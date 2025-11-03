@@ -16,31 +16,66 @@ public class FitsService : IFitsService
     /// </summary>
     public async Task<FitsImageData> LoadFitsFromFileAsync(string assetPath)
     {
-        // --- Step 1: Caricamento Byte da Asset ---
-        byte[] fileBytes;
-        var uri = new Uri(assetPath);
-        if (!AssetLoader.Exists(uri))
-        {
-            throw new FileNotFoundException("Asset non trovato", assetPath);
-        }
+        // Usa 'await using' per un MemoryStream che conterrà i dati
+        await using var memoryStream = new MemoryStream();
 
-        await using (var assetStream = AssetLoader.Open(uri))
-        using (var memoryStream = new MemoryStream())
+        // --- Step 1: Carica i byte in un MemoryStream ---
+        if (assetPath.StartsWith("avares://"))
         {
-            await assetStream.CopyToAsync(memoryStream);
-            fileBytes = memoryStream.ToArray();
+            // È una risorsa asset
+            var uri = new Uri(assetPath);
+            if (!AssetLoader.Exists(uri))
+            {
+                throw new FileNotFoundException("Asset non trovato", assetPath);
+            }
+            await using (var assetStream = AssetLoader.Open(uri))
+            {
+                await assetStream.CopyToAsync(memoryStream);
+            }
         }
+        else if (File.Exists(assetPath))
+        {
+            // È un file del filesystem
+            await using (var fileStream = File.OpenRead(assetPath))
+            {
+                await fileStream.CopyToAsync(memoryStream);
+            }
+        }
+        else
+        {
+            throw new FileNotFoundException("File non trovato", assetPath);
+        }
+        
+        // Riporta il MemoryStream all'inizio
+        memoryStream.Position = 0;
 
         // --- Step 2: Parsing FITS e Calcolo Soglie (in background) ---
         return await Task.Run(() =>
         {
-            using var memoryStream = new MemoryStream(fileBytes);
+            // --- ECCO LA LOGICA CORRETTA ---
+            // 1. Crea un oggetto Fits
             var fitsFile = new Fits(memoryStream);
-            fitsFile.Read();
+            
+            // 2. Leggi tutti gli HDU
+            fitsFile.Read(); 
 
-            var hdu = fitsFile.GetHDU(0);
-            if (hdu is not ImageHDU imageHdu)
-                throw new NotSupportedException("L'HDU primario non è un'immagine.");
+            // 3. Cerca il primo HDU che sia un'immagine valida
+            ImageHDU? imageHdu = null;
+            for (int i = 0; i < fitsFile.NumberOfHDUs; i++)
+            {
+                var hdu = fitsFile.GetHDU(i);
+                if (hdu is ImageHDU hduAsImage && hduAsImage.Data?.Kernel != null)
+                {
+                    imageHdu = hduAsImage;
+                    break; // Trovato!
+                }
+            }
+
+            if (imageHdu == null)
+            {
+                throw new NotSupportedException("Il file FITS non contiene un HDU immagine valido.");
+            }
+            // --- FINE DELLA CORREZIONE ---
 
             var header = imageHdu.Header;
             int naxis = header.GetIntValue("NAXIS");
@@ -58,7 +93,7 @@ public class FitsService : IFitsService
 
             var rawFitsData = dataArray.Clone(); // Clona l'array jagged
 
-            // --- Step 3: Calcolo Soglie Iniziali ---
+            // --- Step 3: Calcolo Soglie Iniziali (Logica ripristinata) ---
             var (blackPoint, whitePoint) = CalculateClippedThresholds(rawFitsData, header);
 
             return new FitsImageData

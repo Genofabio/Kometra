@@ -62,6 +62,7 @@ public class App : Application
         // --- Registra i ViewModel ---
         // (Registriamo anche i VM principali come Singleton
         // perché mantengono lo stato dell'applicazione)
+        services.AddSingleton<IDialogService, DialogService>();
         services.AddSingleton<BoardViewModel>();
         services.AddSingleton<MainWindowViewModel>();
 

@@ -12,9 +12,10 @@ namespace KomaLab.ViewModels;
 
 public partial class BoardViewModel : ObservableObject
 {
-    // --- Dipendenze ---
+    // --- Servizi ---
     private readonly INodeViewModelFactory _nodeFactory; // <-- Nuova dipendenza
-
+    private readonly IDialogService _dialogService;
+    
     // --- Proprietà (Stato della "Telecamera") ---
     [ObservableProperty]
     private double _offsetX;
@@ -31,9 +32,10 @@ public partial class BoardViewModel : ObservableObject
     public ObservableCollection<NodeViewModel> Nodes { get; } = new();
 
     // --- Costruttore ---
-    public BoardViewModel(INodeViewModelFactory nodeFactory) 
+    public BoardViewModel(INodeViewModelFactory nodeFactory, IDialogService dialogService) 
     {
         _nodeFactory = nodeFactory;
+        _dialogService = dialogService;
         
         // Avvia il caricamento dei nodi iniziali
         _ = LoadInitialNodesAsync();
@@ -54,7 +56,18 @@ public partial class BoardViewModel : ObservableObject
     [RelayCommand]
     private async Task AddNode()
     {
-        // Calcola il centro del mondo visibile
+        // --- LOGICA MODIFICATA ---
+
+        // 1. Chiedi al servizio di mostrare la finestra di dialogo
+        string? imagePath = await _dialogService.ShowOpenFitsFileDialogAsync();
+
+        // 2. Controlla se l'utente ha annullato
+        if (string.IsNullOrEmpty(imagePath))
+        {
+            return; // L'utente ha annullato, non fare nulla
+        }
+
+        // 3. Calcola il centro del mondo visibile (come prima)
         double screenCenterX = ViewBounds.Width / 2;
         double screenCenterY = ViewBounds.Height / 2;
         if (Scale == 0) return;
@@ -62,9 +75,7 @@ public partial class BoardViewModel : ObservableObject
         double worldX = (screenCenterX - OffsetX) / Scale;
         double worldY = (screenCenterY - OffsetY) / Scale;
         
-        string imagePath = "avares://KomaLab/Assets/summed_clean.fits";
-
-        // Delega la creazione e aggiunta
+        // 4. Delega la creazione e aggiunta USANDO IL NUOVO PATH
         await AddNodeAsync(imagePath, worldX, worldY, centerOnPosition: true);
     }
     
