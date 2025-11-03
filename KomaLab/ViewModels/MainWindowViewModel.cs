@@ -1,6 +1,14 @@
-﻿namespace KomaLab.ViewModels;
+﻿using CommunityToolkit.Mvvm.ComponentModel;
 
-public partial class MainWindowViewModel : ViewModelBase
+namespace KomaLab.ViewModels;
+
+public class MainWindowViewModel : ObservableObject
 {
-    public string Greeting { get; } = "Welcome to Avalonia!";
+
+    public BoardViewModel BoardVm { get; }
+    
+    public MainWindowViewModel(BoardViewModel boardVm)
+    {
+        BoardVm = boardVm;
+    }
 }

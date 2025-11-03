@@ -1,0 +1,64 @@
+﻿<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:vm="clr-namespace:KomaLab.ViewModels"
+             xmlns:views="clr-namespace:KomaLab.Views"
+             xmlns:controls="clr-namespace:KomaLab.Controls"
+             mc:Ignorable="d" d:DesignWidth="800" d:DesignHeight="450"
+             x:Class="KomaLab.Views.BoardView"
+             x:DataType="vm:BoardViewModel"
+             ClipToBounds="False"
+             PointerPressed="OnPointerPressed"
+             PointerReleased="OnPointerReleased"
+             PointerMoved="OnPointerMoved"
+             PointerWheelChanged="OnPointerWheelChanged"
+             SizeChanged="OnBoardSizeChanged">
+    
+    <!-- Contenitore Principale (permette la sovrapposizione) -->
+    <Grid ClipToBounds="False">
+        
+        <!-- 1. Sfondo a Griglia (Controllo Personalizzato) -->
+        <controls:GridBackground OffsetX="{Binding OffsetX}"
+                                 OffsetY="{Binding OffsetY}"
+                                 Scale="{Binding Scale}" />
+
+        <!-- 2. Contenitore dei Nodi -->
+        <ItemsControl ItemsSource="{Binding Nodes}" 
+                      Background="Transparent"
+                      RenderTransformOrigin="0,0"
+                      ClipToBounds="False">
+            
+            <!-- "Telecamera" per Pan & Zoom -->
+            <ItemsControl.RenderTransform>
+                <TransformGroup>
+                    <ScaleTransform ScaleX="{Binding Scale}" ScaleY="{Binding Scale}" />
+                    <TranslateTransform X="{Binding OffsetX}" Y="{Binding OffsetY}" />
+                </TransformGroup>
+            </ItemsControl.RenderTransform>
+
+            <!-- Canvas Infinito per posizionare i nodi -->
+            <ItemsControl.ItemsPanel>
+                <ItemsPanelTemplate>
+                    <Canvas Background="Transparent" />
+                </ItemsPanelTemplate>
+            </ItemsControl.ItemsPanel>
+
+            <!-- Collega le coordinate (X, Y) del VM al Canvas -->
+            <ItemsControl.ItemContainerTheme>
+                <ControlTheme TargetType="ContentPresenter">
+                    <Setter Property="Canvas.Left" Value="{ReflectionBinding X}" />
+                    <Setter Property="Canvas.Top" Value="{ReflectionBinding Y}" />
+                </ControlTheme>
+            </ItemsControl.ItemContainerTheme>
+
+            <!-- Definisce l'aspetto di ogni nodo -->
+            <ItemsControl.ItemTemplate>
+                <DataTemplate x:DataType="vm:NodeViewModel">
+                    <views:NodeView />
+                </DataTemplate>
+            </ItemsControl.ItemTemplate>
+        </ItemsControl>
+        
+    </Grid>
+</UserControl>

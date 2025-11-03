@@ -1,16 +1,21 @@
 using Avalonia;
 using Avalonia.Controls.ApplicationLifetimes;
-using Avalonia.Data.Core;
-using Avalonia.Data.Core.Plugins;
-using System.Linq;
 using Avalonia.Markup.Xaml;
+using Microsoft.Extensions.DependencyInjection;
+using System;
+using KomaLab.Services;
 using KomaLab.ViewModels;
 using KomaLab.Views;
 
 namespace KomaLab;
 
-public partial class App : Application
+public class App : Application
 {
+    /// <summary>
+    /// Contiene tutti i servizi registrati dell'applicazione.
+    /// </summary>
+    public static IServiceProvider? Services { get; private set; }
+
     public override void Initialize()
     {
         AvaloniaXamlLoader.Load(this);
@@ -18,30 +23,49 @@ public partial class App : Application
 
     public override void OnFrameworkInitializationCompleted()
     {
+
+        // 1. Chiama il metodo che configura e costruisce i servizi
+        Services = ConfigureServices();
+
+        // 2. Ottiene il MainWindowViewModel dal contenitore
+        //    Il contenitore creerà automaticamente TUTTE le dipendenze:
+        //    - MainWindowViewModel -> richiede BoardViewModel
+        //    - BoardViewModel -> richiede INodeViewModelFactory
+        //    - NodeViewModelFactory -> richiede IFitsService
+        //    - IFitsService -> viene creato come FitsService
+        var mainViewModel = Services.GetRequiredService<MainWindowViewModel>();
+
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
-            // Avoid duplicate validations from both Avalonia and the CommunityToolkit. 
-            // More info: https://docs.avaloniaui.net/docs/guides/development-guides/data-validation#manage-validationplugins
-            DisableAvaloniaDataAnnotationValidation();
             desktop.MainWindow = new MainWindow
             {
-                DataContext = new MainWindowViewModel(),
+                // 3. Assegna il ViewModel (già pronto) alla finestra
+                DataContext = mainViewModel 
             };
         }
 
         base.OnFrameworkInitializationCompleted();
     }
 
-    private void DisableAvaloniaDataAnnotationValidation()
+    /// <summary>
+    /// Metodo che crea il contenitore DI e registra tutte le "ricette".
+    /// </summary>
+    private static IServiceProvider ConfigureServices()
     {
-        // Get an array of plugins to remove
-        var dataValidationPluginsToRemove =
-            BindingPlugins.DataValidators.OfType<DataAnnotationsValidationPlugin>().ToArray();
+        var services = new ServiceCollection();
 
-        // remove each entry found
-        foreach (var plugin in dataValidationPluginsToRemove)
-        {
-            BindingPlugins.DataValidators.Remove(plugin);
-        }
+        // --- Registra i Servizi ---
+        services.AddSingleton<IFitsService, FitsService>();
+        
+        services.AddSingleton<INodeViewModelFactory, NodeViewModelFactory>();
+
+        // --- Registra i ViewModel ---
+        // (Registriamo anche i VM principali come Singleton
+        // perché mantengono lo stato dell'applicazione)
+        services.AddSingleton<BoardViewModel>();
+        services.AddSingleton<MainWindowViewModel>();
+
+        // Costruisce e restituisce il contenitore di servizi finale
+        return services.BuildServiceProvider();
     }
 }

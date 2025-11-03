@@ -1,0 +1,82 @@
+﻿<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:vm="clr-namespace:KomaLab.ViewModels"
+             mc:Ignorable="d" 
+             x:Class="KomaLab.Views.NodeView"
+             x:DataType="vm:NodeViewModel"
+             PointerPressed="OnPointerPressed"
+             PointerReleased="OnPointerReleased"
+             PointerMoved="OnPointerMoved"
+             PointerWheelChanged="OnPointerWheelChanged"
+             d:DesignWidth="200" 
+             d:DesignHeight="150"
+             >
+
+    <UserControl.Styles>
+        <Style Selector="Border.NodeFrame">
+            <Setter Property="BorderBrush" Value="#2C2C2C"/>
+            <Setter Property="BorderThickness" Value="12"/>
+            <Setter Property="Background" Value="#2C2C2C"/>
+            <Setter Property="ClipToBounds" Value="True"/>
+            <Setter Property="CornerRadius" Value="8"/> 
+        </Style>
+        
+        <Style Selector="Border.NodeFrame.selected">
+            <Setter Property="BorderBrush" Value="#FEC530"/>
+            <Setter Property="Background" Value="#FEC530"/>
+        </Style>
+        
+        <Style Selector="Button.CloseButton">
+            <Setter Property="Background" Value="#252525"/>
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            
+            <Setter Property="CornerRadius" Value="0,8,0,0"/> 
+            <Setter Property="FontSize" Value="20"/>
+            <Setter Property="FontWeight" Value="Bold"/>
+            <Setter Property="HorizontalContentAlignment" Value="Center"/>
+            <Setter Property="VerticalContentAlignment" Value="Center"/>
+            <Setter Property="VerticalAlignment" Value="Stretch"/> 
+        </Style>
+    </UserControl.Styles>
+
+    <Border Classes="NodeFrame" Classes.selected="{Binding IsSelected}">
+        
+        <Grid RowDefinitions="Auto, Auto">
+            
+            <Border Grid.Row="0" Background="#252525" 
+                    CornerRadius="8,8,0,0"
+                    Margin="0,2,0, -2"
+                    ClipToBounds="True"> <Grid ColumnDefinitions="*,Auto">
+                    
+                    <TextBlock Grid.Column="0" 
+                               Text="{Binding Title}" 
+                               FontWeight="Normal"
+                               FontSize="25" 
+                               HorizontalAlignment="Left"
+                               VerticalAlignment="Center"
+                               Padding="12"/> 
+                    <Button Grid.Column="1"
+                            Content="X"
+                            Classes="CloseButton"
+                            Command="{Binding RemoveSelfCommand}"
+                            
+                            Width="{Binding $self.Bounds.Height}"/>
+                            
+                </Grid>
+            </Border>
+            <Border Grid.Row="1"
+                    Background="#2C2C2C" 
+                    CornerRadius="0,0,8,8" ClipToBounds="True"
+                    Margin="0,-1,0, 0">
+                
+                <Image Source="{Binding NodeImage}"
+                       Stretch="None"
+                       HorizontalAlignment="Center" />
+            </Border>
+            
+        </Grid>
+    </Border>
+</UserControl>
