@@ -15,21 +15,17 @@
              PointerWheelChanged="OnPointerWheelChanged"
              SizeChanged="OnBoardSizeChanged">
     
-    <!-- Contenitore Principale (permette la sovrapposizione) -->
     <Grid ClipToBounds="False">
         
-        <!-- 1. Sfondo a Griglia (Controllo Personalizzato) -->
         <controls:GridBackground OffsetX="{Binding OffsetX}"
                                  OffsetY="{Binding OffsetY}"
                                  Scale="{Binding Scale}" />
 
-        <!-- 2. Contenitore dei Nodi -->
         <ItemsControl ItemsSource="{Binding Nodes}" 
                       Background="Transparent"
                       RenderTransformOrigin="0,0"
                       ClipToBounds="False">
             
-            <!-- "Telecamera" per Pan & Zoom -->
             <ItemsControl.RenderTransform>
                 <TransformGroup>
                     <ScaleTransform ScaleX="{Binding Scale}" ScaleY="{Binding Scale}" />
@@ -37,14 +33,24 @@
                 </TransformGroup>
             </ItemsControl.RenderTransform>
 
-            <!-- Canvas Infinito per posizionare i nodi -->
+            <ItemsControl.DataTemplates>
+                
+                <DataTemplate DataType="vm:SingleImageNodeViewModel">
+                    <views:SingleImageNodeView />
+                </DataTemplate>
+                
+                <DataTemplate DataType="vm:MultipleImagesNodeViewModel">
+                    <views:MultipleImagesNodeView />
+                </DataTemplate>
+                
+            </ItemsControl.DataTemplates>
+
             <ItemsControl.ItemsPanel>
                 <ItemsPanelTemplate>
                     <Canvas Background="Transparent" />
                 </ItemsPanelTemplate>
             </ItemsControl.ItemsPanel>
 
-            <!-- Collega le coordinate (X, Y) del VM al Canvas -->
             <ItemsControl.ItemContainerTheme>
                 <ControlTheme TargetType="ContentPresenter">
                     <Setter Property="Canvas.Left" Value="{ReflectionBinding X}" />
@@ -52,13 +58,6 @@
                 </ControlTheme>
             </ItemsControl.ItemContainerTheme>
 
-            <!-- Definisce l'aspetto di ogni nodo -->
-            <ItemsControl.ItemTemplate>
-                <DataTemplate x:DataType="vm:NodeViewModel">
-                    <views:NodeView />
-                </DataTemplate>
-            </ItemsControl.ItemTemplate>
-        </ItemsControl>
-        
+            </ItemsControl>
     </Grid>
 </UserControl>

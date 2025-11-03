@@ -12,99 +12,130 @@ namespace KomaLab.Services;
 public class FitsService : IFitsService
 {
     /// <summary>
-    /// Carica un file FITS da un percorso asset, lo parsa e calcola le soglie iniziali.
+    /// Carica un file FITS (sia da asset che da filesystem), lo parsa e calcola le soglie.
     /// </summary>
-    public async Task<FitsImageData> LoadFitsFromFileAsync(string assetPath)
+    public async Task<FitsImageData?> LoadFitsFromFileAsync(string assetPath)
     {
-        // Usa 'await using' per un MemoryStream che conterrà i dati
-        await using var memoryStream = new MemoryStream();
-
-        // --- Step 1: Carica i byte in un MemoryStream ---
+        // 1. Apri lo stream corretto (File o Asset)
+        Stream streamToRead;
         if (assetPath.StartsWith("avares://"))
         {
-            // È una risorsa asset
             var uri = new Uri(assetPath);
-            if (!AssetLoader.Exists(uri))
-            {
-                throw new FileNotFoundException("Asset non trovato", assetPath);
-            }
-            await using (var assetStream = AssetLoader.Open(uri))
-            {
-                await assetStream.CopyToAsync(memoryStream);
-            }
+            if (!AssetLoader.Exists(uri)) throw new FileNotFoundException("Asset non trovato", assetPath);
+            streamToRead = AssetLoader.Open(uri);
         }
         else if (File.Exists(assetPath))
         {
-            // È un file del filesystem
-            await using (var fileStream = File.OpenRead(assetPath))
-            {
-                await fileStream.CopyToAsync(memoryStream);
-            }
+            streamToRead = new FileStream(assetPath, FileMode.Open, FileAccess.Read, FileShare.Read);
         }
         else
         {
             throw new FileNotFoundException("File non trovato", assetPath);
         }
-        
-        // Riporta il MemoryStream all'inizio
-        memoryStream.Position = 0;
 
-        // --- Step 2: Parsing FITS e Calcolo Soglie (in background) ---
-        return await Task.Run(() =>
+        // 2. 'await using' si assicurerà che lo stream venga chiuso
+        await using (streamToRead)
         {
-            // --- ECCO LA LOGICA CORRETTA ---
-            // 1. Crea un oggetto Fits
-            var fitsFile = new Fits(memoryStream);
-            
-            // 2. Leggi tutti gli HDU
-            fitsFile.Read(); 
-
-            // 3. Cerca il primo HDU che sia un'immagine valida
-            ImageHDU? imageHdu = null;
-            for (int i = 0; i < fitsFile.NumberOfHDUs; i++)
+            // 3. Esegui il parsing "pesante" in background
+            return await Task.Run(() =>
             {
-                var hdu = fitsFile.GetHDU(i);
-                if (hdu is ImageHDU hduAsImage && hduAsImage.Data?.Kernel != null)
+                // 4. Passa lo stream DIRETTO.
+                var fitsFile = new Fits(streamToRead);
+                fitsFile.Read(); 
+
+                ImageHDU? imageHdu = null;
+                for (int i = 0; i < fitsFile.NumberOfHDUs; i++)
                 {
-                    imageHdu = hduAsImage;
-                    break; // Trovato!
+                    var hdu = fitsFile.GetHDU(i);
+                    if (hdu is ImageHDU hduAsImage && hduAsImage.Data?.Kernel != null)
+                    {
+                        imageHdu = hduAsImage;
+                        break;
+                    }
                 }
-            }
 
-            if (imageHdu == null)
+                if (imageHdu == null)
+                {
+                    return null; 
+                }
+
+                var header = imageHdu.Header;
+                int naxis = header.GetIntValue("NAXIS");
+                if (naxis < 2) return null;
+
+                int width = header.GetIntValue("NAXIS1");
+                int height = header.GetIntValue("NAXIS2");
+                var imageSize = new Size(width, height);
+                
+                var kernelData = imageHdu.Data.Kernel; 
+                if (kernelData == null) return null; 
+
+                var dataArray = (Array)kernelData;
+                if (dataArray.Rank != 1) return null;
+                
+                var rawFitsData = dataArray.Clone(); 
+
+                var (blackPoint, whitePoint) = CalculateClippedThresholds(rawFitsData, header);
+
+                return new FitsImageData
+                {
+                    RawData = rawFitsData,
+                    FitsHeader = header,
+                    ImageSize = imageSize,
+                    InitialBlackPoint = blackPoint,
+                    InitialWhitePoint = whitePoint
+                };
+            });
+        }
+    }
+    
+    /// <summary>
+    /// Legge solo le dimensioni dei file FITS.
+    /// </summary>
+    public async Task<Size> GetFitsImageSizeAsync(string path)
+    {
+        // 1. Apri lo stream corretto (File o Asset)
+        Stream streamToRead;
+        if (path.StartsWith("avares://"))
+        {
+            var uri = new Uri(path);
+            if (!AssetLoader.Exists(uri)) throw new FileNotFoundException("Asset non trovato", path);
+            streamToRead = AssetLoader.Open(uri);
+        }
+        else if (File.Exists(path))
+        {
+            streamToRead = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+        }
+        else
+        {
+            throw new FileNotFoundException("File non trovato", path);
+        }
+
+        // 2. 'await using' si assicurerà che lo stream venga chiuso
+        await using (streamToRead)
+        {
+            // 3. Esegui la lettura "leggera" in background
+            return await Task.Run(() =>
             {
-                throw new NotSupportedException("Il file FITS non contiene un HDU immagine valido.");
-            }
-            // --- FINE DELLA CORREZIONE ---
-
-            var header = imageHdu.Header;
-            int naxis = header.GetIntValue("NAXIS");
-            if (naxis < 2) { throw new NotSupportedException($"NAXIS = {naxis}"); }
-
-            int width = header.GetIntValue("NAXIS1");
-            int height = header.GetIntValue("NAXIS2");
-            var imageSize = new Size(width, height);
-
-            var kernelData = imageHdu.Data.Kernel;
-            if (kernelData == null) { throw new NullReferenceException("Kernel è nullo."); }
-
-            var dataArray = (Array)kernelData;
-            if (dataArray.Rank != 1) { throw new NotSupportedException($"Rank non 1 (è {dataArray.Rank})"); }
-
-            var rawFitsData = dataArray.Clone(); // Clona l'array jagged
-
-            // --- Step 3: Calcolo Soglie Iniziali (Logica ripristinata) ---
-            var (blackPoint, whitePoint) = CalculateClippedThresholds(rawFitsData, header);
-
-            return new FitsImageData
-            {
-                RawData = rawFitsData,
-                FitsHeader = header,
-                ImageSize = imageSize,
-                InitialBlackPoint = blackPoint,
-                InitialWhitePoint = whitePoint
-            };
-        });
+                // 4. Passa lo stream (FileStream/AssetStream) DIRETTAMENTE.
+                var fitsFile = new Fits(streamToRead);
+                fitsFile.Read(); 
+    
+                for (int i = 0; i < fitsFile.NumberOfHDUs; i++)
+                {
+                    var hdu = fitsFile.GetHDU(i);
+                    if (hdu is ImageHDU hduAsImage)
+                    {
+                        var header = hduAsImage.Header;
+                        int width = header.GetIntValue("NAXIS1");
+                        int height = header.GetIntValue("NAXIS2");
+                        return new Size(width, height);
+                    }
+                }
+        
+                return default(Size);
+            });
+        }
     }
 
     /// <summary>
@@ -114,8 +145,7 @@ public class FitsService : IFitsService
     public byte[] NormalizeData(object rawData, Header header, int width, int height, double blackPoint, double whitePoint)
     {
         int bitpix = header.GetIntValue("BITPIX");
-        
-        // Questa funzione ora contiene lo switch che prima era in NodeViewModel
+
         switch (bitpix)
         {
             case 8: return Normalize(ConvertJaggedArray<byte>((Array[])rawData), width, height, blackPoint, whitePoint);
@@ -206,7 +236,6 @@ public class FitsService : IFitsService
         byte[] outputBytes = new byte[width * height];
         double range = whitePoint - blackPoint;
         
-        // Gestione divisione per zero o range negativo
         if (range <= 0)
         {
             byte fillValue = (byte)(blackPoint >= whitePoint ? 0 : 128);

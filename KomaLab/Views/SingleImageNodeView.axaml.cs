@@ -1,32 +1,37 @@
 ﻿using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
-using Avalonia.VisualTree;
-using System.Linq;
-using System.Diagnostics;
-using KomaLab.ViewModels; // Per Debug.WriteLine
+using Avalonia.VisualTree; 
+using KomaLab.ViewModels;
+using System.Linq; 
+using System.Diagnostics; 
 
 namespace KomaLab.Views;
 
-public partial class NodeView : UserControl
+public partial class SingleImageNodeView : UserControl
 {
     private Point? _lastPos; 
     
-    public NodeView()
+    public SingleImageNodeView()
     {
         InitializeComponent();
     }
     
     private void OnPointerPressed(object? sender, PointerPressedEventArgs e)
     {
-        if (DataContext is not NodeViewModel vm) return;
+        // 1. Aggiorna il tipo di ViewModel
+        if (DataContext is not SingleImageNodeViewModel vm)
+        {
+            Debug.WriteLine("ERRORE: DataContext non è SingleImageNodeViewModel.");
+            return;
+        }
         
         if (e.GetCurrentPoint(this).Properties.IsLeftButtonPressed)
         {
-            // 1. Notifica il VM della selezione
+            // Questa logica rimane invariata perché ParentBoard
+            // è nella classe base
             vm.ParentBoard.SetSelectedNode(vm);
 
-            // 2. Trova il pannello genitore per calcolare la posizione
             var boardView = this.GetVisualAncestors().OfType<BoardView>().FirstOrDefault();
             if (boardView == null)
             {
@@ -34,7 +39,6 @@ public partial class NodeView : UserControl
                 return;
             }
             
-            // 3. Inizia il trascinamento (logica della View)
             _lastPos = e.GetPosition(boardView); 
             e.Pointer.Capture(this);
             e.Handled = true; 
@@ -53,34 +57,53 @@ public partial class NodeView : UserControl
 
     private void OnPointerMoved(object? sender, PointerEventArgs e)
     {
-        if (_lastPos == null || DataContext is not NodeViewModel vm)
+        if (_lastPos == null) return;
+        
+        // 2. Aggiorna il tipo di ViewModel
+        if (DataContext is not SingleImageNodeViewModel vm)
             return;
         
         var boardView = this.GetVisualAncestors().OfType<BoardView>().FirstOrDefault();
         if (boardView == null) return;
         
         var pos = e.GetPosition(boardView);
-        var delta = pos - _lastPos.Value; 
-        
+        var delta = pos - _lastPos.Value;
         _lastPos = pos;
         
-        vm.MoveNode(delta);
+        // Questo metodo ora è nella classe base
+        vm.MoveNode(delta); 
         
         e.Handled = true;
     }
     
     private void OnPointerWheelChanged(object? sender, PointerWheelEventArgs e)
     {
-        if (DataContext is not NodeViewModel vm)
+        // 3. Aggiorna il tipo di ViewModel
+        if (DataContext is not SingleImageNodeViewModel vm)
             return;
+
+        // 4. Inoltra la logica al "motore" FitsImage
+        //    (Questa logica è stata spostata da BoardViewModel 
+        //    a qui, ma ora la inoltriamo a FitsDisplayViewModel)
         
-        // 1. Controlla se SHIFT è premuto
+        // Calcola il range attuale
+        double currentRange = vm.FitsImage.WhitePoint - vm.FitsImage.BlackPoint;
+        if (currentRange <= 0) currentRange = 1000; // Fallback
+            
+        double stepPercentage = 0.10; 
+        double deltaAmount = (currentRange * stepPercentage) * e.Delta.Y;
+            
         bool isShiftPressed = (e.KeyModifiers & KeyModifiers.Shift) == KeyModifiers.Shift;
 
-        // 2. Inoltra l'input grezzo al ViewModel
-        vm.AdjustThresholds(e.Delta.Y, isShiftPressed);
+        if (isShiftPressed)
+        {
+            vm.FitsImage.BlackPoint += deltaAmount;
+        }
+        else
+        {
+            vm.FitsImage.WhitePoint += deltaAmount;
+        }
             
-        // 3. Impedisce all'evento di "salire" e causare lo zoom del Board
         e.Handled = true; 
     }
 }

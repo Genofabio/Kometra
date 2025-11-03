@@ -1,4 +1,5 @@
-﻿using System.Threading.Tasks;
+﻿using System.Collections.Generic;
+using System.Threading.Tasks;
 
 namespace KomaLab.Services;
 
@@ -10,6 +11,6 @@ public interface IDialogService
     /// <summary>
     /// Mostra la finestra di dialogo "Apri File" per i file FITS.
     /// </summary>
-    /// <returns>Il percorso (path) del file selezionato, o null se l'utente annulla.</returns>
-    Task<string?> ShowOpenFitsFileDialogAsync();
+    /// <returns>Una lista di percorsi (path) dei file selezionati, o null se l'utente annulla.</returns>
+    Task<IEnumerable<string>?> ShowOpenFitsFileDialogAsync();
 }

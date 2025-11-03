@@ -1,0 +1,29 @@
+﻿<Styles xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    
+    <Style Selector="Border.NodeFrame">
+        <Setter Property="BorderBrush" Value="#2C2C2C"/>
+        <Setter Property="BorderThickness" Value="12"/>
+        <Setter Property="Background" Value="#2C2C2C"/>
+        <Setter Property="ClipToBounds" Value="True"/>
+        <Setter Property="CornerRadius" Value="8"/> 
+    </Style>
+
+    <Style Selector="Border.NodeFrame.selected">
+        <Setter Property="BorderBrush" Value="#FEC530"/>
+        <Setter Property="Background" Value="#FEC530"/>
+    </Style>
+
+    <Style Selector="Button.CloseButton">
+        <Setter Property="Background" Value="#252525"/>
+        <Setter Property="Foreground" Value="White"/>
+        <Setter Property="BorderThickness" Value="0"/>
+        <Setter Property="CornerRadius" Value="0,8,0,0"/> 
+        <Setter Property="FontSize" Value="20"/>
+        <Setter Property="FontWeight" Value="Bold"/>
+        <Setter Property="HorizontalContentAlignment" Value="Center"/>
+        <Setter Property="VerticalContentAlignment" Value="Center"/>
+        <Setter Property="VerticalAlignment" Value="Stretch"/> 
+    </Style>
+    
+</Styles>

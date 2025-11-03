@@ -4,8 +4,8 @@
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
              xmlns:vm="clr-namespace:KomaLab.ViewModels"
              mc:Ignorable="d" 
-             x:Class="KomaLab.Views.NodeView"
-             x:DataType="vm:NodeViewModel"
+             x:Class="KomaLab.Views.SingleImageNodeView"
+             x:DataType="vm:SingleImageNodeViewModel"
              PointerPressed="OnPointerPressed"
              PointerReleased="OnPointerReleased"
              PointerMoved="OnPointerMoved"
@@ -13,34 +13,6 @@
              d:DesignWidth="200" 
              d:DesignHeight="150"
              >
-
-    <UserControl.Styles>
-        <Style Selector="Border.NodeFrame">
-            <Setter Property="BorderBrush" Value="#2C2C2C"/>
-            <Setter Property="BorderThickness" Value="12"/>
-            <Setter Property="Background" Value="#2C2C2C"/>
-            <Setter Property="ClipToBounds" Value="True"/>
-            <Setter Property="CornerRadius" Value="8"/> 
-        </Style>
-        
-        <Style Selector="Border.NodeFrame.selected">
-            <Setter Property="BorderBrush" Value="#FEC530"/>
-            <Setter Property="Background" Value="#FEC530"/>
-        </Style>
-        
-        <Style Selector="Button.CloseButton">
-            <Setter Property="Background" Value="#252525"/>
-            <Setter Property="Foreground" Value="White"/>
-            <Setter Property="BorderThickness" Value="0"/>
-            
-            <Setter Property="CornerRadius" Value="0,8,0,0"/> 
-            <Setter Property="FontSize" Value="20"/>
-            <Setter Property="FontWeight" Value="Bold"/>
-            <Setter Property="HorizontalContentAlignment" Value="Center"/>
-            <Setter Property="VerticalContentAlignment" Value="Center"/>
-            <Setter Property="VerticalAlignment" Value="Stretch"/> 
-        </Style>
-    </UserControl.Styles>
 
     <Border Classes="NodeFrame" Classes.selected="{Binding IsSelected}">
         
@@ -72,7 +44,7 @@
                     CornerRadius="0,0,8,8" ClipToBounds="True"
                     Margin="0,-1,0, 0">
                 
-                <Image Source="{Binding NodeImage}"
+                <Image Source="{Binding FitsImage.Image}"
                        Stretch="None"
                        HorizontalAlignment="Center" />
             </Border>
