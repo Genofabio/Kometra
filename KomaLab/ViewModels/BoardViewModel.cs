@@ -63,8 +63,7 @@ public partial class BoardViewModel : ObservableObject
         }
         else
         {
-            string title = $"Pila ({pathList.Count} immagini)";
-            await AddMultipleNodesAsync(pathList, worldX, worldY, title);
+            await AddMultipleNodesAsync(pathList, worldX, worldY);
         }
     }
     
@@ -77,8 +76,7 @@ public partial class BoardViewModel : ObservableObject
     [RelayCommand] private void ResetBoard() { OffsetX = 0.0; OffsetY = 0.0; Scale = 0.5; }
     
     public void Pan(Vector delta) { OffsetX += delta.X; OffsetY += delta.Y; }
-
-    // --- CODICE RIPRISTINATO (1/3) ---
+    
     public void Zoom(double deltaY, Point mousePosition)
     {
         double oldScale = Scale;
@@ -89,8 +87,7 @@ public partial class BoardViewModel : ObservableObject
         OffsetY = mousePosition.Y - (mousePosition.Y - OffsetY) * (newScale / oldScale);
         Scale = newScale;
     }
-
-    // --- CODICE RIPRISTINATO (2/3) ---
+    
     public void SetSelectedNode(BaseNodeViewModel nodeToSelect)
     {
         if (SelectedNode == nodeToSelect) return;
@@ -108,7 +105,6 @@ public partial class BoardViewModel : ObservableObject
         ResetNormalizationCommand.NotifyCanExecuteChanged();
     }
     
-    // --- CODICE RIPRISTINATO (3/3) ---
     public void DeselectAllNodes()
     {
         if (SelectedNode != null)
@@ -119,9 +115,8 @@ public partial class BoardViewModel : ObservableObject
         
         ResetNormalizationCommand.NotifyCanExecuteChanged();
     }
-
-
-    // --- Metodi "Factory" Privati ---
+    
+    // --- Metodi Privati ---
     private async Task AddSingleNodeAsync(string imagePath, double x, double y, bool centerOnPosition = false)
     {
         try
@@ -135,7 +130,7 @@ public partial class BoardViewModel : ObservableObject
         }
     }
     
-    private async Task AddMultipleNodesAsync(List<string> imagePaths, double x, double y, string title)
+    private async Task AddMultipleNodesAsync(List<string> imagePaths, double x, double y)
     {
         try
         {

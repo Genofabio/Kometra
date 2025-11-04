@@ -6,6 +6,9 @@ using KomaLab.Models;
 using KomaLab.Services;
 using System.Runtime.InteropServices;
 using System.Threading.Tasks;
+using System.Threading; 
+using System;
+using System.Diagnostics; 
 
 namespace KomaLab.ViewModels;
 
@@ -17,10 +20,13 @@ namespace KomaLab.ViewModels;
 public partial class FitsDisplayViewModel : ObservableObject
 {
     // --- Campi ---
-    private readonly FitsImageData _model; // Il Model con i dati grezzi
-    private readonly IFitsService _fitsService; // Il servizio per la normalizzazione
+    private readonly FitsImageData _model; 
+    private readonly IFitsService _fitsService; 
     
     public Size ImageSize => _model.ImageSize;
+
+    // --- Campo per l'Ottimizzazione ---
+    private CancellationTokenSource? _regenerationCts;
 
     // --- Proprietà (Stato dell'Immagine) ---
     
@@ -39,44 +45,78 @@ public partial class FitsDisplayViewModel : ObservableObject
     {
         _model = model;
         _fitsService = fitsService;
-
-        // Imposta i valori iniziali dal Model
+        
         _blackPoint = model.InitialBlackPoint;
         _whitePoint = model.InitialWhitePoint;
     }
     
     /// <summary>
     /// Avvia la prima generazione dell'immagine.
-    /// Chiamato dal ViewModel genitore DOPO l'impostazione.
     /// </summary>
     public void Initialize()
     {
-        _ = RegeneratePreviewImageAsync();
+        TriggerRegeneration();
     }
     
     // --- Logica di Rigenerazione ---
+    partial void OnBlackPointChanged(double value) => TriggerRegeneration();
+    partial void OnWhitePointChanged(double value) => TriggerRegeneration();
 
-    // I metodi parziali vengono chiamati automaticamente quando 
-    // BlackPoint o WhitePoint cambiano, grazie a [ObservableProperty]
-    
-    partial void OnBlackPointChanged(double value) => _ = RegeneratePreviewImageAsync();
-    partial void OnWhitePointChanged(double value) => _ = RegeneratePreviewImageAsync();
+    /// <summary>
+    /// Avvia una rigenerazione "debounced" (anti-sfarfallio).
+    /// Annulla qualsiasi task di rigenerazione precedente.
+    /// </summary>
+    private void TriggerRegeneration()
+    {
+        // 1. Cancella il task precedente, se esiste
+        _regenerationCts?.Cancel();
+        
+        // 2. Crea un nuovo token per questo task
+        _regenerationCts = new CancellationTokenSource();
+        var token = _regenerationCts.Token;
+
+        // 3. Avvia il task con il token
+        _ = RegeneratePreviewImageAsync(token);
+    }
 
     /// <summary>
     /// Rigenera il Bitmap usando i dati grezzi e le soglie correnti.
-    /// (Questa è la logica copiata dal tuo SingleImageNodeViewModel originale).
+    /// (Versione annullabile per evitare lag).
     /// </summary>
-    private async Task RegeneratePreviewImageAsync()
+    private async Task RegeneratePreviewImageAsync(CancellationToken token)
     {
-        // 1. Chiedi al servizio di normalizzare i dati
-        byte[] normalizedData = await Task.Run(() =>
-            _fitsService.NormalizeData(
-                _model.RawData, _model.FitsHeader,
-                (int)_model.ImageSize.Width, (int)_model.ImageSize.Height,
-                BlackPoint, WhitePoint)
-        );
+        byte[]? normalizedData;
+        try
+        {
+            // Chiedi al servizio di normalizzare i dati (in background)
+            normalizedData = await Task.Run(() =>
+            {
+                // Controlla se siamo stati annullati *prima* di iniziare il lavoro pesante
+                token.ThrowIfCancellationRequested();
+                
+                return _fitsService.NormalizeData(
+                    _model.RawData, _model.FitsHeader,
+                    (int)_model.ImageSize.Width, (int)_model.ImageSize.Height,
+                    BlackPoint, WhitePoint);
+            }, token); // Passa il token anche a Task.Run
+        }
+        catch (OperationCanceledException)
+        {
+            // Significa che l'utente ha mosso di nuovo lo slider.
+            return;
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"Errore durante la rigenerazione dell'immagine: {ex.Message}");
+            return;
+        }
+        
+        if (token.IsCancellationRequested)
+        {
+            return;
+        }
 
-        // 2. Crea il Bitmap
+        // Crea il Bitmap (siamo tornati sul thread UI)
         var writeableBmp = new WriteableBitmap(
             new PixelSize((int)_model.ImageSize.Width, (int)_model.ImageSize.Height),
             new Vector(96, 96),
@@ -95,9 +135,8 @@ public partial class FitsDisplayViewModel : ObservableObject
     /// </summary>
     public void UnloadData()
     {
+        _regenerationCts?.Cancel(); 
         Image?.Dispose();
         Image = null;
-        // In futuro, potremmo anche decidere di liberare _model.RawData qui
-        // se la gestione della RAM diventasse un problema critico.
     }
 }

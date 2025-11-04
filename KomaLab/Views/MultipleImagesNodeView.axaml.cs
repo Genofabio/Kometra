@@ -10,7 +10,7 @@ namespace KomaLab.Views;
 
 public partial class MultipleImagesNodeView : UserControl
 {
-    private Point? _lastPos; // Campo per il trascinamento
+    private Point? _lastPos; 
     
     public MultipleImagesNodeView()
     {
@@ -46,11 +46,8 @@ public partial class MultipleImagesNodeView : UserControl
     {
         if (_lastPos != null && e.InitialPressMouseButton == MouseButton.Left)
         {
-            // 1. Rimosso l'errore di battitura 'S'
             _lastPos = null;
             
-            // 2. Aggiunte le parentesi graffe per includere
-            //    tutta la logica di rilascio
             e.Pointer.Capture(null);
             e.Handled = true;
         }
@@ -77,13 +74,11 @@ public partial class MultipleImagesNodeView : UserControl
     
     private void OnPointerWheelChanged(object? sender, PointerWheelEventArgs e)
     {
-        // Lega lo scroll alle proprietà Black/White del NODO PADRE
         if (DataContext is not MultipleImagesNodeViewModel vm)
             return;
-
-        // Calcola il range attuale
+        
         double currentRange = vm.WhitePoint - vm.BlackPoint;
-        if (currentRange <= 0) currentRange = 1000; // Fallback
+        if (currentRange <= 0) currentRange = 1000;
 
         double stepPercentage = 0.10; 
         double deltaAmount = (currentRange * stepPercentage) * e.Delta.Y;

@@ -19,7 +19,6 @@ public partial class SingleImageNodeView : UserControl
     
     private void OnPointerPressed(object? sender, PointerPressedEventArgs e)
     {
-        // 1. Aggiorna il tipo di ViewModel
         if (DataContext is not SingleImageNodeViewModel vm)
         {
             Debug.WriteLine("ERRORE: DataContext non è SingleImageNodeViewModel.");
@@ -28,8 +27,6 @@ public partial class SingleImageNodeView : UserControl
         
         if (e.GetCurrentPoint(this).Properties.IsLeftButtonPressed)
         {
-            // Questa logica rimane invariata perché ParentBoard
-            // è nella classe base
             vm.ParentBoard.SetSelectedNode(vm);
 
             var boardView = this.GetVisualAncestors().OfType<BoardView>().FirstOrDefault();
@@ -59,7 +56,6 @@ public partial class SingleImageNodeView : UserControl
     {
         if (_lastPos == null) return;
         
-        // 2. Aggiorna il tipo di ViewModel
         if (DataContext is not SingleImageNodeViewModel vm)
             return;
         
@@ -70,7 +66,6 @@ public partial class SingleImageNodeView : UserControl
         var delta = pos - _lastPos.Value;
         _lastPos = pos;
         
-        // Questo metodo ora è nella classe base
         vm.MoveNode(delta); 
         
         e.Handled = true;
@@ -78,15 +73,9 @@ public partial class SingleImageNodeView : UserControl
     
     private void OnPointerWheelChanged(object? sender, PointerWheelEventArgs e)
     {
-        // 3. Aggiorna il tipo di ViewModel
         if (DataContext is not SingleImageNodeViewModel vm)
             return;
 
-        // 4. Inoltra la logica al "motore" FitsImage
-        //    (Questa logica è stata spostata da BoardViewModel 
-        //    a qui, ma ora la inoltriamo a FitsDisplayViewModel)
-        
-        // Calcola il range attuale
         double currentRange = vm.FitsImage.WhitePoint - vm.FitsImage.BlackPoint;
         if (currentRange <= 0) currentRange = 1000; // Fallback
             

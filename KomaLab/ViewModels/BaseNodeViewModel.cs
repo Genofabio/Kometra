@@ -13,10 +13,12 @@ public abstract partial class BaseNodeViewModel : ObservableObject
 {
     // --- Campi ---
     
-    // Il Model per la posizione e il titolo (condiviso da tutti i nodi)
-    protected readonly NodeModel Model; 
+    /// <summary>
+    /// Altezza stimata della UI (barra del titolo, ecc.) in pixel.
+    /// </summary>
+    protected const double ESTIMATED_UI_HEIGHT = 60.0;
     
-    // Riferimento al "mondo" genitore
+    protected readonly BaseNodeModel Model; 
     public BoardViewModel ParentBoard { get; }
 
     // --- Proprietà (Posizione e Stato) ---
@@ -38,16 +40,33 @@ public abstract partial class BaseNodeViewModel : ObservableObject
 
     [ObservableProperty]
     private bool _isSelected;
+    
+    // --- 1. CORREZIONE ---
+    // La logica di calcolo ora vive qui, nella classe base.
+    // Non è più 'abstract'.
+    public virtual Size EstimatedTotalSize
+    {
+        get
+        {
+            var contentSize = this.NodeContentSize;
+            return new Size(
+                contentSize.Width, 
+                contentSize.Height + ESTIMATED_UI_HEIGHT);
+        }
+    }
+
+    // --- 2. CORREZIONE ---
+    // Questa è l'UNICA proprietà che i figli
+    // devono implementare.
+    protected abstract Size NodeContentSize { get; }
+
 
     // --- Costruttore ---
     
-    /// <summary>
-    /// Costruttore protetto per la classe base.
-    /// </summary>
-    protected BaseNodeViewModel(BoardViewModel parentBoard, NodeModel model)
+    protected BaseNodeViewModel(BoardViewModel parentBoard, BaseNodeModel model)
     {
         ParentBoard = parentBoard;
-        Model = model;
+        Model = model; 
         Title = model.Title;
     }
 
@@ -56,15 +75,11 @@ public abstract partial class BaseNodeViewModel : ObservableObject
     [RelayCommand]
     private void RemoveSelf()
     {
-        // Questo funzionerà quando aggiorneremo la BoardView (Passo 4)
         ParentBoard.Nodes.Remove(this); 
     }
 
     // --- Metodi Pubblici ---
     
-    /// <summary>
-    /// Logica di trascinamento, comune a tutti i nodi.
-    /// </summary>
     public void MoveNode(Vector screenDelta)
     {
         double currentScale = ParentBoard.Scale;
