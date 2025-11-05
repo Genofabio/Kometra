@@ -16,6 +16,7 @@ public partial class BoardViewModel : ObservableObject
     // --- Dipendenze ---
     private readonly INodeViewModelFactory _nodeFactory;
     private readonly IDialogService _dialogService; 
+    private readonly IWindowService _windowService;
 
     // --- Proprietà ---
     [ObservableProperty] private double _offsetX;
@@ -26,10 +27,11 @@ public partial class BoardViewModel : ObservableObject
     public ObservableCollection<BaseNodeViewModel> Nodes { get; } = new();
 
     // --- Costruttore ---
-    public BoardViewModel(INodeViewModelFactory nodeFactory, IDialogService dialogService)
+    public BoardViewModel(INodeViewModelFactory nodeFactory, IDialogService dialogService, IWindowService windowService)
     {
         _nodeFactory = nodeFactory;
         _dialogService = dialogService; 
+        _windowService = windowService;
         _ = LoadInitialNodesAsync();
     }
 
@@ -103,6 +105,7 @@ public partial class BoardViewModel : ObservableObject
         }
         
         ResetNormalizationCommand.NotifyCanExecuteChanged();
+        ShowAlignmentWindowCommand.NotifyCanExecuteChanged(); 
     }
     
     public void DeselectAllNodes()
@@ -114,7 +117,20 @@ public partial class BoardViewModel : ObservableObject
         SelectedNode = null;
         
         ResetNormalizationCommand.NotifyCanExecuteChanged();
+        ShowAlignmentWindowCommand.NotifyCanExecuteChanged(); 
     }
+    
+    [RelayCommand(CanExecute = nameof(CanShowAlignmentWindow))]
+    private void ShowAlignmentWindow()
+    {
+        if (SelectedNode != null)
+        {
+            _windowService.ShowAlignmentWindow(SelectedNode);
+        }
+    }
+    
+    // Il comando si abilita solo se un nodo è selezionato
+    private bool CanShowAlignmentWindow() => SelectedNode != null;
     
     // --- Metodi Privati ---
     private async Task AddSingleNodeAsync(string imagePath, double x, double y, bool centerOnPosition = false)

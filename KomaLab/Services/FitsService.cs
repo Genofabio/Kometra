@@ -244,7 +244,7 @@ public class FitsService : IFitsService
         }
 
         int k = 0;
-        for (int j = height - 1; j >= 0; j--) // Inverti per orientamento FITS standard
+        for (int j = height - 1; j >= 0; j--) // Invertito per orientamento FITS standard
         {
             T[] row = data[j];
             for (int i = 0; i < width; i++)

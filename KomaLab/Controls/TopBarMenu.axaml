@@ -41,6 +41,16 @@
                 </MenuItem.Icon>
             </MenuItem>
         </MenuItem>
+        
+        <MenuItem Header="_Modifica">
+            <MenuItem Header="Allinea..."
+                      Classes="innerMenuItem"
+                      Command="{Binding BoardVm.ShowAlignmentWindowCommand}">
+                <MenuItem.Icon>
+                    <avalonia:MaterialIcon Kind="ImageFilterCenterFocus" />
+                </MenuItem.Icon>
+            </MenuItem>
+        </MenuItem>
 
         <MenuItem Header="_View">
             <MenuItem Header="Reset Board" 
