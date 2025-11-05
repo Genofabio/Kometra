@@ -15,20 +15,46 @@ public partial class AlignmentViewModel : ObservableObject
     private readonly IFitsService _fitsService;
     private readonly BaseNodeViewModel _nodeToAlign;
     
-    // Dimensione (in pixel) del nostro mirino '+'
+    // Dimensione (in pixel) del nostro mirino '+' SULLO SCHERMO
     private const double ReticleSize = 20; 
+
+    // --- Proprietà per la Dimensione della Vista ---
+    
+    /// <summary>
+    /// Contiene la dimensioneattuale del pannello PreviewBorder.
+    /// Aggiornato dal code-behind.
+    /// </summary>
+    public Size ViewportSize { get; set; }
 
     // --- Proprietà per Pan & Zoom ---
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ReticleScreenLeft))]
+    [NotifyPropertyChangedFor(nameof(ReticleScreenTop))]
     private double _previewOffsetX;
+
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ReticleScreenLeft))]
+    [NotifyPropertyChangedFor(nameof(ReticleScreenTop))]
     private double _previewOffsetY;
+
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ReticleScreenLeft))]
+    [NotifyPropertyChangedFor(nameof(ReticleScreenTop))]
     private double _previewScale = 1.0; 
 
     // --- Proprietà per l'Immagine ---
+    
+    // --- MODIFICA CHIAVE ---
+    // Rimosso [NotifyPropertyChangedFor(nameof(CorrectImageSize))]
+    // per evitare la notifica prematura.
     [ObservableProperty]
     private FitsDisplayViewModel? _activeImage; 
+    
+    // --- PROPRIETÀ CORRETTA ---
+    /// <summary>
+    /// Contiene la dimensione reale (es. 1024x1024) dell'immagine bitmap.
+    /// </summary>
+    public Size CorrectImageSize => ActiveImage?.Image?.Size ?? default;
     
     // --- Proprietà per le Soglie ---
     [ObservableProperty]
@@ -39,14 +65,20 @@ public partial class AlignmentViewModel : ObservableObject
     // --- Proprietà per la Selezione (Mirino) ---
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(IsReticleVisible))]
-    [NotifyPropertyChangedFor(nameof(ReticleCanvasLeft))]
-    [NotifyPropertyChangedFor(nameof(ReticleCanvasTop))]
+    [NotifyPropertyChangedFor(nameof(ReticleScreenLeft))] // Aggiornato
+    [NotifyPropertyChangedFor(nameof(ReticleScreenTop))]  // Aggiornato
     private Point? _targetCoordinate; // Coordinate (X, Y) relative all'IMMAGINE
 
     // --- Proprietà Calcolate per il XAML ---
     public bool IsReticleVisible => TargetCoordinate.HasValue;
-    public double ReticleCanvasLeft => TargetCoordinate?.X - (ReticleSize / 2) ?? 0;
-    public double ReticleCanvasTop => TargetCoordinate?.Y - (ReticleSize / 2) ?? 0;
+    
+    public double ReticleScreenLeft => TargetCoordinate.HasValue
+        ? (TargetCoordinate.Value.X * PreviewScale + PreviewOffsetX) - (ReticleSize / 2)
+        : 0;
+        
+    public double ReticleScreenTop => TargetCoordinate.HasValue
+        ? (TargetCoordinate.Value.Y * PreviewScale + PreviewOffsetY) - (ReticleSize / 2)
+        : 0;
     
     // --- Costruttore ---
     public AlignmentViewModel(BaseNodeViewModel nodeToAlign, IFitsService fitsService)
@@ -60,7 +92,6 @@ public partial class AlignmentViewModel : ObservableObject
 
     /// <summary>
     /// Metodo temporaneo per caricare un'immagine di prova.
-    /// Contiene codice di debug per trovare l'errore "schermo nero".
     /// </summary>
     private async Task LoadTestImageAsync()
     {
@@ -78,9 +109,18 @@ public partial class AlignmentViewModel : ObservableObject
             }
 
             Debug.WriteLine("[AlignmentViewModel] Immagine caricata, creo il motore display...");
+            
+            // Imposta l'immagine (NON notifica ancora CorrectImageSize)
             ActiveImage = new FitsDisplayViewModel(imageData, _fitsService);
+            
+            // Inizializza l'immagine (imposta ActiveImage.Image)
             ActiveImage.Initialize();
             
+            // ORA notifichiamo la UI che la dimensione è pronta.
+            // Questo è il momento sicuro.
+            OnPropertyChanged(nameof(CorrectImageSize)); 
+            Debug.WriteLine($"[AlignmentViewModel] Dimensione immagine caricata: {CorrectImageSize}");
+
             Debug.WriteLine("[AlignmentViewModel] Motore creato. Imposto soglie...");
             BlackPoint = ActiveImage.BlackPoint;
             WhitePoint = ActiveImage.WhitePoint;
@@ -117,13 +157,44 @@ public partial class AlignmentViewModel : ObservableObject
     [RelayCommand]
     private void ZoomIn()
     {
-        PreviewScale *= 1.2;
+        ApplyZoom(1.2);
     }
 
     [RelayCommand]
     private void ZoomOut()
     {
-        PreviewScale /= 1.2;
+        ApplyZoom(1 / 1.2);
+    }
+
+    /// <summary>
+    /// Applica uno zoom centrato rispetto al ViewportSize.
+    /// </summary>
+    private void ApplyZoom(double scaleFactor)
+    {
+        // Se non abbiamo ancora la dimensione, esegui uno zoom "semplice"
+        if (ViewportSize.Width == 0 || ViewportSize.Height == 0)
+        {
+            PreviewScale *= scaleFactor;
+            return;
+        }
+
+        var viewportCenter = new Point(ViewportSize.Width / 2, ViewportSize.Height / 2);
+        
+        // 1. Trova quale punto dell'immagine è attualmente al centro
+        double imagePointX = (viewportCenter.X - PreviewOffsetX) / PreviewScale;
+        double imagePointY = (viewportCenter.Y - PreviewOffsetY) / PreviewScale;
+
+        // 2. Calcola la new scala
+        double newScale = PreviewScale * scaleFactor;
+
+        // 3. Calcola il new offset per mantenere quel punto dell'immagine al centro
+        double newOffsetX = viewportCenter.X - (imagePointX * newScale);
+        double newOffsetY = viewportCenter.Y - (imagePointY * newScale);
+
+        // 4. Applica i new valori
+        PreviewScale = newScale;
+        PreviewOffsetX = newOffsetX;
+        PreviewOffsetY = newOffsetY;
     }
 
     [RelayCommand]
@@ -157,5 +228,9 @@ public partial class AlignmentViewModel : ObservableObject
     public void SetTargetCoordinate(Point imageCoordinate)
     {
         TargetCoordinate = imageCoordinate;
+        
+        // --- RIGA DI DEBUG AGGIUNTA ---
+        Debug.WriteLine($"[AlignmentViewModel] Coordinata immagine impostata su: X={imageCoordinate.X}, Y={imageCoordinate.Y}");
+        // --- FINE ---
     }
 }

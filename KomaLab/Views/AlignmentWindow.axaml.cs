@@ -2,6 +2,8 @@
 using Avalonia.Controls;
 using Avalonia.Input;
 using KomaLab.ViewModels;
+using Avalonia.Interactivity; // Aggiunto per RoutedEventArgs
+// using Avalonia.Media.Imaging; // Rimosso: non più necessario
 
 namespace KomaLab.Views;
 
@@ -10,18 +12,39 @@ public partial class AlignmentWindow : Window
     private Point? _lastPointerPosForPanning;
     private bool _isPanning = false;
     
-    // NOTA: Con la logica del ViewModel attuale, il centraggio
-    // all'avvio non è gestito. Lo risolveremo
-    // se la logica di zoom/pan del VM si rivelerà un problema.
-    
     public AlignmentWindow()
     {
         InitializeComponent();
         
-        // Non è più necessario collegare i comandi
-        // perché il XAML usa Command="{Binding ...}"
+        // --- MODIFICHE PER LO ZOOM CENTRATO ---
+        // 1. Aggiorna la dimensione del VM quando il pannello cambia (es. resize finestra)
+        this.PreviewBorder.SizeChanged += OnPreviewSizeChanged;
+        
+        // 2. Imposta la dimensione iniziale quando la finestra è caricata
+        this.Loaded += OnWindowLoaded;
+        // --- FINE MODIFICHE ---
     }
     
+    // --- NUOVI GESTORI EVENTI ---
+    
+    private void OnWindowLoaded(object? sender, RoutedEventArgs e)
+    {
+        // Imposta la dimensione iniziale del viewport nel VM
+        if (DataContext is AlignmentViewModel vm)
+        {
+            vm.ViewportSize = this.PreviewBorder.Bounds.Size;
+        }
+    }
+
+    private void OnPreviewSizeChanged(object? sender, SizeChangedEventArgs e)
+    {
+        // Aggiorna la dimensione del viewport nel VM
+        if (DataContext is AlignmentViewModel vm)
+        {
+            vm.ViewportSize = e.NewSize;
+        }
+    }
+
     // --- Gestione Eventi Mouse (Pan e Soglie) ---
 
     private void OnPreviewPointerPressed(object? sender, PointerPressedEventArgs e)
@@ -97,16 +120,24 @@ public partial class AlignmentWindow : Window
     /// </summary>
     private void OnCanvasPointerPressed(object? sender, PointerPressedEventArgs e)
     {
-        if (DataContext is not AlignmentViewModel vm || sender is not Control canvas)
+        // Aggiunto controllo per ActiveImage null
+        if (DataContext is not AlignmentViewModel vm || 
+            vm.ActiveImage == null || 
+            sender is not Control canvas)
             return;
             
         var props = e.GetCurrentPoint(canvas).Properties;
         if (props.IsLeftButtonPressed)
         {
             // Ottiene le coordinate *relative al canvas scalato*
-            // (es. 150.5, 300.2). Questa è l'coordinata dell'immagine.
             var imageCoordinate = e.GetPosition(canvas);
+            
+            // --- FIX ---
+            // Non è più necessario alcun controllo dei bordi!
+            // Il canvas ora ha la dimensione esatta dell'immagine,
+            // quindi 'imageCoordinate' è *sempre* valido.
             vm.SetTargetCoordinate(imageCoordinate);
+            // --- FINE FIX ---
             
             e.Handled = true;
         }

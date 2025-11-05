@@ -25,7 +25,7 @@
 
     <Grid ColumnDefinitions="300, *">
         
-        <!-- COLONNA 0: Pannello Impostazioni (Corretto) -->
+        <!-- COLONNA 0: Pannello Impostazioni -->
         <Border Grid.Column="0" Background="#2C2C2C" Padding="15">
             <Grid RowDefinitions="Auto, *, Auto">
                 
@@ -45,7 +45,7 @@
                     </StackPanel>
                     <StackPanel Spacing="2">
                         <RadioButton Content="Manuale" GroupName="AlignmentMode" />
-                        <TextBlock Text="Ispeziona e imposta manualmente il centro per ogni immagine." 
+                        <TextBlock Text="Ispeziona e imposta manually il centro per ogni immagine." 
                                    TextWrapping="Wrap" Margin="28,0,0,0" Opacity="0.7"/>
                     </StackPanel>
                     <Separator Margin="0,10"/>
@@ -64,7 +64,7 @@
             </Grid>
         </Border>
 
-        <!-- COLONNA 1: Pannello Anteprima (Corretto) -->
+        <!-- COLONNA 1: Pannello Anteprima -->
         <Border Grid.Column="1" Background="#1A1A1A" Padding="10">
             <Border Name="PreviewBorder" 
                     Background="#000" ClipToBounds="True"
@@ -77,50 +77,50 @@
                 
                 <Grid ClipToBounds="True">
                     
-                    <!-- Immagine (Corretta) -->
-                    <Image Name="PreviewImage"
-                           Source="{Binding ActiveImage.Image}"
-                           Stretch="None" 
-                           HorizontalAlignment="Center" 
-                           VerticalAlignment="Center"
-                           RenderOptions.BitmapInterpolationMode="None">
-                        
-                        <Image.RenderTransform>
+                    <!-- 
+                      GRUPPO 1: Contenuto Scalato 
+                    -->
+                    <Grid RenderTransformOrigin="0,0">
+                        <Grid.RenderTransform>
                             <TransformGroup>
                                 <ScaleTransform ScaleX="{Binding PreviewScale}" 
                                                 ScaleY="{Binding PreviewScale}" />
                                 <TranslateTransform X="{Binding PreviewOffsetX}" 
                                                     Y="{Binding PreviewOffsetY}" />
                             </TransformGroup>
-                        </Image.RenderTransform>
-                    </Image>
+                        </Grid.RenderTransform>
+                        
+                        <!-- 
+                          Questa immagine (1024x1024) imposta la dimensione
+                          della cella della Grid.
+                        -->
+                        <Image Name="PreviewImage"
+                               Source="{Binding ActiveImage.Image}"
+                               Stretch="None" 
+                               HorizontalAlignment="Left" 
+                               VerticalAlignment="Top"
+                               RenderOptions.BitmapInterpolationMode="None" />
+                        
+                        <Canvas Name="InteractionCanvas"
+                                Background="#01FFFFFF"
+                                PointerPressed="OnCanvasPointerPressed"
+                                />
+                    </Grid>
                     
-                    <Canvas Name="InteractionCanvas"
-                            Background="Transparent"
-                            PointerPressed="OnCanvasPointerPressed"
-                            
-                            HorizontalAlignment="Center"
-                            VerticalAlignment="Center"
-                            Width="{Binding ActiveImage.ImageSize.Width}"
-                            Height="{Binding ActiveImage.ImageSize.Height}">
-                        
-                        <Canvas.RenderTransform>
-                            <TransformGroup>
-                                <ScaleTransform ScaleX="{Binding PreviewScale}" 
-                                                ScaleY="{Binding PreviewScale}" />
-                                <TranslateTransform X="{Binding PreviewOffsetX}" 
-                                                    Y="{Binding PreviewOffsetY}" />
-                            </TransformGroup>
-                        </Canvas.RenderTransform>
-                        
-                        <!-- Mirino (Corretto) -->
+                    <!-- 
+                      GRUPPO 2: Overlay Statico
+                    -->
+                    <Canvas Name="OverlayCanvas" IsHitTestVisible="False">
+                        <!-- 
+                          Mirino (Spostato qui)
+                        -->
                         <Path Data="M0,10 L20,10 M10,0 L10,20"
                               Stroke="#FF0000"
                               StrokeThickness="2"
                               Width="20" Height="20"
                               IsVisible="{Binding IsReticleVisible}"
-                              Canvas.Left="{Binding ReticleCanvasLeft}"
-                              Canvas.Top="{Binding ReticleCanvasTop}" />
+                              Canvas.Left="{Binding ReticleScreenLeft}"
+                              Canvas.Top="{Binding ReticleScreenTop}" />
                     </Canvas>
                     
                     <!-- Pulsanti Overlay (Corretti) -->
