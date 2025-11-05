@@ -2,13 +2,151 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
-        mc:Ignorable="d" d:DesignWidth="800" d:DesignHeight="450"
+        xmlns:vm="clr-namespace:KomaLab.ViewModels"
+        xmlns:avalonia="clr-namespace:Material.Icons.Avalonia;assembly=Material.Icons.Avalonia"
+        mc:Ignorable="d" d:DesignWidth="800" d:DesignHeight="500"
         x:Class="KomaLab.Views.AlignmentWindow"
-        Title="Finestra di Allineamento"
-        Width="800" Height="450">
-    
-    <Grid>
+        x:DataType="vm:AlignmentViewModel"
+        Title="Allineamento"
+        Width="800" Height="500"
+        MinHeight="400" MinWidth="600"
+        WindowStartupLocation="CenterOwner">
+
+    <Window.Styles>
+        <Style Selector="StackPanel.ZoomControls Button">
+            <Setter Property="Width" Value="32"/>
+            <Setter Property="Height" Value="32"/>
+            <Setter Property="Background" Value="#A0333333"/>
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="CornerRadius" Value="4"/>
+        </Style>
+    </Window.Styles>
+
+    <Grid ColumnDefinitions="300, *">
         
+        <!-- COLONNA 0: Pannello Impostazioni (Corretto) -->
+        <Border Grid.Column="0" Background="#2C2C2C" Padding="15">
+            <Grid RowDefinitions="Auto, *, Auto">
+                
+                <StackPanel Grid.Row="0" Spacing="12">
+                    <TextBlock Text="Metodologia di Allineamento" 
+                               FontSize="16" FontWeight="Bold" />
+                    <StackPanel Spacing="2">
+                        <RadioButton Content="Automatico" GroupName="AlignmentMode" 
+                                     IsChecked="True" />
+                        <TextBlock Text="Rilevamento automatico del nucleo in tutte le immagini." 
+                                   TextWrapping="Wrap" Margin="28,0,0,0" Opacity="0.7"/>
+                    </StackPanel>
+                    <StackPanel Spacing="2">
+                        <RadioButton Content="Guidato" GroupName="AlignmentMode" />
+                        <TextBlock Text="Indica il nucleo sulla prima immagine per guidare il rilevamento." 
+                                   TextWrapping="Wrap" Margin="28,0,0,0" Opacity="0.7"/>
+                    </StackPanel>
+                    <StackPanel Spacing="2">
+                        <RadioButton Content="Manuale" GroupName="AlignmentMode" />
+                        <TextBlock Text="Ispeziona e imposta manualmente il centro per ogni immagine." 
+                                   TextWrapping="Wrap" Margin="28,0,0,0" Opacity="0.7"/>
+                    </StackPanel>
+                    <Separator Margin="0,10"/>
+                </StackPanel>
+                
+                <Grid Grid.Row="2" ColumnDefinitions="*, *" ColumnSpacing="10" Margin="0,10,0,0">
+                    <Button Grid.Column="0" Content="Annulla" 
+                            HorizontalAlignment="Stretch" 
+                            HorizontalContentAlignment="Center"
+                            IsEnabled="True"/>
+                    <Button Grid.Column="1" Content="Applica" 
+                            HorizontalAlignment="Stretch" 
+                            HorizontalContentAlignment="Center"
+                            IsEnabled="False"/>
+                </Grid>
+            </Grid>
+        </Border>
+
+        <!-- COLONNA 1: Pannello Anteprima (Corretto) -->
+        <Border Grid.Column="1" Background="#1A1A1A" Padding="10">
+            <Border Name="PreviewBorder" 
+                    Background="#000" ClipToBounds="True"
+                    BorderBrush="#444" BorderThickness="1"
+                    Padding="1" 
+                    PointerPressed="OnPreviewPointerPressed"
+                    PointerReleased="OnPreviewPointerReleased"
+                    PointerMoved="OnPreviewPointerMoved"
+                    PointerWheelChanged="OnPreviewPointerWheelChanged">
+                
+                <Grid ClipToBounds="True">
+                    
+                    <!-- Immagine (Corretta) -->
+                    <Image Name="PreviewImage"
+                           Source="{Binding ActiveImage.Image}"
+                           Stretch="None" 
+                           HorizontalAlignment="Center" 
+                           VerticalAlignment="Center"
+                           RenderOptions.BitmapInterpolationMode="None">
+                        
+                        <Image.RenderTransform>
+                            <TransformGroup>
+                                <ScaleTransform ScaleX="{Binding PreviewScale}" 
+                                                ScaleY="{Binding PreviewScale}" />
+                                <TranslateTransform X="{Binding PreviewOffsetX}" 
+                                                    Y="{Binding PreviewOffsetY}" />
+                            </TransformGroup>
+                        </Image.RenderTransform>
+                    </Image>
+                    
+                    <Canvas Name="InteractionCanvas"
+                            Background="Transparent"
+                            PointerPressed="OnCanvasPointerPressed"
+                            
+                            HorizontalAlignment="Center"
+                            VerticalAlignment="Center"
+                            Width="{Binding ActiveImage.ImageSize.Width}"
+                            Height="{Binding ActiveImage.ImageSize.Height}">
+                        
+                        <Canvas.RenderTransform>
+                            <TransformGroup>
+                                <ScaleTransform ScaleX="{Binding PreviewScale}" 
+                                                ScaleY="{Binding PreviewScale}" />
+                                <TranslateTransform X="{Binding PreviewOffsetX}" 
+                                                    Y="{Binding PreviewOffsetY}" />
+                            </TransformGroup>
+                        </Canvas.RenderTransform>
+                        
+                        <!-- Mirino (Corretto) -->
+                        <Path Data="M0,10 L20,10 M10,0 L10,20"
+                              Stroke="#FF0000"
+                              StrokeThickness="2"
+                              Width="20" Height="20"
+                              IsVisible="{Binding IsReticleVisible}"
+                              Canvas.Left="{Binding ReticleCanvasLeft}"
+                              Canvas.Top="{Binding ReticleCanvasTop}" />
+                    </Canvas>
+                    
+                    <!-- Pulsanti Overlay (Corretti) -->
+                    <StackPanel Classes="ZoomControls" 
+                                Orientation="Horizontal" Spacing="5"
+                                HorizontalAlignment="Right" 
+                                VerticalAlignment="Bottom"
+                                Margin="10"
+                                ZIndex="1">
+                        
+                        <Button Command="{Binding ZoomOutCommand}">
+                            <avalonia:MaterialIcon Kind="Minus" />
+                        </Button>
+                        <Button Command="{Binding ZoomInCommand}">
+                            <avalonia:MaterialIcon Kind="Plus" />
+                        </Button>
+                        <Button Command="{Binding ResetViewCommand}">
+                            <avalonia:MaterialIcon Kind="ImageSearch" />
+                        </Button>
+                        <Button Command="{Binding ResetThresholdsCommand}">
+                            <avalonia:MaterialIcon Kind="Autorenew" />
+                        </Button>
+                    </StackPanel>
+                    
+                </Grid>
+            </Border>
+        </Border>
     </Grid>
-    
 </Window>

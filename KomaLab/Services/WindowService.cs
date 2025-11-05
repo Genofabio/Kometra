@@ -1,13 +1,24 @@
 ﻿using Avalonia.Controls;
 using KomaLab.ViewModels;
-using KomaLab.Views; // <-- Aggiungi questo per la nostra finestra
-using System; // <-- Aggiungi questo
+using KomaLab.Views; 
+using System;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace KomaLab.Services;
 
 public class WindowService : IWindowService
 {
     private Window? _mainWindow;
+    
+    // --- 1. Aggiungi il campo per il ServiceProvider ---
+    private readonly IServiceProvider _serviceProvider;
+
+    // --- 2. Inietta IServiceProvider ---
+    // (Ci serve per "costruire" i ViewModel con le loro dipendenze)
+    public WindowService(IServiceProvider serviceProvider)
+    {
+        _serviceProvider = serviceProvider;
+    }
 
     public void RegisterMainWindow(Window window)
     {
@@ -18,20 +29,20 @@ public class WindowService : IWindowService
     {
         if (_mainWindow == null)
         {
-            // Non possiamo aprire una finestra modale senza un genitore
             throw new InvalidOperationException("La finestra principale non è stata registrata.");
         }
 
-        // --- Per ora, apriamo solo una finestra vuota ---
+        // --- 3. "Risolvi" i servizi necessari ---
+        var fitsService = _serviceProvider.GetRequiredService<IFitsService>();
         
-        // 1. Crea la nuova finestra
-        var alignmentWindow = new AlignmentWindow();
+        // 4. Crea il ViewModel, passando le dipendenze
+        var viewModel = new AlignmentViewModel(nodeToAlign, fitsService);
+        
+        var alignmentWindow = new AlignmentWindow
+        {
+            DataContext = viewModel
+        };
 
-        // 2. TODO: In futuro, creeremo un AlignmentViewModel e lo imposteremo come DataContext
-        // var viewModel = new AlignmentViewModel(nodeToAlign);
-        // alignmentWindow.DataContext = viewModel;
-
-        // 3. Mostra la finestra in modo "modale" (blocca la finestra principale)
         alignmentWindow.ShowDialog(_mainWindow);
     }
 }

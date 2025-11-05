@@ -131,6 +131,30 @@ public partial class FitsDisplayViewModel : ObservableObject
     }
     
     /// <summary>
+    /// Ricalcola le soglie ottimali dai dati grezzi
+    /// e aggiorna questo ViewModel.
+    /// </summary>
+    /// <returns>Le nuove soglie calcolate.</returns>
+    public async Task<(double Black, double White)> ResetThresholdsAsync()
+    {
+        // 1. Chiama il servizio usando i DATI PRIVATI
+        var (newBlack, newWhite) = await Task.Run(() => 
+            _fitsService.CalculateClippedThresholds(
+                _model.RawData, 
+                _model.FitsHeader)
+        );
+        
+        // 2. Aggiorna le proprietà di questo ViewModel
+        //    (questo attiverà automaticamente la rigenerazione
+        //    tramite OnBlackPointChanged/OnWhitePointChanged)
+        BlackPoint = newBlack;
+        WhitePoint = newWhite;
+
+        // 3. Restituisce i nuovi valori al chiamante
+        return (newBlack, newWhite);
+    }
+    
+    /// <summary>
     /// Pulisce il Bitmap per liberare RAM.
     /// </summary>
     public void UnloadData()
