@@ -266,4 +266,13 @@ public partial class AlignmentWindow : Window
             e.Handled = true;
         }
     }
+    
+    // Aggiungi questo metodo al tuo file AlignmentWindow.axaml.cs
+    private void OnControlsPointerPressed(object? sender, Avalonia.Input.PointerPressedEventArgs e)
+    {
+        // Questo "blocca" il clic e gli impedisce di passare
+        // al canvas sottostante.
+        e.Handled = true;
+    }
+    
 }
