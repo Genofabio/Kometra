@@ -10,7 +10,8 @@
         Title="Allineamento"
         Width="800" Height="500"
         MinHeight="400" MinWidth="600"
-        WindowStartupLocation="CenterOwner">
+        WindowStartupLocation="CenterScreen"
+        Loaded="OnWindowLoaded">
 
     <Window.Styles>
         <Style Selector="StackPanel.ZoomControls Button">
@@ -25,7 +26,6 @@
 
     <Grid ColumnDefinitions="300, *">
         
-        <!-- COLONNA 0: Pannello Impostazioni -->
         <Border Grid.Column="0" Background="#2C2C2C" Padding="15">
             <Grid RowDefinitions="Auto, *, Auto">
                 
@@ -45,7 +45,7 @@
                     </StackPanel>
                     <StackPanel Spacing="2">
                         <RadioButton Content="Manuale" GroupName="AlignmentMode" />
-                        <TextBlock Text="Ispeziona e imposta manually il centro per ogni immagine." 
+                        <TextBlock Text="Ispeziona e imposta manualmente il centro per ogni immagine." 
                                    TextWrapping="Wrap" Margin="28,0,0,0" Opacity="0.7"/>
                     </StackPanel>
                     <Separator Margin="0,10"/>
@@ -64,89 +64,92 @@
             </Grid>
         </Border>
 
-        <!-- COLONNA 1: Pannello Anteprima -->
         <Border Grid.Column="1" Background="#1A1A1A" Padding="10">
-            <Border Name="PreviewBorder" 
-                    Background="#000" ClipToBounds="True"
-                    BorderBrush="#444" BorderThickness="1"
-                    Padding="1" 
+            <Border Name="PreviewBorder"
+                    Background="#222"
+                    ClipToBounds="True"
                     PointerPressed="OnPreviewPointerPressed"
                     PointerReleased="OnPreviewPointerReleased"
                     PointerMoved="OnPreviewPointerMoved"
-                    PointerWheelChanged="OnPreviewPointerWheelChanged">
-                
-                <Grid ClipToBounds="True">
-                    
-                    <!-- 
-                      GRUPPO 1: Contenuto Scalato 
-                    -->
-                    <Grid RenderTransformOrigin="0,0">
-                        <Grid.RenderTransform>
+                    PointerWheelChanged="OnPreviewPointerWheelChanged"
+                    SizeChanged="OnPreviewSizeChanged"> <Grid>
+                    <Canvas Name="Viewport"
+                            RenderTransformOrigin="0,0">
+                        <Canvas.RenderTransform>
                             <TransformGroup>
-                                <ScaleTransform ScaleX="{Binding PreviewScale}" 
-                                                ScaleY="{Binding PreviewScale}" />
-                                <TranslateTransform X="{Binding PreviewOffsetX}" 
-                                                    Y="{Binding PreviewOffsetY}" />
+                                <ScaleTransform ScaleX="{Binding Scale}" ScaleY="{Binding Scale}"/>
+                                <TranslateTransform X="{Binding OffsetX}" Y="{Binding OffsetY}"/>
                             </TransformGroup>
-                        </Grid.RenderTransform>
-                        
-                        <!-- 
-                          Questa immagine (1024x1024) imposta la dimensione
-                          della cella della Grid.
-                        -->
+                        </Canvas.RenderTransform>
+
                         <Image Name="PreviewImage"
                                Source="{Binding ActiveImage.Image}"
-                               Stretch="None" 
-                               HorizontalAlignment="Left" 
-                               VerticalAlignment="Top"
-                               RenderOptions.BitmapInterpolationMode="None" />
+                               Stretch="None"
+                               RenderOptions.BitmapInterpolationMode="None"
+                               Canvas.Left="0"
+                               Canvas.Top="0"/>
                         
                         <Canvas Name="InteractionCanvas"
-                                Background="#01FFFFFF"
-                                PointerPressed="OnCanvasPointerPressed"
-                                />
-                    </Grid>
-                    
-                    <!-- 
-                      GRUPPO 2: Overlay Statico
-                    -->
-                    <Canvas Name="OverlayCanvas" IsHitTestVisible="False">
-                        <!-- 
-                          Mirino (Spostato qui)
-                        -->
-                        <Path Data="M0,10 L20,10 M10,0 L10,20"
-                              Stroke="#FF0000"
-                              StrokeThickness="2"
-                              Width="20" Height="20"
-                              IsVisible="{Binding IsReticleVisible}"
-                              Canvas.Left="{Binding ReticleScreenLeft}"
-                              Canvas.Top="{Binding ReticleScreenTop}" />
+                                Background="Transparent"
+                                Width="{Binding ActiveImage.ImageSize.Width}"
+                                Height="{Binding ActiveImage.ImageSize.Height}"
+                                Canvas.Left="0"
+                                Canvas.Top="0"
+                                PointerPressed="OnInteractionCanvasPointerPressed"/>
                     </Canvas>
                     
-                    <!-- Pulsanti Overlay (Corretti) -->
-                    <StackPanel Classes="ZoomControls" 
-                                Orientation="Horizontal" Spacing="5"
-                                HorizontalAlignment="Right" 
-                                VerticalAlignment="Bottom"
-                                Margin="10"
-                                ZIndex="1">
-                        
-                        <Button Command="{Binding ZoomOutCommand}">
-                            <avalonia:MaterialIcon Kind="Minus" />
-                        </Button>
-                        <Button Command="{Binding ZoomInCommand}">
-                            <avalonia:MaterialIcon Kind="Plus" />
-                        </Button>
-                        <Button Command="{Binding ResetViewCommand}">
-                            <avalonia:MaterialIcon Kind="ImageSearch" />
-                        </Button>
-                        <Button Command="{Binding ResetThresholdsCommand}">
-                            <avalonia:MaterialIcon Kind="Autorenew" />
-                        </Button>
-                    </StackPanel>
+                    <Canvas Name="TargetOverlayCanvas"
+                            IsHitTestVisible="False">
+                        <Path Data="M0,10 L20,10 M10,0 L10,20"
+                              Stroke="#FF0000"
+                              StrokeThickness="1">
+                            <Path.IsVisible>
+                                <Binding Path="IsTargetMarkerVisible" />
+                            </Path.IsVisible>
+                            <Canvas.Left>
+                                <Binding Path="TargetMarkerScreenX" />
+                            </Canvas.Left>
+                            <Canvas.Top>
+                                <Binding Path="TargetMarkerScreenY" />
+                            </Canvas.Top>
+                            <Path.RenderTransform>
+                                <TranslateTransform X="-10" Y="-10" />
+                            </Path.RenderTransform>
+                        </Path>
+                    </Canvas>
                     
+                    <StackPanel 
+                        Orientation="Horizontal" 
+                        Spacing="4" 
+                        Margin="10"
+                        HorizontalAlignment="Right" 
+                        VerticalAlignment="Bottom"
+                        ZIndex="1"
+                        Classes="ZoomControls"> <Button Name="ZoomOutButton"
+                                ToolTip.Tip="Zoom Out">
+                            <avalonia:MaterialIcon Kind="Minus" Width="16" Height="16" />
+                        </Button>
+                        <Button Name="ZoomInButton"
+                                ToolTip.Tip="Zoom In">
+                            <avalonia:MaterialIcon Kind="Plus" Width="16" Height="16" />
+                        </Button>
+                        <Button Name="ResetViewButton" Margin="8,0,0,0"
+                                ToolTip.Tip="Reset View (Zoom &amp; Pan)">
+                            <avalonia:MaterialIcon Kind="FitToScreen" Width="16" Height="16" />
+                        </Button>
+                        
+                        <Path Data="M0,0 V18" Stroke="#666666" StrokeThickness="1" Margin="8,4,8,4" VerticalAlignment="Center" />
+            
+                        <Button Name="ResetThresholdsButton"
+                                ToolTip.Tip="Reset Stretch (Livelli)"
+                                Command="{Binding ResetThresholdsCommand}">
+                            <avalonia:MaterialIcon Kind="Contrast" Width="16" Height="16" />
+                        </Button>
+                        
+                    </StackPanel>
                 </Grid>
             </Border>
         </Border>
+        
     </Grid>
 </Window>

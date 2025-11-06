@@ -1,55 +1,121 @@
 ﻿using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
+using Avalonia.Interactivity;
 using KomaLab.ViewModels;
-using Avalonia.Interactivity; // Aggiunto per RoutedEventArgs
-// using Avalonia.Media.Imaging; // Rimosso: non più necessario
+using System;
+using System.Diagnostics;
+using System.Threading.Tasks;
+using Avalonia.Media;
 
 namespace KomaLab.Views;
 
 public partial class AlignmentWindow : Window
 {
+    private bool _hasLoaded = false; 
     private Point? _lastPointerPosForPanning;
-    private bool _isPanning = false;
+    private bool _isPanning = false; 
     
     public AlignmentWindow()
     {
         InitializeComponent();
-        
-        // --- MODIFICHE PER LO ZOOM CENTRATO ---
-        // 1. Aggiorna la dimensione del VM quando il pannello cambia (es. resize finestra)
-        this.PreviewBorder.SizeChanged += OnPreviewSizeChanged;
-        
-        // 2. Imposta la dimensione iniziale quando la finestra è caricata
+
         this.Loaded += OnWindowLoaded;
-        // --- FINE MODIFICHE ---
-    }
-    
-    // --- NUOVI GESTORI EVENTI ---
-    
-    private void OnWindowLoaded(object? sender, RoutedEventArgs e)
-    {
-        // Imposta la dimensione iniziale del viewport nel VM
-        if (DataContext is AlignmentViewModel vm)
+        
+        var previewBorder = this.FindControl<Border>("PreviewBorder");
+        if (previewBorder != null)
         {
-            vm.ViewportSize = this.PreviewBorder.Bounds.Size;
+            previewBorder.SizeChanged += OnPreviewSizeChanged;
         }
+        
+        var zoomInButton = this.FindControl<Button>("ZoomInButton");
+        var zoomOutButton = this.FindControl<Button>("ZoomOutButton");
+        if (zoomInButton != null) zoomInButton.Click += OnZoomInClicked;
+        if (zoomOutButton != null) zoomOutButton.Click += OnZoomOutClicked;
+
+        // --- MODIFICA: Aggancio i nuovi pulsanti ---
+        var resetViewButton = this.FindControl<Button>("ResetViewButton");
+        var resetThresholdsButton = this.FindControl<Button>("ResetThresholdsButton");
+        
+        if (resetViewButton != null) 
+            resetViewButton.Click += OnResetViewClicked;
+            
+        if (resetThresholdsButton != null) 
+            resetThresholdsButton.Click += OnResetThresholdsClicked;
+        // --- FINE MODIFICA ---
     }
 
-    private void OnPreviewSizeChanged(object? sender, SizeChangedEventArgs e)
+    private async void OnWindowLoaded(object? sender, RoutedEventArgs e)
     {
-        // Aggiorna la dimensione del viewport nel VM
-        if (DataContext is AlignmentViewModel vm)
-        {
-            vm.ViewportSize = e.NewSize;
-        }
+        _hasLoaded = true;
+        await CenterImageAsync();
     }
 
-    // --- Gestione Eventi Mouse (Pan e Soglie) ---
+    private async void OnPreviewSizeChanged(object? sender, SizeChangedEventArgs e)
+    {
+        if (!_hasLoaded) return;
+        await Task.Delay(1); 
+        await CenterImageAsync();
+    }
+
+    private async Task CenterImageAsync()
+    {
+        // (Questo metodo rimane invariato, fa già quello che serve)
+        
+        if (DataContext is not AlignmentViewModel vm)
+            return;
+
+        var previewBorder = this.FindControl<Border>("PreviewBorder");
+        if (previewBorder == null)
+            return;
+
+        try
+        {
+            await vm.ImageLoadedTcs.Task;
+
+            if (vm.ActiveImage == null || vm.ActiveImage.ImageSize == default(Size))
+            {
+                Debug.WriteLine("[TestView] CenterImage fallito: ActiveImage non valido.");
+                return;
+            }
+
+            var viewportSize = previewBorder.Bounds.Size;
+            var imageSize = vm.ActiveImage.ImageSize;
+
+            if (imageSize.Width <= 0 || imageSize.Height <= 0 || viewportSize.Width <= 0 || viewportSize.Height <= 0)
+                return;
+
+            double scaleX = viewportSize.Width / imageSize.Width;
+            double scaleY = viewportSize.Height / imageSize.Height;
+            double newScale = Math.Min(scaleX, scaleY);
+
+            double scaledWidth = imageSize.Width * newScale;
+            double scaledHeight = imageSize.Height * newScale;
+            
+            double newOffsetX = (viewportSize.Width - scaledWidth) / 2;
+            double newOffsetY = (viewportSize.Height - scaledHeight) / 2;
+
+            vm.Scale = newScale;
+            vm.OffsetX = newOffsetX;
+            vm.OffsetY = newOffsetY;
+            
+            vm.UpdateTargetMarkerPosition();
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"--- CRASH IN TestView.CenterImageAsync --- {ex}");
+        }
+    }
+    
+    // --- GESTORI EVENTI PER PAN, ZOOM E CLIC ---
+    // (OnPreviewPointerPressed, Released, Moved rimangono invariati)
 
     private void OnPreviewPointerPressed(object? sender, PointerPressedEventArgs e)
     {
+        if (DataContext is not AlignmentViewModel vm || this.PreviewBorder == null) return;
+        
         var props = e.GetCurrentPoint(this.PreviewBorder).Properties;
+
         if (props.IsMiddleButtonPressed)
         {
             _lastPointerPosForPanning = e.GetPosition(this.PreviewBorder);
@@ -57,6 +123,21 @@ public partial class AlignmentWindow : Window
             e.Pointer.Capture(this.PreviewBorder); 
             e.Handled = true; 
             this.Cursor = new Cursor(StandardCursorType.SizeAll);
+        }
+        else if (props.IsLeftButtonPressed)
+        {
+            if (vm.ActiveImage == null || vm.ActiveImage.ImageSize == default(Size))
+                return;
+
+            var viewportPos = e.GetPosition(this.PreviewBorder);
+            double imageX = (viewportPos.X - vm.OffsetX) / vm.Scale;
+            double imageY = (viewportPos.Y - vm.OffsetY) / vm.Scale;
+            var imageSize = vm.ActiveImage.ImageSize;
+            double clampedX = Math.Clamp(imageX, 0, imageSize.Width);
+            double clampedY = Math.Clamp(imageY, 0, imageSize.Height);
+            
+            vm.SetTargetCoordinate(new Point(clampedX, clampedY));
+            e.Handled = true;
         }
     }
 
@@ -74,7 +155,7 @@ public partial class AlignmentWindow : Window
 
     private void OnPreviewPointerMoved(object? sender, PointerEventArgs e)
     {
-        if (!_isPanning || DataContext is not AlignmentViewModel vm) return;
+        if (!_isPanning || DataContext is not AlignmentViewModel vm || this.PreviewBorder == null) return;
         
         if (!e.GetCurrentPoint(this.PreviewBorder).Properties.IsMiddleButtonPressed)
         {
@@ -89,38 +170,84 @@ public partial class AlignmentWindow : Window
         var delta = pos - _lastPointerPosForPanning!.Value;
         _lastPointerPosForPanning = pos;
 
-        // Aggiorna il ViewModel (che gestisce il Pan)
-        vm.PreviewOffsetX += delta.X;
-        vm.PreviewOffsetY += delta.Y;
+        vm.ApplyPan(delta.X, delta.Y);
         e.Handled = true;
     }
     
+    // (OnPreviewPointerWheelChanged rimane invariato)
     private void OnPreviewPointerWheelChanged(object? sender, PointerWheelEventArgs e)
     {
-        if (e.Handled || DataContext is not AlignmentViewModel vm) return;
+        if (e.Handled || DataContext is not AlignmentViewModel vm || this.PreviewBorder == null) return;
+        
+        if (_isPanning) return; 
+        
+        if (vm.ActiveImage == null) return;
 
-        // Gestione Soglie (Rotellina)
-        var props = e.GetCurrentPoint(this.PreviewBorder).Properties;
-        if (!props.IsMiddleButtonPressed) // Non cambiare soglie se sto pannando
+        double currentRange = vm.ActiveImage.WhitePoint - vm.ActiveImage.BlackPoint;
+        double step = currentRange * 0.05; 
+        
+        if (e.Delta.Y < 0) step = -step; 
+
+        var modifiers = e.KeyModifiers;
+
+        if (modifiers.HasFlag(KeyModifiers.Shift))
         {
-            double currentRange = vm.WhitePoint - vm.BlackPoint;
-            if (currentRange <= 0) currentRange = 1000;
-            double deltaAmount = (currentRange * 0.10) * e.Delta.Y;
-            bool isShiftPressed = (e.KeyModifiers & KeyModifiers.Shift) == KeyModifiers.Shift;
-
-            if (isShiftPressed) vm.BlackPoint += deltaAmount;
-            else vm.WhitePoint += deltaAmount;
-            
-            e.Handled = true;
+            double newBlack = vm.ActiveImage.BlackPoint + step;
+            vm.ActiveImage.BlackPoint = Math.Min(newBlack, vm.ActiveImage.WhitePoint - 1); 
         }
+        else
+        {
+            double newWhite = vm.ActiveImage.WhitePoint + step;
+            vm.ActiveImage.WhitePoint = Math.Max(newWhite, vm.ActiveImage.BlackPoint + 1);
+        }
+
+        e.Handled = true;
+    }
+
+    // (Gestori Zoom In/Out rimangono invariati)
+    private void OnZoomInClicked(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is not AlignmentViewModel vm || this.PreviewBorder == null) return;
+        
+        var centerPoint = new Point(this.PreviewBorder.Bounds.Width / 2, this.PreviewBorder.Bounds.Height / 2);
+        vm.ApplyZoomAtPoint(1.2, centerPoint);
+    }
+
+    private void OnZoomOutClicked(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is not AlignmentViewModel vm || this.PreviewBorder == null) return;
+        
+        var centerPoint = new Point(this.PreviewBorder.Bounds.Width / 2, this.PreviewBorder.Bounds.Height / 2);
+        vm.ApplyZoomAtPoint(1 / 1.2, centerPoint);
     }
     
+    // --- MODIFICA: Nuovi gestori per i pulsanti di Reset ---
+    
     /// <summary>
-    /// Gestisce il clic sinistro sul Canvas di interazione.
+    /// Richiama CenterImageAsync per resettare zoom e pan.
     /// </summary>
-    private void OnCanvasPointerPressed(object? sender, PointerPressedEventArgs e)
+    private async void OnResetViewClicked(object? sender, RoutedEventArgs e)
     {
-        // Aggiunto controllo per ActiveImage null
+        // Questo metodo fa già tutto (calcola lo zoom-to-fit e centra)
+        await CenterImageAsync();
+    }
+
+    /// <summary>
+    /// Chiama il metodo ResetThresholdsAsync sul ViewModel dell'immagine.
+    /// </summary>
+    private async void OnResetThresholdsClicked(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is AlignmentViewModel vm && vm.ActiveImage != null)
+        {
+            // Il FitsDisplayViewModel sa come resettare le sue soglie
+            await vm.ActiveImage.ResetThresholdsAsync();
+        }
+    }
+    // --- FINE MODIFICA ---
+    
+    // (OnInteractionCanvasPointerPressed rimane invariato)
+    private void OnInteractionCanvasPointerPressed(object? sender, PointerPressedEventArgs e)
+    {
         if (DataContext is not AlignmentViewModel vm || 
             vm.ActiveImage == null || 
             sender is not Control canvas)
@@ -129,16 +256,13 @@ public partial class AlignmentWindow : Window
         var props = e.GetCurrentPoint(canvas).Properties;
         if (props.IsLeftButtonPressed)
         {
-            // Ottiene le coordinate *relative al canvas scalato*
             var imageCoordinate = e.GetPosition(canvas);
-            
-            // --- FIX ---
-            // Non è più necessario alcun controllo dei bordi!
-            // Il canvas ora ha la dimensione esatta dell'immagine,
-            // quindi 'imageCoordinate' è *sempre* valido.
             vm.SetTargetCoordinate(imageCoordinate);
-            // --- FINE FIX ---
-            
+            e.Handled = true; 
+        }
+        else if (props.IsRightButtonPressed) 
+        {
+            vm.ClearTarget();
             e.Handled = true;
         }
     }
