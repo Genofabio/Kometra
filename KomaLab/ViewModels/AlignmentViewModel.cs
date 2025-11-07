@@ -7,94 +7,101 @@ using System.Diagnostics;
 using System.Threading.Tasks;
 using System;
 using System.Collections.Generic;
+using System.Collections.ObjectModel;
+using System.Linq;
 
 namespace KomaLab.ViewModels;
 
+// --- ENUM PER LE MODALITÀ ---
+public enum AlignmentMode
+{
+    Automatic,
+    Guided,
+    Manual
+}
+
+/// <summary>
+/// ViewModel per la finestra di Allineamento.
+/// </summary>
 public partial class AlignmentViewModel : ObservableObject
 {
-    private readonly IFitsService _fitsService;
-    private readonly BaseNodeViewModel _nodeToAlign; // Il nodo REALE
+    // --- Classe Helper per la Lista delle Coordinate ---
+    
+    /// <summary>
+    /// Rappresenta una singola riga nella lista delle coordinate.
+    /// </summary>
+    public partial class CoordinateEntry : ObservableObject
+    {
+        public int Index { get; set; }
+        public string DisplayName { get; set; } = "";
+        public int DisplayIndex => Index + 1;
+        
+        [ObservableProperty]
+        [NotifyPropertyChangedFor(nameof(CoordinateString))] // Notifica la stringa
+        private Point? _coordinate;
 
-    // --- Campi per la modalità Stack (immagini multiple) ---
+        // Proprietà helper per il formatting
+        public string CoordinateString => Coordinate.HasValue
+            ? $"({Coordinate.Value.X:F2}; {Coordinate.Value.Y:F2})"
+            : "---";
+    }
+    
+    // --- Campi ---
+    private readonly IFitsService _fitsService;
+    private readonly BaseNodeViewModel _nodeToAlign; 
     private MultipleImagesNodeModel? _stackModel;
     private List<string>? _imagePaths;
     private int _currentStackIndex = 0;
     private int _totalStackCount = 0;
     
-    // Dizionario per memorizzare la posizione del mirino per ogni immagine nello stack
-    private readonly Dictionary<int, Point?> _stackCoordinates = new();
+    // --- FIX: Flag per sbloccare il pulsante Applica ---
+    private bool _centersHaveBeenCalculated = false;
     
-    // --- Proprietà per la Dimensione della Vista ---
+    // --- NUOVA SOURCE OF TRUTH per le coordinate ---
+    public ObservableCollection<CoordinateEntry> CoordinateEntries { get; } = new();
+    
+    // --- Proprietà (Pan/Zoom, Immagine, Soglie) ---
     public Size ViewportSize { get; set; }
-
-    // --- Proprietà per Pan & Zoom ---
-    [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(TargetMarkerScreenX))]
-    [NotifyPropertyChangedFor(nameof(TargetMarkerScreenY))]
+    [ObservableProperty] [NotifyPropertyChangedFor(nameof(TargetMarkerScreenX))] [NotifyPropertyChangedFor(nameof(TargetMarkerScreenY))]
     private double _offsetX = 0;
-
-    [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(TargetMarkerScreenX))]
-    [NotifyPropertyChangedFor(nameof(TargetMarkerScreenY))]
+    [ObservableProperty] [NotifyPropertyChangedFor(nameof(TargetMarkerScreenX))] [NotifyPropertyChangedFor(nameof(TargetMarkerScreenY))]
     private double _offsetY = 0;
-
-    [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(TargetMarkerScreenX))]
-    [NotifyPropertyChangedFor(nameof(TargetMarkerScreenY))]
-    // Rimossa notifica per ReticleStrokeThickness
+    [ObservableProperty] [NotifyPropertyChangedFor(nameof(TargetMarkerScreenX))] [NotifyPropertyChangedFor(nameof(TargetMarkerScreenY))]
     private double _scale = 1.0; 
-
-    // --- Proprietà per l'Immagine ---
-    [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(CorrectImageSize))]
+    [ObservableProperty] [NotifyPropertyChangedFor(nameof(CorrectImageSize))]
     private FitsDisplayViewModel? _activeImage; 
-    
     public Size CorrectImageSize => ActiveImage?.ImageSize ?? default;
-    
-    // --- Proprietà per le Soglie ---
-    [ObservableProperty]
-    private double _blackPoint;
-    [ObservableProperty]
-    private double _whitePoint;
+    [ObservableProperty] private double _blackPoint;
+    [ObservableProperty] private double _whitePoint;
 
     // --- Proprietà per la Selezione (Mirino) ---
-    
-    // La visibilità ora dipende da TargetCoordinate
-    public bool IsTargetMarkerVisible => _targetCoordinate.HasValue;
-    
-    public double TargetMarkerScreenX
-    {
-        get
-        {
-            if (TargetCoordinate.HasValue)
-                return (TargetCoordinate.Value.X * Scale) + OffsetX;
-            return 0;
-        }
-    }
-    public double TargetMarkerScreenY
-    {
-        get
-        {
-            if (TargetCoordinate.HasValue)
-                return (TargetCoordinate.Value.Y * Scale) + OffsetY;
-            return 0;
-        }
-    }
-    
-    // RIMOSSA la proprietà ReticleStrokeThickness
-
-    [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(TargetMarkerScreenX))]
-    [NotifyPropertyChangedFor(nameof(TargetMarkerScreenY))]
-    [NotifyPropertyChangedFor(nameof(IsTargetMarkerVisible))]
-    private Point? _targetCoordinate; // Il punto cliccato sull'immagine
+    public bool IsTargetMarkerVisible => TargetCoordinate.HasValue;
+    public double TargetMarkerScreenX => TargetCoordinate.HasValue ? (TargetCoordinate.Value.X * Scale) + OffsetX : 0;
+    public double TargetMarkerScreenY => TargetCoordinate.HasValue ? (TargetCoordinate.Value.Y * Scale) + OffsetY : 0;
+    [ObservableProperty] [NotifyPropertyChangedFor(nameof(TargetMarkerScreenX))] [NotifyPropertyChangedFor(nameof(TargetMarkerScreenY))] [NotifyPropertyChangedFor(nameof(IsTargetMarkerVisible))]
+    private Point? _targetCoordinate;
 
     // --- Proprietà per la modalità Stack ---
-    [ObservableProperty]
-    private bool _isStack = false;
+    [ObservableProperty] private bool _isStack = false;
+    [ObservableProperty] private string _stackCounterText = "";
 
+    // --- Proprietà per la Modalità ---
     [ObservableProperty]
-    private string _stackCounterText = "";
+    private AlignmentMode _selectedMode = AlignmentMode.Automatic;
+    
+    [ObservableProperty]
+    private bool _isCoordinateListVisible;
+    
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsCalculateButtonVisible))]
+    [NotifyPropertyChangedFor(nameof(IsApplyCancelButtonsVisible))]
+    private bool _areResultsAvailable = false;
+
+    public bool IsCalculateButtonVisible => !AreResultsAvailable;
+    public bool IsApplyCancelButtonsVisible => AreResultsAvailable;
+    
+    // Proprietà helper per il binding della ComboBox
+    public static IEnumerable<AlignmentMode> AlignmentModes => Enum.GetValues<AlignmentMode>();
 
     // Task per segnalare che l'immagine è caricata
     public TaskCompletionSource ImageLoadedTcs { get; } = new();
@@ -104,66 +111,83 @@ public partial class AlignmentViewModel : ObservableObject
     {
         _nodeToAlign = nodeToAlign;
         _fitsService = fitsService;
-        
-        // Carica l'immagine dal nodo, non un test
         _ = InitializeFromNodeAsync();
     }
 
     // --- Logica di Inizializzazione ---
-    
     private async Task InitializeFromNodeAsync()
     {
         try
         {
-            IsStack = false; // Default
+            IsStack = false; 
+            string? singlePath = null;
+            
             if (_nodeToAlign is SingleImageNodeViewModel singleNode)
             {
-                // Il nodo potrebbe esistere ma non aver ancora caricato i suoi dati
                 if (singleNode.FitsImage.ImageSize == default(Size))
                 {
                     await singleNode.LoadDataAsync();
                 }
-                // Ora siamo sicuri che i dati ci sono (o il caricamento è fallito)
                 ActiveImage = singleNode.FitsImage;
-
-                if (ActiveImage != null)
+                
+                var modelField = typeof(BaseNodeViewModel).GetField("Model", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+                if (modelField?.GetValue(singleNode) is SingleImageNodeModel singleModel)
                 {
-                    // Applica lo stretch automatico
-                    await ApplyOptimalStretchAsync();
-                    
-                    OnPropertyChanged(nameof(CorrectImageSize));
-                    ResetThresholdsCommand.NotifyCanExecuteChanged();
+                    singlePath = singleModel.ImagePath;
                 }
+                
+                _currentStackIndex = 0;
+                _totalStackCount = 1; 
             }
             else if (_nodeToAlign is MultipleImagesNodeViewModel stackNode)
             {
-                // Cast al modello per ottenere l'elenco dei percorsi
-                var modelField = typeof(BaseNodeViewModel).GetField("Model", 
-                    System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-                
+                var modelField = typeof(BaseNodeViewModel).GetField("Model", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
                 if (modelField?.GetValue(stackNode) is not MultipleImagesNodeModel stackModel)
                 {
                      throw new InvalidCastException("Impossibile accedere al modello dati del nodo multiplo.");
                 }
-
                 _stackModel = stackModel;
                 _imagePaths = _stackModel.ImagePaths;
                 _totalStackCount = _imagePaths.Count;
-                _currentStackIndex = stackNode.CurrentIndex; // Inizia dall'indice corrente del nodo
+                _currentStackIndex = stackNode.CurrentIndex;
                 IsStack = true;
-
-                // Carica l'immagine iniziale (il metodo applicherà lo stretch)
-                await LoadStackImageAtIndexAsync(_currentStackIndex); 
-                
-                if (ActiveImage != null)
-                {
-                    OnPropertyChanged(nameof(CorrectImageSize));
-                    ResetThresholdsCommand.NotifyCanExecuteChanged();
-                }
             }
             else
             {
-                throw new NotSupportedException($"Tipo di nodo '{_nodeToAlign.GetType().Name}' non supportato per l'allineamento.");
+                throw new NotSupportedException($"Tipo di nodo '{_nodeToAlign.GetType().Name}' non supportato.");
+            }
+            
+            // --- Popola la NUOVA collection ---
+            CoordinateEntries.Clear();
+            if (_imagePaths != null) // Caso Stack
+            {
+                for (int i = 0; i < _totalStackCount; i++)
+                {
+                    CoordinateEntries.Add(new CoordinateEntry
+                    {
+                        Index = i,
+                        DisplayName = System.IO.Path.GetFileName(_imagePaths[i]),
+                        Coordinate = null
+                    });
+                }
+                await LoadStackImageAtIndexAsync(_currentStackIndex);
+            }
+            else if (singlePath != null) // Caso Singolo
+            {
+                 CoordinateEntries.Add(new CoordinateEntry
+                 {
+                     Index = 0,
+                     DisplayName = System.IO.Path.GetFileName(singlePath),
+                     Coordinate = null
+                 });
+                 UpdateReticleVisibilityForCurrentState();
+            }
+
+            if (ActiveImage != null)
+            {
+                await ApplyOptimalStretchAsync();
+                OnPropertyChanged(nameof(CorrectImageSize));
+                ResetThresholdsCommand.NotifyCanExecuteChanged();
             }
         }
         catch (System.Exception ex)
@@ -172,13 +196,22 @@ public partial class AlignmentViewModel : ObservableObject
         }
         finally
         {
-            ImageLoadedTcs.SetResult(); // Sblocca il code-behind per il reset della vista
+            ImageLoadedTcs.SetResult();
+            UpdateCoordinateListVisibility();
+            CalculateCentersCommand.NotifyCanExecuteChanged();
+            ApplyAlignmentCommand.NotifyCanExecuteChanged();
+            
+            // --- FIX: Notifica comandi di navigazione ---
+            PreviousImageCommand.NotifyCanExecuteChanged();
+            NextImageCommand.NotifyCanExecuteChanged();
+            GoToFirstImageCommand.NotifyCanExecuteChanged();
+            GoToLastImageCommand.NotifyCanExecuteChanged();
+            // --- FINE FIX ---
         }
     }
 
     /// <summary>
     /// Carica un'immagine specifica dallo stack.
-    /// Questo metodo gestisce tutto: caricamento, stretch e ripristino del mirino.
     /// </summary>
     private async Task LoadStackImageAtIndexAsync(int index)
     {
@@ -187,10 +220,6 @@ public partial class AlignmentViewModel : ObservableObject
         _currentStackIndex = index;
         StackCounterText = $"{_currentStackIndex + 1} / {_totalStackCount}";
         
-        // Pulisce il mirino PRIMA di iniziare il caricamento
-        TargetCoordinate = null; 
-        
-        // Rimuove la bitmap precedente per liberare memoria
         ActiveImage?.UnloadData(); 
 
         try
@@ -201,89 +230,115 @@ public partial class AlignmentViewModel : ObservableObject
             ActiveImage = new FitsDisplayViewModel(imageData, _fitsService);
             ActiveImage.Initialize();
             
-            // Applica lo stretch automatico OGNI VOLTA
             await ApplyOptimalStretchAsync();
+            UpdateReticleVisibilityForCurrentState();
 
-            // Carica la coordinata (mirino) salvata per questa immagine
-            if (_stackCoordinates.TryGetValue(index, out Point? savedCoordinate))
-            {
-                TargetCoordinate = savedCoordinate;
-            }
-            // else: TargetCoordinate resta null (impostato sopra)
-
-            // Notifica i comandi e la UI
             PreviousImageCommand.NotifyCanExecuteChanged();
             NextImageCommand.NotifyCanExecuteChanged();
+            // --- FIX: Notifica nuovi comandi ---
+            GoToFirstImageCommand.NotifyCanExecuteChanged();
+            GoToLastImageCommand.NotifyCanExecuteChanged();
+            // --- FINE FIX ---
         }
         catch (Exception ex)
         {
             Debug.WriteLine($"[AlgnVM] Errore caricamento immagine stack: {ex}");
-            ActiveImage = null; // Mostra nulla in caso di errore
+            ActiveImage = null;
         }
     }
     
-    // --- Metodi Parziali per le Soglie ---
+    // --- Metodi Parziali ---
     
     partial void OnBlackPointChanged(double value)
     {
-        if (ActiveImage != null)
-            ActiveImage.BlackPoint = value;
+        if (ActiveImage != null) ActiveImage.BlackPoint = value;
     }
     
     partial void OnWhitePointChanged(double value)
     {
-        if (ActiveImage != null)
-            ActiveImage.WhitePoint = value;
+        if (ActiveImage != null) ActiveImage.WhitePoint = value;
+    }
+
+    /// <summary>
+    /// Chiamato quando l'utente cambia RadioButton.
+    /// Azzera tutte le coordinate salvate.
+    /// </summary>
+    partial void OnSelectedModeChanged(AlignmentMode value)
+    {
+        Debug.WriteLine($"[AlgnVM] Modalità cambiata: {value}. Reset coordinate.");
+        
+        // --- FIX: Usa il metodo di reset centralizzato ---
+        ResetAlignmentState();
+        // --- FINE FIX ---
+    }
+    
+    /// <summary>
+    /// Aggiorna la visibilità della lista coordinate in base alla modalità.
+    /// </summary>
+    private void UpdateCoordinateListVisibility()
+    {
+        // La lista è SEMPRE nascosta all'inizio o al cambio di modalità.
+        // Verrà mostrata da 'CalculateCenters' o 'SetTargetCoordinate'.
+        IsCoordinateListVisible = false;
+    }
+    
+    /// <summary>
+    /// Metodo helper per decidere se il mirino deve essere visibile.
+    /// </summary>
+    private void UpdateReticleVisibilityForCurrentState()
+    {
+        if (_currentStackIndex < 0 || _currentStackIndex >= CoordinateEntries.Count)
+        {
+            TargetCoordinate = null;
+            return;
+        }
+        
+        var currentEntry = CoordinateEntries[_currentStackIndex];
+        bool shouldBeVisible = false; 
+
+        if (currentEntry.Coordinate.HasValue)
+        {
+            switch (SelectedMode)
+            {
+                case AlignmentMode.Manual:
+                case AlignmentMode.Guided: // <<< MODIFICATO (rimosso il blocco 'if' da qui)
+                case AlignmentMode.Automatic:
+                    shouldBeVisible = true; 
+                    break;
+            }
+        }
+        
+        TargetCoordinate = shouldBeVisible ? currentEntry.Coordinate : null;
     }
 
     // --- Comandi (Zoom, Pan, Reset) ---
-    
     [RelayCommand] private void ZoomIn() 
     {
         var center = new Point(ViewportSize.Width / 2, ViewportSize.Height / 2);
         ApplyZoomAtPoint(1.25, center);
     }
-
     [RelayCommand] private void ZoomOut() 
     {
         var center = new Point(ViewportSize.Width / 2, ViewportSize.Height / 2);
         ApplyZoomAtPoint(1.0 / 1.25, center);
     }
-
     [RelayCommand] private void ResetView() 
     {
         if (CorrectImageSize.Width == 0 || CorrectImageSize.Height == 0 || ViewportSize.Width == 0)
         {
-            Scale = 1.0;
-            OffsetX = 0;
-            OffsetY = 0;
-            return;
+            Scale = 1.0; OffsetX = 0; OffsetY = 0; return;
         }
-
         double padding = 0.9; 
         double scaleX = (ViewportSize.Width * padding) / CorrectImageSize.Width;
         double scaleY = (ViewportSize.Height * padding) / CorrectImageSize.Height;
         Scale = Math.Min(scaleX, scaleY);
-
         OffsetX = (ViewportSize.Width - (CorrectImageSize.Width * Scale)) / 2;
         OffsetY = (ViewportSize.Height - (CorrectImageSize.Height * Scale)) / 2;
-        
         UpdateTargetMarkerPosition();
     }
-
-    // --- Comandi (Soglie) ---
-
     [RelayCommand(CanExecute = nameof(CanResetThresholds))]
-    private async Task ResetThresholds()
-    {
-        await ApplyOptimalStretchAsync();
-    }
+    private async Task ResetThresholds() => await ApplyOptimalStretchAsync();
     private bool CanResetThresholds() => ActiveImage != null;
-
-    /// <summary>
-    /// Metodo helper che esegue lo stretch automatico sull'immagine
-    /// e aggiorna i valori Black/WhitePoint del ViewModel.
-    /// </summary>
     private async Task ApplyOptimalStretchAsync()
     {
         if (ActiveImage == null) return;
@@ -293,13 +348,11 @@ public partial class AlignmentViewModel : ObservableObject
     }
 
     // --- Comandi Navigazione Stack ---
-    
     [RelayCommand(CanExecute = nameof(CanShowPrevious))]
     private async Task PreviousImage()
     {
-        // Aggiunta guardia ridondante per sicurezza
         if (!CanShowPrevious()) return; 
-        
+        TargetCoordinate = null; 
         await LoadStackImageAtIndexAsync(_currentStackIndex - 1);
     }
     private bool CanShowPrevious() => IsStack && _currentStackIndex > 0;
@@ -307,13 +360,165 @@ public partial class AlignmentViewModel : ObservableObject
     [RelayCommand(CanExecute = nameof(CanShowNext))]
     private async Task NextImage()
     {
-        // Aggiunta guardia ridondante per sicurezza
         if (!CanShowNext()) return; 
-        
+        TargetCoordinate = null; 
         await LoadStackImageAtIndexAsync(_currentStackIndex + 1);
     }
     private bool CanShowNext() => IsStack && _currentStackIndex < _totalStackCount - 1;
+    
+    // --- FIX: Aggiunti comandi per Prima/Ultima immagine ---
+    [RelayCommand(CanExecute = nameof(CanGoToFirst))]
+    private async Task GoToFirstImage()
+    {
+        if (!CanGoToFirst()) return;
+        TargetCoordinate = null;
+        await LoadStackImageAtIndexAsync(0);
+    }
+    private bool CanGoToFirst() => IsStack && _currentStackIndex > 0;
 
+    [RelayCommand(CanExecute = nameof(CanGoToLast))]
+    private async Task GoToLastImage()
+    {
+        if (!CanGoToLast()) return;
+        TargetCoordinate = null;
+        await LoadStackImageAtIndexAsync(_totalStackCount - 1);
+    }
+    private bool CanGoToLast() => IsStack && _currentStackIndex < _totalStackCount - 1;
+    // --- FINE FIX ---
+
+    // --- *** NUOVI COMANDI DI ALLINEAMENTO *** ---
+    
+    [RelayCommand(CanExecute = nameof(CanCalculateCenters))]
+    private async Task CalculateCenters()
+    {
+        Debug.WriteLine($"[AlgnVM] Avvio calcolo centri (Modo: {SelectedMode})...");
+        
+        // --- SIMULAZIONE ALGORITMO ---
+        await Task.Delay(500); // Simula lavoro
+        
+        Random rand = new Random();
+
+        // --- LOGICA DI CALCOLO DIFFERENZIATA ---
+        if (SelectedMode == AlignmentMode.Automatic)
+        {
+            Debug.WriteLine("[AlgnVM] Calcolo Automatico: sovrascrivo tutto.");
+            foreach (var entry in CoordinateEntries)
+            {
+                // Simula un punto trovato
+                double x = rand.NextDouble() * CorrectImageSize.Width;
+                double y = rand.NextDouble() * CorrectImageSize.Height;
+                entry.Coordinate = new Point(x, y);
+            }
+        }
+        else if (SelectedMode == AlignmentMode.Guided)
+        {
+            Debug.WriteLine("[AlgnVM] Calcolo Guidato: interpolo i mancanti.");
+            // (Qui andrebbe la logica di interpolazione)
+            // Per ora, simulo il riempimento solo dei punti mancanti
+            foreach (var entry in CoordinateEntries.Where(e => e.Coordinate == null))
+            {
+                double x = rand.NextDouble() * CorrectImageSize.Width;
+                double y = rand.NextDouble() * CorrectImageSize.Height;
+                entry.Coordinate = new Point(x, y);
+            }
+        }
+        else if (SelectedMode == AlignmentMode.Manual)
+        {
+             Debug.WriteLine("[AlgnVM] Calcolo Manuale: nessun calcolo, solo 'sblocco'.");
+             // Non fare nulla, i punti sono già stati impostati dall'utente.
+             // Il pulsante è stato premuto solo per confermare.
+        }
+        // --- FINE LOGICA DIFFERENZIATA ---
+        
+        
+        Debug.WriteLine("[AlgnVM] Calcolo completato.");
+        
+        // --- FIX: Imposta il flag per abilitare "Applica" ---
+        _centersHaveBeenCalculated = true;
+        // --- FINE FIX ---
+        
+        AreResultsAvailable = true;
+        
+        // Mostra la lista
+        IsCoordinateListVisible = true;
+        
+        // Aggiorna la vista corrente e abilita "Applica"
+        UpdateReticleVisibilityForCurrentState();
+        ApplyAlignmentCommand.NotifyCanExecuteChanged();
+    }
+    
+    private bool CanCalculateCenters()
+    {
+        // --- LOGICA MODIFICATA PER BUG 2 (Guided) ---
+        switch (SelectedMode)
+        {
+            case AlignmentMode.Automatic:
+                // 1. Sempre abilitato
+                return true; 
+
+            case AlignmentMode.Guided:
+                if (CoordinateEntries.Count == 0)
+                    return false; 
+
+                // --- FIX: Gestione Immagine Singola (totalStackCount == 1) ---
+                if (_totalStackCount == 1)
+                {
+                    // Per immagine singola, basta che l'unica coordinata (Index 0) sia impostata
+                    return CoordinateEntries.FirstOrDefault(e => e.Index == 0)?.Coordinate.HasValue == true;
+                }
+                // --- FINE FIX ---
+
+                // Logica standard per Stack (totalStackCount > 1)
+                // 2. Abilitato se la prima E l'ultima immagine hanno coordinate
+                var first = CoordinateEntries.FirstOrDefault(e => e.Index == 0);
+                var last = CoordinateEntries.FirstOrDefault(e => e.Index == _totalStackCount - 1);
+                bool hasFirstAndLast = first?.Coordinate.HasValue == true && last?.Coordinate.HasValue == true;
+
+                // 3. Abilitato se TUTTE le immagini hanno coordinate
+                bool hasAllGuided = CoordinateEntries.All(e => e.Coordinate.HasValue);
+
+                return hasFirstAndLast || hasAllGuided;
+
+            case AlignmentMode.Manual:
+                // Abilitato se TUTTE le immagini hanno coordinate
+                if (CoordinateEntries.Count == 0)
+                    return false;
+                
+                bool hasAllManual = CoordinateEntries.All(e => e.Coordinate.HasValue);
+                return hasAllManual;
+
+            default:
+                return false;
+        }
+    }
+
+    [RelayCommand(CanExecute = nameof(CanApplyAlignment))]
+    private void ApplyAlignment()
+    {
+        Debug.WriteLine("[AlgnVM] *** APPLICA ALLINEAMENTO ***");
+        foreach (var entry in CoordinateEntries)
+        {
+            Debug.WriteLine($" - Img {entry.Index}: {entry.Coordinate}");
+        }
+        // TODO: Chiudere la finestra e passare i dati
+    }
+    
+    [RelayCommand]
+    private void CancelCalculation()
+    {
+        ResetAlignmentState();
+    }
+    
+    private bool CanApplyAlignment()
+    {
+        if (CoordinateEntries.Count == 0 || CoordinateEntries.Count != _totalStackCount)
+            return false;
+            
+        // --- FIX: Usa la nuova proprietà di stato ---
+        bool allCoordinatesSet = CoordinateEntries.All(e => e.Coordinate.HasValue);
+        return allCoordinatesSet && AreResultsAvailable;
+        // --- FINE FIX ---
+    }
 
     // --- Metodi Pubblici per il Code-Behind ---
     
@@ -321,11 +526,9 @@ public partial class AlignmentViewModel : ObservableObject
     {
         double oldScale = Scale;
         double newScale = Math.Clamp(oldScale * scaleFactor, 0.01, 20);
-
         OffsetX = viewportZoomPoint.X - (viewportZoomPoint.X - OffsetX) * (newScale / oldScale);
         OffsetY = viewportZoomPoint.Y - (viewportZoomPoint.Y - OffsetY) * (newScale / oldScale);
         Scale = newScale;
-
         UpdateTargetMarkerPosition();
     }
 
@@ -333,40 +536,115 @@ public partial class AlignmentViewModel : ObservableObject
     {
         OffsetX += deltaX;
         OffsetY += deltaY;
-
         UpdateTargetMarkerPosition();
     }
 
     public void SetTargetCoordinate(Point imageCoordinate)
     {
-        TargetCoordinate = imageCoordinate; // Imposta la proprietà
-        
-        // Salva la coordinata per l'indice corrente se siamo in uno stack
-        if (IsStack)
+        // --- FIX: Logica di blocco modificata ---
+        if (!AreResultsAvailable) // Se i centri NON sono ancora stati calcolati
         {
-            _stackCoordinates[_currentStackIndex] = imageCoordinate;
+            if (SelectedMode == AlignmentMode.Automatic)
+            {
+                Debug.WriteLine("[AlgnVM] Clic ignorato (Modalità Automatica - usa 'Calcola').");
+                return; 
+            }
+
+            if (IsStack && SelectedMode == AlignmentMode.Guided)
+            {
+                if (_currentStackIndex != 0 && _currentStackIndex != (_totalStackCount - 1))
+                {
+                    Debug.WriteLine($"[AlgnVM] Clic ignorato (Modalità Guidata). Index: {_currentStackIndex}");
+                    return;
+                }
+            }
+        }
+        // Se i centri SONO stati calcolati, o se sei in Manuale, o in Guidata (primo/ultimo),
+        // il codice prosegue e permette la modifica.
+        // --- FINE FIX ---
+
+        TargetCoordinate = imageCoordinate; 
+        
+        var entry = CoordinateEntries.FirstOrDefault(e => e.Index == _currentStackIndex);
+        if (entry != null)
+        {
+            entry.Coordinate = imageCoordinate;
         }
         
+        // --- FIX: Rimosso il reset del flag: le modifiche post-calcolo sono OK ---
+        
         Debug.WriteLine($"[AlgnVM] Clic Preciso! Coordinata Immagine: {imageCoordinate}");
+        
+        ApplyAlignmentCommand.NotifyCanExecuteChanged();
+        CalculateCentersCommand.NotifyCanExecuteChanged();
     }
  
     public void ClearTarget()
     {
-        TargetCoordinate = null; // Imposta la proprietà
-
-        // Salva "null" per l'indice corrente se siamo in uno stack
-        if (IsStack)
+        // --- FIX: Logica "Annulla" se si rimuove la croce POST-calcolo ---
+        if (AreResultsAvailable)
         {
-            _stackCoordinates[_currentStackIndex] = null;
+            // Se i risultati sono già calcolati, rimuovere una croce
+            // equivale a "Annullare" l'intero calcolo.
+            ResetAlignmentState();
+            return;
+        }
+        // --- FINE FIX ---
+        
+        // --- Logica PRE-calcolo (rimasta invariata) ---
+        // Se i centri NON sono ancora stati calcolati
+        if (SelectedMode == AlignmentMode.Automatic) return;
+        if (IsStack && SelectedMode == AlignmentMode.Guided)
+        {
+            if (_currentStackIndex != 0 && _currentStackIndex != (_totalStackCount - 1))
+                return;
         }
         
-        Debug.WriteLine("[AlgnVM] Mirino rimosso.");
+        TargetCoordinate = null; 
+        
+        var entry = CoordinateEntries.FirstOrDefault(e => e.Index == _currentStackIndex);
+        if (entry != null)
+        {
+            entry.Coordinate = null;
+        }
+        
+        Debug.WriteLine("[AlgnVM] Mirino rimosso (pre-calcolo).");
+        
+        ApplyAlignmentCommand.NotifyCanExecuteChanged();
+        CalculateCentersCommand.NotifyCanExecuteChanged();
     }
     
     public void UpdateTargetMarkerPosition()
     {
-        // Notifica il cambio, il calcolo è nelle proprietà X/Y
         OnPropertyChanged(nameof(TargetMarkerScreenX));
         OnPropertyChanged(nameof(TargetMarkerScreenY));
+    }
+    
+    /// <summary>
+    /// Resetta lo stato dell'allineamento ai valori pre-calcolo.
+    /// Nasconde i risultati, resetta i flag e le coordinate.
+    /// </summary>
+    private void ResetAlignmentState()
+    {
+        Debug.WriteLine($"[AlgnVM] Resetting alignment state.");
+        
+        // 1. Resetta i flag (Pulsanti)
+        AreResultsAvailable = false;
+        
+        // 3. Resetta le croci e le coordinate
+        foreach (var entry in CoordinateEntries)
+        {
+            entry.Coordinate = null;
+        }
+        TargetCoordinate = null;
+        
+        // 2. Nasconde la lista coordinate
+        UpdateCoordinateListVisibility(); 
+        
+        // 4 & 5 (Pulsanti) sono gestiti dal reset di AreResultsAvailable
+        
+        // Notifica i comandi
+        CalculateCentersCommand.NotifyCanExecuteChanged();
+        ApplyAlignmentCommand.NotifyCanExecuteChanged();
     }
 }

@@ -4,78 +4,123 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:vm="clr-namespace:KomaLab.ViewModels"
         xmlns:avalonia="clr-namespace:Material.Icons.Avalonia;assembly=Material.Icons.Avalonia"
+        xmlns:converters="clr-namespace:KomaLab.Converters" 
         mc:Ignorable="d" d:DesignWidth="800" d:DesignHeight="500"
         x:Class="KomaLab.Views.AlignmentWindow"
         x:DataType="vm:AlignmentViewModel"
         Title="Allineamento"
         Width="800" Height="500"
-        MinHeight="400" MinWidth="600"
+        MinHeight="400" MinWidth="710"
         WindowStartupLocation="CenterScreen"
-        Loaded="OnWindowLoaded"> <!-- Assicurati che il tuo code-behind abbia questo gestore -->
+        Loaded="OnWindowLoaded">
+
+    <Window.Resources>
+        <converters:EnumToBooleanConverter x:Key="EnumToBoolConverter" />
+        <converters:EqualityConverter x:Key="EqualityConverter" />
+        
+        <!-- DataTemplate aggiornato con CoordinateString -->
+        <DataTemplate x:Key="CoordinateItemTemplate"
+                      x:DataType="vm:AlignmentViewModel+CoordinateEntry">
+            <Grid ColumnDefinitions="Auto, *" Margin="2,3" MinHeight="22" ColumnSpacing="5">
+                <!-- Colonna 0: "Immagine N:" -->
+                <TextBlock Grid.Column="0" VerticalAlignment="Center">
+                    <Run Text="Immagine "/>
+                    <Run Text="{Binding DisplayIndex}"/>
+                    <Run Text=":"/>
+                </TextBlock>
+                <!-- Colonna 1: "(xx.xx; yy.yy)" -->
+                <TextBlock Grid.Column="1"
+                           Text="{Binding CoordinateString}"
+                           VerticalAlignment="Center"/>
+            </Grid>
+        </DataTemplate>
+        
+    </Window.Resources>
 
     <Window.Styles>
-<!-- ... (Stili invariati) ... -->
-        <Style Selector="StackPanel.ZoomControls Button">
-            <Setter Property="Width" Value="32"/>
-            <Setter Property="Height" Value="32"/>
-            <Setter Property="Background" Value="#A0333333"/>
+        <Style Selector="StackPanel.NavControls TextBlock">
             <Setter Property="Foreground" Value="White"/>
-            <Setter Property="BorderThickness" Value="0"/>
-            <Setter Property="CornerRadius" Value="4"/>
-        </Style>
-        <!-- Stile per il testo del contatore -->
-        <Style Selector="StackPanel.ZoomControls TextBlock">
-            <Setter Property="Foreground" Value="White"/>
-            <Setter Property="VerticalAlignment" Value="Center"/>
-            <Setter Property="Margin" Value="4,0"/>
+            <Setter Property="HorizontalAlignment" Value="Center"/>
+            <Setter Property="Margin" Value="0,4"/>
         </Style>
     </Window.Styles>
 
     <Grid ColumnDefinitions="300, *">
         
-        <!-- Pannello Laterale Sinistro (Invariato) -->
-<!-- ... (Pannello sinistro invariato) ... -->
+        <!-- Pannello Laterale Sinistro -->
         <Border Grid.Column="0" Background="#2C2C2C" Padding="15">
             <Grid RowDefinitions="Auto, *, Auto">
                 
+                <!-- Riga 0: Controlli Principali -->
                 <StackPanel Grid.Row="0" Spacing="12">
                     <TextBlock Text="Metodologia di Allineamento" 
                                FontSize="16" FontWeight="Bold" />
-                    <StackPanel Spacing="2">
-                        <RadioButton Content="Automatico" GroupName="AlignmentMode" 
-                                     IsChecked="True" />
-                        <TextBlock Text="Rilevamento automatico del nucleo in tutte le immagini." 
-                                   TextWrapping="Wrap" Margin="28,0,0,0" Opacity="0.7"/>
-                    </StackPanel>
-                    <StackPanel Spacing="2">
-                        <RadioButton Content="Guidato" GroupName="AlignmentMode" />
-                        <TextBlock Text="Indica il nucleo sulla prima immagine per guidare il rilevamento." 
-                                   TextWrapping="Wrap" Margin="28,0,0,0" Opacity="0.7"/>
-                    </StackPanel>
-                    <StackPanel Spacing="2">
-                        <RadioButton Content="Manuale" GroupName="AlignmentMode" />
-                        <TextBlock Text="Ispeziona e imposta manualmente il centro per ogni immagine." 
-                                   TextWrapping="Wrap" Margin="28,0,0,0" Opacity="0.7"/>
-                    </StackPanel>
+                    
+                    <ComboBox ItemsSource="{Binding AlignmentModes}"
+                              SelectedItem="{Binding SelectedMode}"
+                              HorizontalAlignment="Stretch"/>
+                    
+                    <TextBlock TextWrapping="Wrap" Opacity="0.7" MinHeight="40">
+                        <TextBlock.IsVisible>
+                            <Binding Path="SelectedMode" Converter="{StaticResource EqualityConverter}" ConverterParameter="Automatic" />
+                        </TextBlock.IsVisible>
+                        <Run>Rilevamento automatico del nucleo. Premi 'Calcola Centri' per iniziare.</Run>
+                    </TextBlock>
+                    <TextBlock TextWrapping="Wrap" Opacity="0.7" MinHeight="40">
+                        <TextBlock.IsVisible>
+                            <Binding Path="SelectedMode" Converter="{StaticResource EqualityConverter}" ConverterParameter="Guided" />
+                        </TextBlock.IsVisible>
+                        <Run>Indica il nucleo sulla prima e ultima immagine, poi premi 'Calcola Centri'.</Run>
+                    </TextBlock>
+                    <TextBlock TextWrapping="Wrap" Opacity="0.7" MinHeight="40">
+                        <TextBlock.IsVisible>
+                            <Binding Path="SelectedMode" Converter="{StaticResource EqualityConverter}" ConverterParameter="Manual" />
+                        </TextBlock.IsVisible>
+                        <Run>Ispeziona e imposta manualmente il centro per ogni immagine.</Run>
+                    </TextBlock>
+                    
                     <Separator Margin="0,10"/>
+                    
+                    <TextBlock Text="Centri Rilevati:" FontWeight="SemiBold"
+                               IsVisible="{Binding IsCoordinateListVisible}"/>
                 </StackPanel>
                 
-                <Grid Grid.Row="2" ColumnDefinitions="*, *" ColumnSpacing="10" Margin="0,10,0,0">
-                    <Button Grid.Column="0" Content="Annulla" 
-                            HorizontalAlignment="Stretch" 
+                <!-- Riga 1: Lista Coordinate con ScrollViewer -->
+                <ScrollViewer Grid.Row="1" Margin="0,5,0,0" VerticalScrollBarVisibility="Auto"
+                            IsVisible="{Binding IsCoordinateListVisible}">
+                    <ItemsControl ItemsSource="{Binding CoordinateEntries}"
+                                  ItemTemplate="{StaticResource CoordinateItemTemplate}"/>
+                </ScrollViewer>
+                
+                
+                <!-- Riga 2: Pulsanti Calcola/Annulla/Applica -->
+                <StackPanel Grid.Row="2" Spacing="10" Margin="0,15,0,0">
+                    
+                    <Button Content="Calcola Centri"
+                            Command="{Binding CalculateCentersCommand}"
+                            HorizontalAlignment="Stretch"
                             HorizontalContentAlignment="Center"
-                            IsEnabled="True"/>
-                    <Button Grid.Column="1" Content="Applica" 
-                            HorizontalAlignment="Stretch" 
-                            HorizontalContentAlignment="Center"
-                            IsEnabled="False"/>
-                </Grid>
+                            IsVisible="{Binding IsCalculateButtonVisible}"/>
+                    
+                    <Grid ColumnDefinitions="*, *" ColumnSpacing="10"
+                          IsVisible="{Binding IsApplyCancelButtonsVisible}">
+                        
+                        <Button Grid.Column="0" Content="Annulla" 
+                                HorizontalAlignment="Stretch" 
+                                HorizontalContentAlignment="Center"
+                                Command="{Binding CancelCalculationCommand}"/>
+                        
+                        <Button Grid.Column="1" Content="Applica" 
+                                HorizontalAlignment="Stretch" 
+                                HorizontalContentAlignment="Center"
+                                Command="{Binding ApplyAlignmentCommand}"/>
+                    </Grid>
+                </StackPanel>
             </Grid>
         </Border>
 
-        <!-- Area di Visualizzazione Immagine (Modificata) -->
+        <!-- Area di Visualizzazione Immagine (Pannello Destro) -->
         <Border Grid.Column="1" Background="#1A1A1A" Padding="10">
-<!-- ... (PreviewBorder invariato) ... -->
             <Border Name="PreviewBorder"
                     Background="#222"
                     ClipToBounds="True"
@@ -84,41 +129,25 @@
                     PointerMoved="OnPreviewPointerMoved"
                     PointerWheelChanged="OnPreviewPointerWheelChanged"
                     SizeChanged="OnPreviewSizeChanged"> 
+                
                 <Grid>
-                    <!-- Canvas di Pan/Zoom (Invariato) -->
-<!-- ... (Canvas Viewport e Immagine invariati) ... -->
-                    <Canvas Name="Viewport"
-                            RenderTransformOrigin="0,0">
+                    <Canvas Name="Viewport" RenderTransformOrigin="0,0">
                         <Canvas.RenderTransform>
                             <TransformGroup>
                                 <ScaleTransform ScaleX="{Binding Scale}" ScaleY="{Binding Scale}"/>
                                 <TranslateTransform X="{Binding OffsetX}" Y="{Binding OffsetY}"/>
                             </TransformGroup>
                         </Canvas.RenderTransform>
-
-                        <Image Name="PreviewImage"
-                               Source="{Binding ActiveImage.Image}"
-                               Stretch="None"
-                               RenderOptions.BitmapInterpolationMode="None"
-                               Canvas.Left="0"
-                               Canvas.Top="0"/>
-                        
-                        <Canvas Name="InteractionCanvas"
-                                Background="Transparent"
+                        <Image Name="PreviewImage" Source="{Binding ActiveImage.Image}" Stretch="None"
+                               RenderOptions.BitmapInterpolationMode="None" Canvas.Left="0" Canvas.Top="0"/>
+                        <Canvas Name="InteractionCanvas" Background="Transparent"
                                 Width="{Binding ActiveImage.ImageSize.Width}"
                                 Height="{Binding ActiveImage.ImageSize.Height}"
-                                Canvas.Left="0"
-                                Canvas.Top="0"
+                                Canvas.Left="0" Canvas.Top="0"
                                 PointerPressed="OnInteractionCanvasPointerPressed"/>
                     </Canvas>
-                    
-                    <!-- Mirino (Invariato) -->
-<!-- ... (Canvas TargetOverlayCanvas invariato) ... -->
-                    <Canvas Name="TargetOverlayCanvas"
-                            IsHitTestVisible="False">
-                        <Path Data="M0,10 L20,10 M10,0 L10,20"
-                              Stroke="#FF0000"
-                              StrokeThickness="1"> <!-- RIPRISTINATO a 1 -->
+                    <Canvas Name="TargetOverlayCanvas" IsHitTestVisible="False">
+                        <Path Data="M0,10 L20,10 M10,0 L10,20" Stroke="#FF0000" StrokeThickness="1">
                             <Path.IsVisible>
                                 <Binding Path="IsTargetMarkerVisible" />
                             </Path.IsVisible>
@@ -133,65 +162,51 @@
                             </Path.RenderTransform>
                         </Path>
                     </Canvas>
-                    
-                    <!-- *** MODIFICA PER FIX #1 *** -->
-                    <!-- Aggiunto Background="Transparent" e PointerPressed -->
-                    <StackPanel 
-                        Orientation="Horizontal" 
-                        Spacing="4" 
-                        Margin="10"
-                        HorizontalAlignment="Right" 
-                        VerticalAlignment="Bottom"
-                        ZIndex="1"
-                        Classes="ZoomControls"
-                        Background="Transparent"
-                        PointerPressed="OnControlsPointerPressed"> 
+                    <StackPanel Orientation="Horizontal" Spacing="4" Margin="10"
+                                HorizontalAlignment="Right" VerticalAlignment="Bottom"
+                                ZIndex="1" Classes="ZoomControls"
+                                Background="Transparent" PointerPressed="OnControlsPointerPressed"> 
+                        <Button Name="ZoomOutButton" ToolTip.Tip="Zoom Out">
+                            <avalonia:MaterialIcon Kind="Minus" Width="16" Height="16" />
+                        </Button>
+                        <Button Name="ZoomInButton" ToolTip.Tip="Zoom In">
+                            <avalonia:MaterialIcon Kind="Plus" Width="16" Height="16" />
+                        </Button>
+                        <Button Name="ResetViewButton" Margin="8,0,0,0" ToolTip.Tip="Reset View (Zoom &amp; Pan)">
+                            <avalonia:MaterialIcon Kind="FitToScreen" Width="16" Height="16" />
+                        </Button>
+                        <Path Data="M0,0 V18" Stroke="#666666" StrokeThickness="1" Margin="8,4,8,4" VerticalAlignment="Center" />
+                        <Button Name="ResetThresholdsButton" ToolTip.Tip="Reset Stretch (Livelli)"
+                                Command="{Binding ResetThresholdsCommand}">
+                            <avalonia:MaterialIcon Kind="Contrast" Width="16" Height="16" />
+                        </Button>
+                    </StackPanel>
+                    <StackPanel Orientation="Horizontal" Spacing="4" Margin="10"
+                                HorizontalAlignment="Left" VerticalAlignment="Bottom"
+                                ZIndex="1" Classes="NavControls"
+                                IsVisible="{Binding IsStack}"
+                                Background="Transparent" PointerPressed="OnControlsPointerPressed">
+
+                        <Button Name="GoToFirstImageButton" ToolTip.Tip="Prima Immagine"
+                                Command="{Binding GoToFirstImageCommand}">
+                            <avalonia:MaterialIcon Kind="ChevronDoubleLeft" Width="16" Height="16" />
+                        </Button>
                         
-                        <!-- Controlli Navigazione Stack (Invariati) -->
-<!-- ... (Bottoni Stack invariati) ... -->
-                        <Button Name="PreviousImageButton"
-                                ToolTip.Tip="Immagine Precedente"
-                                Command="{Binding PreviousImageCommand}"
-                                IsVisible="{Binding IsStack}">
+                        <Button Name="PreviousImageButton" ToolTip.Tip="Immagine Precedente"
+                                Command="{Binding PreviousImageCommand}">
                             <avalonia:MaterialIcon Kind="ChevronLeft" Width="16" Height="16" />
                         </Button>
                         
-                        <TextBlock Text="{Binding StackCounterText}"
-                                   IsVisible="{Binding IsStack}" />
-
-                        <Button Name="NextImageButton"
-                                ToolTip.Tip="Immagine Successiva"
-                                Command="{Binding NextImageCommand}"
-                                IsVisible="{Binding IsStack}">
+                        <TextBlock Text="{Binding StackCounterText}" />
+                        
+                        <Button Name="NextImageButton" ToolTip.Tip="Immagine Successiva"
+                                Command="{Binding NextImageCommand}">
                             <avalonia:MaterialIcon Kind="ChevronRight" Width="16" Height="16" />
                         </Button>
-                        
-                        <!-- Separatore se lo stack è visibile -->
-                        <Path Data="M0,0 V18" Stroke="#666666" StrokeThickness="1" 
-                              Margin="8,4,8,4" VerticalAlignment="Center"
-                              IsVisible="{Binding IsStack}" />
-                        
-                        <!-- Bottoni Esistenti (Invariati) -->
-<!-- ... (Bottoni Zoom/Reset invariati) ... -->
-                        <Button Name="ZoomOutButton"
-                                ToolTip.Tip="Zoom Out">
-                            <avalonia:MaterialIcon Kind="Minus" Width="16" Height="16" />
-                        </Button>
-                        <Button Name="ZoomInButton"
-                                ToolTip.Tip="Zoom In">
-                            <avalonia:MaterialIcon Kind="Plus" Width="16" Height="16" />
-                        </Button>
-                        <Button Name="ResetViewButton" Margin="8,0,0,0"
-                                ToolTip.Tip="Reset View (Zoom &amp; Pan)">
-                            <avalonia:MaterialIcon Kind="FitToScreen" Width="16" Height="16" />
-                        </Button>
-                        
-                        <Path Data="M0,0 V18" Stroke="#666666" StrokeThickness="1" Margin="8,4,8,4" VerticalAlignment="Center" />
-            
-                        <Button Name="ResetThresholdsButton"
-                                ToolTip.Tip="Reset Stretch (Livelli)"
-                                Command="{Binding ResetThresholdsCommand}">
-                            <avalonia:MaterialIcon Kind="Contrast" Width="16" Height="16" />
+
+                        <Button Name="GoToLastImageButton" ToolTip.Tip="Ultima Immagine"
+                                Command="{Binding GoToLastImageCommand}">
+                            <avalonia:MaterialIcon Kind="ChevronDoubleRight" Width="16" Height="16" />
                         </Button>
                         
                     </StackPanel>
