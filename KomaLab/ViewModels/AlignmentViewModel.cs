@@ -89,6 +89,33 @@ public partial class AlignmentViewModel : ObservableObject
     [ObservableProperty]
     private AlignmentMode _selectedMode = AlignmentMode.Automatic;
     
+    // --- FIX: Aggiunte proprietà per il Raggio di Ricerca (ora int) ---
+    [ObservableProperty]
+    private int _minSearchRadius = 0; // Minimo raggio (es. 5px)
+
+    [ObservableProperty]
+    private int _maxSearchRadius = 100; // Massimo di default (verrà aggiornato)
+
+    [ObservableProperty]
+    private int _searchRadius = 25; // Valore di default (es. 25px)
+    // --- FINE FIX ---
+    
+    partial void OnSearchRadiusChanged(int value)
+    {
+        UpdateSearchBoxPosition();
+    }
+    
+    // --- FIX: Proprietà per il riquadro di ricerca (pixel schermo) ---
+    [ObservableProperty]
+    private double _searchBoxLeft;
+    [ObservableProperty]
+    private double _searchBoxTop;
+    [ObservableProperty]
+    private double _searchBoxWidth;
+    [ObservableProperty]
+    private double _searchBoxHeight;
+    // --- FINE FIX ---
+    
     [ObservableProperty]
     private bool _isCoordinateListVisible;
     
@@ -124,17 +151,35 @@ public partial class AlignmentViewModel : ObservableObject
             
             if (_nodeToAlign is SingleImageNodeViewModel singleNode)
             {
-                if (singleNode.FitsImage.ImageSize == default(Size))
-                {
-                    await singleNode.LoadDataAsync();
-                }
-                ActiveImage = singleNode.FitsImage;
-                
+                // 1. Ottieni il percorso dell'immagine
                 var modelField = typeof(BaseNodeViewModel).GetField("Model", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
                 if (modelField?.GetValue(singleNode) is SingleImageNodeModel singleModel)
                 {
                     singlePath = singleModel.ImagePath;
                 }
+                
+                if (string.IsNullOrEmpty(singlePath))
+                {
+                    throw new InvalidOperationException("Impossibile trovare il percorso per l'immagine singola.");
+                }
+
+                // --- MODIFICA CONSIGLIATA ---
+                // 2. Carica l'immagine come un NUOVO oggetto (come fai per lo stack).
+                //    Questo crea un "sandbox" e non modifica il nodo originale.
+                try
+                {
+                    var imageData = await _fitsService.LoadFitsFromFileAsync(singlePath);
+                    if (imageData == null) throw new Exception("Dati FITS nulli.");
+
+                    ActiveImage = new FitsDisplayViewModel(imageData, _fitsService);
+                    ActiveImage.Initialize();
+                }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"[AlgnVM] Errore caricamento immagine singola: {ex}");
+                    ActiveImage = null;
+                }
+                // --- FINE MODIFICA ---
                 
                 _currentStackIndex = 0;
                 _totalStackCount = 1; 
@@ -230,8 +275,12 @@ public partial class AlignmentViewModel : ObservableObject
             ActiveImage = new FitsDisplayViewModel(imageData, _fitsService);
             ActiveImage.Initialize();
             
+            UpdateSearchRadiusRange();
+            
             await ApplyOptimalStretchAsync();
             UpdateReticleVisibilityForCurrentState();
+            
+            UpdateSearchBoxPosition();
 
             PreviousImageCommand.NotifyCanExecuteChanged();
             NextImageCommand.NotifyCanExecuteChanged();
@@ -433,10 +482,6 @@ public partial class AlignmentViewModel : ObservableObject
         
         Debug.WriteLine("[AlgnVM] Calcolo completato.");
         
-        // --- FIX: Imposta il flag per abilitare "Applica" ---
-        _centersHaveBeenCalculated = true;
-        // --- FINE FIX ---
-        
         AreResultsAvailable = true;
         
         // Mostra la lista
@@ -565,6 +610,8 @@ public partial class AlignmentViewModel : ObservableObject
 
         TargetCoordinate = imageCoordinate; 
         
+        UpdateTargetMarkerPosition();
+        
         var entry = CoordinateEntries.FirstOrDefault(e => e.Index == _currentStackIndex);
         if (entry != null)
         {
@@ -607,7 +654,7 @@ public partial class AlignmentViewModel : ObservableObject
         {
             entry.Coordinate = null;
         }
-        
+        UpdateSearchBoxPosition();
         Debug.WriteLine("[AlgnVM] Mirino rimosso (pre-calcolo).");
         
         ApplyAlignmentCommand.NotifyCanExecuteChanged();
@@ -618,6 +665,7 @@ public partial class AlignmentViewModel : ObservableObject
     {
         OnPropertyChanged(nameof(TargetMarkerScreenX));
         OnPropertyChanged(nameof(TargetMarkerScreenY));
+        UpdateSearchBoxPosition();
     }
     
     /// <summary>
@@ -638,6 +686,8 @@ public partial class AlignmentViewModel : ObservableObject
         }
         TargetCoordinate = null;
         
+        UpdateSearchBoxPosition();
+        
         // 2. Nasconde la lista coordinate
         UpdateCoordinateListVisibility(); 
         
@@ -646,5 +696,60 @@ public partial class AlignmentViewModel : ObservableObject
         // Notifica i comandi
         CalculateCentersCommand.NotifyCanExecuteChanged();
         ApplyAlignmentCommand.NotifyCanExecuteChanged();
+    }
+    
+    /// <summary>
+    /// Aggiorna i limiti Min/Max dello slider del raggio di ricerca
+    /// in base alla dimensione dell'immagine attiva.
+    /// </summary>
+    private void UpdateSearchRadiusRange()
+    {
+        if (ActiveImage == null || ActiveImage.ImageSize == default(Size))
+        {
+            // Mantiene i valori di default se non c'è immagine
+            MinSearchRadius = 5;
+            MaxSearchRadius = 100;
+        }
+        else
+        {
+            // Il raggio massimo è metà della dimensione più piccola
+            double minDimension = Math.Min(ActiveImage.ImageSize.Width, ActiveImage.ImageSize.Height);
+            MinSearchRadius = 5; 
+            MaxSearchRadius = (int)Math.Floor(minDimension / 2.0); // Cast a int
+        }
+
+        // Assicura che il valore corrente sia nei nuovi limiti
+        SearchRadius = Math.Clamp(SearchRadius, MinSearchRadius, MaxSearchRadius);
+    }
+    
+    // --- FIX: Aggiunto metodo helper per aggiornare il riquadro ---
+    private void UpdateSearchBoxPosition()
+    {
+        // Se non c'è un target o lo zoom è 0, nascondi il riquadro
+        if (!TargetCoordinate.HasValue || Scale == 0)
+        {
+            SearchBoxLeft = 0;
+            SearchBoxTop = 0;
+            SearchBoxWidth = 0;
+            SearchBoxHeight = 0;
+            return;
+        }
+
+        // 1. Calcola la dimensione del riquadro (pixel schermo)
+        // Il raggio è il "metà-lato", quindi il lato intero è Raggio * 2
+        double halfSizeScreen = SearchRadius * Scale;
+        double fullSizeScreen = halfSizeScreen * 2;
+            
+        SearchBoxWidth = fullSizeScreen;
+        SearchBoxHeight = fullSizeScreen;
+
+        // 2. Calcola la posizione del centro (pixel schermo)
+        // (Questa è la stessa logica di TargetMarkerScreenX/Y)
+        double centerXScreen = (TargetCoordinate.Value.X * Scale) + OffsetX;
+        double centerYScreen = (TargetCoordinate.Value.Y * Scale) + OffsetY;
+
+        // 3. Calcola l'angolo in alto a sinistra (Centro - Metà Dimensione)
+        SearchBoxLeft = centerXScreen - halfSizeScreen;
+        SearchBoxTop = centerYScreen - halfSizeScreen;
     }
 }

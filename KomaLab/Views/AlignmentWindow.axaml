@@ -79,6 +79,37 @@
                         <Run>Ispeziona e imposta manualmente il centro per ogni immagine.</Run>
                     </TextBlock>
                     
+                    <TextBlock Text="Parametri di Ricerca" 
+                               FontSize="16" FontWeight="Bold" 
+                               Margin="0,15,0,0"/>
+
+                    <StackPanel Spacing="5" Margin="0,5,0,0">
+                        <TextBlock Text="Raggio di Ricerca (px):"/>
+                        <Grid ColumnDefinitions="Auto, *" ColumnSpacing="10">
+                            
+                            <TextBox Grid.Column="0"
+                                     Name="SearchRadiusTextBox"
+                                     Text="{Binding SearchRadius, Mode=OneWay}"
+                                     MinWidth="45"
+                                     VerticalAlignment="Center"
+                                     HorizontalContentAlignment="Right"
+                                     GotFocus="OnSearchRadiusTextBoxGotFocus"
+                                     LostFocus="OnSearchRadiusTextBoxLostFocus"/>
+                            
+                            <Slider Grid.Column="1"
+                                    Minimum="{Binding MinSearchRadius}"
+                                    Maximum="{Binding MaxSearchRadius}"
+                                    Value="{Binding SearchRadius}"
+                                    TickFrequency="1"
+                                    IsSnapToTickEnabled="True"
+                                    VerticalAlignment="Center"/>
+                        </Grid>
+                    </StackPanel>
+                    
+                    <TextBlock TextWrapping="Wrap" Opacity="0.7">
+                        <Run>Definisce l'area (metà-lato del box) in cui cercare il centro.</Run>
+                    </TextBlock>
+                    
                     <Separator Margin="0,10"/>
                     
                     <TextBlock Text="Centri Rilevati:" FontWeight="SemiBold"
@@ -147,6 +178,15 @@
                                 PointerPressed="OnInteractionCanvasPointerPressed"/>
                     </Canvas>
                     <Canvas Name="TargetOverlayCanvas" IsHitTestVisible="False">
+                        <Rectangle Stroke="Yellow" StrokeThickness="1" StrokeDashArray="2,2"
+                                   Canvas.Left="{Binding SearchBoxLeft}"
+                                   Canvas.Top="{Binding SearchBoxTop}"
+                                   Width="{Binding SearchBoxWidth}"
+                                   Height="{Binding SearchBoxHeight}">
+                            <Rectangle.IsVisible>
+                                <Binding Path="IsTargetMarkerVisible" />
+                            </Rectangle.IsVisible>
+                        </Rectangle>
                         <Path Data="M0,10 L20,10 M10,0 L10,20" Stroke="#FF0000" StrokeThickness="1">
                             <Path.IsVisible>
                                 <Binding Path="IsTargetMarkerVisible" />

@@ -7,6 +7,7 @@ using System;
 using System.Diagnostics;
 using System.Threading.Tasks;
 using Avalonia.Media;
+using Avalonia.VisualTree;
 
 namespace KomaLab.Views;
 
@@ -19,6 +20,14 @@ public partial class AlignmentWindow : Window
     public AlignmentWindow()
     {
         InitializeComponent();
+        
+        // --- FIX: Registra un handler globale per i click ---
+        this.AddHandler(
+            PointerPressedEvent, 
+            OnWindowPointerPressed_Global, 
+            Avalonia.Interactivity.RoutingStrategies.Tunnel, 
+            handledEventsToo: true);
+        // --- FINE FIX ---
 
         this.Loaded += OnWindowLoaded;
         
@@ -273,6 +282,81 @@ public partial class AlignmentWindow : Window
         // Questo "blocca" il clic e gli impedisce di passare
         // al canvas sottostante.
         e.Handled = true;
+    }
+    
+    /// <summary>
+    /// Seleziona tutto il testo quando l'utente clicca nella TextBox.
+    /// </summary>
+    private void OnSearchRadiusTextBoxGotFocus(object? sender, GotFocusEventArgs e)
+    {
+        if (sender is TextBox textBox)
+        {
+            // Seleziona tutto per facilitare la sovrascrittura
+            textBox.SelectAll();
+        }
+    }
+
+    /// <summary>
+    /// Valida il valore quando l'utente lascia la TextBox.
+    /// </summary>
+    private void OnSearchRadiusTextBoxLostFocus(object? sender, RoutedEventArgs e)
+    {
+        if (sender is not TextBox textBox || DataContext is not AlignmentViewModel vm)
+        {
+            return;
+        }
+
+        // 1. Prova a convertire il testo in un numero intero
+        if (int.TryParse(textBox.Text, out int newValue))
+        {
+            // 2. Se è un numero, "forzalo" a rimanere nei limiti (Min/Max)
+            int clampedValue = Math.Clamp(newValue, vm.MinSearchRadius, vm.MaxSearchRadius);
+
+            // 3. Aggiorna il ViewModel
+            vm.SearchRadius = clampedValue;
+            
+            // 4. Aggiorna la TextBox se il valore è stato modificato (es. "999" -> "100")
+            // Usiamo il binding bidirezionale, ma forzare un aggiornamento
+            // dal ViewModel assicura la sincronizzazione
+            textBox.Text = clampedValue.ToString();
+        }
+        else
+        {
+            // 4. Se il testo non è valido (es. "abc"),
+            // ripristina il valore precedente dal ViewModel.
+            textBox.Text = vm.SearchRadius.ToString();
+        }
+    }
+    // --- FINE FIX ---
+    
+    private void OnWindowPointerPressed_Global(object? sender, PointerPressedEventArgs e)
+    {
+        // 1. Assicurati che la TextBox esista e abbia il focus
+        if (this.SearchRadiusTextBox == null || !this.SearchRadiusTextBox.IsFocused)
+        {
+            return; // Il focus non è sulla TextBox, non fare nulla
+        }
+
+        // 2. Controlla se il click è avvenuto SULLA TextBox
+        var source = e.Source as Control;
+        bool isClickOnTextBox = false;
+        
+        if (source != null)
+        {
+            // Controlla se il click è sulla TextBox o su un suo "figlio" (es. la scrollbar interna)
+            isClickOnTextBox = source == this.SearchRadiusTextBox || 
+                               this.SearchRadiusTextBox.IsVisualAncestorOf(source);
+        }
+
+        // 3. Se il click è avvenuto FUORI dalla TextBox, pulisci il focus
+        if (!isClickOnTextBox)
+        {
+            // Questa chiamata FORZA la TextBox a perdere il focus
+            this.FocusManager?.ClearFocus();
+            
+            // Di conseguenza, il tuo evento OnSearchRadiusTextBoxLostFocus()
+            // verrà eseguito automaticamente, validando il numero.
+        }
     }
     
 }
