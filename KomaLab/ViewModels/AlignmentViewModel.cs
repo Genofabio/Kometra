@@ -79,6 +79,7 @@ public partial class AlignmentViewModel : ObservableObject
     public double TargetMarkerScreenX => TargetCoordinate.HasValue ? (TargetCoordinate.Value.X * Scale) + OffsetX : 0;
     public double TargetMarkerScreenY => TargetCoordinate.HasValue ? (TargetCoordinate.Value.Y * Scale) + OffsetY : 0;
     [ObservableProperty] [NotifyPropertyChangedFor(nameof(TargetMarkerScreenX))] [NotifyPropertyChangedFor(nameof(TargetMarkerScreenY))] [NotifyPropertyChangedFor(nameof(IsTargetMarkerVisible))]
+    [NotifyPropertyChangedFor(nameof(IsSearchBoxVisible))]
     private Point? _targetCoordinate;
 
     // --- Proprietà per la modalità Stack ---
@@ -88,9 +89,33 @@ public partial class AlignmentViewModel : ObservableObject
     // --- Proprietà per la Modalità ---
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(IsSearchRadiusVisible))] // <-- AGGIUNGI QUESTO
+    [NotifyPropertyChangedFor(nameof(IsSearchRadiusControlsVisible))]
+    [NotifyPropertyChangedFor(nameof(IsRefinementMessageVisible))]
     private AlignmentMode _selectedMode = AlignmentMode.Automatic;
     
     public bool IsSearchRadiusVisible => SelectedMode != AlignmentMode.Automatic;
+    
+    // --- FIX: Aggiunte proprietà per il "Dopo Calcolo" ---
+
+    /// <summary>
+    /// Controlla la visibilità del riquadro giallo (Rectangle).
+    /// Visibile solo PRIMA del calcolo.
+    /// </summary>
+    public bool IsSearchBoxVisible => IsTargetMarkerVisible && !AreResultsAvailable;
+
+    /// <summary>
+    /// Controlla la visibilità dei controlli del raggio (Slider/TextBox).
+    /// Visibile solo PRIMA del calcolo E non in modalità Automatica.
+    /// </summary>
+    public bool IsSearchRadiusControlsVisible => IsSearchRadiusVisible && !AreResultsAvailable;
+
+    /// <summary>
+    /// Controlla la visibilità del messaggio di "Rifinutura".
+    /// Visibile solo DOPO il calcolo E non in modalità Automatica.
+    /// </summary>
+    public bool IsRefinementMessageVisible => IsSearchRadiusVisible && AreResultsAvailable;
+    
+    // --- FINE FIX ---
     
     // --- FIX: Aggiunte proprietà per il Raggio di Ricerca (ora int) ---
     [ObservableProperty]
@@ -125,6 +150,9 @@ public partial class AlignmentViewModel : ObservableObject
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(IsCalculateButtonVisible))]
     [NotifyPropertyChangedFor(nameof(IsApplyCancelButtonsVisible))]
+    [NotifyPropertyChangedFor(nameof(IsSearchBoxVisible))]
+    [NotifyPropertyChangedFor(nameof(IsSearchRadiusControlsVisible))]
+    [NotifyPropertyChangedFor(nameof(IsRefinementMessageVisible))]
     private bool _areResultsAvailable = false;
 
     public bool IsCalculateButtonVisible => !AreResultsAvailable;

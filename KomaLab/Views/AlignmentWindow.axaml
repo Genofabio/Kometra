@@ -127,11 +127,11 @@
                         <Run>Ispeziona e imposta manualmente il centro per ogni immagine.</Run>
                     </TextBlock>
                     
-                    <StackPanel Spacing="5" IsVisible="{Binding IsSearchRadiusVisible}">
+                    <Separator Margin="0,-2 ,0,5"/>
                     
-                        <TextBlock Text="Parametri di Ricerca" 
-                                   FontSize="16" FontWeight="Bold" 
-                                   Margin="0,10,0,0"/>
+                    <StackPanel Spacing="5" IsVisible="{Binding IsSearchRadiusControlsVisible}">
+                         <TextBlock Text="Parametri di Ricerca"
+                                    FontSize="14" FontWeight="Bold" />
                         
                         <TextBlock TextWrapping="Wrap" Opacity="0.7">
                             <Run>Definisce l'area (metà-lato del box) in cui cercare il centro.</Run>
@@ -159,10 +159,18 @@
                                         VerticalAlignment="Center"/>
                             </Grid>
                         </StackPanel>
-                        
                     </StackPanel>
                     
-                    <Separator Margin="0,10"/>
+                    <StackPanel Spacing="5" 
+                                IsVisible="{Binding IsCoordinateListVisible}">
+                        
+                        <TextBlock Text="Rifinatura Manuale" 
+                                   FontSize="14" FontWeight="Bold"/>
+
+                        <TextBlock TextWrapping="Wrap" Opacity="0.7">
+                            <Run>I centri sono stati calcolati. Ora puoi cliccare sull'immagine per modificare manualmente la posizione di un centro prima di applicare.</Run>
+                        </TextBlock>
+                    </StackPanel>
                     
                     <TextBlock Text="Centri Rilevati:" FontWeight="SemiBold"
                                IsVisible="{Binding IsCoordinateListVisible}"/>
@@ -175,10 +183,9 @@
                                   ItemTemplate="{StaticResource CoordinateItemTemplate}"/>
                 </ScrollViewer>
                 
-                
                 <!-- Riga 2: Pulsanti Calcola/Annulla/Applica -->
                 <StackPanel Grid.Row="2" Spacing="10" Margin="0,15,0,0">
-                    
+                    <Separator Margin="0,5,0,10"/>
                     <Button Content="Calcola Centri"
                             Command="{Binding CalculateCentersCommand}"
                             HorizontalAlignment="Stretch"
@@ -238,7 +245,7 @@
                                    Width="{Binding SearchBoxWidth}"
                                    Height="{Binding SearchBoxHeight}">
                             <Rectangle.IsVisible>
-                                <Binding Path="IsTargetMarkerVisible" />
+                                <Binding Path="IsSearchBoxVisible" />
                             </Rectangle.IsVisible>
                         </Rectangle>
                         <Path Data="M0,10 L20,10 M10,0 L10,20" Stroke="#F84B5F" StrokeThickness="1">
