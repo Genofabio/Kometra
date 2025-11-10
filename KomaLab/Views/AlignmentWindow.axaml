@@ -37,14 +37,62 @@
         
     </Window.Resources>
 
-    <Window.Styles>
+<Window.Styles>
         <Style Selector="StackPanel.NavControls TextBlock">
             <Setter Property="Foreground" Value="White"/>
             <Setter Property="HorizontalAlignment" Value="Center"/>
             <Setter Property="Margin" Value="0,4"/>
         </Style>
-    </Window.Styles>
+    
+        <Style Selector="Button.calculate">
+            <Setter Property="Background" Value="#8058E8"/> <Setter Property="Foreground" Value="White"/>
+            <Setter Property="BorderThickness" Value="0"/>
+        </Style>
+        <Style Selector="Button.calculate:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Background" Value="#936BFF"/> <Setter Property="TextBlock.Foreground" Value="White"/>
+        </Style>
+        <Style Selector="Button.calculate:pressed /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Background" Value="#704AD9"/> <Setter Property="TextBlock.Foreground" Value="White"/>
+        </Style>
+        <Style Selector="Button.calculate:disabled">
+            <Setter Property="Background" Value="#555"/>
+            <Setter Property="Opacity" Value="0.7"/>
+        </Style>
 
+
+    <Style Selector="Button.apply">
+        <Setter Property="Background" Value="#03A077"/> <Setter Property="Foreground" Value="White"/>
+        <Setter Property="BorderThickness" Value="0"/>
+    </Style>
+    <Style Selector="Button.apply:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+        <Setter Property="Background" Value="#04CA95"/> <Setter Property="TextBlock.Foreground" Value="White"/>
+    </Style>
+    <Style Selector="Button.apply:pressed /template/ ContentPresenter#PART_ContentPresenter">
+        <Setter Property="Background" Value="#028A64"/> <Setter Property="TextBlock.Foreground" Value="White"/>
+    </Style>
+    <Style Selector="Button.apply:disabled">
+        <Setter Property="Background" Value="#555"/>
+        <Setter Property="Opacity" Value="0.7"/>
+    </Style>
+
+
+    <Style Selector="Button.cancel">
+        <Setter Property="Background" Value="#E6606A"/> <Setter Property="Foreground" Value="White"/>
+        <Setter Property="BorderThickness" Value="0"/>
+    </Style>
+    <Style Selector="Button.cancel:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+        <Setter Property="Background" Value="#FF7D85"/> <Setter Property="TextBlock.Foreground" Value="White"/>
+    </Style>
+    <Style Selector="Button.cancel:pressed /template/ ContentPresenter#PART_ContentPresenter">
+        <Setter Property="Background" Value="#D94B55"/> <Setter Property="TextBlock.Foreground" Value="White"/>
+    </Style>
+    <Style Selector="Button.cancel:disabled">
+        <Setter Property="Background" Value="#555"/>
+        <Setter Property="Opacity" Value="0.7"/>
+    </Style>
+
+    </Window.Styles>
+    
     <Grid ColumnDefinitions="300, *">
         
         <!-- Pannello Laterale Sinistro -->
@@ -79,36 +127,40 @@
                         <Run>Ispeziona e imposta manualmente il centro per ogni immagine.</Run>
                     </TextBlock>
                     
-                    <TextBlock Text="Parametri di Ricerca" 
-                               FontSize="16" FontWeight="Bold" 
-                               Margin="0,15,0,0"/>
-
-                    <StackPanel Spacing="5" Margin="0,5,0,0">
-                        <TextBlock Text="Raggio di Ricerca (px):"/>
-                        <Grid ColumnDefinitions="Auto, *" ColumnSpacing="10">
-                            
-                            <TextBox Grid.Column="0"
-                                     Name="SearchRadiusTextBox"
-                                     Text="{Binding SearchRadius, Mode=OneWay}"
-                                     MinWidth="45"
-                                     VerticalAlignment="Center"
-                                     HorizontalContentAlignment="Right"
-                                     GotFocus="OnSearchRadiusTextBoxGotFocus"
-                                     LostFocus="OnSearchRadiusTextBoxLostFocus"/>
-                            
-                            <Slider Grid.Column="1"
-                                    Minimum="{Binding MinSearchRadius}"
-                                    Maximum="{Binding MaxSearchRadius}"
-                                    Value="{Binding SearchRadius}"
-                                    TickFrequency="1"
-                                    IsSnapToTickEnabled="True"
-                                    VerticalAlignment="Center"/>
-                        </Grid>
-                    </StackPanel>
+                    <StackPanel Spacing="5" IsVisible="{Binding IsSearchRadiusVisible}">
                     
-                    <TextBlock TextWrapping="Wrap" Opacity="0.7">
-                        <Run>Definisce l'area (metà-lato del box) in cui cercare il centro.</Run>
-                    </TextBlock>
+                        <TextBlock Text="Parametri di Ricerca" 
+                                   FontSize="16" FontWeight="Bold" 
+                                   Margin="0,10,0,0"/>
+                        
+                        <TextBlock TextWrapping="Wrap" Opacity="0.7">
+                            <Run>Definisce l'area (metà-lato del box) in cui cercare il centro.</Run>
+                        </TextBlock>
+
+                        <StackPanel Spacing="5" Margin="0,5,0,0">
+                            <TextBlock Text="Raggio di Ricerca (px):"/>
+                            <Grid ColumnDefinitions="Auto, *" ColumnSpacing="10">
+                                
+                                <TextBox Grid.Column="0"
+                                         Name="SearchRadiusTextBox"
+                                         Text="{Binding SearchRadius, Mode=OneWay}"
+                                         MinWidth="45"
+                                         VerticalAlignment="Center"
+                                         HorizontalContentAlignment="Right"
+                                         GotFocus="OnSearchRadiusTextBoxGotFocus"
+                                         LostFocus="OnSearchRadiusTextBoxLostFocus"/>
+                                
+                                <Slider Grid.Column="1"
+                                        Minimum="{Binding MinSearchRadius}"
+                                        Maximum="{Binding MaxSearchRadius}"
+                                        Value="{Binding SearchRadius}"
+                                        TickFrequency="1"
+                                        IsSnapToTickEnabled="True"
+                                        VerticalAlignment="Center"/>
+                            </Grid>
+                        </StackPanel>
+                        
+                    </StackPanel>
                     
                     <Separator Margin="0,10"/>
                     
@@ -131,7 +183,8 @@
                             Command="{Binding CalculateCentersCommand}"
                             HorizontalAlignment="Stretch"
                             HorizontalContentAlignment="Center"
-                            IsVisible="{Binding IsCalculateButtonVisible}"/>
+                            IsVisible="{Binding IsCalculateButtonVisible}"
+                            Classes="calculate"/> 
                     
                     <Grid ColumnDefinitions="*, *" ColumnSpacing="10"
                           IsVisible="{Binding IsApplyCancelButtonsVisible}">
@@ -139,12 +192,13 @@
                         <Button Grid.Column="0" Content="Annulla" 
                                 HorizontalAlignment="Stretch" 
                                 HorizontalContentAlignment="Center"
-                                Command="{Binding CancelCalculationCommand}"/>
-                        
+                                Command="{Binding CancelCalculationCommand}"
+                                Classes="cancel"/> 
                         <Button Grid.Column="1" Content="Applica" 
                                 HorizontalAlignment="Stretch" 
                                 HorizontalContentAlignment="Center"
-                                Command="{Binding ApplyAlignmentCommand}"/>
+                                Command="{Binding ApplyAlignmentCommand}"
+                                Classes="apply"/> 
                     </Grid>
                 </StackPanel>
             </Grid>
@@ -178,7 +232,7 @@
                                 PointerPressed="OnInteractionCanvasPointerPressed"/>
                     </Canvas>
                     <Canvas Name="TargetOverlayCanvas" IsHitTestVisible="False">
-                        <Rectangle Stroke="Yellow" StrokeThickness="1" StrokeDashArray="2,2"
+                        <Rectangle Stroke="#FEC530" StrokeThickness="1" StrokeDashArray="2,2"
                                    Canvas.Left="{Binding SearchBoxLeft}"
                                    Canvas.Top="{Binding SearchBoxTop}"
                                    Width="{Binding SearchBoxWidth}"
@@ -187,7 +241,7 @@
                                 <Binding Path="IsTargetMarkerVisible" />
                             </Rectangle.IsVisible>
                         </Rectangle>
-                        <Path Data="M0,10 L20,10 M10,0 L10,20" Stroke="#FF0000" StrokeThickness="1">
+                        <Path Data="M0,10 L20,10 M10,0 L10,20" Stroke="#F84B5F" StrokeThickness="1">
                             <Path.IsVisible>
                                 <Binding Path="IsTargetMarkerVisible" />
                             </Path.IsVisible>

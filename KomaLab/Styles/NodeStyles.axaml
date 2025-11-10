@@ -10,8 +10,8 @@
     </Style>
 
     <Style Selector="Border.NodeFrame.selected">
-        <Setter Property="BorderBrush" Value="#FEC530"/>
-        <Setter Property="Background" Value="#FEC530"/>
+        <Setter Property="BorderBrush" Value="#8058E8"/>
+        <Setter Property="Background" Value="#8058E8"/>
     </Style>
 
     <Style Selector="Button.CloseButton">

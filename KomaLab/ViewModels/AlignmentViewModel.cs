@@ -87,7 +87,10 @@ public partial class AlignmentViewModel : ObservableObject
 
     // --- Proprietà per la Modalità ---
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsSearchRadiusVisible))] // <-- AGGIUNGI QUESTO
     private AlignmentMode _selectedMode = AlignmentMode.Automatic;
+    
+    public bool IsSearchRadiusVisible => SelectedMode != AlignmentMode.Automatic;
     
     // --- FIX: Aggiunte proprietà per il Raggio di Ricerca (ora int) ---
     [ObservableProperty]
@@ -173,6 +176,7 @@ public partial class AlignmentViewModel : ObservableObject
 
                     ActiveImage = new FitsDisplayViewModel(imageData, _fitsService);
                     ActiveImage.Initialize();
+                    UpdateSearchRadiusRange();
                 }
                 catch (Exception ex)
                 {
@@ -707,14 +711,14 @@ public partial class AlignmentViewModel : ObservableObject
         if (ActiveImage == null || ActiveImage.ImageSize == default(Size))
         {
             // Mantiene i valori di default se non c'è immagine
-            MinSearchRadius = 5;
+            MinSearchRadius = 0;
             MaxSearchRadius = 100;
         }
         else
         {
             // Il raggio massimo è metà della dimensione più piccola
             double minDimension = Math.Min(ActiveImage.ImageSize.Width, ActiveImage.ImageSize.Height);
-            MinSearchRadius = 5; 
+            MinSearchRadius = 0; 
             MaxSearchRadius = (int)Math.Floor(minDimension / 2.0); // Cast a int
         }
 

@@ -21,7 +21,7 @@ public partial class BoardViewModel : ObservableObject
     // --- Proprietà ---
     [ObservableProperty] private double _offsetX;
     [ObservableProperty] private double _offsetY;
-    [ObservableProperty] private double _scale = 0.5;
+    [ObservableProperty] private double _scale = 0.46;
     [ObservableProperty] private Rect _viewBounds;
     [ObservableProperty] private BaseNodeViewModel? _selectedNode;
     public ObservableCollection<BaseNodeViewModel> Nodes { get; } = new();
