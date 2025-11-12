@@ -1,5 +1,4 @@
-﻿using Avalonia;
-using CommunityToolkit.Mvvm.ComponentModel;
+﻿using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using KomaLab.Services;
 using System.Diagnostics;
@@ -9,7 +8,10 @@ using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Linq;
 using KomaLab.ViewModels.Helpers;
-using CoordinateEntry = KomaLab.ViewModels.Helpers.CoordinateEntry; // Necessario per CoordinateEntry e ViewportManager
+using OpenCvSharp;
+using CoordinateEntry = KomaLab.ViewModels.Helpers.CoordinateEntry;
+using Point = Avalonia.Point;
+using Size = Avalonia.Size; // Necessario per CoordinateEntry e ViewportManager
 
 namespace KomaLab.ViewModels;
 
@@ -229,22 +231,29 @@ public partial class AlignmentToolViewModel : ObservableObject
 
             ActiveImage = new FitsDisplayViewModel(imageData, _fitsService);
             ActiveImage.Initialize();
-            
-            // Notifica i componenti dipendenti
-            Viewport.ImageSize = ActiveImage.ImageSize;
-            OnPropertyChanged(nameof(CorrectImageSize));
-            ResetThresholdsCommand.NotifyCanExecuteChanged();
-            
-            // Applica stato
-            UpdateSearchRadiusRange();
-            await ApplyOptimalStretchAsync();
-            UpdateReticleVisibilityForCurrentState();
+        
+            // --- TEST FINALE (Modificato per usare solo Centroid) ---
+            Debug.WriteLine("--- INIZIO TEST COMPLETO DI ALLINEAMENTO (Metodo Centroid) ---");
 
-            // Notifica i comandi di navigazione
-            PreviousImageCommand.NotifyCanExecuteChanged();
-            NextImageCommand.NotifyCanExecuteChanged();
-            GoToFirstImageCommand.NotifyCanExecuteChanged();
-            GoToLastImageCommand.NotifyCanExecuteChanged();
+            // (Devi rendere 'LoadFitsDataAsMat' pubblico e aggiungerlo a IAlignmentService)
+            using Mat originalMat = _alignmentService.LoadFitsDataAsMat(imageData); 
+
+            // 2. Trova il centro (USANDO CENTROID)
+            Point originalCenter = _alignmentService.GetCenterByCentroid(originalMat, sigma: 5.0);
+            Debug.WriteLine($"Centro Originale (Centroid) (X, Y): {originalCenter.X:F2}, {originalCenter.Y:F2}");
+
+            // 3. Sposta l'immagine (il metodo di shift è corretto)
+            using Mat centeredMat = _alignmentService.CenterImageByCoords(originalMat, originalCenter);
+
+            // 4. VERIFICA: Calcola il centroide della NUOVA immagine (USANDO CENTROID)
+            Point newCenter = _alignmentService.GetCenterByCentroid(centeredMat, sigma: 5.0);
+            Debug.WriteLine($"Centro Verificato (dopo shift) (X, Y): {newCenter.X:F2}, {newCenter.Y:F2}");
+        
+            Debug.WriteLine("--- FINE TEST COMPLETO ---");
+            // --- FINE TEST ---
+
+            Viewport.ImageSize = ActiveImage.ImageSize;
+            // ... (resto del metodo) ...
         }
         catch (Exception ex)
         {
