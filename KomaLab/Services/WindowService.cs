@@ -34,11 +34,12 @@ public class WindowService : IWindowService
 
         // --- 3. "Risolvi" i servizi necessari ---
         var fitsService = _serviceProvider.GetRequiredService<IFitsService>();
+        var alignmentService = _serviceProvider.GetRequiredService<IAlignmentService>();
         
         // 4. Crea il ViewModel, passando le dipendenze
-        var viewModel = new AlignmentViewModel(nodeToAlign, fitsService);
+        var viewModel = new AlignmentToolViewModel(nodeToAlign, fitsService, alignmentService);
         
-        var alignmentWindow = new AlignmentWindow
+        var alignmentWindow = new AlignmentToolView
         {
             DataContext = viewModel
         };

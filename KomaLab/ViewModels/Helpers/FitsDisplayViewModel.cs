@@ -1,16 +1,16 @@
-﻿using Avalonia;
+﻿using System;
+using System.Diagnostics;
+using System.Runtime.InteropServices;
+using System.Threading;
+using System.Threading.Tasks;
+using Avalonia;
 using Avalonia.Media.Imaging;
 using Avalonia.Platform;
 using CommunityToolkit.Mvvm.ComponentModel;
 using KomaLab.Models;
 using KomaLab.Services;
-using System.Runtime.InteropServices;
-using System.Threading.Tasks;
-using System.Threading; 
-using System;
-using System.Diagnostics; 
 
-namespace KomaLab.ViewModels;
+namespace KomaLab.ViewModels.Helpers;
 
 /// <summary>
 /// Questo ViewModel non è un "Nodo".

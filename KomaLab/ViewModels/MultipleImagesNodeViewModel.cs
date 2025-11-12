@@ -1,4 +1,5 @@
-﻿using System.Threading.Tasks;
+﻿using System.Collections.Generic;
+using System.Threading.Tasks;
 using Avalonia;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -11,14 +12,16 @@ public partial class MultipleImagesNodeViewModel : BaseNodeViewModel
 {
     // --- Campi ---
     private readonly IFitsService _fitsService;
-    private readonly MultipleImagesNodeModel _stackModel;
+    private readonly MultipleImagesNodeModel _multiModel;
     private readonly Size _maxImageSize;
     private readonly int _imageCount;
 
     // --- Proprietà per la Pila ---
     
     [ObservableProperty]
-    private FitsDisplayViewModel? _activeFitsImage;
+    private Helpers.FitsDisplayViewModel? _activeFitsImage;
+    
+    public List<string> ImagePaths => _multiModel.ImagePaths;
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(CurrentImageText))]
@@ -50,13 +53,13 @@ public partial class MultipleImagesNodeViewModel : BaseNodeViewModel
         : base(parentBoard, model)
     {
         _fitsService = fitsService;
-        _stackModel = model;
+        _multiModel = model;
         _maxImageSize = maxSize;
         _imageCount = model.ImagePaths.Count; 
         
         _currentIndex = 0;
         
-        ActiveFitsImage = new FitsDisplayViewModel(initialData, _fitsService);
+        ActiveFitsImage = new Helpers.FitsDisplayViewModel(initialData, _fitsService);
         ActiveFitsImage.Initialize();
         
         BlackPoint = ActiveFitsImage.BlackPoint;
@@ -102,7 +105,7 @@ public partial class MultipleImagesNodeViewModel : BaseNodeViewModel
         FitsImageData? newModel;
         try
         {
-            newModel = await _fitsService.LoadFitsFromFileAsync(_stackModel.ImagePaths[index]);
+            newModel = await _fitsService.LoadFitsFromFileAsync(_multiModel.ImagePaths[index]);
         }
         catch (System.Exception ex)
         {
@@ -116,7 +119,7 @@ public partial class MultipleImagesNodeViewModel : BaseNodeViewModel
             return; 
         }
     
-        ActiveFitsImage = new FitsDisplayViewModel(newModel, _fitsService);
+        ActiveFitsImage = new Helpers.FitsDisplayViewModel(newModel, _fitsService);
     
         BlackPoint = ActiveFitsImage.BlackPoint;
         WhitePoint = ActiveFitsImage.WhitePoint;

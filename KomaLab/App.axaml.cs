@@ -46,6 +46,7 @@ public partial class App : Application
         services.AddSingleton<INodeViewModelFactory, NodeViewModelFactory>();
         services.AddSingleton<IDialogService, DialogService>(); 
         services.AddSingleton<IWindowService, WindowService>();
+        services.AddSingleton<IAlignmentService, AlignmentService>();
 
         services.AddSingleton<BoardViewModel>();
         services.AddSingleton<MainWindowViewModel>();

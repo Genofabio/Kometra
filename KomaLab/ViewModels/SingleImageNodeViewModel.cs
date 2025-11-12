@@ -22,7 +22,9 @@ public partial class SingleImageNodeViewModel : BaseNodeViewModel
 
     // "Motore" di visualizzazione (contiene Bitmap, Black/White)
     [ObservableProperty]
-    private FitsDisplayViewModel _fitsImage;
+    private Helpers.FitsDisplayViewModel _fitsImage;
+    
+    public string ImagePath => _imageModel.ImagePath;
 
     // --- Implementazione Proprietà Astratte ---
 
@@ -60,10 +62,21 @@ public partial class SingleImageNodeViewModel : BaseNodeViewModel
             FitsHeader = new Header(),
             ImageSize = default
         };
-        _fitsImage = new FitsDisplayViewModel(placeholderModel, _fitsService);
+        _fitsImage = new Helpers.FitsDisplayViewModel(placeholderModel, _fitsService);
     }
     
     // --- Metodi ---
+    
+    // Implementazione del metodo parziale
+    // Questo viene chiamato automaticamente dopo che _fitsImage è stato impostato
+    partial void OnFitsImageChanged(Helpers.FitsDisplayViewModel? value)
+    {
+        // 1. Notifico che la MIA proprietà (astratta) è cambiata
+        OnPropertyChanged(nameof(NodeContentSize));
+        
+        // 2. Se vuoi, puoi già inizializzare qui
+        value?.Initialize();
+    }
 
     /// <summary>
     /// Carica i dati FITS in modo asincrono.
@@ -79,15 +92,8 @@ public partial class SingleImageNodeViewModel : BaseNodeViewModel
             {
                 throw new Exception("I dati FITS caricati sono nulli o non validi.");
             }
-
-            // Sostituisce il "motore" segnaposto con quello reale
-            // [ObservableProperty] notificherà la UI
-            FitsImage = new FitsDisplayViewModel(imageData, _fitsService);
-            FitsImage.Initialize();
             
-            // Notifica alla classe base che la dimensione è cambiata
-            // (per aggiornare EstimatedTotalSize)
-            OnPropertyChanged(nameof(EstimatedTotalSize)); 
+            FitsImage = new Helpers.FitsDisplayViewModel(imageData, _fitsService);
         }
         catch (Exception ex)
         {

@@ -68,6 +68,14 @@ public abstract partial class BaseNodeViewModel : ObservableObject
         ParentBoard = parentBoard;
         Model = model; 
         Title = model.Title;
+        
+        this.PropertyChanged += (sender, e) =>
+        {
+            if (e.PropertyName == nameof(NodeContentSize))
+            {
+                OnPropertyChanged(nameof(EstimatedTotalSize));
+            }
+        };
     }
 
     // --- Comandi ---
