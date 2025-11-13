@@ -1,6 +1,5 @@
 ﻿using System;
 using System.Diagnostics;
-using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
 using Avalonia;
@@ -20,10 +19,11 @@ namespace KomaLab.ViewModels.Helpers;
 public partial class FitsDisplayViewModel : ObservableObject
 {
     // --- Campi ---
-    private readonly FitsImageData _model; 
+    private readonly FitsImageData _imageData; 
     private readonly IFitsService _fitsService; 
+    private readonly IImageProcessingService _processingService;
     
-    public Size ImageSize => _model.ImageSize;
+    public Size ImageSize => _imageData.ImageSize;
 
     // --- Campo per l'Ottimizzazione ---
     private CancellationTokenSource? _regenerationCts;
@@ -41,21 +41,28 @@ public partial class FitsDisplayViewModel : ObservableObject
 
     // --- Costruttore ---
     
-    public FitsDisplayViewModel(FitsImageData model, IFitsService fitsService)
+    public FitsDisplayViewModel(
+        FitsImageData imageData, 
+        IFitsService fitsService, 
+        IImageProcessingService processingService)
     {
-        _model = model;
+        _imageData = imageData;
         _fitsService = fitsService;
+        _processingService = processingService;
         
-        _blackPoint = model.InitialBlackPoint;
-        _whitePoint = model.InitialWhitePoint;
+        // Le soglie vengono impostate da InitializeAsync
     }
     
     /// <summary>
-    /// Avvia la prima generazione dell'immagine.
+    /// Avvia la prima generazione dell'immagine e calcola le soglie iniziali.
     /// </summary>
-    public void Initialize()
+    public async Task InitializeAsync()
     {
-        TriggerRegeneration();
+        // 1. Calcola le soglie per primo
+        await ResetThresholdsAsync();
+        
+        // 2. TriggerRegeneration() sarà chiamato automaticamente
+        //    dai setter di BlackPoint/WhitePoint nel passo 1.
     }
     
     // --- Logica di Rigenerazione ---
@@ -64,69 +71,64 @@ public partial class FitsDisplayViewModel : ObservableObject
 
     /// <summary>
     /// Avvia una rigenerazione "debounced" (anti-sfarfallio).
-    /// Annulla qualsiasi task di rigenerazione precedente.
     /// </summary>
     private void TriggerRegeneration()
     {
-        // 1. Cancella il task precedente, se esiste
         _regenerationCts?.Cancel();
-        
-        // 2. Crea un nuovo token per questo task
         _regenerationCts = new CancellationTokenSource();
         var token = _regenerationCts.Token;
 
-        // 3. Avvia il task con il token
         _ = RegeneratePreviewImageAsync(token);
     }
 
     /// <summary>
     /// Rigenera il Bitmap usando i dati grezzi e le soglie correnti.
-    /// (Versione annullabile per evitare lag).
+    /// (Versione ottimizzata "zero-copy").
     /// </summary>
     private async Task RegeneratePreviewImageAsync(CancellationToken token)
     {
-        // --- INIZIO OTTIMIZZAZIONE ---
-        // 1. Crea il bitmap PRIMA
         var writeableBmp = new WriteableBitmap(
-            new PixelSize((int)_model.ImageSize.Width, (int)_model.ImageSize.Height),
+            new PixelSize((int)_imageData.ImageSize.Width, (int)_imageData.ImageSize.Height),
             new Vector(96, 96),
             PixelFormats.Gray8, AlphaFormat.Opaque);
-        // --- FINE OTTIMIZZAZIONE ---
     
         try
         {
-            // 2. Blocca il buffer per ottenere il puntatore
+            // Applica il "throttling" per la fluidità dello slider
+            await Task.Delay(30, token);
+
             using (var lockedBuffer = writeableBmp.Lock())
             {
-                // 3. Passa il puntatore al Task in background
+                // Passa il puntatore al Task in background
                 await Task.Run(() =>
                 {
                     token.ThrowIfCancellationRequested();
                 
                     _fitsService.NormalizeData(
-                        _model.RawData, _model.FitsHeader,
-                        (int)_model.ImageSize.Width, (int)_model.ImageSize.Height,
+                        _imageData.RawData, _imageData.FitsHeader,
+                        (int)_imageData.ImageSize.Width, (int)_imageData.ImageSize.Height,
                         BlackPoint, WhitePoint,
                         lockedBuffer.Address,
                         lockedBuffer.RowBytes); 
                 }, token);
             }
         
-            // 4. Se il task ha successo, aggiorna l'immagine
-            if (token.IsCancellationRequested) return;
+            if (token.IsCancellationRequested)
+            {
+                writeableBmp.Dispose();
+                return;
+            }
+            
             Image = writeableBmp;
         }
         catch (OperationCanceledException)
         {
-            // Slider mosso di nuovo
             writeableBmp.Dispose(); // Pulisci il bitmap che non useremo
-            return;
         }
         catch (Exception ex)
         {
             Debug.WriteLine($"Errore durante la rigenerazione dell'immagine: {ex.Message}");
             writeableBmp.Dispose(); // Pulisci
-            return;
         }
     }
     
@@ -137,20 +139,14 @@ public partial class FitsDisplayViewModel : ObservableObject
     /// <returns>Le nuove soglie calcolate.</returns>
     public async Task<(double Black, double White)> ResetThresholdsAsync()
     {
-        // 1. Chiama il servizio usando i DATI PRIVATI
         var (newBlack, newWhite) = await Task.Run(() => 
-            _fitsService.CalculateClippedThresholds(
-                _model.RawData, 
-                _model.FitsHeader)
+            // Chiama il servizio di processing (che sa come ignorare 0.0 o NaN)
+            _processingService.CalculateClippedThresholds(_imageData)
         );
         
-        // 2. Aggiorna le proprietà di questo ViewModel
-        //    (questo attiverà automaticamente la rigenerazione
-        //    tramite OnBlackPointChanged/OnWhitePointChanged)
         BlackPoint = newBlack;
         WhitePoint = newWhite;
 
-        // 3. Restituisce i nuovi valori al chiamante
         return (newBlack, newWhite);
     }
     

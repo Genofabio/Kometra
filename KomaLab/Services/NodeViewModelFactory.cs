@@ -15,10 +15,14 @@ namespace KomaLab.Services;
 public class NodeViewModelFactory : INodeViewModelFactory
 {
     private readonly IFitsService _fitsService;
+    private readonly IImageProcessingService _processingService;
 
-    public NodeViewModelFactory(IFitsService fitsService)
+    public NodeViewModelFactory(
+        IFitsService fitsService, 
+        IImageProcessingService processingService) // <-- Aggiungi qui
     {
         _fitsService = fitsService;
+        _processingService = processingService; // <-- Salvalo
     }
 
     /// <summary>
@@ -42,8 +46,9 @@ public class NodeViewModelFactory : INodeViewModelFactory
         // 2. PASSA IL NUOVO MODELLO al costruttore
         var newNodeViewModel = new SingleImageNodeViewModel(
             parent, 
-            newNodeModel, // <-- Passa il modello
-            _fitsService);
+            newNodeModel,
+            _fitsService,
+            _processingService);
         
         await newNodeViewModel.LoadDataAsync();
         
@@ -117,9 +122,12 @@ public class NodeViewModelFactory : INodeViewModelFactory
         var newNodeViewModel = new MultipleImagesNodeViewModel(
             parent, 
             newNodeModel, // <-- Passa il modello
-            _fitsService,
+            _fitsService, 
+            _processingService,
             maxSize,
             firstImageData); // Passa i dati pre-caricati
+        
+        await newNodeViewModel.InitializeAsync();
 
         // --- 5. Centra (invariato) ---
         var size = newNodeViewModel.EstimatedTotalSize;

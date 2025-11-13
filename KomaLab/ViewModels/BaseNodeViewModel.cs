@@ -2,6 +2,8 @@
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using KomaLab.Models;
+using System.Collections.Generic; // Per List
+using System.Threading.Tasks; // Per Task
 
 namespace KomaLab.ViewModels;
 
@@ -12,23 +14,16 @@ namespace KomaLab.ViewModels;
 public abstract partial class BaseNodeViewModel : ObservableObject
 {
     // --- Campi ---
-    
-    /// <summary>
-    /// Altezza stimata della UI (barra del titolo, ecc.) in pixel.
-    /// </summary>
     protected const double ESTIMATED_UI_HEIGHT = 60.0;
-    
     protected readonly BaseNodeModel Model; 
     public BoardViewModel ParentBoard { get; }
 
     // --- Proprietà (Posizione e Stato) ---
-    
     public double X
     {
         get => Model.X;
         set => SetProperty(Model.X, value, Model, (m, v) => m.X = v);
     }
-
     public double Y
     {
         get => Model.Y;
@@ -41,9 +36,6 @@ public abstract partial class BaseNodeViewModel : ObservableObject
     [ObservableProperty]
     private bool _isSelected;
     
-    // --- 1. CORREZIONE ---
-    // La logica di calcolo ora vive qui, nella classe base.
-    // Non è più 'abstract'.
     public virtual Size EstimatedTotalSize
     {
         get
@@ -54,22 +46,27 @@ public abstract partial class BaseNodeViewModel : ObservableObject
                 contentSize.Height + ESTIMATED_UI_HEIGHT);
         }
     }
-
-    // --- 2. CORREZIONE ---
-    // Questa è l'UNICA proprietà che i figli
-    // devono implementare.
     protected abstract Size NodeContentSize { get; }
+    
+    /// <summary>
+    /// Recupera la lista dei dati FITS *attualmente* in memoria per questo nodo.
+    /// (Saranno i dati originali o quelli già processati).
+    /// </summary>
+    public abstract Task<List<FitsImageData?>> GetCurrentDataAsync();
 
+    /// <summary>
+    /// Sostituisce i dati in memoria del nodo con una nuova lista di dati processati.
+    /// </summary>
+    public abstract Task ApplyProcessedDataAsync(List<FitsImageData> newProcessedData);
 
     // --- Costruttore ---
-    
     protected BaseNodeViewModel(BoardViewModel parentBoard, BaseNodeModel model)
     {
         ParentBoard = parentBoard;
         Model = model; 
         Title = model.Title;
         
-        this.PropertyChanged += (sender, e) =>
+        this.PropertyChanged += (_, e) =>
         {
             if (e.PropertyName == nameof(NodeContentSize))
             {
@@ -79,7 +76,6 @@ public abstract partial class BaseNodeViewModel : ObservableObject
     }
 
     // --- Comandi ---
-    
     [RelayCommand]
     private void RemoveSelf()
     {
@@ -87,7 +83,6 @@ public abstract partial class BaseNodeViewModel : ObservableObject
     }
 
     // --- Metodi Pubblici ---
-    
     public void MoveNode(Vector screenDelta)
     {
         double currentScale = ParentBoard.Scale;

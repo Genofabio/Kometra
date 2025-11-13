@@ -5,33 +5,32 @@ using KomaLab.Models;
 using KomaLab.Services;
 using nom.tam.fits;
 using CommunityToolkit.Mvvm.ComponentModel;
+using System.Collections.Generic;
+using System.Linq;
 
 namespace KomaLab.ViewModels;
 
 /// <summary>
 /// ViewModel per un nodo che visualizza una singola immagine FITS.
-/// Eredita il comportamento di base (posizione, selezione) da BaseNodeViewModel.
 /// </summary>
 public partial class SingleImageNodeViewModel : BaseNodeViewModel 
 {
     // --- Campi ---
     private readonly IFitsService _fitsService;
-    
-    // Riferimento al modello specifico (che contiene ImagePath)
+    private readonly IImageProcessingService _processingService; 
     private readonly SingleImageNodeModel _imageModel;
+    
+    /// <summary>
+    /// Questo è lo "stato attuale" dei dati (originali o processati).
+    /// </summary>
+    private FitsImageData? _currentData;
 
-    // "Motore" di visualizzazione (contiene Bitmap, Black/White)
     [ObservableProperty]
     private Helpers.FitsDisplayViewModel _fitsImage;
     
     public string ImagePath => _imageModel.ImagePath;
 
     // --- Implementazione Proprietà Astratte ---
-
-    /// <summary>
-    /// Restituisce la dimensione del contenuto (l'immagine)
-    /// per il calcolo della dimensione totale nella classe base.
-    /// </summary>
     protected override Size NodeContentSize
     {
         get
@@ -45,15 +44,16 @@ public partial class SingleImageNodeViewModel : BaseNodeViewModel
     }
 
     // --- Costruttore ---
-    
     public SingleImageNodeViewModel(
         BoardViewModel parentBoard, 
-        SingleImageNodeModel model, // Accetta il modello specifico
-        IFitsService fitsService) 
-        : base(parentBoard, model) // Passa il modello alla classe base
+        SingleImageNodeModel model,
+        IFitsService fitsService,
+        IImageProcessingService processingService) 
+        : base(parentBoard, model)
     {
         _fitsService = fitsService;
-        _imageModel = model; // Salva il riferimento al modello specifico
+        _processingService = processingService;
+        _imageModel = model;
         
         // Crea un "motore" segnaposto vuoto
         var placeholderModel = new FitsImageData
@@ -62,42 +62,85 @@ public partial class SingleImageNodeViewModel : BaseNodeViewModel
             FitsHeader = new Header(),
             ImageSize = default
         };
-        _fitsImage = new Helpers.FitsDisplayViewModel(placeholderModel, _fitsService);
+        
+        _fitsImage = new Helpers.FitsDisplayViewModel(
+            placeholderModel, 
+            _fitsService, 
+            _processingService);
     }
     
     // --- Metodi ---
     
-    // Implementazione del metodo parziale
-    // Questo viene chiamato automaticamente dopo che _fitsImage è stato impostato
     partial void OnFitsImageChanged(Helpers.FitsDisplayViewModel? value)
     {
-        // 1. Notifico che la MIA proprietà (astratta) è cambiata
+        // 1. Notifico che la dimensione del nodo è cambiata
         OnPropertyChanged(nameof(NodeContentSize));
         
-        // 2. Se vuoi, puoi già inizializzare qui
-        value?.Initialize();
+        // 2. Avvia l'inizializzazione asincrona (che calcola le soglie)
+        _ = value?.InitializeAsync();
     }
 
     /// <summary>
-    /// Carica i dati FITS in modo asincrono.
+    /// Carica i dati FITS *originali* dal disco.
     /// </summary>
     public async Task LoadDataAsync()
     {
         try
         {
-            // Legge il percorso dal modello specifico
             var imageData = await _fitsService.LoadFitsFromFileAsync(_imageModel.ImagePath); 
-
             if (imageData == null)
             {
                 throw new Exception("I dati FITS caricati sono nulli o non validi.");
             }
             
-            FitsImage = new Helpers.FitsDisplayViewModel(imageData, _fitsService);
+            // Applica questi dati come "stato attuale"
+            await ApplyProcessedDataAsync(new List<FitsImageData> { imageData });
         }
         catch (Exception ex)
         {
             Title = $"ERRE: {ex.Message.Split('\n')[0]}";
         }
+    }
+    
+    /// <summary>
+    /// Sostituisce l'immagine visualizzata con i nuovi dati.
+    /// </summary>
+    private async Task SetFitsData(FitsImageData newData)
+    {
+        _currentData = newData; // Salva il new stato
+        
+        FitsImage.UnloadData();
+        FitsImage = new Helpers.FitsDisplayViewModel(
+            newData, 
+            _fitsService, 
+            _processingService);
+            
+        // InitializeAsync calcolerà le soglie corrette
+        // (ignorando 0.0 se è un'immagine processata)
+        await FitsImage.InitializeAsync();
+    }
+    
+    // --- Implementazione Metodi Base ---
+    
+    public override async Task<List<FitsImageData?>> GetCurrentDataAsync()
+    {
+        // Se i dati non sono ancora stati caricati, caricali ora
+        if (_currentData == null)
+        {
+            await LoadDataAsync();
+        }
+        return new List<FitsImageData?> { _currentData };
+    }
+
+    public override async Task ApplyProcessedDataAsync(List<FitsImageData> newProcessedData)
+    {
+        if (newProcessedData.Count == 0)
+            return;
+
+        var newData = newProcessedData.FirstOrDefault(); // Prende solo il primo
+        if (newData == null)
+            return;
+            
+        await SetFitsData(newData);
     }
 }

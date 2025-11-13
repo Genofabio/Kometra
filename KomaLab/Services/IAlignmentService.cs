@@ -1,6 +1,7 @@
 ﻿using KomaLab.ViewModels; // Per AlignmentMode
 using System.Collections.Generic;
 using System.Threading.Tasks;
+using KomaLab.Models;
 using Point = Avalonia.Point;
 using Size = Avalonia.Size;
 
@@ -13,13 +14,15 @@ namespace KomaLab.Services;
 /// </summary>
 public interface IAlignmentService
 {
+    // --- MODIFICATA ---
     /// <summary>
-    /// Calcola i centri delle immagini in base alla modalità e alle coordinate fornite.
+    /// Calcola i centri di allineamento (Modalità Manuale).
     /// </summary>
     Task<IEnumerable<Point?>> CalculateCentersAsync(
         AlignmentMode mode, 
+        List<FitsImageData?> sourceData, // <-- Accetta i dati, non i path
         IEnumerable<Point?> currentCoordinates, 
-        Size imageSize);
+        int searchRadius);
 
     /// <summary>
     /// Determina se il calcolo può essere eseguito in base allo stato corrente.
@@ -28,4 +31,10 @@ public interface IAlignmentService
         AlignmentMode mode, 
         IEnumerable<Point?> currentCoordinates, 
         int totalCount);
+    
+    /// <summary>
+    /// Applica i centri calcolati ai dati sorgente e restituisce i nuovi dati processati.
+    /// </summary>
+    Task<List<FitsImageData>> ApplyCenteringAsync(List<FitsImageData?> sourceData,
+        List<Point?> centers);
 }

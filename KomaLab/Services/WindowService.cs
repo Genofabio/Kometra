@@ -2,6 +2,10 @@
 using KomaLab.ViewModels;
 using KomaLab.Views; 
 using System;
+using System.Collections.Generic;
+using System.Threading.Tasks;
+using Avalonia;
+using KomaLab.Models;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace KomaLab.Services;
@@ -9,12 +13,8 @@ namespace KomaLab.Services;
 public class WindowService : IWindowService
 {
     private Window? _mainWindow;
-    
-    // --- 1. Aggiungi il campo per il ServiceProvider ---
     private readonly IServiceProvider _serviceProvider;
 
-    // --- 2. Inietta IServiceProvider ---
-    // (Ci serve per "costruire" i ViewModel con le loro dipendenze)
     public WindowService(IServiceProvider serviceProvider)
     {
         _serviceProvider = serviceProvider;
@@ -25,25 +25,53 @@ public class WindowService : IWindowService
         _mainWindow = window;
     }
 
-    public void ShowAlignmentWindow(BaseNodeViewModel nodeToAlign)
+    // --- INIZIO SOSTITUZIONE ---
+    public async Task<List<FitsImageData>?> ShowAlignmentWindowAsync(BaseNodeViewModel nodeToAlign)
     {
         if (_mainWindow == null)
         {
             throw new InvalidOperationException("La finestra principale non è stata registrata.");
         }
 
-        // --- 3. "Risolvi" i servizi necessari ---
+        // 1. Preleva i dati IN MEMORIA dal nodo (non i path)
+        var currentData = await nodeToAlign.GetCurrentDataAsync();
+        
+        // La finestra di allineamento parte "pulita"
+        List<Point?>? initialCenters = null; 
+
+        // 2. Risolvi tutti i servizi necessari
         var fitsService = _serviceProvider.GetRequiredService<IFitsService>();
         var alignmentService = _serviceProvider.GetRequiredService<IAlignmentService>();
-        
-        // 4. Crea il ViewModel, passando le dipendenze
-        var viewModel = new AlignmentToolViewModel(nodeToAlign, fitsService, alignmentService);
-        
+        var processingService = _serviceProvider.GetRequiredService<IImageProcessingService>();
+    
+        // 3. Crea il ViewModel (LA FIRMA È CAMBIATA)
+        var viewModel = new AlignmentToolViewModel(
+            currentData, // Passa i dati in memoria, non i path
+            initialCenters,
+            fitsService, 
+            alignmentService, 
+            processingService);
+    
         var alignmentWindow = new AlignmentToolView
         {
             DataContext = viewModel
         };
 
-        alignmentWindow.ShowDialog(_mainWindow);
+        // 4. Collega e attendi la chiusura (invariato)
+        Action closeHandler = () => { alignmentWindow.Close(); };
+        viewModel.RequestClose += closeHandler;
+
+        await alignmentWindow.ShowDialog<object>(_mainWindow); 
+
+        viewModel.RequestClose -= closeHandler;
+
+        // 5. Restituisci i NUOVI dati processati
+        if (viewModel.DialogResult) // Se ha premuto "Applica"
+        {
+            return viewModel.FinalProcessedData; 
+        }
+    
+        return null; // L'utente ha annullato
     }
+    // --- FINE SOSTITUZIONE ---
 }

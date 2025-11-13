@@ -29,9 +29,5 @@ public interface IFitsService
         IntPtr destinationBuffer,
         long stride 
     );
-
-    /// <summary>
-    /// Calcola le soglie iniziali (percentili) dai dati grezzi.
-    /// </summary>
-    (double BlackPoint, double WhitePoint) CalculateClippedThresholds(object rawData, Header header);
+    
 }

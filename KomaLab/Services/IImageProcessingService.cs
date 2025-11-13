@@ -33,6 +33,16 @@ public interface IImageProcessingService
 {
     // --- Metodi di Conversione Dati ---
     Mat LoadFitsDataAsMat(FitsImageData fitsData);
+    
+    /// <summary>
+    /// Calcola le soglie di visualizzazione (percentili) per un set di dati FITS.
+    /// </summary>
+    (double BlackPoint, double WhitePoint) CalculateClippedThresholds(FitsImageData fitsData);
+
+    /// <summary>
+    /// Converte una Mat di OpenCV (dati processati) di nuovo in un FitsImageData.
+    /// </summary>
+    FitsImageData CreateFitsDataFromMat(Mat mat, FitsImageData originalData);
 
     // --- Metodi di Workflow ---
     Point GetCenterOfLocalRegion(

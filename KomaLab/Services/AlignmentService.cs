@@ -1,10 +1,12 @@
 ﻿using KomaLab.ViewModels; 
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using System.Threading.Tasks;
+using KomaLab.Models;
+using OpenCvSharp;
 using Point = Avalonia.Point;
-using Size = Avalonia.Size;
 
 namespace KomaLab.Services;
 
@@ -22,39 +24,66 @@ public class AlignmentService : IAlignmentService
         _processingService = processingService;
     }
 
-    #region Logica di Business (Interfaccia Principale)
-
     public async Task<IEnumerable<Point?>> CalculateCentersAsync(
         AlignmentMode mode, 
+        List<FitsImageData?> sourceData, // <-- Firma aggiornata
         IEnumerable<Point?> currentCoordinates, 
-        Size imageSize)
+        int searchRadius)
     {
-        var newCoordinates = currentCoordinates.ToList();
-        
-        // TODO: Questa è ancora la logica di simulazione/placeholder.
-        // In futuro, questa logica chiamerà _processingService.GetCenterOfLocalRegion, etc.
-        await Task.Delay(500); 
-        Random rand = new Random();
-
-        if (mode == AlignmentMode.Automatic)
+        if (mode != AlignmentMode.Manual)
         {
-            for(int i = 0; i < newCoordinates.Count; i++)
-            {
-                double x = rand.NextDouble() * imageSize.Width;
-                double y = rand.NextDouble() * imageSize.Height;
-                newCoordinates[i] = new Point(x, y);
-            }
+            Debug.WriteLine($"Modalità {mode} non ancora implementata, restituisco i click originali.");
+            return currentCoordinates;
         }
-        else if (mode == AlignmentMode.Guided)
+
+        var newCoordinates = new List<Point?>();
+        var guesses = currentCoordinates.ToList();
+
+        for (int i = 0; i < sourceData.Count; i++)
         {
-            for(int i = 0; i < newCoordinates.Count; i++)
+            var guessPoint = guesses[i];
+            var fitsData = sourceData[i];
+
+            if (guessPoint == null || fitsData == null)
             {
-                if (newCoordinates[i] == null)
+                newCoordinates.Add(null);
+                continue; 
+            }
+            
+            try
+            {
+                // 1. NON CARICA DA DISCO. Usa i dati passati.
+                using Mat imageMat = _processingService.LoadFitsDataAsMat(fitsData);
+
+                // 2. Definisci la ROI
+                int x = (int)(guessPoint.Value.X - searchRadius);
+                int y = (int)(guessPoint.Value.Y - searchRadius);
+                int size = searchRadius * 2;
+                
+                int xCrop = Math.Max(0, x);
+                int yCrop = Math.Max(0, y);
+                int wCrop = Math.Min(size, imageMat.Width - xCrop);
+                int hCrop = Math.Min(size, imageMat.Height - yCrop);
+                
+                if (wCrop <= 0 || hCrop <= 0)
                 {
-                    double x = rand.NextDouble() * imageSize.Width;
-                    double y = rand.NextDouble() * imageSize.Height;
-                    newCoordinates[i] = new Point(x, y);
+                    newCoordinates.Add(guessPoint.Value); // Fallback
+                    continue;
                 }
+                
+                Rect roiRect = new Rect(xCrop, yCrop, wCrop, hCrop);
+                using Mat regionCrop = new Mat(imageMat, roiRect);
+
+                // 3. Esegui GetCenterByPeak
+                Point localCenter = _processingService.GetCenterByPeak(regionCrop, sigma: 1.0);
+                Point globalCenter = new Point(localCenter.X + xCrop, localCenter.Y + yCrop);
+                
+                newCoordinates.Add(globalCenter);
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"Calcolo fallito per l'immagine {i}: {ex.Message}");
+                newCoordinates.Add(guessPoint.Value); // Fallback
             }
         }
         
@@ -95,6 +124,38 @@ public class AlignmentService : IAlignmentService
                 return false;
         }
     }
+    
+    public async Task<List<FitsImageData>> ApplyCenteringAsync(List<FitsImageData?> sourceData, List<Point?>? centers)
+    {
+        // Esegui il processamento in parallelo
+        var tasks = sourceData.Select((data, index) =>
+        {
+            if (data == null)
+                return Task.FromResult<FitsImageData?>(null)!;
 
-    #endregion
+            var centerPoint = (centers != null && index < centers.Count) ? centers[index] : null;
+
+            // Se non c'è un centro, restituisci i dati originali
+            if (centerPoint == null)
+                return Task.FromResult(data);
+
+            // Se c'è un centro, applica lo shift
+            try
+            {
+                using Mat originalMat = _processingService.LoadFitsDataAsMat(data);
+                using Mat centeredMat = _processingService.CenterImageByCoords(originalMat, centerPoint.Value);
+                // Crea un nuovo FitsImageData (processato)
+                return Task.FromResult(_processingService.CreateFitsDataFromMat(centeredMat, data));
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"ApplyCentering fallito per l'immagine {index}: {ex.Message}");
+                return Task.FromResult(data); // Fallback ai dati originali
+            }
+        });
+
+        var results = await Task.WhenAll(tasks);
+        return results.ToList();
+    }
+
 }

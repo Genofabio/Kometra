@@ -7,10 +7,12 @@ using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Linq;
+using KomaLab.Models;
 using KomaLab.ViewModels.Helpers;
+using OpenCvSharp;
 using CoordinateEntry = KomaLab.ViewModels.Helpers.CoordinateEntry;
 using Point = Avalonia.Point;
-using Size = Avalonia.Size; // Necessario per CoordinateEntry e ViewportManager
+using Size = Avalonia.Size; 
 
 namespace KomaLab.ViewModels;
 
@@ -32,13 +34,14 @@ public partial class AlignmentToolViewModel : ObservableObject
     #region Campi
     
     private readonly IFitsService _fitsService;
-    private readonly BaseNodeViewModel _nodeToAlign; 
     private readonly IAlignmentService _alignmentService;
+    private readonly IImageProcessingService _processingService;
     
-    private List<string>? _imagePaths;
+    private readonly List<FitsImageData?> _sourceData; 
     private int _currentStackIndex;
     private int _totalStackCount;
     
+    private readonly List<Point?>? _initialCenters;
     private Size _viewportSize;
 
     #endregion
@@ -110,6 +113,22 @@ public partial class AlignmentToolViewModel : ObservableObject
     
     [ObservableProperty]
     private bool _isCoordinateListVisible;
+    
+    /// <summary>
+    /// Flag per bloccare la UI durante l'elaborazione finale.
+    /// </summary>
+    [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(ApplyAlignmentCommand))] // Disabilita il pulsante
+    private bool _isProcessing;
+
+    /// <summary>
+    /// Il risultato finale: una lista di nuovi dati FITS processati.
+    /// </summary>
+    public List<FitsImageData>? FinalProcessedData { get; private set; }
+    
+    public bool DialogResult { get; private set; }
+
+    public event Action RequestClose;
 
     public bool IsCalculateButtonVisible => !AreResultsAvailable;
     public bool IsApplyCancelButtonsVisible => AreResultsAvailable;
@@ -125,70 +144,70 @@ public partial class AlignmentToolViewModel : ObservableObject
 
     #region Costruttore e Inizializzazione
 
+    // --- MODIFICA IL COSTRUTTORE ---
     public AlignmentToolViewModel(
-        BaseNodeViewModel nodeToAlign, 
+        List<FitsImageData?> sourceData, // <-- Accetta i dati
+        List<Point?>? initialCenters,
         IFitsService fitsService,
-        IAlignmentService alignmentService) 
+        IAlignmentService alignmentService,
+        IImageProcessingService processingService) 
     {
-        _nodeToAlign = nodeToAlign;
         _fitsService = fitsService;
         _alignmentService = alignmentService;
+        _processingService = processingService;
+        _initialCenters = initialCenters;
         
-        _ = InitializeFromNodeAsync();
+        // Salva i dati
+        _sourceData = sourceData;
+        _currentStackIndex = 0; // Parte sempre dal primo
+        _totalStackCount = sourceData.Count;
+        IsStack = _totalStackCount > 1;
+        
+        Viewport.SearchRadius = this.SearchRadius;
+        _ = InitializeAsync();
     }
 
     /// <summary>
     /// Inizializza lo stato del ViewModel in base al nodo da allineare.
     /// Prepara i percorsi e le voci delle coordinate.
     /// </summary>
-    private async Task InitializeFromNodeAsync()
+    private async Task InitializeAsync()
     {
         try
         {
-            IsStack = false;
-        
-            if (_nodeToAlign is SingleImageNodeViewModel singleNode)
-            {
-                if (string.IsNullOrEmpty(singleNode.ImagePath))
-                    throw new InvalidOperationException("Impossibile trovare il percorso per l'immagine singola.");
-            
-                _imagePaths = new List<string> { singleNode.ImagePath };
-                _currentStackIndex = 0;
-                _totalStackCount = 1; 
-            }
-            else if (_nodeToAlign is MultipleImagesNodeViewModel stackNode)
-            {
-                _imagePaths = stackNode.ImagePaths; 
-                _totalStackCount = _imagePaths.Count;
-                _currentStackIndex = stackNode.CurrentIndex;
-                IsStack = true;
-            }
-            else
-            {
-                throw new NotSupportedException($"Tipo di nodo '{_nodeToAlign.GetType().Name}' non supportato.");
-            }
-        
             // Popola la collection
             CoordinateEntries.Clear();
-            if (_imagePaths != null)
+            for (int i = 0; i < _totalStackCount; i++)
             {
-                for (int i = 0; i < _totalStackCount; i++)
+                var initialCoord = (_initialCenters != null && i < _initialCenters.Count)
+                    ? _initialCenters[i] 
+                    : null;
+
+                // Cerca un titolo nel header
+                string? displayName = $"Immagine {i + 1}";
+                if (_sourceData[i] != null)
                 {
-                    CoordinateEntries.Add(new CoordinateEntry
-                    {
-                        Index = i,
-                        DisplayName = System.IO.Path.GetFileName(_imagePaths[i]),
-                        Coordinate = null
-                    });
+                    try {
+                        displayName = _sourceData[i]?.FitsHeader.GetStringValue("OBJECT");
+                        if (string.IsNullOrWhiteSpace(displayName))
+                            displayName = $"Immagine {i + 1}";
+                    } catch { /* usa il default */ }
                 }
+
+                CoordinateEntries.Add(new CoordinateEntry
+                {
+                    Index = i,
+                    DisplayName = displayName,
+                    Coordinate = initialCoord
+                });
             }
-        
-            // Delega tutto il lavoro di caricamento e setup al metodo unificato
+
+            // Carica l'immagine iniziale
             await LoadStackImageAtIndexAsync(_currentStackIndex);
         }
         catch (Exception ex)
         {
-            Debug.WriteLine($"--- CRASH IN AlgnVM.InitializeFromNodeAsync --- {ex}");
+            Debug.WriteLine($"--- CRASH IN AlgnVM.InitializeAsync --- {ex}");
         }
         finally
         {
@@ -196,6 +215,11 @@ public partial class AlignmentToolViewModel : ObservableObject
             UpdateCoordinateListVisibility();
             CalculateCentersCommand.NotifyCanExecuteChanged();
             ApplyAlignmentCommand.NotifyCanExecuteChanged();
+            
+            PreviousImageCommand.NotifyCanExecuteChanged();
+            NextImageCommand.NotifyCanExecuteChanged();
+            GoToFirstImageCommand.NotifyCanExecuteChanged();
+            GoToLastImageCommand.NotifyCanExecuteChanged();
         }
     }
 
@@ -205,43 +229,41 @@ public partial class AlignmentToolViewModel : ObservableObject
     /// </summary>
     private async Task LoadStackImageAtIndexAsync(int index)
     {
-        if (_imagePaths == null || index < 0 || index >= _totalStackCount) return;
-    
+        if (_sourceData == null || index < 0 || index >= _totalStackCount) return;
+
         _currentStackIndex = index;
         StackCounterText = $"{_currentStackIndex + 1} / {_totalStackCount}";
-    
+
         ActiveImage?.UnloadData(); 
 
         try
         {
-            var imageData = await _fitsService.LoadFitsFromFileAsync(_imagePaths[_currentStackIndex]);
-            if (imageData == null) throw new Exception("Dati FITS nulli.");
-
-            // 1. L'immagine viene creata CON LE SUE SOGLIE OTTIMALI
-            ActiveImage = new FitsDisplayViewModel(imageData, _fitsService);
-            ActiveImage.Initialize();
-    
-            // --- INIZIO CORREZIONE ---
-            // 2. AGGIORNA le proprietà del VM (e degli slider)
-            //    leggendo i valori dalla *nuova* immagine caricata.
+            // --- MODIFICA ---
+            // Non carica da disco, prende dalla lista in memoria
+            var newModel = _sourceData[index];
+            // --- FINE MODIFICA ---
+            
+            if (newModel == null) throw new Exception("Dati FITS nulli.");
+            
+            FitsImageData dataToShow = newModel;
+                
+            ActiveImage = new Helpers.FitsDisplayViewModel(
+                dataToShow, 
+                _fitsService, 
+                _processingService
+            );
+            await ActiveImage.InitializeAsync();
+            
             BlackPoint = ActiveImage.BlackPoint;
             WhitePoint = ActiveImage.WhitePoint;
-            // --- FINE CORREZIONE ---
-
-            // (Codice di test) ...
-            Debug.WriteLine("--- INIZIO TEST COMPLETO ... ---");
-            // ... (tutto il tuo codice di test) ...
-            Debug.WriteLine("--- FINE TEST COMPLETO ---");
-
-            // Aggiorna tutto il resto
+            
             Viewport.ImageSize = ActiveImage.ImageSize;
-            Viewport.ResetView(); // Resetta lo zoom per la new immagine
+            Viewport.ResetView(); 
             OnPropertyChanged(nameof(CorrectImageSize)); 
             ResetThresholdsCommand.NotifyCanExecuteChanged();
             UpdateReticleVisibilityForCurrentState();
             UpdateSearchRadiusRange();
         
-            // Notifica i comandi di navigazione
             PreviousImageCommand.NotifyCanExecuteChanged();
             NextImageCommand.NotifyCanExecuteChanged();
             GoToFirstImageCommand.NotifyCanExecuteChanged();
@@ -249,7 +271,7 @@ public partial class AlignmentToolViewModel : ObservableObject
         }
         catch (Exception ex)
         {
-            Debug.WriteLine($"[AlgnVM] Errore caricamento immagine stack: {ex}");
+            Debug.WriteLine($"[AlgnVM] Errore caricamento immagine stack: {ex.Message}");
             ActiveImage = null;
         }
     }
@@ -297,16 +319,18 @@ public partial class AlignmentToolViewModel : ObservableObject
     private async Task CalculateCenters()
     {
         Debug.WriteLine($"[AlgnVM] Avvio calcolo centri (Modo: {SelectedMode})...");
-        
+
         var currentCoords = CoordinateEntries.Select(e => e.Coordinate);
-        
-        // Delega il calcolo al servizio
+
+        // 2. CHIEDI al servizio (con la nuova firma)
         var newCoords = await _alignmentService.CalculateCentersAsync(
             SelectedMode, 
+            _sourceData, // <-- Passa i dati in memoria
             currentCoords, 
-            CorrectImageSize);
-            
-        // Aggiorna la UI con i risultati
+            SearchRadius
+        );
+
+        // 3. Aggiorna la UI (invariato)
         int i = 0;
         foreach (var coord in newCoords)
         {
@@ -316,9 +340,9 @@ public partial class AlignmentToolViewModel : ObservableObject
             }
             i++;
         }
-        
+
         Debug.WriteLine("[AlgnVM] Calcolo completato.");
-        
+
         AreResultsAvailable = true;
         IsCoordinateListVisible = true;
         UpdateReticleVisibilityForCurrentState();
@@ -336,29 +360,46 @@ public partial class AlignmentToolViewModel : ObservableObject
     }
 
     [RelayCommand(CanExecute = nameof(CanApplyAlignment))]
-    private void ApplyAlignment()
+    private async Task ApplyAlignment()
     {
-        Debug.WriteLine("[AlgnVM] *** APPLICA ALLINEAMENTO ***");
-        foreach (var entry in CoordinateEntries)
+        IsProcessing = true; // Blocca la UI
+    
+        try
         {
-            Debug.WriteLine($" - Img {entry.Index}: {entry.Coordinate}");
+            // 1. Prendi i centri finali dalla UI
+            var centers = CoordinateEntries.Select(e => e.Coordinate).ToList();
+
+            // 2. Delega TUTTO il lavoro di processing al servizio
+            FinalProcessedData = await _alignmentService.ApplyCenteringAsync(_sourceData, centers);
+
+            DialogResult = true; // Successo
+            RequestClose?.Invoke(); // Chiudi
         }
-        // TODO: Chiudere la finestra e passare i dati
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"Processo di 'Applica' fallito: {ex.Message}");
+            DialogResult = false;
+            IsProcessing = false;
+        }
     }
     
     [RelayCommand]
     private void CancelCalculation()
     {
+        // Questo ora è corretto, resetta solo lo stato
         ResetAlignmentState();
     }
     
     private bool CanApplyAlignment()
     {
+        // Aggiungi il controllo per non premere "Applica"
+        // mentre sta già processando.
+        if (IsProcessing) return false; 
+        
         if (CoordinateEntries.Count == 0 || CoordinateEntries.Count != _totalStackCount)
             return false;
-            
-        bool allCoordinatesSet = CoordinateEntries.All(e => e.Coordinate.HasValue);
-        return allCoordinatesSet && AreResultsAvailable;
+        
+        return AreResultsAvailable; // Abilitato solo dopo il "Calcola"
     }
 
     #endregion

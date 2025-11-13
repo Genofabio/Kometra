@@ -85,15 +85,11 @@ public class FitsService : IFitsService
                 
                 var rawFitsData = dataArray.Clone(); 
 
-                var (blackPoint, whitePoint) = CalculateClippedThresholds(rawFitsData, header);
-
                 return new FitsImageData
                 {
                     RawData = rawFitsData,
                     FitsHeader = header,
-                    ImageSize = imageSize,
-                    InitialBlackPoint = blackPoint,
-                    InitialWhitePoint = whitePoint
+                    ImageSize = imageSize
                 };
             });
         }
@@ -181,105 +177,6 @@ public class FitsService : IFitsService
 
         srcMat.ConvertTo(dstMat, MatType.CV_8UC1, alpha, beta);
         Cv2.Flip(dstMat, dstMat, FlipMode.X); 
-    }
-
-    // --- METODI HELPER PRIVATI (Logica di calcolo) ---
-
-    public (double BlackPoint, double WhitePoint) CalculateClippedThresholds(object rawData, Header header)
-    {
-        int bitpix = header.GetIntValue("BITPIX");
-        var jaggedData = (Array[])rawData;
-
-        switch (bitpix)
-        {
-            // --- INIZIO MODIFICA ---
-            case 8: 
-                return GetPercentiles(ConvertJaggedArray<byte>(jaggedData));
-            case 16: 
-                return GetPercentiles(ConvertJaggedArray<short>(jaggedData));
-            case 32: 
-                return GetPercentiles(ConvertJaggedArray<int>(jaggedData));
-            case -32: 
-                return GetPercentiles(ConvertJaggedArray<float>(jaggedData));
-            case -64: 
-                return GetPercentiles(ConvertJaggedArray<double>(jaggedData));
-            // --- FINE MODIFICA ---
-            default:
-                throw new NotSupportedException($"BITPIX non supportato per GetPercentiles: {bitpix}");
-        }
-    }
-
-    private (double BlackPoint, double WhitePoint) GetPercentiles(byte[][] data)
-    {
-        if (data.Length == 0 || data[0].Length == 0) return (0, 255);
-        // Converti direttamente in double senza boxing
-        var pixelValues = data.SelectMany(row => row.Select(pixel => (double)pixel));
-        return CalculateQuantiles(pixelValues);
-    }
-
-    private (double BlackPoint, double WhitePoint) GetPercentiles(short[][] data)
-    {
-        if (data.Length == 0 || data[0].Length == 0) return (0, 255);
-        var pixelValues = data.SelectMany(row => row.Select(pixel => (double)pixel));
-        return CalculateQuantiles(pixelValues);
-    }
-
-    private (double BlackPoint, double WhitePoint) GetPercentiles(int[][] data)
-    {
-        if (data.Length == 0 || data[0].Length == 0) return (0, 255);
-        var pixelValues = data.SelectMany(row => row.Select(pixel => (double)pixel));
-        return CalculateQuantiles(pixelValues);
-    }
-
-    private (double BlackPoint, double WhitePoint) GetPercentiles(float[][] data)
-    {
-        if (data.Length == 0 || data[0].Length == 0) return (0, 255);
-        var pixelValues = data.SelectMany(row => row.Select(pixel => (double)pixel));
-        return CalculateQuantiles(pixelValues);
-    }
-
-    private (double BlackPoint, double WhitePoint) GetPercentiles(double[][] data)
-    {
-        if (data.Length == 0 || data[0].Length == 0) return (0, 255);
-        // Questo è già double, ma dobbiamo filtrare i NaN
-        var pixelValues = data.SelectMany(row => row.Where(val => !double.IsNaN(val) && !double.IsInfinity(val)));
-        return CalculateQuantiles(pixelValues);
-    }
-
-    /// <summary>
-    /// Metodo helper che esegue il calcolo dei quantili su uno stream di double.
-    /// </summary>
-    private (double BlackPoint, double WhitePoint) CalculateQuantiles(IEnumerable<double> pixelValues)
-    {
-        // 1. Materializza la lista (questa è l'allocazione LOH, che è inevitabile)
-        //    Usiamo ToList() perché è leggermente più veloce di ToArray() per Statistics
-        var pixelList = pixelValues.ToList();
-        if (pixelList.Count == 0) return (0, 255);
-
-        // 2. Calcola i quantili
-        double blackPoint = Statistics.Quantile(pixelList, 0.02);  // 2%
-        double whitePoint = Statistics.Quantile(pixelList, 0.998); // 99.8%
-
-        // 3. Fallback se i valori sono invertiti o identici
-        if (whitePoint <= blackPoint)
-        {
-            // Dobbiamo trovare min/max (costoso, ma solo come fallback)
-            double min = pixelList.Min();
-            double max = pixelList.Max();
-            return (min, max);
-        }
-        
-        return (blackPoint, whitePoint);
-    }
-
-    private T[][] ConvertJaggedArray<T>(Array[] source) where T : struct
-    {
-        T[][] result = new T[source.Length][];
-        for (int i = 0; i < source.Length; i++)
-        {
-            result[i] = (T[])source[i];
-        }
-        return result;
     }
     
 }

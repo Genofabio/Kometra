@@ -121,11 +121,29 @@ public partial class BoardViewModel : ObservableObject
     }
     
     [RelayCommand(CanExecute = nameof(CanShowAlignmentWindow))]
-    private void ShowAlignmentWindow()
+    private async Task ShowAlignmentWindow() // <-- 1. Rendi il metodo 'async Task'
     {
-        if (SelectedNode != null)
+        if (SelectedNode == null) return;
+
+        try
         {
-            _windowService.ShowAlignmentWindow(SelectedNode);
+            // 2. Chiama e ATTENDI (await) la versione async del servizio
+            var newProcessedData = await _windowService.ShowAlignmentWindowAsync(SelectedNode);
+
+            // 3. Controlla se l'utente ha premuto "Applica" (il risultato non è nullo)
+            if (newProcessedData != null)
+            {
+                // 4. Passa i nuovi dati processati al nodo.
+                //    Il nodo sa come gestirli (grazie al Passo 1).
+                await SelectedNode.ApplyProcessedDataAsync(newProcessedData);
+            }
+            // Se 'newProcessedData' è nullo, l'utente ha premuto 'Annulla'
+            // o 'Chiudi', quindi non facciamo nulla.
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"Processo di allineamento fallito: {ex.Message}");
+            // Qui potresti mostrare un DialogService di errore all'utente
         }
     }
     

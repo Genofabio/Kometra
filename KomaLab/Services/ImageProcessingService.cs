@@ -8,6 +8,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
+using nom.tam.fits;
 using Point = Avalonia.Point;
 
 namespace KomaLab.Services;
@@ -33,15 +34,23 @@ public class ImageProcessingService : IImageProcessingService
 
         // 3. Calcola la mediana
         double medianVal;
+    
         if (imageMat.Type() == MatType.CV_32FC1)
         {
             imageMat.GetArray(out float[] data);
-            medianVal = Statistics.Median(data.Select(x => (double)x));
+            var pixelValues = data.Select(x => (double)x)
+                .Where(val => !double.IsNaN(val) && !double.IsInfinity(val));
+        
+            if (!pixelValues.Any()) medianVal = 0.0;
+            else medianVal = Statistics.Median(pixelValues);
         }
-        else
+        else // Assumiamo CV_64FC1
         {
             imageMat.GetArray(out double[] data);
-            medianVal = Statistics.Median(data);
+            var pixelValues = data.Where(val => !double.IsNaN(val) && !double.IsInfinity(val));
+
+            if (!pixelValues.Any()) medianVal = 0.0;
+            else medianVal = Statistics.Median(pixelValues);
         }
 
         // 4. Calcola soglia
@@ -103,6 +112,7 @@ public class ImageProcessingService : IImageProcessingService
         Rect roiRect = new Rect(minColP, minRowP, maxColP - minColP, maxRowP - minRowP);
         
         using Mat regionCrop = new Mat(imageMat, roiRect);
+        Cv2.PatchNaNs(regionCrop, 0.0);
         
         // 10. Chiama la funzione di centraggio richiesta
         Point cropCenter;
@@ -149,13 +159,16 @@ public class ImageProcessingService : IImageProcessingService
         m.Set(1, 2, -yShift);
 
         var centeredImage = new Mat();
-    
+        Scalar paddingValue = new Scalar(double.NaN); 
+
         Cv2.WarpAffine(
             imageMat,
             centeredImage,
             m,
             imageMat.Size(), 
-            InterpolationFlags.Cubic
+            InterpolationFlags.Cubic,
+            BorderTypes.Constant, 
+            paddingValue        
         );
     
         return centeredImage;
@@ -482,6 +495,168 @@ public class ImageProcessingService : IImageProcessingService
             k += width;
         }
         return flatArray;
+    }
+    
+    public FitsImageData CreateFitsDataFromMat(Mat mat, FitsImageData originalData)
+    {
+        // 1. Estrai i dati flat dalla Mat
+        Array flatData;
+        int width = mat.Width;
+        int height = mat.Height;
+        
+        if (mat.Type() == MatType.CV_32FC1)
+        {
+            float[] data = new float[width * height];
+            mat.GetArray(out data);
+            flatData = data;
+        }
+        else // Assumiamo CV_64FC1
+        {
+            double[] data = new double[width * height];
+            mat.GetArray(out data);
+            flatData = data;
+        }
+
+        // 2. Riconverti in JaggedArray (T[][])
+        Array[] jaggedData;
+        if (flatData is float[] f)
+        {
+            jaggedData = new float[height][];
+            for (int j = 0; j < height; j++)
+            {
+                jaggedData[j] = new float[width];
+                Array.Copy(f, j * width, jaggedData[j], 0, width);
+            }
+        }
+        else // double[]
+        {
+            var d = (double[])flatData;
+            jaggedData = new double[height][];
+            for (int j = 0; j < height; j++)
+            {
+                jaggedData[j] = new double[width];
+                Array.Copy(d, j * width, jaggedData[j], 0, width);
+            }
+        }
+        
+        // 3. Clona l'header
+        var newHeader = new Header();
+        foreach (object item in originalData.FitsHeader) // Usa il dato originale
+        {
+            if (item is System.Collections.DictionaryEntry entry && entry.Value is HeaderCard card)
+            {
+                newHeader.AddCard(card);
+            }
+        }
+        
+        // 4. Crea il modello "puro"
+        return new FitsImageData
+        {
+            RawData = jaggedData,
+            FitsHeader = newHeader,
+            ImageSize = new Avalonia.Size(width, height)
+            // Non calcola le soglie, perché il ViewModel le ricalcolerà
+        };
+    }
+    
+     // --- METODI HELPER PRIVATI (Logica di calcolo) ---
+
+    public (double BlackPoint, double WhitePoint) CalculateClippedThresholds(FitsImageData fitsData)
+    {
+        int bitpix = fitsData.FitsHeader.GetIntValue("BITPIX");
+        var jaggedData = (Array[])fitsData.RawData;
+
+        switch (bitpix)
+        {
+            case 8: 
+                return GetPercentiles(ConvertJaggedArray<byte>(jaggedData));
+            case 16: 
+                return GetPercentiles(ConvertJaggedArray<short>(jaggedData));
+            case 32: 
+                return GetPercentiles(ConvertJaggedArray<int>(jaggedData));
+            case -32: 
+                return GetPercentiles(ConvertJaggedArray<float>(jaggedData));
+            case -64: 
+                return GetPercentiles(ConvertJaggedArray<double>(jaggedData));
+            default:
+                throw new NotSupportedException($"BITPIX non supportato per GetPercentiles: {bitpix}");
+        }
+    }
+
+    private (double BlackPoint, double WhitePoint) GetPercentiles(byte[][] data)
+    {
+        if (data.Length == 0 || data[0].Length == 0) return (0, 255);
+        var pixelValues = data.SelectMany(row => row.Select(pixel => (double)pixel)
+                                                    .Where(val => val != 0.0)); // <-- AGGIUNGI
+        return CalculateQuantiles(pixelValues);
+    }
+
+    private (double BlackPoint, double WhitePoint) GetPercentiles(short[][] data)
+    {
+        if (data.Length == 0 || data[0].Length == 0) return (0, 255);
+        var pixelValues = data.SelectMany(row => row.Select(pixel => (double)pixel)
+                                                    .Where(val => val != 0.0)); // <-- AGGIUNGI
+        return CalculateQuantiles(pixelValues);
+    }
+
+    private (double BlackPoint, double WhitePoint) GetPercentiles(int[][] data)
+    {
+        if (data.Length == 0 || data[0].Length == 0) return (0, 255);
+        var pixelValues = data.SelectMany(row => row.Select(pixel => (double)pixel)
+                                                    .Where(val => val != 0.0)); // <-- AGGIUNGI
+        return CalculateQuantiles(pixelValues);
+    }
+
+    private (double BlackPoint, double WhitePoint) GetPercentiles(float[][] data)
+    {
+        if (data.Length == 0 || data[0].Length == 0) return (0, 255);
+        var pixelValues = data.SelectMany(row => row.Select(pixel => (double)pixel)
+            .Where(val => !double.IsNaN(val) && !double.IsInfinity(val)));
+        return CalculateQuantiles(pixelValues);
+    }
+
+    private (double BlackPoint, double WhitePoint) GetPercentiles(double[][] data)
+    {
+        if (data.Length == 0 || data[0].Length == 0) return (0, 255);
+        var pixelValues = data.SelectMany(row => row
+            .Where(val => !double.IsNaN(val) && !double.IsInfinity(val)));
+        return CalculateQuantiles(pixelValues);
+    }
+
+    /// <summary>
+    /// Metodo helper che esegue il calcolo dei quantili su uno stream di double.
+    /// </summary>
+    private (double BlackPoint, double WhitePoint) CalculateQuantiles(IEnumerable<double> pixelValues)
+    {
+        // 1. Materializza la lista (questa è l'allocazione LOH, che è inevitabile)
+        //    Usiamo ToList() perché è leggermente più veloce di ToArray() per Statistics
+        var pixelList = pixelValues.ToList();
+        if (pixelList.Count == 0) return (0, 255);
+
+        // 2. Calcola i quantili
+        double blackPoint = Statistics.Quantile(pixelList, 0.02);  // 2%
+        double whitePoint = Statistics.Quantile(pixelList, 0.998); // 99.8%
+
+        // 3. Fallback se i valori sono invertiti o identici
+        if (whitePoint <= blackPoint)
+        {
+            // Dobbiamo trovare min/max (costoso, ma solo come fallback)
+            double min = pixelList.Min();
+            double max = pixelList.Max();
+            return (min, max);
+        }
+        
+        return (blackPoint, whitePoint);
+    }
+
+    private T[][] ConvertJaggedArray<T>(Array[] source) where T : struct
+    {
+        T[][] result = new T[source.Length][];
+        for (int i = 0; i < source.Length; i++)
+        {
+            result[i] = (T[])source[i];
+        }
+        return result;
     }
 
     #endregion
