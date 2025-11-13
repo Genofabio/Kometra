@@ -16,7 +16,7 @@ namespace KomaLab.ViewModels.Helpers;
 /// È un "motore" riutilizzabile che gestisce lo stato di visualizzazione
 /// (Black/White, Bitmap) di un singolo modello di dati FITS (FitsImageData).
 /// </summary>
-public partial class FitsDisplayViewModel : ObservableObject
+public partial class FitsRenderer : ObservableObject
 {
     // --- Campi ---
     private readonly FitsImageData _imageData; 
@@ -41,7 +41,7 @@ public partial class FitsDisplayViewModel : ObservableObject
 
     // --- Costruttore ---
     
-    public FitsDisplayViewModel(
+    public FitsRenderer(
         FitsImageData imageData, 
         IFitsService fitsService, 
         IImageProcessingService processingService)
@@ -58,11 +58,18 @@ public partial class FitsDisplayViewModel : ObservableObject
     /// </summary>
     public async Task InitializeAsync()
     {
-        // 1. Calcola le soglie per primo
-        await ResetThresholdsAsync();
+        // 1. Calcola le soglie
+        var (newBlack, newWhite) = await Task.Run(() => 
+            _processingService.CalculateClippedThresholds(_imageData)
+        );
         
-        // 2. TriggerRegeneration() sarà chiamato automaticamente
-        //    dai setter di BlackPoint/WhitePoint nel passo 1.
+        // 2. Imposta le proprietà (usando SetProperty per evitare
+        //    di chiamare TriggerRegeneration() inutilmente)
+        SetProperty(ref _blackPoint, newBlack, nameof(BlackPoint));
+        SetProperty(ref _whitePoint, newWhite, nameof(WhitePoint));
+
+        // 3. ORA avvia la prima rigenerazione e ATTENDILA
+        await TriggerRegeneration(isInitialization: true);
     }
     
     // --- Logica di Rigenerazione ---
@@ -72,20 +79,21 @@ public partial class FitsDisplayViewModel : ObservableObject
     /// <summary>
     /// Avvia una rigenerazione "debounced" (anti-sfarfallio).
     /// </summary>
-    private void TriggerRegeneration()
+    private Task TriggerRegeneration(bool isInitialization = false)
     {
         _regenerationCts?.Cancel();
         _regenerationCts = new CancellationTokenSource();
         var token = _regenerationCts.Token;
 
-        _ = RegeneratePreviewImageAsync(token);
+        // Passa 'isInitialization' a RegeneratePreviewImageAsync
+        return RegeneratePreviewImageAsync(token, isInitialization);
     }
 
     /// <summary>
     /// Rigenera il Bitmap usando i dati grezzi e le soglie correnti.
     /// (Versione ottimizzata "zero-copy").
     /// </summary>
-    private async Task RegeneratePreviewImageAsync(CancellationToken token)
+    private async Task RegeneratePreviewImageAsync(CancellationToken token, bool isInitialization)
     {
         var writeableBmp = new WriteableBitmap(
             new PixelSize((int)_imageData.ImageSize.Width, (int)_imageData.ImageSize.Height),
@@ -95,7 +103,10 @@ public partial class FitsDisplayViewModel : ObservableObject
         try
         {
             // Applica il "throttling" per la fluidità dello slider
-            await Task.Delay(30, token);
+            if (!isInitialization)
+            {
+                await Task.Delay(30, token);
+            }
 
             using (var lockedBuffer = writeableBmp.Lock())
             {
@@ -134,20 +145,21 @@ public partial class FitsDisplayViewModel : ObservableObject
     
     /// <summary>
     /// Ricalcola le soglie ottimali dai dati grezzi
-    /// e aggiorna questo ViewModel.
+    /// e aggiorna questo ViewModel (e rigenera l'immagine).
+    /// Chiamato dal pulsante "Reset" della UI.
     /// </summary>
-    /// <returns>Le nuove soglie calcolate.</returns>
-    public async Task<(double Black, double White)> ResetThresholdsAsync()
+    public async Task ResetThresholdsAsync()
     {
+        // 1. Chiama il servizio di processing
         var (newBlack, newWhite) = await Task.Run(() => 
-            // Chiama il servizio di processing (che sa come ignorare 0.0 o NaN)
             _processingService.CalculateClippedThresholds(_imageData)
         );
         
+        // 2. Aggiorna le proprietà.
+        //    Questo attiverà automaticamente On...Changed
+        //    e quindi TriggerRegeneration().
         BlackPoint = newBlack;
         WhitePoint = newWhite;
-
-        return (newBlack, newWhite);
     }
     
     /// <summary>

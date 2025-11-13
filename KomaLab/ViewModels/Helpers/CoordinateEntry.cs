@@ -6,7 +6,6 @@ namespace KomaLab.ViewModels.Helpers;
 public partial class CoordinateEntry : ObservableObject
 {
     public int Index { get; set; }
-    public string? DisplayName { get; set; } = "";
     public int DisplayIndex => Index + 1;
         
     [ObservableProperty]

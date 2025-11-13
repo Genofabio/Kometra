@@ -29,7 +29,7 @@ public partial class MultipleImagesNodeViewModel : BaseNodeViewModel
     // --- Proprietà (Stato) ---
     
     [ObservableProperty]
-    private FitsDisplayViewModel? _activeFitsImage;
+    private FitsRenderer? _activeFitsImage;
     
     public List<string> ImagePaths => _multiModel.ImagePaths;
 
@@ -89,7 +89,7 @@ public partial class MultipleImagesNodeViewModel : BaseNodeViewModel
             return;
         }
 
-        ActiveFitsImage = new FitsDisplayViewModel(
+        ActiveFitsImage = new FitsRenderer(
             initialData, 
             _fitsService, 
             _processingService);
@@ -125,15 +125,15 @@ public partial class MultipleImagesNodeViewModel : BaseNodeViewModel
     private async Task ResetThresholds()
     {
         if (ActiveFitsImage == null) return;
-    
-        // Delega il reset al "motore", che
-        // ricalcolerà sui dati che possiede (dataToShow)
-        var (newBlack, newWhite) = await ActiveFitsImage.ResetThresholdsAsync();
-    
-        // Sincronizza gli slider
-        BlackPoint = newBlack;
-        WhitePoint = newWhite;
+
+        // 1. Dì al motore di resettarsi
+        await ActiveFitsImage.ResetThresholdsAsync();
+
+        // 2. Leggi i nuovi valori (come nell'altro file)
+        BlackPoint = ActiveFitsImage.BlackPoint;
+        WhitePoint = ActiveFitsImage.WhitePoint;
     }
+    
     private bool CanResetThresholds() => ActiveFitsImage != null;
 
     // --- Implementazione Metodi Base (Contratto) ---
@@ -178,49 +178,62 @@ public partial class MultipleImagesNodeViewModel : BaseNodeViewModel
     {
         if (index < 0 || index >= _imageCount || index == CurrentIndex)
             return;
-        
+    
         ActiveFitsImage?.UnloadData();
         CurrentIndex = index;
 
-        // --- INIZIO LOGICA CACHE ---
-        FitsImageData? dataToShow = _processedDataCache[index];
-
-        // Se non è in cache, caricala dal disco
-        if (dataToShow == null)
-        {
-            try
-            {
-                dataToShow = await _fitsService.LoadFitsFromFileAsync(_multiModel.ImagePaths[index]);
-                if (dataToShow != null)
-                {
-                    _processedDataCache[index] = dataToShow; // Salva in cache
-                }
-            }
-            catch (Exception ex) 
-            { 
-                Debug.WriteLine($"Errore caricamento {index}: {ex.Message}"); 
-                return; 
-            }
-        }
-        // --- FINE LOGICA CACHE ---
-        
+        // --- Assicurati che questa chiamata sia corretta ---
+        FitsImageData? dataToShow = await GetOrLoadDataAtIndex(index);
+        // --- Fine controllo ---
+    
         if (dataToShow == null) 
         {
             Debug.WriteLine($"Impossibile mostrare l'immagine {index}, dati nulli.");
             return; 
         }
-    
-        ActiveFitsImage = new FitsDisplayViewModel(
+
+        var newFitsImage = new FitsRenderer(
             dataToShow, 
             _fitsService, 
             _processingService);
-        await ActiveFitsImage.InitializeAsync(); 
+        await newFitsImage.InitializeAsync(); 
 
-        BlackPoint = ActiveFitsImage.BlackPoint; 
-        WhitePoint = ActiveFitsImage.WhitePoint;
+        BlackPoint = newFitsImage.BlackPoint; 
+        WhitePoint = newFitsImage.WhitePoint;
+    
+        var oldFitsImage = ActiveFitsImage;
+        ActiveFitsImage = newFitsImage;
+        oldFitsImage?.UnloadData();
 
         PreviousImageCommand.NotifyCanExecuteChanged();
         NextImageCommand.NotifyCanExecuteChanged();
+    }
+    
+    /// <summary>
+    /// Helper per la cache: recupera i dati dalla cache o li carica dal disco.
+    /// </summary>
+    private async Task<FitsImageData?> GetOrLoadDataAtIndex(int index)
+    {
+        if (index < 0 || index >= _imageCount)
+            return null;
+
+        FitsImageData? data = _processedDataCache[index];
+        if (data == null)
+        {
+            try
+            {
+                data = await _fitsService.LoadFitsFromFileAsync(_multiModel.ImagePaths[index]);
+                if (data != null)
+                {
+                    _processedDataCache[index] = data; // Salva in cache
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"Caricamento fallito per {index}: {ex.Message}");
+            }
+        }
+        return data;
     }
     
     // --- Metodi Parziali (Collegati alle proprietà) ---

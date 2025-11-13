@@ -56,7 +56,7 @@ public partial class ViewportManager : ObservableObject
     [NotifyPropertyChangedFor(nameof(SearchBoxTop))]
     [NotifyPropertyChangedFor(nameof(SearchBoxWidth))]
     [NotifyPropertyChangedFor(nameof(SearchBoxHeight))]
-    private double _offsetX = 0;
+    private double _offsetX;
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(TargetMarkerScreenX))]
@@ -65,7 +65,7 @@ public partial class ViewportManager : ObservableObject
     [NotifyPropertyChangedFor(nameof(SearchBoxTop))]
     [NotifyPropertyChangedFor(nameof(SearchBoxWidth))]
     [NotifyPropertyChangedFor(nameof(SearchBoxHeight))]
-    private double _offsetY = 0;
+    private double _offsetY;
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(TargetMarkerScreenX))]

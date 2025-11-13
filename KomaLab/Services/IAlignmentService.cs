@@ -3,7 +3,6 @@ using System.Collections.Generic;
 using System.Threading.Tasks;
 using KomaLab.Models;
 using Point = Avalonia.Point;
-using Size = Avalonia.Size;
 
 namespace KomaLab.Services;
 

@@ -37,7 +37,6 @@ public class WindowService : IWindowService
         var currentData = await nodeToAlign.GetCurrentDataAsync();
         
         // La finestra di allineamento parte "pulita"
-        List<Point?>? initialCenters = null; 
 
         // 2. Risolvi tutti i servizi necessari
         var fitsService = _serviceProvider.GetRequiredService<IFitsService>();
@@ -46,8 +45,7 @@ public class WindowService : IWindowService
     
         // 3. Crea il ViewModel (LA FIRMA È CAMBIATA)
         var viewModel = new AlignmentToolViewModel(
-            currentData, // Passa i dati in memoria, non i path
-            initialCenters,
+            currentData,
             fitsService, 
             alignmentService, 
             processingService);

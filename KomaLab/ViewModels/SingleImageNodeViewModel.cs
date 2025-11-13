@@ -7,6 +7,7 @@ using nom.tam.fits;
 using CommunityToolkit.Mvvm.ComponentModel;
 using System.Collections.Generic;
 using System.Linq;
+using KomaLab.ViewModels.Helpers;
 
 namespace KomaLab.ViewModels;
 
@@ -26,7 +27,7 @@ public partial class SingleImageNodeViewModel : BaseNodeViewModel
     private FitsImageData? _currentData;
 
     [ObservableProperty]
-    private Helpers.FitsDisplayViewModel _fitsImage;
+    private Helpers.FitsRenderer _fitsImage;
     
     public string ImagePath => _imageModel.ImagePath;
 
@@ -63,7 +64,7 @@ public partial class SingleImageNodeViewModel : BaseNodeViewModel
             ImageSize = default
         };
         
-        _fitsImage = new Helpers.FitsDisplayViewModel(
+        _fitsImage = new Helpers.FitsRenderer(
             placeholderModel, 
             _fitsService, 
             _processingService);
@@ -71,7 +72,7 @@ public partial class SingleImageNodeViewModel : BaseNodeViewModel
     
     // --- Metodi ---
     
-    partial void OnFitsImageChanged(Helpers.FitsDisplayViewModel? value)
+    partial void OnFitsImageChanged(Helpers.FitsRenderer? value)
     {
         // 1. Notifico che la dimensione del nodo è cambiata
         OnPropertyChanged(nameof(NodeContentSize));
@@ -107,17 +108,19 @@ public partial class SingleImageNodeViewModel : BaseNodeViewModel
     /// </summary>
     private async Task SetFitsData(FitsImageData newData)
     {
-        _currentData = newData; // Salva il new stato
-        
-        FitsImage.UnloadData();
-        FitsImage = new Helpers.FitsDisplayViewModel(
+        _currentData = newData; 
+    
+        // 1. CREA E PREPARA IL NUOVO
+        var newFitsImage = new FitsRenderer( // Assumendo che tu l'abbia rinominato
             newData, 
             _fitsService, 
             _processingService);
-            
-        // InitializeAsync calcolerà le soglie corrette
-        // (ignorando 0.0 se è un'immagine processata)
-        await FitsImage.InitializeAsync();
+        await newFitsImage.InitializeAsync();
+    
+        // 2. ESEGUI LO SCAMBIO
+        var oldFitsImage = FitsImage;
+        FitsImage = newFitsImage;
+        oldFitsImage?.UnloadData();
     }
     
     // --- Implementazione Metodi Base ---

@@ -24,7 +24,7 @@ public class AlignmentService : IAlignmentService
         _processingService = processingService;
     }
 
-    public async Task<IEnumerable<Point?>> CalculateCentersAsync(
+    public Task<IEnumerable<Point?>> CalculateCentersAsync(
         AlignmentMode mode, 
         List<FitsImageData?> sourceData, // <-- Firma aggiornata
         IEnumerable<Point?> currentCoordinates, 
@@ -33,7 +33,7 @@ public class AlignmentService : IAlignmentService
         if (mode != AlignmentMode.Manual)
         {
             Debug.WriteLine($"Modalità {mode} non ancora implementata, restituisco i click originali.");
-            return currentCoordinates;
+            return Task.FromResult(currentCoordinates);
         }
 
         var newCoordinates = new List<Point?>();
@@ -87,7 +87,7 @@ public class AlignmentService : IAlignmentService
             }
         }
         
-        return newCoordinates;
+        return Task.FromResult<IEnumerable<Point?>>(newCoordinates);
     }
 
     public bool CanCalculate(
@@ -110,14 +110,14 @@ public class AlignmentService : IAlignmentService
                     return coordinateList[0].HasValue;
                 }
                 
-                bool hasFirstAndLast = coordinateList.FirstOrDefault().HasValue && 
-                                       coordinateList.LastOrDefault().HasValue;
+                var hasFirstAndLast = coordinateList.FirstOrDefault().HasValue && 
+                                      coordinateList.LastOrDefault().HasValue;
                 
-                bool hasAllGuided = coordinateList.All(e => e.HasValue);
+                var hasAllGuided = coordinateList.All(e => e.HasValue);
                 return hasFirstAndLast || hasAllGuided;
 
             case AlignmentMode.Manual:
-                bool hasAllManual = coordinateList.All(e => e.HasValue);
+                var hasAllManual = coordinateList.All(e => e.HasValue);
                 return hasAllManual;
 
             default:
@@ -133,7 +133,7 @@ public class AlignmentService : IAlignmentService
             if (data == null)
                 return Task.FromResult<FitsImageData?>(null)!;
 
-            var centerPoint = (centers != null && index < centers.Count) ? centers[index] : null;
+            var centerPoint = centers != null && index < centers.Count ? centers[index] : null;
 
             // Se non c'è un centro, restituisci i dati originali
             if (centerPoint == null)
