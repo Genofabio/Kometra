@@ -1,4 +1,5 @@
-﻿using Avalonia;
+﻿using System;
+using Avalonia;
 using KomaLab.Models;
 using nom.tam.fits;
 using System.Collections.Generic;
@@ -22,7 +23,12 @@ public interface IFitsService
     /// <summary>
     /// Normalizza i dati grezzi in un array di byte per la visualizzazione.
     /// </summary>
-    byte[] NormalizeData(object rawData, Header header, int width, int height, double blackPoint, double whitePoint);
+    void NormalizeData(
+        object rawData, Header header, int width, int height, 
+        double blackPoint, double whitePoint,
+        IntPtr destinationBuffer,
+        long stride 
+    );
 
     /// <summary>
     /// Calcola le soglie iniziali (percentili) dai dati grezzi.

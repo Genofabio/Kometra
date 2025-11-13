@@ -1,16 +1,26 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Threading.Tasks;
-using Avalonia;
 using Avalonia.Platform;
 using KomaLab.Models;
+using MathNet.Numerics.Statistics;
 using nom.tam.fits;
+using OpenCvSharp;
+using Size = Avalonia.Size;
 
 namespace KomaLab.Services;
 
 public class FitsService : IFitsService
 {
+    private readonly IImageProcessingService _processingService;
+
+    public FitsService(IImageProcessingService processingService)
+    {
+        _processingService = processingService;
+    }
+    
     /// <summary>
     /// Carica un file FITS (sia da asset che da filesystem), lo parsa e calcola le soglie.
     /// </summary>
@@ -142,20 +152,35 @@ public class FitsService : IFitsService
     /// Normalizza i dati FITS grezzi in un array di byte (Gray8) 
     /// usando le soglie specificate.
     /// </summary>
-    public byte[] NormalizeData(object rawData, Header header, int width, int height, double blackPoint, double whitePoint)
+    public void NormalizeData(object rawData, Header header, int width, int height,
+        double blackPoint, double whitePoint,
+        IntPtr destinationBuffer, long stride)
     {
-        int bitpix = header.GetIntValue("BITPIX");
+        // --- 2. MODIFICA NormalizeData ---
+        using Mat srcMat = _processingService.LoadFitsDataAsMat(
+            new FitsImageData 
+            { 
+                RawData = rawData, 
+                FitsHeader = header, 
+                ImageSize = new Size(width, height) 
+            }
+        );
 
-        switch (bitpix)
-        {
-            case 8: return Normalize(ConvertJaggedArray<byte>((Array[])rawData), width, height, blackPoint, whitePoint);
-            case 16: return Normalize(ConvertJaggedArray<short>((Array[])rawData), width, height, blackPoint, whitePoint);
-            case 32: return Normalize(ConvertJaggedArray<int>((Array[])rawData), width, height, blackPoint, whitePoint);
-            case -32: return Normalize(ConvertJaggedArray<float>((Array[])rawData), width, height, blackPoint, whitePoint);
-            case -64: return Normalize(ConvertJaggedArray<double>((Array[])rawData), width, height, blackPoint, whitePoint);
-            default:
-                throw new NotSupportedException($"BITPIX non supportato per Normalizzazione: {bitpix}");
-        }
+        if (srcMat.Empty()) return; 
+    
+        double range = whitePoint - blackPoint;
+        double alpha = (range <= 0) ? 0 : 255.0 / range;
+        double beta = (range <= 0) ? (blackPoint >= whitePoint ? 0 : 128) : -blackPoint * alpha;
+
+        using Mat dstMat = Mat.FromPixelData(
+            height, 
+            width, 
+            MatType.CV_8UC1, 
+            destinationBuffer, 
+            stride);
+
+        srcMat.ConvertTo(dstMat, MatType.CV_8UC1, alpha, beta);
+        Cv2.Flip(dstMat, dstMat, FlipMode.X); 
     }
 
     // --- METODI HELPER PRIVATI (Logica di calcolo) ---
@@ -163,61 +188,87 @@ public class FitsService : IFitsService
     public (double BlackPoint, double WhitePoint) CalculateClippedThresholds(object rawData, Header header)
     {
         int bitpix = header.GetIntValue("BITPIX");
+        var jaggedData = (Array[])rawData;
 
         switch (bitpix)
         {
-            case 8: return GetPercentiles(ConvertJaggedArray<byte>((Array[])rawData));
-            case 16: return GetPercentiles(ConvertJaggedArray<short>((Array[])rawData));
-            case 32: return GetPercentiles(ConvertJaggedArray<int>((Array[])rawData));
-            case -32: return GetPercentiles(ConvertJaggedArray<float>((Array[])rawData));
-            case -64: return GetPercentiles(ConvertJaggedArray<double>((Array[])rawData));
+            // --- INIZIO MODIFICA ---
+            case 8: 
+                return GetPercentiles(ConvertJaggedArray<byte>(jaggedData));
+            case 16: 
+                return GetPercentiles(ConvertJaggedArray<short>(jaggedData));
+            case 32: 
+                return GetPercentiles(ConvertJaggedArray<int>(jaggedData));
+            case -32: 
+                return GetPercentiles(ConvertJaggedArray<float>(jaggedData));
+            case -64: 
+                return GetPercentiles(ConvertJaggedArray<double>(jaggedData));
+            // --- FINE MODIFICA ---
             default:
                 throw new NotSupportedException($"BITPIX non supportato per GetPercentiles: {bitpix}");
         }
     }
 
-    private (double BlackPoint, double WhitePoint) GetPercentiles<T>(T[][] data) where T : struct
+    private (double BlackPoint, double WhitePoint) GetPercentiles(byte[][] data)
     {
         if (data.Length == 0 || data[0].Length == 0) return (0, 255);
+        // Converti direttamente in double senza boxing
+        var pixelValues = data.SelectMany(row => row.Select(pixel => (double)pixel));
+        return CalculateQuantiles(pixelValues);
+    }
 
-        var pixelValues = new List<double>(data.Length * data[0].Length);
-        double min = double.MaxValue;
-        double max = double.MinValue;
+    private (double BlackPoint, double WhitePoint) GetPercentiles(short[][] data)
+    {
+        if (data.Length == 0 || data[0].Length == 0) return (0, 255);
+        var pixelValues = data.SelectMany(row => row.Select(pixel => (double)pixel));
+        return CalculateQuantiles(pixelValues);
+    }
 
-        for (int j = 0; j < data.Length; j++)
-        {
-            T[] row = data[j];
-            for (int i = 0; i < row.Length; i++)
-            {
-                double val = Convert.ToDouble(row[i]);
-                if (double.IsNaN(val) || double.IsInfinity(val)) continue;
-                pixelValues.Add(val);
-                if (val < min) min = val;
-                if (val > max) max = val;
-            }
-        }
+    private (double BlackPoint, double WhitePoint) GetPercentiles(int[][] data)
+    {
+        if (data.Length == 0 || data[0].Length == 0) return (0, 255);
+        var pixelValues = data.SelectMany(row => row.Select(pixel => (double)pixel));
+        return CalculateQuantiles(pixelValues);
+    }
 
-        if (pixelValues.Count == 0) return (0, 255);
-        pixelValues.Sort();
+    private (double BlackPoint, double WhitePoint) GetPercentiles(float[][] data)
+    {
+        if (data.Length == 0 || data[0].Length == 0) return (0, 255);
+        var pixelValues = data.SelectMany(row => row.Select(pixel => (double)pixel));
+        return CalculateQuantiles(pixelValues);
+    }
 
-        double blackClipPercent = 0.02;
-        double whiteClipPercent = 0.998;
+    private (double BlackPoint, double WhitePoint) GetPercentiles(double[][] data)
+    {
+        if (data.Length == 0 || data[0].Length == 0) return (0, 255);
+        // Questo è già double, ma dobbiamo filtrare i NaN
+        var pixelValues = data.SelectMany(row => row.Where(val => !double.IsNaN(val) && !double.IsInfinity(val)));
+        return CalculateQuantiles(pixelValues);
+    }
 
-        int blackIndex = (int)(pixelValues.Count * blackClipPercent);
-        int whiteIndex = (int)(pixelValues.Count * whiteClipPercent) - 1;
+    /// <summary>
+    /// Metodo helper che esegue il calcolo dei quantili su uno stream di double.
+    /// </summary>
+    private (double BlackPoint, double WhitePoint) CalculateQuantiles(IEnumerable<double> pixelValues)
+    {
+        // 1. Materializza la lista (questa è l'allocazione LOH, che è inevitabile)
+        //    Usiamo ToList() perché è leggermente più veloce di ToArray() per Statistics
+        var pixelList = pixelValues.ToList();
+        if (pixelList.Count == 0) return (0, 255);
 
-        if (whiteIndex < 0) whiteIndex = 0;
-        if (whiteIndex >= pixelValues.Count) whiteIndex = pixelValues.Count - 1;
-        if (blackIndex >= whiteIndex) blackIndex = 0;
+        // 2. Calcola i quantili
+        double blackPoint = Statistics.Quantile(pixelList, 0.02);  // 2%
+        double whitePoint = Statistics.Quantile(pixelList, 0.998); // 99.8%
 
-        double blackPoint = pixelValues[blackIndex];
-        double whitePoint = pixelValues[whiteIndex];
-
+        // 3. Fallback se i valori sono invertiti o identici
         if (whitePoint <= blackPoint)
         {
-            blackPoint = min;
-            whitePoint = max;
+            // Dobbiamo trovare min/max (costoso, ma solo come fallback)
+            double min = pixelList.Min();
+            double max = pixelList.Max();
+            return (min, max);
         }
+        
         return (blackPoint, whitePoint);
     }
 
@@ -230,39 +281,5 @@ public class FitsService : IFitsService
         }
         return result;
     }
-
-    private byte[] Normalize<T>(T[][] data, int width, int height, double blackPoint, double whitePoint) where T : struct
-    {
-        byte[] outputBytes = new byte[width * height];
-        double range = whitePoint - blackPoint;
-        
-        if (range <= 0)
-        {
-            byte fillValue = (byte)(blackPoint >= whitePoint ? 0 : 128);
-            Array.Fill(outputBytes, fillValue);
-            return outputBytes;
-        }
-
-        int k = 0;
-        for (int j = height - 1; j >= 0; j--) // Invertito per orientamento FITS standard
-        {
-            T[] row = data[j];
-            for (int i = 0; i < width; i++)
-            {
-                double val = Convert.ToDouble(row[i]);
-                
-                // Clipping
-                if (val <= blackPoint) { outputBytes[k] = 0; }
-                else if (val >= whitePoint) { outputBytes[k] = 255; }
-                else 
-                { 
-                    // Normalizzazione
-                    double normalized = (val - blackPoint) / range; 
-                    outputBytes[k] = (byte)(normalized * 255.0); 
-                }
-                k++;
-            }
-        }
-        return outputBytes;
-    }
+    
 }

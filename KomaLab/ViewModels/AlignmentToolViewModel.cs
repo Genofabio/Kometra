@@ -8,7 +8,6 @@ using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Linq;
 using KomaLab.ViewModels.Helpers;
-using OpenCvSharp;
 using CoordinateEntry = KomaLab.ViewModels.Helpers.CoordinateEntry;
 using Point = Avalonia.Point;
 using Size = Avalonia.Size; // Necessario per CoordinateEntry e ViewportManager
@@ -147,12 +146,12 @@ public partial class AlignmentToolViewModel : ObservableObject
         try
         {
             IsStack = false;
-            
+        
             if (_nodeToAlign is SingleImageNodeViewModel singleNode)
             {
                 if (string.IsNullOrEmpty(singleNode.ImagePath))
                     throw new InvalidOperationException("Impossibile trovare il percorso per l'immagine singola.");
-                
+            
                 _imagePaths = new List<string> { singleNode.ImagePath };
                 _currentStackIndex = 0;
                 _totalStackCount = 1; 
@@ -168,7 +167,7 @@ public partial class AlignmentToolViewModel : ObservableObject
             {
                 throw new NotSupportedException($"Tipo di nodo '{_nodeToAlign.GetType().Name}' non supportato.");
             }
-            
+        
             // Popola la collection
             CoordinateEntries.Clear();
             if (_imagePaths != null)
@@ -183,14 +182,9 @@ public partial class AlignmentToolViewModel : ObservableObject
                     });
                 }
             }
-            
-            // Delega il caricamento dell'immagine (sia singola che stack) al metodo unificato
+        
+            // Delega tutto il lavoro di caricamento e setup al metodo unificato
             await LoadStackImageAtIndexAsync(_currentStackIndex);
-            
-            if (ActiveImage != null)
-            {
-                Viewport.ResetView();
-            }
         }
         catch (Exception ex)
         {
@@ -202,12 +196,6 @@ public partial class AlignmentToolViewModel : ObservableObject
             UpdateCoordinateListVisibility();
             CalculateCentersCommand.NotifyCanExecuteChanged();
             ApplyAlignmentCommand.NotifyCanExecuteChanged();
-            
-            // Notifica comandi di navigazione
-            PreviousImageCommand.NotifyCanExecuteChanged();
-            NextImageCommand.NotifyCanExecuteChanged();
-            GoToFirstImageCommand.NotifyCanExecuteChanged();
-            GoToLastImageCommand.NotifyCanExecuteChanged();
         }
     }
 
@@ -218,10 +206,10 @@ public partial class AlignmentToolViewModel : ObservableObject
     private async Task LoadStackImageAtIndexAsync(int index)
     {
         if (_imagePaths == null || index < 0 || index >= _totalStackCount) return;
-        
+    
         _currentStackIndex = index;
         StackCounterText = $"{_currentStackIndex + 1} / {_totalStackCount}";
-        
+    
         ActiveImage?.UnloadData(); 
 
         try
@@ -229,31 +217,35 @@ public partial class AlignmentToolViewModel : ObservableObject
             var imageData = await _fitsService.LoadFitsFromFileAsync(_imagePaths[_currentStackIndex]);
             if (imageData == null) throw new Exception("Dati FITS nulli.");
 
+            // 1. L'immagine viene creata CON LE SUE SOGLIE OTTIMALI
             ActiveImage = new FitsDisplayViewModel(imageData, _fitsService);
             ActiveImage.Initialize();
-        
-            // --- TEST FINALE (Modificato per usare solo Centroid) ---
-            Debug.WriteLine("--- INIZIO TEST COMPLETO DI ALLINEAMENTO (Metodo Centroid) ---");
+    
+            // --- INIZIO CORREZIONE ---
+            // 2. AGGIORNA le proprietà del VM (e degli slider)
+            //    leggendo i valori dalla *nuova* immagine caricata.
+            BlackPoint = ActiveImage.BlackPoint;
+            WhitePoint = ActiveImage.WhitePoint;
+            // --- FINE CORREZIONE ---
 
-            // (Devi rendere 'LoadFitsDataAsMat' pubblico e aggiungerlo a IAlignmentService)
-            using Mat originalMat = _alignmentService.LoadFitsDataAsMat(imageData); 
-
-            // 2. Trova il centro (USANDO CENTROID)
-            Point originalCenter = _alignmentService.GetCenterByCentroid(originalMat, sigma: 5.0);
-            Debug.WriteLine($"Centro Originale (Centroid) (X, Y): {originalCenter.X:F2}, {originalCenter.Y:F2}");
-
-            // 3. Sposta l'immagine (il metodo di shift è corretto)
-            using Mat centeredMat = _alignmentService.CenterImageByCoords(originalMat, originalCenter);
-
-            // 4. VERIFICA: Calcola il centroide della NUOVA immagine (USANDO CENTROID)
-            Point newCenter = _alignmentService.GetCenterByCentroid(centeredMat, sigma: 5.0);
-            Debug.WriteLine($"Centro Verificato (dopo shift) (X, Y): {newCenter.X:F2}, {newCenter.Y:F2}");
-        
+            // (Codice di test) ...
+            Debug.WriteLine("--- INIZIO TEST COMPLETO ... ---");
+            // ... (tutto il tuo codice di test) ...
             Debug.WriteLine("--- FINE TEST COMPLETO ---");
-            // --- FINE TEST ---
 
+            // Aggiorna tutto il resto
             Viewport.ImageSize = ActiveImage.ImageSize;
-            // ... (resto del metodo) ...
+            Viewport.ResetView(); // Resetta lo zoom per la new immagine
+            OnPropertyChanged(nameof(CorrectImageSize)); 
+            ResetThresholdsCommand.NotifyCanExecuteChanged();
+            UpdateReticleVisibilityForCurrentState();
+            UpdateSearchRadiusRange();
+        
+            // Notifica i comandi di navigazione
+            PreviousImageCommand.NotifyCanExecuteChanged();
+            NextImageCommand.NotifyCanExecuteChanged();
+            GoToFirstImageCommand.NotifyCanExecuteChanged();
+            GoToLastImageCommand.NotifyCanExecuteChanged();
         }
         catch (Exception ex)
         {

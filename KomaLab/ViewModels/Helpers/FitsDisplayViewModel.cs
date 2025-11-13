@@ -85,49 +85,49 @@ public partial class FitsDisplayViewModel : ObservableObject
     /// </summary>
     private async Task RegeneratePreviewImageAsync(CancellationToken token)
     {
-        byte[]? normalizedData;
+        // --- INIZIO OTTIMIZZAZIONE ---
+        // 1. Crea il bitmap PRIMA
+        var writeableBmp = new WriteableBitmap(
+            new PixelSize((int)_model.ImageSize.Width, (int)_model.ImageSize.Height),
+            new Vector(96, 96),
+            PixelFormats.Gray8, AlphaFormat.Opaque);
+        // --- FINE OTTIMIZZAZIONE ---
+    
         try
         {
-            // Chiedi al servizio di normalizzare i dati (in background)
-            normalizedData = await Task.Run(() =>
+            // 2. Blocca il buffer per ottenere il puntatore
+            using (var lockedBuffer = writeableBmp.Lock())
             {
-                // Controlla se siamo stati annullati *prima* di iniziare il lavoro pesante
-                token.ThrowIfCancellationRequested();
+                // 3. Passa il puntatore al Task in background
+                await Task.Run(() =>
+                {
+                    token.ThrowIfCancellationRequested();
                 
-                return _fitsService.NormalizeData(
-                    _model.RawData, _model.FitsHeader,
-                    (int)_model.ImageSize.Width, (int)_model.ImageSize.Height,
-                    BlackPoint, WhitePoint);
-            }, token); // Passa il token anche a Task.Run
+                    _fitsService.NormalizeData(
+                        _model.RawData, _model.FitsHeader,
+                        (int)_model.ImageSize.Width, (int)_model.ImageSize.Height,
+                        BlackPoint, WhitePoint,
+                        lockedBuffer.Address,
+                        lockedBuffer.RowBytes); 
+                }, token);
+            }
+        
+            // 4. Se il task ha successo, aggiorna l'immagine
+            if (token.IsCancellationRequested) return;
+            Image = writeableBmp;
         }
         catch (OperationCanceledException)
         {
-            // Significa che l'utente ha mosso di nuovo lo slider.
+            // Slider mosso di nuovo
+            writeableBmp.Dispose(); // Pulisci il bitmap che non useremo
             return;
         }
         catch (Exception ex)
         {
             Debug.WriteLine($"Errore durante la rigenerazione dell'immagine: {ex.Message}");
+            writeableBmp.Dispose(); // Pulisci
             return;
         }
-        
-        if (token.IsCancellationRequested)
-        {
-            return;
-        }
-
-        // Crea il Bitmap (siamo tornati sul thread UI)
-        var writeableBmp = new WriteableBitmap(
-            new PixelSize((int)_model.ImageSize.Width, (int)_model.ImageSize.Height),
-            new Vector(96, 96),
-            PixelFormats.Gray8, AlphaFormat.Opaque);
-
-        using (var lockedBuffer = writeableBmp.Lock())
-        {
-            Marshal.Copy(normalizedData, 0, lockedBuffer.Address, normalizedData.Length);
-        }
-        
-        Image = writeableBmp;
     }
     
     /// <summary>

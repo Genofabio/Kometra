@@ -42,6 +42,7 @@ public partial class App : Application
     {
         var services = new ServiceCollection();
         
+        services.AddSingleton<IImageProcessingService, ImageProcessingService>();
         services.AddSingleton<IFitsService, FitsService>();
         services.AddSingleton<INodeViewModelFactory, NodeViewModelFactory>();
         services.AddSingleton<IDialogService, DialogService>(); 
