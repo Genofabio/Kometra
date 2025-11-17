@@ -82,6 +82,7 @@ public class FitsService : IFitsService
 
                 var dataArray = (Array)kernelData;
                 if (dataArray.Rank != 1) return null;
+                Array.Reverse(dataArray);
                 
                 var rawFitsData = dataArray.Clone(); 
 
@@ -176,7 +177,6 @@ public class FitsService : IFitsService
             stride);
 
         srcMat.ConvertTo(dstMat, MatType.CV_8UC1, alpha, beta);
-        Cv2.Flip(dstMat, dstMat, FlipMode.X); 
     }
     
 }

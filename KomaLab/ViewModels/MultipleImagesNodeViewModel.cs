@@ -17,7 +17,7 @@ public partial class MultipleImagesNodeViewModel : BaseNodeViewModel
     // --- Campi ---
     private readonly IFitsService _fitsService;
     private readonly MultipleImagesNodeModel _multiModel;
-    private readonly Size _maxImageSize;
+    private Size _maxImageSize;
     private readonly int _imageCount;
     private readonly IImageProcessingService _processingService;
     
@@ -163,12 +163,32 @@ public partial class MultipleImagesNodeViewModel : BaseNodeViewModel
 
     public override async Task ApplyProcessedDataAsync(List<FitsImageData> newProcessedData)
     {
-        // Sovrascrive la cache con i new dati processati
+        // 1. Aggiorna la cache dei dati
         _processedDataCache = newProcessedData.Cast<FitsImageData?>().ToList();
+    
+        // 2. AGGIORNAMENTO DIMENSIONI AUTOMATICO
+        // Se abbiamo ricevuto dei dati validi, aggiorniamo _maxImageSize
+        if (newProcessedData.Count > 0)
+        {
+            // Prendiamo la dimensione della prima immagine.
+            // (Grazie al lavoro fatto prima, sappiamo che sono tutte uguali e centrate).
+            var newSize = newProcessedData[0].ImageSize;
         
-        // Forza il ricaricamento dell'immagine corrente per mostrare la modifica
+            // Controllo di sicurezza per non impostare dimensioni 0x0
+            if (newSize.Width > 0 && newSize.Height > 0)
+            {
+                _maxImageSize = newSize;
+            
+                // FONDAMENTALE: Notifichiamo alla UI che le proprietà sono cambiate
+                // così Avalonia ridimensionerà il rettangolo del nodo.
+                OnPropertyChanged(nameof(MaxImageSize));
+                OnPropertyChanged(nameof(NodeContentSize));
+            }
+        }
+
+        // 3. Forza il ricaricamento dell'immagine corrente per mostrare visivamente la modifica
         int tempIndex = CurrentIndex;
-        CurrentIndex = -1; // Trucco per forzare il refresh
+        CurrentIndex = -1; // Trucco per forzare il refresh nel metodo LoadImageAtIndexAsync
         await LoadImageAtIndexAsync(tempIndex);
     }
     

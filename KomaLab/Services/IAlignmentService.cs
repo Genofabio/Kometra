@@ -34,6 +34,6 @@ public interface IAlignmentService
     /// <summary>
     /// Applica i centri calcolati ai dati sorgente e restituisce i nuovi dati processati.
     /// </summary>
-    Task<List<FitsImageData>> ApplyCenteringAsync(List<FitsImageData?> sourceData,
+    Task<List<FitsImageData?>> ApplyCenteringAsync(List<FitsImageData?> sourceData,
         List<Point?> centers);
 }

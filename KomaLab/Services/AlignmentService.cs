@@ -17,8 +17,7 @@ namespace KomaLab.Services;
 public class AlignmentService : IAlignmentService
 {
     private readonly IImageProcessingService _processingService;
-
-    // Richiede il "laboratorio" (ImageProcessingService) per fare il lavoro
+    
     public AlignmentService(IImageProcessingService processingService)
     {
         _processingService = processingService;
@@ -26,13 +25,12 @@ public class AlignmentService : IAlignmentService
 
     public Task<IEnumerable<Point?>> CalculateCentersAsync(
         AlignmentMode mode, 
-        List<FitsImageData?> sourceData, // <-- Firma aggiornata
+        List<FitsImageData?> sourceData, 
         IEnumerable<Point?> currentCoordinates, 
         int searchRadius)
     {
         if (mode != AlignmentMode.Manual)
         {
-            Debug.WriteLine($"Modalità {mode} non ancora implementata, restituisco i click originali.");
             return Task.FromResult(currentCoordinates);
         }
 
@@ -52,10 +50,9 @@ public class AlignmentService : IAlignmentService
             
             try
             {
-                // 1. NON CARICA DA DISCO. Usa i dati passati.
                 using Mat imageMat = _processingService.LoadFitsDataAsMat(fitsData);
 
-                // 2. Definisci la ROI
+                // Definisci la ROI
                 int x = (int)(guessPoint.Value.X - searchRadius);
                 int y = (int)(guessPoint.Value.Y - searchRadius);
                 int size = searchRadius * 2;
@@ -73,9 +70,13 @@ public class AlignmentService : IAlignmentService
                 
                 Rect roiRect = new Rect(xCrop, yCrop, wCrop, hCrop);
                 using Mat regionCrop = new Mat(imageMat, roiRect);
-
-                // 3. Esegui GetCenterByPeak
-                Point localCenter = _processingService.GetCenterByPeak(regionCrop, sigma: 1.0);
+                
+                // Calcola il bounding box che esclude i NaN (usando la tua funzione)
+                Rect validBox = _processingService.FindValidDataBox(regionCrop);
+                using Mat validCrop = new Mat(regionCrop, validBox);
+                Point centerInCrop = _processingService.GetCenterByPeak(validCrop, sigma: 1.0);
+                
+                Point localCenter = new Point(centerInCrop.X + validBox.X, centerInCrop.Y + validBox.Y);
                 Point globalCenter = new Point(localCenter.X + xCrop, localCenter.Y + yCrop);
                 
                 newCoordinates.Add(globalCenter);
@@ -125,37 +126,101 @@ public class AlignmentService : IAlignmentService
         }
     }
     
-    public async Task<List<FitsImageData>> ApplyCenteringAsync(List<FitsImageData?> sourceData, List<Point?>? centers)
+    public async Task<List<FitsImageData?>> ApplyCenteringAsync(List<FitsImageData?> sourceData, List<Point?> centers)
     {
-        // Esegui il processamento in parallelo
-        var tasks = sourceData.Select((data, index) =>
-        {
-            if (data == null)
-                return Task.FromResult<FitsImageData?>(null)!;
-
-            var centerPoint = centers != null && index < centers.Count ? centers[index] : null;
-
-            // Se non c'è un centro, restituisci i dati originali
-            if (centerPoint == null)
-                return Task.FromResult(data);
-
-            // Se c'è un centro, applica lo shift
-            try
-            {
-                using Mat originalMat = _processingService.LoadFitsDataAsMat(data);
-                using Mat centeredMat = _processingService.CenterImageByCoords(originalMat, centerPoint.Value);
-                // Crea un nuovo FitsImageData (processato)
-                return Task.FromResult(_processingService.CreateFitsDataFromMat(centeredMat, data));
-            }
-            catch (Exception ex)
-            {
-                Debug.WriteLine($"ApplyCentering fallito per l'immagine {index}: {ex.Message}");
-                return Task.FromResult(data); // Fallback ai dati originali
-            }
-        });
-
+        Size perfectSize = CalculatePerfectCanvasSize(sourceData, centers);
+        
+        var tasks = sourceData.Select((data, index) => 
+            ProcessSingleImageAsync(data, centers, index, perfectSize)
+        );
+        
         var results = await Task.WhenAll(tasks);
         return results.ToList();
+    }
+    
+    private Size CalculatePerfectCanvasSize(List<FitsImageData?> sourceData, List<Point?> centers)
+    {
+        double maxRadiusX = 0;
+        double maxRadiusY = 0;
+
+        for (int i = 0; i < sourceData.Count; i++)
+        {
+            var data = sourceData[i];
+            if (data == null || centers == null || i >= centers.Count || centers[i] == null) continue;
+
+            Point center = centers[i]!.Value;
+            
+            using Mat mat = _processingService.LoadFitsDataAsMat(data);
+            Rect validBox = _processingService.FindValidDataBox(mat);
+
+            if (validBox.Width <= 0 || validBox.Height <= 0) continue;
+            double distLeft = center.X - validBox.X;
+            double distRight = (validBox.X + validBox.Width) - center.X;
+            double distTop = center.Y - validBox.Y;
+            double distBottom = (validBox.Y + validBox.Height) - center.Y;
+            double myRadiusX = Math.Max(distLeft, distRight);
+            double myRadiusY = Math.Max(distTop, distBottom);
+            
+            if (myRadiusX > maxRadiusX) maxRadiusX = myRadiusX;
+            if (myRadiusY > maxRadiusY) maxRadiusY = myRadiusY;
+        }
+        
+        int finalW = (int)Math.Ceiling(maxRadiusX * 2);
+        int finalH = (int)Math.Ceiling(maxRadiusY * 2);
+        
+        return (finalW > 0 && finalH > 0) ? new Size(finalW, finalH) : new Size(100, 100);
+    }
+
+private Task<FitsImageData?> ProcessSingleImageAsync(FitsImageData? data, List<Point?>? centers, int index, Size targetSize)
+{
+    return Task.Run(() =>
+    {
+        if (data == null) return null;
+        var centerPoint = (centers != null && index < centers.Count) ? centers[index] : null;
+        if (centerPoint == null) return data;
+
+        try
+        {
+            using Mat originalMat = _processingService.LoadFitsDataAsMat(data);
+            using Mat centeredMat = GetSubPixelCenteredCanvas(originalMat, centerPoint.Value, targetSize);
+            return _processingService.CreateFitsDataFromMat(centeredMat, data);
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"Error img {index}: {ex.Message}");
+            return data;
+        }
+    });
+}
+
+    /// <summary>
+    /// Esegue Centratura + Padding in un colpo solo con precisione SubPixel.
+    /// </summary>
+    private Mat GetSubPixelCenteredCanvas(Mat source, Point originalCenter, Size outputSize)
+    {
+        double destCenterX = outputSize.Width / 2.0;
+        double destCenterY = outputSize.Height / 2.0;
+        
+        double tx = destCenterX - originalCenter.X;
+        double ty = destCenterY - originalCenter.Y;
+        
+        using Mat m = new Mat(2, 3, MatType.CV_32F);
+        m.Set(0, 0, 1.0f); m.Set(0, 1, 0.0f); m.Set(0, 2, (float)tx);
+        m.Set(1, 0, 0.0f); m.Set(1, 1, 1.0f); m.Set(1, 2, (float)ty);
+        
+        Mat result = new Mat(outputSize, source.Type(), new Scalar(double.NaN));
+        
+        Cv2.WarpAffine(
+            source, 
+            result, 
+            m, 
+            outputSize, 
+            InterpolationFlags.Linear, 
+            BorderTypes.Transparent, 
+            new Scalar(double.NaN)
+        );
+
+        return result;
     }
 
 }

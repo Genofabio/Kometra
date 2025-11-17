@@ -58,4 +58,6 @@ public interface IImageProcessingService
     Point GetCenterByCentroid(Mat imageMat, double sigma = 5.0);
     Point GetCenterByPeak(Mat imageMat, double sigma = 1.0);
     Point GetCenterByGaussianFit(Mat imageMat, double thresholdRatio = 0.5, double sigma = 3.0);
+
+    public Rect FindValidDataBox(Mat imageMat);
 }
