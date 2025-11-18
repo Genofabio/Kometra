@@ -330,6 +330,7 @@ public partial class AlignmentToolViewModel : ObservableObject
         // 2. CHIEDI al servizio (con la nuova firma)
         var newCoords = await _alignmentService.CalculateCentersAsync(
             SelectedMode, 
+            CenteringMethod.LocalRegion,
             _sourceData, // <-- Passa i dati in memoria
             currentCoords, 
             SearchRadius

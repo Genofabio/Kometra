@@ -19,6 +19,7 @@ public interface IAlignmentService
     /// </summary>
     Task<IEnumerable<Point?>> CalculateCentersAsync(
         AlignmentMode mode, 
+        CenteringMethod method,
         List<FitsImageData?> sourceData, // <-- Accetta i dati, non i path
         IEnumerable<Point?> currentCoordinates, 
         int searchRadius);

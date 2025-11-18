@@ -102,11 +102,6 @@ public partial class FitsRenderer : ObservableObject
     
         try
         {
-            // Applica il "throttling" per la fluidità dello slider
-            if (!isInitialization)
-            {
-                await Task.Delay(30, token);
-            }
 
             using (var lockedBuffer = writeableBmp.Lock())
             {

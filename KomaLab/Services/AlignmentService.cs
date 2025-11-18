@@ -25,6 +25,7 @@ public class AlignmentService : IAlignmentService
 
     public Task<IEnumerable<Point?>> CalculateCentersAsync(
         AlignmentMode mode, 
+        CenteringMethod method, 
         List<FitsImageData?> sourceData, 
         IEnumerable<Point?> currentCoordinates, 
         int searchRadius)
@@ -50,41 +51,54 @@ public class AlignmentService : IAlignmentService
             
             try
             {
-                using Mat imageMat = _processingService.LoadFitsDataAsMat(fitsData);
-
-                // Definisci la ROI
+                using Mat fullImageMat = _processingService.LoadFitsDataAsMat(fitsData);
+                
+                int size = searchRadius * 2;
                 int x = (int)(guessPoint.Value.X - searchRadius);
                 int y = (int)(guessPoint.Value.Y - searchRadius);
-                int size = searchRadius * 2;
                 
-                int xCrop = Math.Max(0, x);
-                int yCrop = Math.Max(0, y);
-                int wCrop = Math.Min(size, imageMat.Width - xCrop);
-                int hCrop = Math.Min(size, imageMat.Height - yCrop);
+                int safeX = Math.Max(0, x);
+                int safeY = Math.Max(0, y);
+                int safeW = Math.Min(size, fullImageMat.Width - safeX);
+                int safeH = Math.Min(size, fullImageMat.Height - safeY);
                 
-                if (wCrop <= 0 || hCrop <= 0)
+                if (safeW <= 0 || safeH <= 0)
                 {
-                    newCoordinates.Add(guessPoint.Value); // Fallback
+                    newCoordinates.Add(guessPoint.Value);
                     continue;
                 }
                 
-                Rect roiRect = new Rect(xCrop, yCrop, wCrop, hCrop);
-                using Mat regionCrop = new Mat(imageMat, roiRect);
+                Rect roiRect = new Rect(safeX, safeY, safeW, safeH);
+                using Mat regionCrop = new Mat(fullImageMat, roiRect);
                 
-                // Calcola il bounding box che esclude i NaN (usando la tua funzione)
-                Rect validBox = _processingService.FindValidDataBox(regionCrop);
-                using Mat validCrop = new Mat(regionCrop, validBox);
-                Point centerInCrop = _processingService.GetCenterByPeak(validCrop, sigma: 1.0);
+                Point localCenter;
+                switch (method)
+                {
+                    case CenteringMethod.Centroid:
+                        localCenter = _processingService.GetCenterByCentroid(regionCrop);
+                        break;
+
+                    case CenteringMethod.GaussianFit:
+                        localCenter = _processingService.GetCenterByGaussianFit(regionCrop);
+                        break;
+
+                    case CenteringMethod.Peak:
+                        localCenter = _processingService.GetCenterByPeak(regionCrop);
+                        break;
+                    
+                    default:
+                        localCenter = _processingService.GetCenterOfLocalRegion(regionCrop);
+                        break;
+                }
                 
-                Point localCenter = new Point(centerInCrop.X + validBox.X, centerInCrop.Y + validBox.Y);
-                Point globalCenter = new Point(localCenter.X + xCrop, localCenter.Y + yCrop);
+                Point globalCenter = new Point(localCenter.X + safeX, localCenter.Y + safeY);
                 
                 newCoordinates.Add(globalCenter);
             }
             catch (Exception ex)
             {
                 Debug.WriteLine($"Calcolo fallito per l'immagine {i}: {ex.Message}");
-                newCoordinates.Add(guessPoint.Value); // Fallback
+                newCoordinates.Add(guessPoint.Value);
             }
         }
         
@@ -137,6 +151,28 @@ public class AlignmentService : IAlignmentService
         var results = await Task.WhenAll(tasks);
         return results.ToList();
     }
+
+    private Task<FitsImageData?> ProcessSingleImageAsync(FitsImageData? data, List<Point?>? centers, int index, Size targetSize)
+    {
+        return Task.Run(() =>
+        {
+            if (data == null) return null;
+            var centerPoint = (centers != null && index < centers.Count) ? centers[index] : null;
+            if (centerPoint == null) return data;
+
+            try
+            {
+                using Mat originalMat = _processingService.LoadFitsDataAsMat(data);
+                using Mat centeredMat = _processingService.GetSubPixelCenteredCanvas(originalMat, centerPoint.Value, targetSize);
+                return _processingService.CreateFitsDataFromMat(centeredMat, data);
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"Error img {index}: {ex.Message}");
+                return data;
+            }
+        });
+    }
     
     private Size CalculatePerfectCanvasSize(List<FitsImageData?> sourceData, List<Point?> centers)
     {
@@ -169,58 +205,6 @@ public class AlignmentService : IAlignmentService
         int finalH = (int)Math.Ceiling(maxRadiusY * 2);
         
         return (finalW > 0 && finalH > 0) ? new Size(finalW, finalH) : new Size(100, 100);
-    }
-
-private Task<FitsImageData?> ProcessSingleImageAsync(FitsImageData? data, List<Point?>? centers, int index, Size targetSize)
-{
-    return Task.Run(() =>
-    {
-        if (data == null) return null;
-        var centerPoint = (centers != null && index < centers.Count) ? centers[index] : null;
-        if (centerPoint == null) return data;
-
-        try
-        {
-            using Mat originalMat = _processingService.LoadFitsDataAsMat(data);
-            using Mat centeredMat = GetSubPixelCenteredCanvas(originalMat, centerPoint.Value, targetSize);
-            return _processingService.CreateFitsDataFromMat(centeredMat, data);
-        }
-        catch (Exception ex)
-        {
-            Debug.WriteLine($"Error img {index}: {ex.Message}");
-            return data;
-        }
-    });
-}
-
-    /// <summary>
-    /// Esegue Centratura + Padding in un colpo solo con precisione SubPixel.
-    /// </summary>
-    private Mat GetSubPixelCenteredCanvas(Mat source, Point originalCenter, Size outputSize)
-    {
-        double destCenterX = outputSize.Width / 2.0;
-        double destCenterY = outputSize.Height / 2.0;
-        
-        double tx = destCenterX - originalCenter.X;
-        double ty = destCenterY - originalCenter.Y;
-        
-        using Mat m = new Mat(2, 3, MatType.CV_32F);
-        m.Set(0, 0, 1.0f); m.Set(0, 1, 0.0f); m.Set(0, 2, (float)tx);
-        m.Set(1, 0, 0.0f); m.Set(1, 1, 1.0f); m.Set(1, 2, (float)ty);
-        
-        Mat result = new Mat(outputSize, source.Type(), new Scalar(double.NaN));
-        
-        Cv2.WarpAffine(
-            source, 
-            result, 
-            m, 
-            outputSize, 
-            InterpolationFlags.Linear, 
-            BorderTypes.Transparent, 
-            new Scalar(double.NaN)
-        );
-
-        return result;
     }
 
 }
