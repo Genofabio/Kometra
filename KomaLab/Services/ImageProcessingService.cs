@@ -22,33 +22,42 @@ public class ImageProcessingService : IImageProcessingService
     // 1. WORKFLOW INTELLIGENTI (High Level Processing)
     // =======================================================================
     
-    public Point GetCenterOfLocalRegion(Mat regionMat, double thresholdRatio = 0.1, int minArea = 10, int padding = 2)
+    public Point GetCenterOfLocalRegion(Mat regionMat)
     {
-        if (regionMat.Empty()) return new Point(0, 0);
-        
-        double medianVal;
-        var matType = regionMat.Type();
-
-        if (matType == MatType.CV_32FC1)
+        if (regionMat.Empty())
         {
-            regionMat.GetArray(out float[] raw);
-            var valid = raw.Select(v => (double)v).Where(v => !double.IsNaN(v) && !double.IsInfinity(v));
-            var data = valid as double[] ?? valid.ToArray();
-            medianVal = data.Any() ? Statistics.Median(data) : 0.0;
-        }
-        else
-        {
-            regionMat.GetArray(out double[] raw);
-            var valid = raw.Where(v => !double.IsNaN(v) && !double.IsInfinity(v));
-            var enumerable = valid as double[] ?? valid.ToArray();
-            medianVal = enumerable.Any() ? Statistics.Median(enumerable) : 0.0;
+            Debug.WriteLine("[LocalRegion] ERRORE: Matrice di input vuota.");
+            return new Point(0, 0);
         }
 
-        if (medianVal <= 1e-6) medianVal = 1.0;
-        double threshold = medianVal * (1 + thresholdRatio);
-        
+        // --- SOLUZIONE CRITICA: Promuovi a Float ---
+        // Converte qualsiasi input (es. Int32 da FITS) in Float32 per i calcoli
+        using Mat workingMat = new Mat();
+        regionMat.ConvertTo(workingMat, MatType.CV_32FC1);
+        // --------------------------------------------
+
+        // 1. Statistica Robusta (su workingMat float)
+        using Mat statsMat = new Mat();
+        Cv2.GaussianBlur(workingMat, statsMat, new Size(3, 3), 0);
+        Cv2.MinMaxLoc(statsMat, out double minVal, out double maxVal);
+
+        double dynamicRange = maxVal - minVal;
+
+        if (dynamicRange <= 1e-6) 
+        {
+            Debug.WriteLine("[LocalRegion] FALLBACK: Immagine piatta. Ritorno centro geometrico.");
+            return new Point(workingMat.Width / 2.0, workingMat.Height / 2.0);
+        }
+
+        // 2. Parametri Dinamici
+        double threshold = minVal + (dynamicRange * 0.2); 
+        int minArea = 5; 
+
+        Debug.WriteLine($"[LocalRegion] Statistiche: Min={minVal:F2}, Max={maxVal:F2}, Soglia={threshold:F2}");
+
+        // 3. Blob Detection
         using Mat maskF = new Mat();
-        Cv2.Threshold(regionMat, maskF, threshold, 1.0, ThresholdTypes.Binary);
+        Cv2.Threshold(workingMat, maskF, threshold, 1.0, ThresholdTypes.Binary);
         
         using Mat mask8U = new Mat();
         maskF.ConvertTo(mask8U, MatType.CV_8UC1, 255.0);
@@ -58,23 +67,27 @@ public class ImageProcessingService : IImageProcessingService
         using Mat centroids = new Mat();
         int numFeatures = Cv2.ConnectedComponentsWithStats(mask8U, labels, stats, centroids);
 
-        if (numFeatures <= 1) return new Point(regionMat.Width / 2.0, regionMat.Height / 2.0);
+        if (numFeatures <= 1) 
+        {
+            Debug.WriteLine("[LocalRegion] FALLBACK: Nessuna feature trovata sopra la soglia.");
+            return new Point(workingMat.Width / 2.0, workingMat.Height / 2.0);
+        }
         
         int bestLabel = -1;
         int maxArea = -1;
-        
         for (int i = 1; i < numFeatures; i++)
         {
             int area = stats.At<int>(i, (int)ConnectedComponentsTypes.Area);
-            if (area >= minArea && area > maxArea)
-            {
-                maxArea = area;
-                bestLabel = i;
-            }
+            if (area >= minArea && area > maxArea) { maxArea = area; bestLabel = i; }
         }
 
-        if (bestLabel == -1) return new Point(regionMat.Width / 2.0, regionMat.Height / 2.0);
+        if (bestLabel == -1) 
+        {
+            Debug.WriteLine($"[LocalRegion] FALLBACK: Nessuna feature supera l'area minima.");
+            return new Point(workingMat.Width / 2.0, workingMat.Height / 2.0);
+        }
         
+        // 4. Crop e Padding
         int bX = stats.At<int>(bestLabel, (int)ConnectedComponentsTypes.Left);
         int bY = stats.At<int>(bestLabel, (int)ConnectedComponentsTypes.Top);
         int bW = stats.At<int>(bestLabel, (int)ConnectedComponentsTypes.Width);
@@ -82,22 +95,26 @@ public class ImageProcessingService : IImageProcessingService
         
         int paddingX = Math.Max(2, (int)(bW * 0.25));
         int paddingY = Math.Max(2, (int)(bH * 0.25));
-
         int pX = Math.Max(bX - paddingX, 0);
         int pY = Math.Max(bY - paddingY, 0);
-        int pW = Math.Min(bX + bW + paddingX, regionMat.Cols) - pX;
-        int pH = Math.Min(bY + bH + paddingY, regionMat.Rows) - pY;
+        int pW = Math.Min(bX + bW + paddingX, workingMat.Cols) - pX;
+        int pH = Math.Min(bY + bH + paddingY, workingMat.Rows) - pY;
 
         Rect starRect = new Rect(pX, pY, pW, pH);
-        using Mat starCrop = new Mat(regionMat, starRect);
         
+        // starCrop è una sottomatrice di workingMat (che è già Float)
+        using Mat starCrop = new Mat(workingMat, starRect);
+        
+        // 5. Calcolo
         Point centerInStarCrop;
         try
         {
+            // starCrop è Float, quindi GaussianFit non crasherà
             centerInStarCrop = GetCenterByGaussianFit(starCrop);
         }
-        catch 
+        catch (Exception ex)
         {
+            Debug.WriteLine($"[LocalRegion] FALLBACK: {ex.Message}");
             centerInStarCrop = new Point(starRect.Width / 2.0, starRect.Height / 2.0);
         }
 
@@ -113,68 +130,59 @@ public class ImageProcessingService : IImageProcessingService
         if (rawMat.Empty()) return new Point(-1, -1);
 
         // 1. Pre-processing (Blur)
-        using Mat smoothedMat = new Mat();
+        using Mat blurredMat = new Mat();
         if (sigma > 0)
-            Cv2.GaussianBlur(rawMat, smoothedMat, new Size(0, 0), sigma, sigma);
+            Cv2.GaussianBlur(rawMat, blurredMat, new Size(0, 0), sigma, sigma);
         else
-            rawMat.CopyTo(smoothedMat);
+            rawMat.CopyTo(blurredMat);
+        
+        // --- SOLUZIONE CRITICA: Promuovi a Float ---
+        using Mat smoothedMat = new Mat();
+        blurredMat.ConvertTo(smoothedMat, MatType.CV_32FC1);
+        // --------------------------------------------
 
-        // 2. Soglia Automatica basata sulla Dinamica (FWHM)
+        // 2. Soglia Automatica (FWHM) su Float
         Cv2.MinMaxLoc(smoothedMat, out double minVal, out double maxVal);
         double dynamicRange = maxVal - minVal;
 
         if (dynamicRange <= 1e-6) 
-            return GetCenterByPeak(smoothedMat, sigma: 0); // Fallback immediato su immagine piatta
+            return GetCenterByPeak(smoothedMat, sigma: 0); 
 
-        double threshold = minVal + (dynamicRange * 0.5); // Half Maximum
+        double threshold = minVal + (dynamicRange * 0.5); 
 
-        // 3. Estrazione Punti per il Fit
+        // 3. Estrazione Punti
         using Mat maskF = new Mat();
         Cv2.Threshold(smoothedMat, maskF, threshold, 1.0, ThresholdTypes.Binary);
+        
+        using Mat mask8U = new Mat();
+        maskF.ConvertTo(mask8U, MatType.CV_8UC1, 255.0);
+        
+        // Ottimizzazione FindNonZero corretta
+        using Mat locationsMat = new Mat();
+        Cv2.FindNonZero(mask8U, locationsMat);
+        locationsMat.GetArray(out OpenCvSharp.Point[] locations);
 
-        List<double[]> xDataList = [];
-        List<double> yDataList = [];
-        var matType = smoothedMat.Type();
+        if (locations.Length < 6) return GetCenterByPeak(smoothedMat, sigma: 0);
 
-        // Uso Indexer per velocità
-        if (matType == MatType.CV_32FC1)
+        List<double[]> xDataList = new List<double[]>(locations.Length);
+        List<double> yDataList = new List<double>(locations.Length);
+        
+        // smoothedMat è SEMPRE CV_32FC1 qui
+        var indexer = smoothedMat.GetGenericIndexer<float>();
+        foreach (var p in locations)
         {
-            var indexer = smoothedMat.GetGenericIndexer<float>();
-            var maskIdx = maskF.GetGenericIndexer<float>();
-            for (int y = 0; y < smoothedMat.Rows; y++) {
-                for (int x = 0; x < smoothedMat.Cols; x++) {
-                    if (maskIdx[y, x] > 0.5f) {
-                        xDataList.Add([x, y]);
-                        yDataList.Add(indexer[y, x]);
-                    }
-                }
-            }
+            xDataList.Add(new double[] { p.X, p.Y });
+            yDataList.Add(indexer[p.Y, p.X]);
         }
-        else
-        {
-            var indexer = smoothedMat.GetGenericIndexer<double>();
-            var maskIdx = maskF.GetGenericIndexer<float>();
-            for (int y = 0; y < smoothedMat.Rows; y++) {
-                for (int x = 0; x < smoothedMat.Cols; x++) {
-                    if (maskIdx[y, x] > 0.5f) {
-                        xDataList.Add([x, y]);
-                        yDataList.Add(indexer[y, x]);
-                    }
-                }
-            }
-        }
-
-        if (xDataList.Count < 6) return GetCenterByPeak(smoothedMat, sigma: 0); // Pochi punti
-
-        // 4. Setup MathNet Fit
+        
+        // 4. MathNet Fit
         double[][] xData = xDataList.ToArray();
         double[] yData = yDataList.ToArray();
         
-        // Stima iniziale parametri
         double xoInitNum = 0, yoInitNum = 0, weightSum = 0;
         for(int i = 0; i < yData.Length; i++)
         {
-            double w = Math.Max(0, yData[i] - minVal); // Peso senza fondo
+            double w = Math.Max(0, yData[i] - minVal); 
             xoInitNum += xData[i][0] * w;
             yoInitNum += xData[i][1] * w;
             weightSum += w;
@@ -182,12 +190,8 @@ public class ImageProcessingService : IImageProcessingService
         if (weightSum <= 1e-9) return GetCenterByPeak(smoothedMat, sigma: 0);
 
         var initialGuess = Vector<double>.Build.Dense([
-            dynamicRange,           // Ampiezza
-            xoInitNum / weightSum,  // X0
-            yoInitNum / weightSum,  // Y0
-            3.0,                    // Sigma X
-            3.0,                    // Sigma Y
-            minVal                  // Offset
+            dynamicRange, xoInitNum / weightSum, yoInitNum / weightSum, 
+            3.0, 3.0, minVal
         ]);
         
         var lowerBounds = Vector<double>.Build.Dense([0, 0, 0, 0.1, 0.1, -double.MaxValue]);
@@ -195,7 +199,6 @@ public class ImageProcessingService : IImageProcessingService
 
         try
         {
-            // Definizione Funzione Obiettivo WLS (Weighted Least Squares)
             double minSig = yData.Where(y => y > 0).DefaultIfEmpty(1.0).Min();
             var weightsVector = Vector<double>.Build.Dense(yData.Length, i => 1.0 / Math.Sqrt(Math.Max(Math.Abs(yData[i]), minSig)));
             var yDataVector = Vector<double>.Build.Dense(yData);
@@ -220,11 +223,10 @@ public class ImageProcessingService : IImageProcessingService
         catch (Exception ex)
         {
             Debug.WriteLine($"GaussianFit Fallback: {ex.Message}");
-            // Fallback: Peak su immagine mascherata
-            using Mat mask8U = new Mat();
-            maskF.ConvertTo(mask8U, MatType.CV_8UC1, 255.0);
+            using Mat mask8UFallback = new Mat();
+            maskF.ConvertTo(mask8UFallback, MatType.CV_8UC1, 255.0);
             using Mat masked = Mat.Zeros(smoothedMat.Size(), smoothedMat.Type());
-            smoothedMat.CopyTo(masked, mask8U);
+            smoothedMat.CopyTo(masked, mask8UFallback);
             return GetCenterByPeak(masked, sigma: 0);
         }
     }
@@ -233,61 +235,54 @@ public class ImageProcessingService : IImageProcessingService
     {
         if (rawMat.Empty()) return new Point(-1, -1);
         
-        using Mat workingMat = new Mat();
+        using Mat blurredMat = new Mat();
         if (sigma > 0)
-            Cv2.GaussianBlur(rawMat, workingMat, new Size(0, 0), sigma, sigma);
+            Cv2.GaussianBlur(rawMat, blurredMat, new Size(0, 0), sigma, sigma);
         else
-            rawMat.CopyTo(workingMat);
+            rawMat.CopyTo(blurredMat);
+        
+        // --- SOLUZIONE CRITICA: Promuovi a Float ---
+        using Mat workingMat = new Mat();
+        blurredMat.ConvertTo(workingMat, MatType.CV_32FC1);
+        // --------------------------------------------
         
         Cv2.MinMaxLoc(workingMat, out _, out _, out _, out OpenCvSharp.Point maxLoc);
         int x0 = maxLoc.X;
         int y0 = maxLoc.Y;
 
-        // Check bordi
         if (y0 <= 0 || x0 <= 0 || y0 >= workingMat.Rows - 1 || x0 >= workingMat.Cols - 1)
             return new Point(x0, y0); 
         
-        // Fit Parabolico
         try
         {
+            // Ora è sempre CV_32FC1
+            var idx = workingMat.GetGenericIndexer<float>();
+            float c = idx[y0, x0], r = idx[y0, x0+1], l = idx[y0, x0-1], u = idx[y0-1, x0], d = idx[y0+1, x0];
+            double dxx = r + l - 2*c;
+            double dyy = d + u - 2*c;
             double subX = x0, subY = y0;
+            if (Math.Abs(dxx) >= 1e-6) subX = x0 - ((r - l) / 2.0) / dxx;
+            if (Math.Abs(dyy) >= 1e-6) subY = y0 - ((d - u) / 2.0) / dyy;
             
-            // Usa Indexer per gestire sia Float che Double
-            if (workingMat.Type() == MatType.CV_32FC1)
-            {
-                var idx = workingMat.GetGenericIndexer<float>();
-                float c = idx[y0, x0], r = idx[y0, x0+1], l = idx[y0, x0-1], u = idx[y0-1, x0], d = idx[y0+1, x0];
-                double dxx = r + l - 2*c;
-                double dyy = d + u - 2*c;
-                if (Math.Abs(dxx) >= 1e-6) subX = x0 - ((r - l) / 2.0) / dxx;
-                if (Math.Abs(dyy) >= 1e-6) subY = y0 - ((d - u) / 2.0) / dyy;
-            }
-            else
-            {
-                var idx = workingMat.GetGenericIndexer<double>();
-                double c = idx[y0, x0], r = idx[y0, x0+1], l = idx[y0, x0-1], u = idx[y0-1, x0], d = idx[y0+1, x0];
-                double dxx = r + l - 2*c;
-                double dyy = d + u - 2*c;
-                if (Math.Abs(dxx) >= 1e-6) subX = x0 - ((r - l) / 2.0) / dxx;
-                if (Math.Abs(dyy) >= 1e-6) subY = y0 - ((d - u) / 2.0) / dyy;
-            }
             return new Point(subX, subY);
         }
-        catch
-        {
-            return new Point(x0, y0);
-        }
+        catch { return new Point(x0, y0); }
     }
 
     public Point GetCenterByCentroid(Mat rawMat, double sigma = 5.0)
     {
         if (rawMat.Empty()) return new Point(-1, -1);
         
-        using Mat workingMat = new Mat();
+        using Mat blurredMat = new Mat();
         if (sigma > 0)
-            Cv2.GaussianBlur(rawMat, workingMat, new Size(0, 0), sigma, sigma);
+            Cv2.GaussianBlur(rawMat, blurredMat, new Size(0, 0), sigma, sigma);
         else
-            rawMat.CopyTo(workingMat);
+            rawMat.CopyTo(blurredMat);
+
+        // --- SOLUZIONE CRITICA: Promuovi a Float ---
+        using Mat workingMat = new Mat();
+        blurredMat.ConvertTo(workingMat, MatType.CV_32FC1);
+        // --------------------------------------------
 
         Moments moments = Cv2.Moments(workingMat, binaryImage: false);
 
@@ -314,14 +309,22 @@ public class ImageProcessingService : IImageProcessingService
         m.Set(0, 0, 1.0f); m.Set(0, 1, 0.0f); m.Set(0, 2, (float)tx);
         m.Set(1, 0, 0.0f); m.Set(1, 1, 1.0f); m.Set(1, 2, (float)ty);
         
-        Mat result = new Mat(outputSize, source.Type(), new Scalar(double.NaN));
+        // Per il risultato finale usiamo NaN su Float
+        Mat result = new Mat(outputSize, MatType.CV_32FC1, new Scalar(double.NaN));
+        
+        // Assicurati che anche 'source' sia Float prima di Warp, altrimenti NaN diventa 0
+        using Mat sourceFloat = new Mat();
+        if (source.Type() != MatType.CV_32FC1 && source.Type() != MatType.CV_64FC1)
+             source.ConvertTo(sourceFloat, MatType.CV_32FC1);
+        else
+             source.CopyTo(sourceFloat); // O semplice assegnamento se gestito bene
         
         Cv2.WarpAffine(
-            source, 
+            sourceFloat, 
             result, 
             m, 
             outputSize, 
-            InterpolationFlags.Linear, 
+            InterpolationFlags.Cubic, 
             BorderTypes.Transparent, 
             new Scalar(double.NaN)
         );
@@ -332,6 +335,11 @@ public class ImageProcessingService : IImageProcessingService
     public Rect FindValidDataBox(Mat imageMat)
     {
         using Mat nanMask = new Mat();
+        
+        // Se è intero, non ci sono NaN, quindi tutto valido
+        if (imageMat.Depth() != MatType.CV_32F && imageMat.Depth() != MatType.CV_64F)
+            return new Rect(0, 0, imageMat.Width, imageMat.Height);
+
         Cv2.Compare(imageMat, imageMat, nanMask, CmpType.EQ);
         Rect validDataBox = Cv2.BoundingRect(nanMask);
 
@@ -354,31 +362,31 @@ public class ImageProcessingService : IImageProcessingService
 
         switch (bitpix)
         {
-            case -32: // Float (32-bit floating point)
+            case -32: // Float
                 float[] flatDataF = ConvertJaggedToFlat<float>(rawJaggedData, width, height);
                 imageMat = new Mat(height, width, MatType.CV_32FC1);
                 imageMat.SetArray(flatDataF);
                 break;
             
-            case -64: // Double (64-bit floating point)
+            case -64: // Double
                 double[] flatDataD = ConvertJaggedToFlat<double>(rawJaggedData, width, height);
                 imageMat = new Mat(height, width, MatType.CV_64FC1);
                 imageMat.SetArray(flatDataD);
                 break;
         
-            case 16: // Short (16-bit integer)
+            case 16: // Short
                 short[] flatDataS = ConvertJaggedToFlat<short>(rawJaggedData, width, height);
                 imageMat = new Mat(height, width, MatType.CV_16SC1);
                 imageMat.SetArray(flatDataS);
                 break;
 
-            case 8: // Byte (8-bit integer)
+            case 8: // Byte
                 byte[] flatDataB = ConvertJaggedToFlat<byte>(rawJaggedData, width, height);
                 imageMat = new Mat(height, width, MatType.CV_8UC1);
                 imageMat.SetArray(flatDataB);
                 break;
 
-            case 32: // Int (32-bit integer)
+            case 32: // Int
                 int[] flatDataI = ConvertJaggedToFlat<int>(rawJaggedData, width, height);
                 imageMat = new Mat(height, width, MatType.CV_32SC1);
                 imageMat.SetArray(flatDataI);
@@ -401,18 +409,31 @@ public class ImageProcessingService : IImageProcessingService
 
         if (mat.Type() == MatType.CV_32FC1)
         {
-            mat.GetArray(out float[] f);
-            for (int j = 0; j < height; j++) {
-                jaggedData[j] = new float[width];
-                Array.Copy(f, j * width, jaggedData[j], 0, width);
+            var indexer = mat.GetGenericIndexer<float>();
+            for (int j = 0; j < height; j++) 
+            {
+                var row = new float[width];
+                for (int i = 0; i < width; i++)
+                {
+                    row[i] = indexer[j, i];
+                }
+                jaggedData[j] = row;
             }
         }
-        else // CV_64FC1
+        else 
         {
-            mat.GetArray(out double[] d);
-            for (int j = 0; j < height; j++) {
-                jaggedData[j] = new double[width];
-                Array.Copy(d, j * width, jaggedData[j], 0, width);
+            // Fallback o Double
+            using Mat temp = new Mat();
+            mat.ConvertTo(temp, MatType.CV_64FC1);
+            var indexer = temp.GetGenericIndexer<double>();
+            for (int j = 0; j < height; j++) 
+            {
+                var row = new double[width];
+                for (int i = 0; i < width; i++)
+                {
+                    row[i] = indexer[j, i];
+                }
+                jaggedData[j] = row;
             }
         }
         
@@ -436,23 +457,64 @@ public class ImageProcessingService : IImageProcessingService
         int bitpix = fitsData.FitsHeader.GetIntValue("BITPIX");
         var jagged = (Array[])fitsData.RawData;
 
-        return bitpix switch
-        {
-            8 => GetPercentiles(ConvertJaggedArray<byte>(jagged)),
-            16 => GetPercentiles(ConvertJaggedArray<short>(jagged)),
-            32 => GetPercentiles(ConvertJaggedArray<int>(jagged)),
-            -32 => GetPercentiles(ConvertJaggedArray<float>(jagged)),
-            -64 => GetPercentiles(ConvertJaggedArray<double>(jagged)),
-            _ => (0, 255)
-        };
+        return CalculateQuantilesBySampling(jagged, bitpix);
     }
     
     // --- Helpers Privati ---
 
-    private (double, double) GetPercentiles<T>(T[][] data) where T : struct, IConvertible
+    private (double, double) CalculateQuantilesBySampling(Array[] jaggedData, int bitpix, int maxSamples = 20000)
     {
-        if (data.Length == 0) return (0, 255);
-        // Linq generico lento ma funzionale per display
+        if (jaggedData.Length == 0) return (0, 255);
+
+        int height = jaggedData.Length;
+        int width = jaggedData[0].Length;
+        long totalPixels = (long)height * width;
+        
+        if (totalPixels <= maxSamples)
+        {
+             return bitpix switch
+            {
+                8 => GetPercentilesFull(ConvertJaggedArray<byte>(jaggedData)),
+                16 => GetPercentilesFull(ConvertJaggedArray<short>(jaggedData)),
+                32 => GetPercentilesFull(ConvertJaggedArray<int>(jaggedData)),
+                -32 => GetPercentilesFull(ConvertJaggedArray<float>(jaggedData)),
+                -64 => GetPercentilesFull(ConvertJaggedArray<double>(jaggedData)),
+                _ => (0, 255)
+            };
+        }
+
+        var samples = new List<double>(maxSamples);
+        double step = totalPixels / (double)maxSamples;
+
+        for (int i = 0; i < maxSamples; i++)
+        {
+            long pixelIndex = (long)(i * step); 
+            int y = (int)(pixelIndex / width);
+            int x = (int)(pixelIndex % width);
+
+            try
+            {
+                double val = bitpix switch
+                {
+                    8 => ((byte[])jaggedData[y])[x],
+                    16 => ((short[])jaggedData[y])[x],
+                    32 => ((int[])jaggedData[y])[x],
+                    -32 => ((float[])jaggedData[y])[x],
+                    -64 => ((double[])jaggedData[y])[x],
+                    _ => 0
+                };
+                
+                if (!double.IsNaN(val) && !double.IsInfinity(val) && val != 0)
+                    samples.Add(val);
+            }
+            catch { }
+        }
+        
+        return CalculateQuantiles(samples);
+    }
+
+    private (double, double) GetPercentilesFull<T>(T[][] data) where T : struct, IConvertible
+    {
         var values = data.SelectMany(row => row.Select(p => Convert.ToDouble(p))
                          .Where(v => !double.IsNaN(v) && !double.IsInfinity(v) && v != 0));
         return CalculateQuantiles(values);

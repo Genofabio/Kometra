@@ -26,7 +26,7 @@
                 <!-- Colonna 0: "Immagine N:" -->
                 <TextBlock Grid.Column="0" VerticalAlignment="Center">
                     <Run Text="Immagine "/>
-                    <Run Text="{Binding DisplayIndex}"/>
+                    <Run Text="{Binding Index}"/>
                     <Run Text=":"/>
                 </TextBlock>
                 <!-- Colonna 1: "(xx.xx; yy.yy)" -->

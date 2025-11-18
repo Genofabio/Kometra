@@ -62,7 +62,7 @@ public interface IImageProcessingService
     /// Metodo "Intelligente": riceve un crop, isola la stella più grande (Blob Detection)
     /// e calcola il centro usando GaussianFit.
     /// </summary>
-    Point GetCenterOfLocalRegion(Mat regionMat, double thresholdRatio = 0.1, int minArea = 10, int padding = 2);
+    Point GetCenterOfLocalRegion(Mat regionMat);
 
     // --- 3. Core Centering Algorithms (Math) ---
     // Responsabilità: Data un'immagine (già preparata), calcolare un centro.

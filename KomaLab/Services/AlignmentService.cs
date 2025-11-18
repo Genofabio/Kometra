@@ -23,86 +23,88 @@ public class AlignmentService : IAlignmentService
         _processingService = processingService;
     }
 
-    public Task<IEnumerable<Point?>> CalculateCentersAsync(
+    public async Task<IEnumerable<Point?>> CalculateCentersAsync(
         AlignmentMode mode, 
         CenteringMethod method, 
         List<FitsImageData?> sourceData, 
         IEnumerable<Point?> currentCoordinates, 
         int searchRadius)
     {
-        if (mode != AlignmentMode.Manual)
+        if (mode != AlignmentMode.Manual || searchRadius <= 0)
         {
-            return Task.FromResult(currentCoordinates);
+            return currentCoordinates;
         }
 
-        var newCoordinates = new List<Point?>();
         var guesses = currentCoordinates.ToList();
-
+        
+        var processingTasks = new List<Task<Point?>>();
         for (int i = 0; i < sourceData.Count; i++)
         {
-            var guessPoint = guesses[i];
-            var fitsData = sourceData[i];
+            int index = i;
+            var guessPoint = guesses[index];
+            var fitsData = sourceData[index];
 
-            if (guessPoint == null || fitsData == null)
+            processingTasks.Add(Task.Run(() =>
             {
-                newCoordinates.Add(null);
-                continue; 
-            }
-            
-            try
-            {
-                using Mat fullImageMat = _processingService.LoadFitsDataAsMat(fitsData);
-                
-                int size = searchRadius * 2;
-                int x = (int)(guessPoint.Value.X - searchRadius);
-                int y = (int)(guessPoint.Value.Y - searchRadius);
-                
-                int safeX = Math.Max(0, x);
-                int safeY = Math.Max(0, y);
-                int safeW = Math.Min(size, fullImageMat.Width - safeX);
-                int safeH = Math.Min(size, fullImageMat.Height - safeY);
-                
-                if (safeW <= 0 || safeH <= 0)
+                if (guessPoint == null || fitsData == null)
                 {
-                    newCoordinates.Add(guessPoint.Value);
-                    continue;
+                    return (Point?)null; 
                 }
                 
-                Rect roiRect = new Rect(safeX, safeY, safeW, safeH);
-                using Mat regionCrop = new Mat(fullImageMat, roiRect);
-                
-                Point localCenter;
-                switch (method)
+                try
                 {
-                    case CenteringMethod.Centroid:
-                        localCenter = _processingService.GetCenterByCentroid(regionCrop);
-                        break;
-
-                    case CenteringMethod.GaussianFit:
-                        localCenter = _processingService.GetCenterByGaussianFit(regionCrop);
-                        break;
-
-                    case CenteringMethod.Peak:
-                        localCenter = _processingService.GetCenterByPeak(regionCrop);
-                        break;
+                    using Mat fullImageMat = _processingService.LoadFitsDataAsMat(fitsData);
                     
-                    default:
-                        localCenter = _processingService.GetCenterOfLocalRegion(regionCrop);
-                        break;
+                    int size = searchRadius * 2;
+                    int x = (int)(guessPoint.Value.X - searchRadius);
+                    int y = (int)(guessPoint.Value.Y - searchRadius);
+                    
+                    int safeX = Math.Max(0, x);
+                    int safeY = Math.Max(0, y);
+                    int safeW = Math.Min(size, fullImageMat.Width - safeX);
+                    int safeH = Math.Min(size, fullImageMat.Height - safeY);
+                    
+                    if (safeW <= 0 || safeH <= 0)
+                    {
+                        return guessPoint.Value; // Fallback
+                    }
+                    
+                    Rect roiRect = new Rect(safeX, safeY, safeW, safeH);
+                    using Mat regionCrop = new Mat(fullImageMat, roiRect);
+                    
+                    Point localCenter;
+                    switch (method)
+                    {
+                        case CenteringMethod.Centroid:
+                            localCenter = _processingService.GetCenterByCentroid(regionCrop);
+                            break;
+
+                        case CenteringMethod.GaussianFit:
+                            localCenter = _processingService.GetCenterByGaussianFit(regionCrop);
+                            break;
+
+                        case CenteringMethod.Peak:
+                            localCenter = _processingService.GetCenterByPeak(regionCrop);
+                            break;
+                        
+                        default:
+                            localCenter = _processingService.GetCenterOfLocalRegion(regionCrop);
+                            break;
+                    }
+                    
+                    Point globalCenter = new Point(localCenter.X + safeX, localCenter.Y + safeY);
+                    return globalCenter;
                 }
-                
-                Point globalCenter = new Point(localCenter.X + safeX, localCenter.Y + safeY);
-                
-                newCoordinates.Add(globalCenter);
-            }
-            catch (Exception ex)
-            {
-                Debug.WriteLine($"Calcolo fallito per l'immagine {i}: {ex.Message}");
-                newCoordinates.Add(guessPoint.Value);
-            }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"Calcolo fallito per l'immagine {index}: {ex.Message}");
+                    return guessPoint.Value;
+                }
+            }));
         }
         
-        return Task.FromResult<IEnumerable<Point?>>(newCoordinates);
+        var newCoordinates = await Task.WhenAll(processingTasks);
+        return newCoordinates;
     }
 
     public bool CanCalculate(

@@ -117,7 +117,7 @@ public partial class AlignmentToolViewModel : ObservableObject
     [ObservableProperty]
     private int _maxSearchRadius = 100;
     [ObservableProperty]
-    private int _searchRadius = 25;
+    private int _searchRadius = 100;
 
     // --- Stato Risultati e Visibilità UI ---
     [ObservableProperty]
@@ -127,6 +127,7 @@ public partial class AlignmentToolViewModel : ObservableObject
     [NotifyPropertyChangedFor(nameof(IsSearchRadiusControlsVisible))]
     [NotifyPropertyChangedFor(nameof(IsRefinementMessageVisible))]
     [NotifyCanExecuteChangedFor(nameof(ApplyAlignmentCommand))]
+    [NotifyPropertyChangedFor(nameof(IsCoordinateListVisible))]
     private AlignmentState _currentState = AlignmentState.Initial;
     
     /// <summary>
@@ -186,9 +187,11 @@ public partial class AlignmentToolViewModel : ObservableObject
             for (int i = 0; i < _totalStackCount; i++)
             {
                 // Cerca un titolo nel header
-                string? displayName;
+                string? displayName = $"Immagine {i + 1}";
+                double imageHeight = 0;
                 if (_sourceData[i] != null)
                 {
+                    imageHeight = _sourceData[i]!.ImageSize.Height;
                     try
                     {
                         displayName = _sourceData[i]?.FitsHeader.GetStringValue("OBJECT");
@@ -204,7 +207,9 @@ public partial class AlignmentToolViewModel : ObservableObject
                 CoordinateEntries.Add(new CoordinateEntry
                 {
                     Index = i,
-                    Coordinate = null
+                    DisplayName = displayName,
+                    Coordinate = null,
+                    ImageHeight = imageHeight
                 });
             }
 
@@ -375,7 +380,7 @@ public partial class AlignmentToolViewModel : ObservableObject
             var centers = CoordinateEntries.Select(e => e.Coordinate).ToList();
 
             // 2. Delega TUTTO il lavoro di processing al servizio
-            FinalProcessedData = await _alignmentService.ApplyCenteringAsync(_sourceData, centers);
+            FinalProcessedData = (await _alignmentService.ApplyCenteringAsync(_sourceData, centers))!;
 
             DialogResult = true; // Successo
             RequestClose(); // Chiudi
