@@ -8,6 +8,7 @@ using Avalonia;
 using KomaLab.Services;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using KomaLab.Models;
 
 namespace KomaLab.ViewModels;
 
@@ -17,6 +18,7 @@ public partial class BoardViewModel : ObservableObject
     private readonly INodeViewModelFactory _nodeFactory;
     private readonly IDialogService _dialogService; 
     private readonly IWindowService _windowService;
+    private readonly IImageProcessingService _processingService;
 
     // --- Proprietà ---
     [ObservableProperty] private double _offsetX;
@@ -27,11 +29,19 @@ public partial class BoardViewModel : ObservableObject
     public ObservableCollection<BaseNodeViewModel> Nodes { get; } = new();
 
     // --- Costruttore ---
-    public BoardViewModel(INodeViewModelFactory nodeFactory, IDialogService dialogService, IWindowService windowService)
+    public BoardViewModel(
+        INodeViewModelFactory nodeFactory, 
+        IDialogService dialogService, 
+        IWindowService windowService,
+        IImageProcessingService processingService)
     {
         _nodeFactory = nodeFactory;
         _dialogService = dialogService; 
         _windowService = windowService;
+    
+        // Assegna il servizio
+        _processingService = processingService; 
+    
         _ = LoadInitialNodesAsync();
     }
 
@@ -105,7 +115,9 @@ public partial class BoardViewModel : ObservableObject
         {
             SelectedNode.IsSelected = false;
         }
+        
         SelectedNode = nodeToSelect;
+        
         if (SelectedNode != null)
         {
             SelectedNode.IsSelected = true;
@@ -113,6 +125,7 @@ public partial class BoardViewModel : ObservableObject
         
         ResetNormalizationCommand.NotifyCanExecuteChanged();
         ShowAlignmentWindowCommand.NotifyCanExecuteChanged(); 
+        StackImagesCommand.NotifyCanExecuteChanged();
     }
     
     public void DeselectAllNodes()
@@ -125,6 +138,7 @@ public partial class BoardViewModel : ObservableObject
         
         ResetNormalizationCommand.NotifyCanExecuteChanged();
         ShowAlignmentWindowCommand.NotifyCanExecuteChanged(); 
+        StackImagesCommand.NotifyCanExecuteChanged();
     }
     
     [RelayCommand(CanExecute = nameof(CanShowAlignmentWindow))]
@@ -156,6 +170,88 @@ public partial class BoardViewModel : ObservableObject
     
     // Il comando si abilita solo se un nodo è selezionato
     private bool CanShowAlignmentWindow() => SelectedNode != null;
+    
+    [RelayCommand(CanExecute = nameof(CanStackImages))]
+    private async Task StackImages(StackingMode mode)
+    {
+        // 1. Controllo di sicurezza (il CanExecute lo gestisce già per la UI, ma controlliamo comunque)
+        if (SelectedNode is not MultipleImagesNodeViewModel multiNode) return;
+
+        try
+        {
+            // 2. RECUPERO DATI POLIMORFICO
+            var rawDataList = await SelectedNode.GetCurrentDataAsync();
+
+            // 3. Filtriamo eventuali null (sicurezza)
+            var sourceImages = rawDataList
+                .Where(d => d != null)
+                .Cast<FitsImageData>()
+                .ToList();
+
+            if (sourceImages.Count < 2)
+            {
+                Debug.WriteLine("Servono almeno 2 immagini valide per fare uno stack.");
+                return;
+            }
+
+            // 4. Eseguiamo il calcolo (Service)
+            var resultData = await _processingService.ComputeStackAsync(sourceImages, mode);
+
+            // 5. Prepariamo i metadati per il nuovo nodo
+            double newX = multiNode.X + 50;
+            double newY = multiNode.Y + 50;
+        
+            // --- LOGICA DI PULIZIA DEL TITOLO AGGIUNTA QUI ---
+            string baseTitle = multiNode.Title;
+            
+            // Trova l'ultima parentesi aperta e chiusa
+            int lastOpenParen = baseTitle.LastIndexOf('(');
+            int lastCloseParen = baseTitle.LastIndexOf(')');
+
+            // Se l'ultima parentesi aperta esiste ed è prima di quella chiusa,
+            // assumiamo che il contenuto sia un metadato da rimuovere.
+            if (lastOpenParen != -1 && lastCloseParen > lastOpenParen)
+            {
+                // Taglia la stringa fino all'ultima parentesi aperta
+                baseTitle = baseTitle.Substring(0, lastOpenParen).TrimEnd();
+            }
+            
+            string opName = mode switch 
+            {
+                StackingMode.Sum => "Somma",
+                StackingMode.Average => "Media",
+                StackingMode.Median => "Mediana",
+                _ => "Stack"
+            };
+            // Ricostruisce il titolo pulito con il nuovo suffisso dell'operazione
+            string newTitle = $"{baseTitle} ({opName})"; 
+
+            // 6. Creiamo il nuovo nodo (usando la Factory modificata nello step precedente)
+            var newNode = await _nodeFactory.CreateSingleImageNodeFromDataAsync(
+                this, 
+                resultData, 
+                newTitle, 
+                newX, 
+                newY
+            );
+
+            // 7. Aggiungiamo alla Board
+            Nodes.Add(newNode);
+            SetSelectedNode(newNode);
+        
+            Debug.WriteLine($"Stacking {mode} completato.");
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"Errore durante lo stacking: {ex.Message}");
+        }
+    }
+
+    private bool CanStackImages(StackingMode mode)
+    {
+        // Il comando è abilitato SOLO se il nodo selezionato è di tipo Multiplo
+        return SelectedNode is MultipleImagesNodeViewModel;
+    }
     
     // --- Metodi Privati ---
     private async Task AddSingleNodeAsync(string imagePath, double x, double y, bool centerOnPosition = false)

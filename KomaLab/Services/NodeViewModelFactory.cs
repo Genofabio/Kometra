@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using Avalonia;
 using KomaLab.Models; // <-- Ora importa la nuova gerarchIA di modelli
 using KomaLab.ViewModels;
+using KomaLab.ViewModels.Helpers;
 
 namespace KomaLab.Services;
 
@@ -135,5 +136,34 @@ public class NodeViewModelFactory : INodeViewModelFactory
         newNodeViewModel.Y = y - (size.Height / 2);
 
         return newNodeViewModel;
+    }
+    
+    public async Task<SingleImageNodeViewModel> CreateSingleImageNodeFromDataAsync(
+        BoardViewModel parent, 
+        FitsImageData data, 
+        string title, 
+        double x, 
+        double y)
+    {
+        // 1. Crea il Modello (Dati persistenti di base)
+        // Impostiamo ImagePath vuoto o speciale perché i dati non vengono letti da disco
+        var model = new SingleImageNodeModel
+        {
+            Title = title,
+            X = x,
+            Y = y,
+            ImagePath = string.Empty // Segnala che è un nodo "in-memory" o generato
+        };
+
+        // 2. Crea il ViewModel usando il costruttore standard che hai definito
+        // Nota: La Factory deve avere _fitsService e _processingService iniettati nel suo costruttore
+        var node = new SingleImageNodeViewModel(parent, model, _fitsService, _processingService);
+
+        // 3. Inietta i dati calcolati (Stacking)
+        // Questo metodo internamente creerà il FitsRenderer, calcolerà le soglie
+        // e inizializzerà la visualizzazione, esattamente come se avesse caricato un file.
+        await node.ApplyProcessedDataAsync(new List<FitsImageData> { data });
+
+        return node;
     }
 }

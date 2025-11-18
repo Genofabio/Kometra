@@ -7,6 +7,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
+using System.Threading.Tasks;
 using nom.tam.fits;
 using Point = Avalonia.Point;
 
@@ -690,4 +691,118 @@ public class ImageProcessingService : IImageProcessingService
         int sh = Math.Min(size, mat.Height - sy);
         return new Rect(sx, sy, sw, sh);
     }
+    
+    public async Task<FitsImageData> ComputeStackAsync(List<FitsImageData> sources, StackingMode mode)
+{
+    if (sources == null || sources.Count == 0) 
+        throw new ArgumentException("Nessuna immagine da processare");
+
+    // 1. Preparazione: Dimensioni e riferimento
+    // Assumiamo che tutte abbiano la stessa dimensione della prima.
+    var refData = sources[0];
+    int width = (int)refData.ImageSize.Width;
+    int height = (int)refData.ImageSize.Height;
+    int count = sources.Count;
+
+    // Creiamo la matrice risultato (64-bit Double per precisione)
+    Mat resultMat = new Mat(height, width, MatType.CV_64FC1, new Scalar(0));
+
+    await Task.Run(() =>
+    {
+        // =================================================
+        // STRATEGIA A: SOMMA O MEDIA (Veloce via OpenCV)
+        // =================================================
+        if (mode == StackingMode.Sum || mode == StackingMode.Average)
+        {
+            // Accumulatore
+            foreach (var sourceData in sources)
+            {
+                // Carica usando il metodo corretto (con BZERO applicato)
+                using Mat currentMat = LoadFitsDataAsMat(sourceData);
+                
+                // Controlla dimensioni per sicurezza
+                if (currentMat.Width != width || currentMat.Height != height) continue;
+
+                // Somma accumulativa: Result = Result + Current
+                Cv2.Add(resultMat, currentMat, resultMat);
+            }
+
+            // Se è Media, dividiamo per il numero di immagini
+            if (mode == StackingMode.Average)
+            {
+                // Result = Result * (1.0 / count)
+                resultMat *= (1.0 / count);
+            }
+        }
+        // =================================================
+        // STRATEGIA B: MEDIANA (Intensiva CPU)
+        // =================================================
+        else if (mode == StackingMode.Median)
+        {
+            // 1. Carichiamo TUTTE le matrici in memoria (Double)
+            // Nota: Richiede RAM, ma è l'unico modo veloce.
+            Mat[] stack = new Mat[count];
+            for (int i = 0; i < count; i++)
+            {
+                stack[i] = LoadFitsDataAsMat(sources[i]);
+            }
+
+            try
+            {
+                // 2. Loop Parallelo per ogni pixel
+                // Utilizziamo un unsafe context per velocità massima sui puntatori
+                // Se preferisci safe, usa gli indexer, ma qui la velocità conta.
+                // Qui uso indexer 'Generic' sicuri per semplicità di lettura, 
+                // OpenCV è abbastanza veloce.
+                
+                var resIndexer = resultMat.GetGenericIndexer<double>();
+                
+                Parallel.For(0, height, y =>
+                {
+                    // Buffer locale per ordinare i pixel di questa "colonna"
+                    double[] pixelStack = new double[count];
+
+                    for (int x = 0; x < width; x++)
+                    {
+                        // Raccogli i valori Z
+                        for (int k = 0; k < count; k++)
+                        {
+                            // Accesso diretto (ottimizzabile con puntatori se lento)
+                            pixelStack[k] = stack[k].At<double>(y, x); 
+                        }
+
+                        // Ordina
+                        Array.Sort(pixelStack);
+
+                        // Prendi il mediano
+                        double median;
+                        if (count % 2 == 0)
+                        {
+                            // Pari: media dei due centrali
+                            int mid = count / 2;
+                            median = (pixelStack[mid - 1] + pixelStack[mid]) / 2.0;
+                        }
+                        else
+                        {
+                            // Dispari: centrale esatto
+                            median = pixelStack[count / 2];
+                        }
+
+                        resIndexer[y, x] = median;
+                    }
+                });
+            }
+            finally
+            {
+                // Pulizia matrici temporanee
+                foreach (var m in stack) m?.Dispose();
+            }
+        }
+    });
+
+    // 3. Conversione finale: Mat -> FitsImageData
+    // Usiamo il metodo helper esistente per impacchettare il risultato
+    // (Passiamo refData per copiare l'header originale, utile per WCS ecc.)
+    return CreateFitsDataFromMat(resultMat, refData);
+}
 }

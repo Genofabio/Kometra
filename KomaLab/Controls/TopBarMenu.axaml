@@ -4,6 +4,7 @@
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
              xmlns:avalonia="clr-namespace:Material.Icons.Avalonia;assembly=Material.Icons.Avalonia"
              xmlns:vm="clr-namespace:KomaLab.ViewModels"
+             xmlns:models="clr-namespace:KomaLab.Models"
              mc:Ignorable="d" d:DesignWidth="800" d:DesignHeight="450"
              x:Class="KomaLab.Controls.TopBarMenu"
              x:DataType="vm:MainWindowViewModel">
@@ -49,6 +50,37 @@
                 <MenuItem.Icon>
                     <avalonia:MaterialIcon Kind="ImageFilterCenterFocus" />
                 </MenuItem.Icon>
+            </MenuItem>
+            
+            <Separator />
+
+            <MenuItem Header="Operazioni Stack">
+                <MenuItem.Icon>
+                    <avalonia:MaterialIcon Kind="Layers" />
+                </MenuItem.Icon>
+
+                <MenuItem Header="Somma"
+                          Command="{Binding BoardVm.StackImagesCommand}"
+                          CommandParameter="{x:Static models:StackingMode.Sum}">
+                    <MenuItem.Icon>
+                        <avalonia:MaterialIcon Kind="PlusBoxMultiple" />
+                    </MenuItem.Icon>
+                </MenuItem>
+
+                <MenuItem Header="Media"
+                          Command="{Binding BoardVm.StackImagesCommand}"
+                          CommandParameter="{x:Static models:StackingMode.Average}">
+                    <MenuItem.Icon>
+                        <avalonia:MaterialIcon Kind="DivisionBox" />
+                    </MenuItem.Icon>
+                </MenuItem>
+        
+                <MenuItem Header="Mediana"
+                          Command="{Binding BoardVm.StackImagesCommand}"
+                          CommandParameter="{x:Static models:StackingMode.Median}">
+                    <MenuItem.Icon>
+                        <avalonia:MaterialIcon Kind="ChartBox" /> </MenuItem.Icon>
+                </MenuItem>
             </MenuItem>
         </MenuItem>
 

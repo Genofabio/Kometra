@@ -1,4 +1,6 @@
-﻿using KomaLab.Models;
+﻿using System.Collections.Generic;
+using System.Threading.Tasks;
+using KomaLab.Models;
 using OpenCvSharp;
 using Point = Avalonia.Point;
 
@@ -98,4 +100,10 @@ public interface IImageProcessingService
     
     (Mat template, Point preciseCenter) ExtractRefinedTemplate(FitsImageData? data, Point roughGuess, int radius);
     Point? FindTemplatePosition(Mat searchImage, Mat template, Point expectedCenter, int searchRadius);
+    
+    /// <summary>
+    /// Esegue lo stacking (Somma, Media, Mediana) di una lista di immagini.
+    /// Ritorna una nuova struttura dati FITS (sempre in Double precision).
+    /// </summary>
+    Task<FitsImageData> ComputeStackAsync(List<FitsImageData> sources, StackingMode mode);
 }

@@ -27,9 +27,7 @@ public partial class SingleImageNodeViewModel : BaseNodeViewModel
     private FitsImageData? _currentData;
 
     [ObservableProperty]
-    private Helpers.FitsRenderer _fitsImage;
-    
-    public string ImagePath => _imageModel.ImagePath;
+    private FitsRenderer _fitsImage;
 
     // --- Implementazione Proprietà Astratte ---
     protected override Size NodeContentSize
