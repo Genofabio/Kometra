@@ -48,6 +48,8 @@ public abstract partial class BaseNodeViewModel : ObservableObject
     }
     protected abstract Size NodeContentSize { get; }
     
+    public abstract Task ResetThresholdsAsync();
+    
     /// <summary>
     /// Recupera la lista dei dati FITS *attualmente* in memoria per questo nodo.
     /// (Saranno i dati originali o quelli già processati).

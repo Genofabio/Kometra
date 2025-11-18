@@ -60,6 +60,16 @@
                     <avalonia:MaterialIcon Kind="Autorenew" />
                 </MenuItem.Icon>
             </MenuItem>
+
+            <Separator />
+
+            <MenuItem Header="Resetta Soglie Immagine"
+                      Classes="innerMenuItem"
+                      Command="{Binding BoardVm.ResetNormalizationCommand}">
+                <MenuItem.Icon>
+                    <avalonia:MaterialIcon Kind="Restore" />
+                </MenuItem.Icon>
+            </MenuItem>
         </MenuItem>
 
         <MenuItem Header="_Help">

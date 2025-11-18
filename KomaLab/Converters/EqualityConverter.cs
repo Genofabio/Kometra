@@ -1,6 +1,7 @@
 ﻿using Avalonia.Data.Converters;
 using System;
 using System.Globalization;
+using Avalonia.Data;
 
 namespace KomaLab.Converters;
 
@@ -19,9 +20,13 @@ public class EqualityConverter : IValueConverter
         return string.Equals(currentValue, parameterValue, StringComparison.OrdinalIgnoreCase);
     }
 
-    public object ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture)
+    public object? ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture)
     {
-        // Non necessario per questo scenario (binding OneWay)
-        throw new NotImplementedException();
+        if (value is bool isChecked && isChecked)
+        {
+            return parameter;
+        }
+        
+        return BindingOperations.DoNothing;
     }
 }

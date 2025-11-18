@@ -146,4 +146,9 @@ public partial class SingleImageNodeViewModel : BaseNodeViewModel
             
         await SetFitsData(newData);
     }
+    
+    public override async Task ResetThresholdsAsync()
+    {
+        await FitsImage.ResetThresholdsAsync();
+    }
 }

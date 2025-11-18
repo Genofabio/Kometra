@@ -68,10 +68,17 @@ public partial class BoardViewModel : ObservableObject
             await AddMultipleNodesAsync(pathList, worldX, worldY);
         }
     }
-    
+
     [RelayCommand(CanExecute = nameof(CanResetNormalization))]
-    private async Task ResetNormalization() { await Task.CompletedTask; }
-    private bool CanResetNormalization() => false;
+    private async Task ResetNormalization()
+    {
+        if (SelectedNode != null)
+        {
+            // Deleghiamo al nodo la logica di reset
+            await SelectedNode.ResetThresholdsAsync();
+        }
+    }
+    private bool CanResetNormalization() => SelectedNode != null;
     
     [RelayCommand] private void IncrementOffset() { OffsetX += 20; }
     

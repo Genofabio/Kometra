@@ -192,6 +192,18 @@ public partial class MultipleImagesNodeViewModel : BaseNodeViewModel
         await LoadImageAtIndexAsync(tempIndex);
     }
     
+    public override async Task ResetThresholdsAsync()
+    {
+        // Resetta l'immagine attiva nello stack
+        if (ActiveFitsImage != null)
+        {
+            await ActiveFitsImage.ResetThresholdsAsync();
+            
+            BlackPoint = ActiveFitsImage.BlackPoint;
+            WhitePoint = ActiveFitsImage.WhitePoint;
+        }
+    }
+    
     // --- Logica di Caricamento (Usa la Cache) ---
 
     private async Task LoadImageAtIndexAsync(int index)
