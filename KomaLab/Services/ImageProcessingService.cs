@@ -30,7 +30,7 @@ public class ImageProcessingService : IImageProcessingService
             return new Point(0, 0);
         }
 
-        // --- SOLUZIONE CRITICA: Promuovi a Float ---
+        // 1. PROMOZIONE A FLOAT IMMEDIATA (CRUCIALE)
         // Converte qualsiasi input (es. Int32 da FITS) in Float32 per i calcoli
         using Mat workingMat = new Mat();
         regionMat.ConvertTo(workingMat, MatType.CV_32FC1);
@@ -83,7 +83,7 @@ public class ImageProcessingService : IImageProcessingService
 
         if (bestLabel == -1) 
         {
-            Debug.WriteLine($"[LocalRegion] FALLBACK: Nessuna feature supera l'area minima.");
+            Debug.WriteLine($"[LocalRegion] FALLBACK: Nessuna feature supera l'area minima di {minArea} pixel.");
             return new Point(workingMat.Width / 2.0, workingMat.Height / 2.0);
         }
         
@@ -101,8 +101,7 @@ public class ImageProcessingService : IImageProcessingService
         int pH = Math.Min(bY + bH + paddingY, workingMat.Rows) - pY;
 
         Rect starRect = new Rect(pX, pY, pW, pH);
-        
-        // starCrop è una sottomatrice di workingMat (che è già Float)
+        // starCrop ora è un crop di 'workingMat', quindi è già Float
         using Mat starCrop = new Mat(workingMat, starRect);
         
         // 5. Calcolo
@@ -129,19 +128,21 @@ public class ImageProcessingService : IImageProcessingService
     {
         if (rawMat.Empty()) return new Point(-1, -1);
 
-        // 1. Pre-processing (Blur)
-        using Mat blurredMat = new Mat();
-        if (sigma > 0)
-            Cv2.GaussianBlur(rawMat, blurredMat, new Size(0, 0), sigma, sigma);
+        // 1. PROMOZIONE A FLOAT PRIMA DI TUTTO
+        using Mat workingMat = new Mat();
+        if (rawMat.Type() != MatType.CV_32FC1)
+             rawMat.ConvertTo(workingMat, MatType.CV_32FC1);
         else
-            rawMat.CopyTo(blurredMat);
-        
-        // --- SOLUZIONE CRITICA: Promuovi a Float ---
-        using Mat smoothedMat = new Mat();
-        blurredMat.ConvertTo(smoothedMat, MatType.CV_32FC1);
-        // --------------------------------------------
+             rawMat.CopyTo(workingMat);
 
-        // 2. Soglia Automatica (FWHM) su Float
+        // 2. Pre-processing (Blur su Float)
+        using Mat smoothedMat = new Mat();
+        if (sigma > 0)
+            Cv2.GaussianBlur(workingMat, smoothedMat, new Size(0, 0), sigma, sigma);
+        else
+            workingMat.CopyTo(smoothedMat);
+        
+        // 3. Soglia Automatica (FWHM)
         Cv2.MinMaxLoc(smoothedMat, out double minVal, out double maxVal);
         double dynamicRange = maxVal - minVal;
 
@@ -150,7 +151,7 @@ public class ImageProcessingService : IImageProcessingService
 
         double threshold = minVal + (dynamicRange * 0.5); 
 
-        // 3. Estrazione Punti
+        // 4. Estrazione Punti
         using Mat maskF = new Mat();
         Cv2.Threshold(smoothedMat, maskF, threshold, 1.0, ThresholdTypes.Binary);
         
@@ -175,7 +176,7 @@ public class ImageProcessingService : IImageProcessingService
             yDataList.Add(indexer[p.Y, p.X]);
         }
         
-        // 4. MathNet Fit
+        // 5. MathNet Fit
         double[][] xData = xDataList.ToArray();
         double[] yData = yDataList.ToArray();
         
@@ -235,35 +236,36 @@ public class ImageProcessingService : IImageProcessingService
     {
         if (rawMat.Empty()) return new Point(-1, -1);
         
+        // 1. PROMOZIONE A FLOAT PRIMA DI TUTTO
+        using Mat workingMat = new Mat();
+        if (rawMat.Type() != MatType.CV_32FC1)
+             rawMat.ConvertTo(workingMat, MatType.CV_32FC1);
+        else
+             rawMat.CopyTo(workingMat);
+             
+        // 2. Blur su Float
         using Mat blurredMat = new Mat();
         if (sigma > 0)
-            Cv2.GaussianBlur(rawMat, blurredMat, new Size(0, 0), sigma, sigma);
+            Cv2.GaussianBlur(workingMat, blurredMat, new Size(0, 0), sigma, sigma);
         else
-            rawMat.CopyTo(blurredMat);
+            workingMat.CopyTo(blurredMat);
         
-        // --- SOLUZIONE CRITICA: Promuovi a Float ---
-        using Mat workingMat = new Mat();
-        blurredMat.ConvertTo(workingMat, MatType.CV_32FC1);
-        // --------------------------------------------
-        
-        Cv2.MinMaxLoc(workingMat, out _, out _, out _, out OpenCvSharp.Point maxLoc);
+        Cv2.MinMaxLoc(blurredMat, out _, out _, out _, out OpenCvSharp.Point maxLoc);
         int x0 = maxLoc.X;
         int y0 = maxLoc.Y;
 
-        if (y0 <= 0 || x0 <= 0 || y0 >= workingMat.Rows - 1 || x0 >= workingMat.Cols - 1)
+        if (y0 <= 0 || x0 <= 0 || y0 >= blurredMat.Rows - 1 || x0 >= blurredMat.Cols - 1)
             return new Point(x0, y0); 
         
         try
         {
-            // Ora è sempre CV_32FC1
-            var idx = workingMat.GetGenericIndexer<float>();
+            var idx = blurredMat.GetGenericIndexer<float>();
             float c = idx[y0, x0], r = idx[y0, x0+1], l = idx[y0, x0-1], u = idx[y0-1, x0], d = idx[y0+1, x0];
             double dxx = r + l - 2*c;
             double dyy = d + u - 2*c;
             double subX = x0, subY = y0;
             if (Math.Abs(dxx) >= 1e-6) subX = x0 - ((r - l) / 2.0) / dxx;
             if (Math.Abs(dyy) >= 1e-6) subY = y0 - ((d - u) / 2.0) / dyy;
-            
             return new Point(subX, subY);
         }
         catch { return new Point(x0, y0); }
@@ -273,23 +275,26 @@ public class ImageProcessingService : IImageProcessingService
     {
         if (rawMat.Empty()) return new Point(-1, -1);
         
+        // 1. PROMOZIONE A FLOAT PRIMA DI TUTTO
+        using Mat workingMat = new Mat();
+        if (rawMat.Type() != MatType.CV_32FC1)
+             rawMat.ConvertTo(workingMat, MatType.CV_32FC1);
+        else
+             rawMat.CopyTo(workingMat);
+
+        // 2. Blur su Float
         using Mat blurredMat = new Mat();
         if (sigma > 0)
-            Cv2.GaussianBlur(rawMat, blurredMat, new Size(0, 0), sigma, sigma);
+            Cv2.GaussianBlur(workingMat, blurredMat, new Size(0, 0), sigma, sigma);
         else
-            rawMat.CopyTo(blurredMat);
+            workingMat.CopyTo(blurredMat);
 
-        // --- SOLUZIONE CRITICA: Promuovi a Float ---
-        using Mat workingMat = new Mat();
-        blurredMat.ConvertTo(workingMat, MatType.CV_32FC1);
-        // --------------------------------------------
-
-        Moments moments = Cv2.Moments(workingMat, binaryImage: false);
+        Moments moments = Cv2.Moments(blurredMat, binaryImage: false);
 
         if (moments.M00 != 0)
             return new Point(moments.M10 / moments.M00, moments.M01 / moments.M00);
     
-        return new Point(workingMat.Width / 2.0, workingMat.Height / 2.0);
+        return new Point(blurredMat.Width / 2.0, blurredMat.Height / 2.0);
     }
     
 
@@ -301,30 +306,33 @@ public class ImageProcessingService : IImageProcessingService
     {
         double destCenterX = outputSize.Width / 2.0;
         double destCenterY = outputSize.Height / 2.0;
-        
+    
         double tx = destCenterX - originalCenter.X;
         double ty = destCenterY - originalCenter.Y;
+    
+        // Usa CV_64FC1 (Double) anche per la matrice di trasformazione
+        using Mat m = new Mat(2, 3, MatType.CV_64FC1);
+        m.Set(0, 0, 1.0); m.Set(0, 1, 0.0); m.Set(0, 2, tx);
+        m.Set(1, 0, 0.0); m.Set(1, 1, 1.0); m.Set(1, 2, ty);
+    
+        // Crea il risultato direttamente in Double, inizializzato a NaN (trasparente per i FITS)
+        Mat result = new Mat(outputSize, MatType.CV_64FC1, new Scalar(double.NaN));
         
-        using Mat m = new Mat(2, 3, MatType.CV_32F);
-        m.Set(0, 0, 1.0f); m.Set(0, 1, 0.0f); m.Set(0, 2, (float)tx);
-        m.Set(1, 0, 0.0f); m.Set(1, 1, 1.0f); m.Set(1, 2, (float)ty);
-        
-        // Per il risultato finale usiamo NaN su Float
-        Mat result = new Mat(outputSize, MatType.CV_32FC1, new Scalar(double.NaN));
-        
-        // Assicurati che anche 'source' sia Float prima di Warp, altrimenti NaN diventa 0
-        using Mat sourceFloat = new Mat();
-        if (source.Type() != MatType.CV_32FC1 && source.Type() != MatType.CV_64FC1)
-             source.ConvertTo(sourceFloat, MatType.CV_32FC1);
+        using Mat sourceDouble = new Mat();
+        if (source.Type() != MatType.CV_64FC1)
+            source.ConvertTo(sourceDouble, MatType.CV_64FC1);
         else
-             source.CopyTo(sourceFloat); // O semplice assegnamento se gestito bene
-        
+            source.CopyTo(sourceDouble);
+    
+        // --- MIGLIORAMENTO: Usa Lanczos4 invece di Cubic ---
+        // Lanczos4 è molto meglio per preservare i dettagli puntiformi (stelle) 
+        // ed evita l'effetto "blur" causato dallo shift sub-pixel su dati interi.
         Cv2.WarpAffine(
-            sourceFloat, 
+            sourceDouble, 
             result, 
             m, 
             outputSize, 
-            InterpolationFlags.Cubic, 
+            InterpolationFlags.Lanczos4, 
             BorderTypes.Transparent, 
             new Scalar(double.NaN)
         );
@@ -336,7 +344,6 @@ public class ImageProcessingService : IImageProcessingService
     {
         using Mat nanMask = new Mat();
         
-        // Se è intero, non ci sono NaN, quindi tutto valido
         if (imageMat.Depth() != MatType.CV_32F && imageMat.Depth() != MatType.CV_64F)
             return new Rect(0, 0, imageMat.Width, imageMat.Height);
 
@@ -391,6 +398,21 @@ public class ImageProcessingService : IImageProcessingService
                 imageMat = new Mat(height, width, MatType.CV_32SC1);
                 imageMat.SetArray(flatDataI);
                 break;
+                
+            case 64: // Long (64-bit integer)
+                // OpenCV non ha CV_64S. Convertiamo a Double (CV_64F).
+                imageMat = new Mat(height, width, MatType.CV_64FC1);
+                var indexer = imageMat.GetGenericIndexer<double>();
+                // Eseguiamo la conversione manuale riga per riga per evitare allocazioni di un array double[] flat enorme
+                for(int y = 0; y < height; y++) 
+                {
+                    long[] row = (long[])rawJaggedData[y];
+                    for(int x = 0; x < width; x++) 
+                    {
+                         indexer[y, x] = (double)row[x];
+                    }
+                }
+                break;
 
             default:
                 Debug.WriteLine($"LoadFitsDataAsMat: BITPIX non supportato {bitpix}");
@@ -406,43 +428,38 @@ public class ImageProcessingService : IImageProcessingService
         int width = mat.Width;
         int height = mat.Height;
         Array[] jaggedData = new Array[height];
+        
+        // --- FIXED: Salviamo SEMPRE come Double (BITPIX -64) per preservare la qualità ---
+        
+        using Mat temp = new Mat();
+        if (mat.Type() != MatType.CV_64FC1)
+                mat.ConvertTo(temp, MatType.CV_64FC1);
+        else
+                mat.CopyTo(temp);
 
-        if (mat.Type() == MatType.CV_32FC1)
+        var indexer = temp.GetGenericIndexer<double>();
+        for (int j = 0; j < height; j++) 
         {
-            var indexer = mat.GetGenericIndexer<float>();
-            for (int j = 0; j < height; j++) 
+            var row = new double[width];
+            for (int i = 0; i < width; i++)
             {
-                var row = new float[width];
-                for (int i = 0; i < width; i++)
-                {
-                    row[i] = indexer[j, i];
-                }
-                jaggedData[j] = row;
+                row[i] = indexer[j, i];
             }
-        }
-        else 
-        {
-            // Fallback o Double
-            using Mat temp = new Mat();
-            mat.ConvertTo(temp, MatType.CV_64FC1);
-            var indexer = temp.GetGenericIndexer<double>();
-            for (int j = 0; j < height; j++) 
-            {
-                var row = new double[width];
-                for (int i = 0; i < width; i++)
-                {
-                    row[i] = indexer[j, i];
-                }
-                jaggedData[j] = row;
-            }
+            jaggedData[j] = row;
         }
         
+        // Update Header
         var newHeader = new Header();
         foreach (object item in originalData.FitsHeader)
         {
             if (item is System.Collections.DictionaryEntry entry && entry.Value is HeaderCard card)
+            {
+                if (card.Key.ToUpper() == "BITPIX") continue; 
                 newHeader.AddCard(card);
+            }
         }
+        // Forziamo BITPIX -64 (Double)
+        newHeader.AddCard(new HeaderCard("BITPIX", -64, "Updated by Alignment (Double Precision)"));
         
         return new FitsImageData
         {
@@ -479,6 +496,7 @@ public class ImageProcessingService : IImageProcessingService
                 32 => GetPercentilesFull(ConvertJaggedArray<int>(jaggedData)),
                 -32 => GetPercentilesFull(ConvertJaggedArray<float>(jaggedData)),
                 -64 => GetPercentilesFull(ConvertJaggedArray<double>(jaggedData)),
+                64 => GetPercentilesFull(ConvertJaggedArray<long>(jaggedData)), // Aggiunto caso 64
                 _ => (0, 255)
             };
         }
@@ -501,6 +519,7 @@ public class ImageProcessingService : IImageProcessingService
                     32 => ((int[])jaggedData[y])[x],
                     -32 => ((float[])jaggedData[y])[x],
                     -64 => ((double[])jaggedData[y])[x],
+                    64 => ((long[])jaggedData[y])[x], // Aggiunto caso 64
                     _ => 0
                 };
                 
