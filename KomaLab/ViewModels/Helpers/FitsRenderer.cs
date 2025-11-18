@@ -69,7 +69,7 @@ public partial class FitsRenderer : ObservableObject
         SetProperty(ref _whitePoint, newWhite, nameof(WhitePoint));
 
         // 3. ORA avvia la prima rigenerazione e ATTENDILA
-        await TriggerRegeneration(isInitialization: true);
+        await TriggerRegeneration();
     }
     
     // --- Logica di Rigenerazione ---
@@ -79,21 +79,20 @@ public partial class FitsRenderer : ObservableObject
     /// <summary>
     /// Avvia una rigenerazione "debounced" (anti-sfarfallio).
     /// </summary>
-    private Task TriggerRegeneration(bool isInitialization = false)
+    private Task TriggerRegeneration()
     {
         _regenerationCts?.Cancel();
         _regenerationCts = new CancellationTokenSource();
         var token = _regenerationCts.Token;
-
-        // Passa 'isInitialization' a RegeneratePreviewImageAsync
-        return RegeneratePreviewImageAsync(token, isInitialization);
+        
+        return RegeneratePreviewImageAsync(token);
     }
 
     /// <summary>
     /// Rigenera il Bitmap usando i dati grezzi e le soglie correnti.
     /// (Versione ottimizzata "zero-copy").
     /// </summary>
-    private async Task RegeneratePreviewImageAsync(CancellationToken token, bool isInitialization)
+    private async Task RegeneratePreviewImageAsync(CancellationToken token)
     {
         var writeableBmp = new WriteableBitmap(
             new PixelSize((int)_imageData.ImageSize.Width, (int)_imageData.ImageSize.Height),

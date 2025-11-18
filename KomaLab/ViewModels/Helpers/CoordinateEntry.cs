@@ -6,7 +6,7 @@ namespace KomaLab.ViewModels.Helpers;
 public partial class CoordinateEntry : ObservableObject
 {
     public int Index { get; set; }
-    public string DisplayName { get; set; } = "";
+    public string? DisplayName { get; set; } = "";
     
     // Serve per calcolare la Y invertita per la visualizzazione
     public double ImageHeight { get; set; } 

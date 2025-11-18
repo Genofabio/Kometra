@@ -1,4 +1,5 @@
-﻿using Avalonia;
+﻿using System;
+using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.VisualTree;
@@ -76,22 +77,42 @@ public partial class MultipleImagesNodeView : UserControl
     {
         if (DataContext is not MultipleImagesNodeViewModel vm)
             return;
-        
-        double currentRange = vm.WhitePoint - vm.BlackPoint;
-        if (currentRange <= 0) currentRange = 1000;
+    
+        // 1. Usa Math.Abs per garantire una direzione di scorrimento costante
+        double currentRange = Math.Abs(vm.WhitePoint - vm.BlackPoint);
+    
+        // Fallback se il range è troppo piccolo
+        if (currentRange < 1.0) currentRange = 1000.0;
 
         double stepPercentage = 0.10; 
         double deltaAmount = (currentRange * stepPercentage) * e.Delta.Y;
 
         bool isShiftPressed = (e.KeyModifiers & KeyModifiers.Shift) == KeyModifiers.Shift;
+    
+        // Gap minimo di sicurezza (1 unità)
+        double gap = 1.0;
 
         if (isShiftPressed)
         {
-            vm.BlackPoint += deltaAmount;
+            // --- MODIFICA BLACK POINT ---
+            double newBlack = vm.BlackPoint + deltaAmount;
+        
+            // BLOCCO: Il nero non può superare il (Bianco - gap)
+            double limit = vm.WhitePoint - gap;
+            if (newBlack > limit) newBlack = limit;
+
+            vm.BlackPoint = newBlack;
         }
         else
         {
-            vm.WhitePoint += deltaAmount;
+            // --- MODIFICA WHITE POINT ---
+            double newWhite = vm.WhitePoint + deltaAmount;
+        
+            // BLOCCO: Il bianco non può scendere sotto il (Nero + gap)
+            double limit = vm.BlackPoint + gap;
+            if (newWhite < limit) newWhite = limit;
+
+            vm.WhitePoint = newWhite;
         }
 
         e.Handled = true; 

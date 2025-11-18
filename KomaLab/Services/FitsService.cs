@@ -70,6 +70,20 @@ public class FitsService : IFitsService
                 }
 
                 var header = imageHdu.Header;
+                
+                // --- PUNTO DI ISPEZIONE DEBUG ---
+                double bzero = header.GetDoubleValue("BZERO", 0.0);
+                double bscale = header.GetDoubleValue("BSCALE", 1.0);
+                int bitpix = header.GetIntValue("BITPIX");
+            
+                System.Diagnostics.Debug.WriteLine($"--------------------------------------------------");
+                System.Diagnostics.Debug.WriteLine($"[FITS LOAD] File: {Path.GetFileName(assetPath)}");
+                System.Diagnostics.Debug.WriteLine($"[FITS LOAD] BITPIX: {bitpix}");
+                System.Diagnostics.Debug.WriteLine($"[FITS LOAD] BZERO : {bzero}"); // Se questo è != 0, è lui la causa
+                System.Diagnostics.Debug.WriteLine($"[FITS LOAD] BSCALE: {bscale}");
+                System.Diagnostics.Debug.WriteLine($"--------------------------------------------------");
+                // --------------------------------
+                
                 int naxis = header.GetIntValue("NAXIS");
                 if (naxis < 2) return null;
 
@@ -153,7 +167,6 @@ public class FitsService : IFitsService
         double blackPoint, double whitePoint,
         IntPtr destinationBuffer, long stride)
     {
-        // --- 2. MODIFICA NormalizeData ---
         using Mat srcMat = _processingService.LoadFitsDataAsMat(
             new FitsImageData 
             { 

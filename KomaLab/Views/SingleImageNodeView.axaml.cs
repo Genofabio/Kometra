@@ -1,4 +1,5 @@
-﻿using Avalonia;
+﻿using System;
+using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.VisualTree; 
@@ -76,23 +77,43 @@ public partial class SingleImageNodeView : UserControl
         if (DataContext is not SingleImageNodeViewModel vm)
             return;
 
-        double currentRange = vm.FitsImage.WhitePoint - vm.FitsImage.BlackPoint;
-        if (currentRange <= 0) currentRange = 1000; // Fallback
-            
+        // 1. Usa Math.Abs per evitare che la direzione si inverta se le soglie sono vicine
+        double currentRange = Math.Abs(vm.FitsImage.WhitePoint - vm.FitsImage.BlackPoint);
+    
+        // Fallback se l'immagine è piatta
+        if (currentRange < 1.0) currentRange = 1000.0; 
+        
         double stepPercentage = 0.10; 
         double deltaAmount = (currentRange * stepPercentage) * e.Delta.Y;
-            
+        
         bool isShiftPressed = (e.KeyModifiers & KeyModifiers.Shift) == KeyModifiers.Shift;
+
+        // Gap minimo di sicurezza (1 unità)
+        double gap = 1.0;
 
         if (isShiftPressed)
         {
-            vm.FitsImage.BlackPoint += deltaAmount;
+            // --- MODIFICA BLACK POINT ---
+            double newBlack = vm.FitsImage.BlackPoint + deltaAmount;
+        
+            // BLOCCO: Il nero non può superare il (Bianco - gap)
+            double limit = vm.FitsImage.WhitePoint - gap;
+            if (newBlack > limit) newBlack = limit;
+
+            vm.FitsImage.BlackPoint = newBlack;
         }
         else
         {
-            vm.FitsImage.WhitePoint += deltaAmount;
+            // --- MODIFICA WHITE POINT ---
+            double newWhite = vm.FitsImage.WhitePoint + deltaAmount;
+        
+            // BLOCCO: Il bianco non può scendere sotto il (Nero + gap)
+            double limit = vm.FitsImage.BlackPoint + gap;
+            if (newWhite < limit) newWhite = limit;
+
+            vm.FitsImage.WhitePoint = newWhite;
         }
-            
+        
         e.Handled = true; 
     }
 }

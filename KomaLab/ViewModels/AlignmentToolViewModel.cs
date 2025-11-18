@@ -146,7 +146,7 @@ public partial class AlignmentToolViewModel : ObservableObject
     public bool IsRefinementMessageVisible => IsSearchRadiusVisible && CurrentState != AlignmentState.Initial;
     public bool IsCoordinateListVisible => CurrentState != AlignmentState.Initial;
     // --- Helper Pubblici ---
-    public static IEnumerable<AlignmentMode> AlignmentModes => Enum.GetValues<AlignmentMode>();
+    public IEnumerable<AlignmentMode> AvailableAlignmentModes { get; private set; }
     public TaskCompletionSource ImageLoadedTcs { get; } = new();
 
     #endregion
@@ -164,11 +164,31 @@ public partial class AlignmentToolViewModel : ObservableObject
         _alignmentService = alignmentService;
         _processingService = processingService;
         
-        // Salva i dati
         _sourceData = sourceData;
-        _currentStackIndex = 0; // Parte sempre dal primo
+        _currentStackIndex = 0;
         _totalStackCount = sourceData.Count;
         IsStack = _totalStackCount > 1;
+
+        // --- CAMBIO 2: Popola la lista delle modalità disponibili ---
+        if (IsStack)
+        {
+            // Se è uno stack, permetti tutto
+            AvailableAlignmentModes = new[] 
+            { 
+                AlignmentMode.Automatic, 
+                AlignmentMode.Guided, 
+                AlignmentMode.Manual 
+            };
+        }
+        else
+        {
+            // Se è una singola immagine, rimuovi 'Guided' che richiede start/end
+            AvailableAlignmentModes = new[] 
+            { 
+                AlignmentMode.Automatic, 
+                AlignmentMode.Manual 
+            };
+        }
         
         Viewport.SearchRadius = this.SearchRadius;
         _ = InitializeAsync();

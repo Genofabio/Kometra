@@ -95,4 +95,7 @@ public interface IImageProcessingService
     /// Trova il rettangolo dei dati validi (escludendo bordi NaN).
     /// </summary>
     Rect FindValidDataBox(Mat imageMat);
+    
+    (Mat template, Point preciseCenter) ExtractRefinedTemplate(FitsImageData? data, Point roughGuess, int radius);
+    Point? FindTemplatePosition(Mat searchImage, Mat template, Point expectedCenter, int searchRadius);
 }

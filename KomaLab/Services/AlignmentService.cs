@@ -28,191 +28,117 @@ public class AlignmentService : IAlignmentService
     /// Esegue il calcolo dei centri per un set di immagini in base alla modalità scelta.
     /// </summary>
     public async Task<IEnumerable<Point?>> CalculateCentersAsync(
-    AlignmentMode mode, 
-    CenteringMethod method, 
-    List<FitsImageData?> sourceData, 
-    IEnumerable<Point?> currentCoordinates, 
-    int searchRadius)
-{
-    // Uscita rapida
-    if (searchRadius <= 0 && (mode == AlignmentMode.Manual || mode == AlignmentMode.Guided))
+        AlignmentMode mode, 
+        CenteringMethod method, 
+        List<FitsImageData?> sourceData, 
+        IEnumerable<Point?> currentCoordinates, 
+        int searchRadius)
     {
-        return currentCoordinates;
-    }
-
-    var guesses = currentCoordinates.ToList();
-    int N = sourceData.Count;
-    
-    // --- STRUTTURA CORRETTA ---
-    // Usiamo una lista di risultati "slot-based" o array per mantenere l'ordine,
-    // dato che i task potrebbero finire in tempi diversi.
-    Point?[] results = new Point?[N]; 
-    
-    // Limitiamo la concorrenza per non esplodere la RAM (es. max 4-8 immagini alla volta)
-    using var semaphore = new SemaphoreSlim(Environment.ProcessorCount); 
-
-    var processingTasks = new List<Task>();
-
-    // ====================================================================
-    // --- STRATEGIA 1: MANUALE ---
-    // ====================================================================
-    if (mode == AlignmentMode.Manual)
-    {
-        for (int i = 0; i < N; i++)
+        // 1. Uscita rapida se non ci sono parametri validi
+        if (searchRadius <= 0 && (mode == AlignmentMode.Manual || mode == AlignmentMode.Guided))
         {
-            int index = i; // Cattura variabile per la closure
-            var guessPoint = guesses[index];
-            var fitsData = sourceData[index];
-
-            processingTasks.Add(Task.Run(async () =>
-            {
-                await semaphore.WaitAsync(); // Attendi slot libero
-                try
-                {
-                    if (guessPoint == null || fitsData == null) 
-                    {
-                        results[index] = null;
-                        return;
-                    }
-
-                    using Mat fullImageMat = _processingService.LoadFitsDataAsMat(fitsData);
-                    Rect roiRect = CreateSafeRoi(fullImageMat, guessPoint.Value, searchRadius);
-
-                    if (roiRect.Width <= 0 || roiRect.Height <= 0)
-                    {
-                        results[index] = guessPoint;
-                        return;
-                    }
-
-                    using Mat regionCrop = new Mat(fullImageMat, roiRect);
-                    Point localCenter;
-
-                    switch (method)
-                    {
-                        case CenteringMethod.Centroid:
-                            localCenter = _processingService.GetCenterByCentroid(regionCrop);
-                            break;
-                        case CenteringMethod.GaussianFit:
-                            localCenter = _processingService.GetCenterByGaussianFit(regionCrop);
-                            break;
-                        case CenteringMethod.Peak:
-                            localCenter = _processingService.GetCenterByPeak(regionCrop);
-                            break;
-                        default: 
-                            localCenter = _processingService.GetCenterOfLocalRegion(regionCrop);
-                            break;
-                    }
-
-                    // Ricostruzione Globale
-                    results[index] = new Point(localCenter.X + roiRect.X, localCenter.Y + roiRect.Y);
-                }
-                catch (Exception ex)
-                {
-                    Debug.WriteLine($"[Manual] Err img {index}: {ex.Message}");
-                    results[index] = guessPoint; // Fallback
-                }
-                finally
-                {
-                    semaphore.Release(); // Rilascia slot
-                }
-            }));
-        }
-        
-        await Task.WhenAll(processingTasks);
-        return results;
-    }
-
-    // ====================================================================
-    // --- STRATEGIA 2: AUTOMATICA ---
-    // ====================================================================
-    else if (mode == AlignmentMode.Automatic)
-    {
-        for (int i = 0; i < N; i++)
-        {
-            int index = i;
-            var fitsData = sourceData[index];
-
-            processingTasks.Add(Task.Run(async () =>
-            {
-                await semaphore.WaitAsync();
-                try
-                {
-                    if (fitsData == null) return;
-
-                    using Mat fullImageMat = _processingService.LoadFitsDataAsMat(fitsData);
-                    Rect roiRect = new Rect(0, 0, fullImageMat.Width, fullImageMat.Height);
-                    using Mat regionCrop = new Mat(fullImageMat, roiRect);
-
-                    // Solo LocalRegion è affidabile su full frame senza guess
-                    Point localCenter = _processingService.GetCenterOfLocalRegion(regionCrop);
-                    
-                    results[index] = new Point(localCenter.X, localCenter.Y);
-                }
-                catch (Exception ex)
-                {
-                    Debug.WriteLine($"[Auto] Err img {index}: {ex.Message}");
-                    results[index] = null;
-                }
-                finally
-                {
-                    semaphore.Release();
-                }
-            }));
-        }
-
-        await Task.WhenAll(processingTasks);
-        return results;
-    }
-
-    // ====================================================================
-    // --- STRATEGIA 3: GUIDATA ---
-    // ====================================================================
-    else if (mode == AlignmentMode.Guided)
-    {
-        // Nota: Guided ha una logica sequenziale mista a parallela, 
-        // qui manteniamo la tua logica ma la incapsuliamo correttamente.
-        
-        var p1_guess = guesses.FirstOrDefault();
-        var pN_guess = guesses.LastOrDefault();
-
-        if (N < 2 || !p1_guess.HasValue || !pN_guess.HasValue || sourceData[0] == null || sourceData[N - 1] == null)
             return currentCoordinates;
+        }
 
-        Mat templateF = null;
-        Mat tempRawTemplate = null;
+        var calculateCentersAsync = currentCoordinates.ToList();
+        var guesses = calculateCentersAsync.ToList();
+        int n = sourceData.Count;
+        
+        // Array per mantenere l'ordine dei risultati anche con esecuzione parallela
+        Point?[] results = new Point?[n]; 
+        
+        // Semaforo per limitare l'uso della CPU/RAM (es. elabora max N core alla volta)
+        using var semaphore = new SemaphoreSlim(Environment.ProcessorCount); 
+        var processingTasks = new List<Task>();
 
-        try
+        // ====================================================================
+        // --- STRATEGIA 1: MANUALE ---
+        // ====================================================================
+        if (mode == AlignmentMode.Manual)
         {
-            // 1. Prepara Template (Img 0) e Target (Img N)
-            var t0 = await RefineAndExtractTemplateButReturnRaw(sourceData[0], p1_guess.Value, searchRadius);
-            tempRawTemplate = t0.template;
-            Point center1_precise = t0.preciseCenter;
-            results[0] = center1_precise; // Salviamo risultato 0
+            for (int i = 0; i < n; i++)
+            {
+                int index = i; // Cattura indice per la closure
+                var guessPoint = guesses[index];
+                var fitsData = sourceData[index];
 
-            if (tempRawTemplate == null || tempRawTemplate.Empty()) throw new Exception("Template vuoto");
-            templateF = NormalizeAndConvertTo32F(tempRawTemplate);
+                processingTasks.Add(Task.Run(async () =>
+                {
+                    await semaphore.WaitAsync(); 
+                    try
+                    {
+                        if (guessPoint == null || fitsData == null) 
+                        {
+                            results[index] = null;
+                            return;
+                        }
 
-            var tN = await RefineAndExtractTemplateButReturnRaw(sourceData[N - 1], pN_guess.Value, searchRadius);
-            Point centerN_precise = tN.preciseCenter;
-            results[N - 1] = centerN_precise; // Salviamo risultato N
-            tN.template?.Dispose();
+                        using Mat fullImageMat = _processingService.LoadFitsDataAsMat(fitsData);
+                        
+                        // Calcolo ROI sicuro (senza funzione helper privata, logica geometrica inline)
+                        int size = searchRadius * 2;
+                        int x = (int)(guessPoint.Value.X - searchRadius);
+                        int y = (int)(guessPoint.Value.Y - searchRadius);
+                        Rect imageBounds = new Rect(0, 0, fullImageMat.Width, fullImageMat.Height);
+                        Rect targetRect = new Rect(x, y, size, size);
+                        Rect roiRect = imageBounds.Intersect(targetRect);
 
-            // 2. Calcola Traiettoria
-            double stepX = (centerN_precise.X - center1_precise.X) / (N - 1);
-            double stepY = (centerN_precise.Y - center1_precise.Y) / (N - 1);
+                        if (roiRect.Width <= 0 || roiRect.Height <= 0)
+                        {
+                            results[index] = guessPoint; // ROI fuori dai bordi, mantieni guess
+                            return;
+                        }
 
-            // 3. Processa i frame intermedi
-            var intermediateTasks = new List<Task>();
+                        using Mat regionCrop = new Mat(fullImageMat, roiRect);
+                        Point localCenter;
+
+                        // Delega al service il calcolo specifico
+                        switch (method)
+                        {
+                            case CenteringMethod.Centroid:
+                                localCenter = _processingService.GetCenterByCentroid(regionCrop);
+                                break;
+                            case CenteringMethod.GaussianFit:
+                                localCenter = _processingService.GetCenterByGaussianFit(regionCrop);
+                                break;
+                            case CenteringMethod.Peak:
+                                localCenter = _processingService.GetCenterByPeak(regionCrop);
+                                break;
+                            default: // Robust Local Region
+                                localCenter = _processingService.GetCenterOfLocalRegion(regionCrop);
+                                break;
+                        }
+
+                        // Ricostruzione coordinate globali
+                        results[index] = new Point(localCenter.X + roiRect.X, localCenter.Y + roiRect.Y);
+                    }
+                    catch (Exception ex)
+                    {
+                        Debug.WriteLine($"[Manual] Err img {index}: {ex.Message}");
+                        results[index] = guessPoint; // Fallback su errore
+                    }
+                    finally
+                    {
+                        semaphore.Release();
+                    }
+                }));
+            }
             
-            for (int i = 1; i < N - 1; i++)
+            await Task.WhenAll(processingTasks);
+            return results;
+        }
+
+        // ====================================================================
+        // --- STRATEGIA 2: AUTOMATICA ---
+        // ====================================================================
+        else if (mode == AlignmentMode.Automatic)
+        {
+            for (int i = 0; i < n; i++)
             {
                 int index = i;
                 var fitsData = sourceData[index];
-                double guessX = center1_precise.X + (i * stepX);
-                double guessY = center1_precise.Y + (i * stepY);
-                Point expectedPoint = new Point(guessX, guessY);
 
-                intermediateTasks.Add(Task.Run(async () =>
+                processingTasks.Add(Task.Run(async () =>
                 {
                     await semaphore.WaitAsync();
                     try
@@ -223,52 +149,18 @@ public class AlignmentService : IAlignmentService
                             return;
                         }
 
-                        using Mat fullImage = _processingService.LoadFitsDataAsMat(fitsData);
+                        using Mat fullImageMat = _processingService.LoadFitsDataAsMat(fitsData);
                         
-                        // A. Area di ricerca estesa
-                        int searchW = searchRadius * 3;
-                        Rect searchRect = CreateSafeRoi(fullImage, expectedPoint, searchW);
-
-                        // Check bordi per template match
-                        if (searchRect.Width <= templateF.Width || searchRect.Height <= templateF.Height)
-                        {
-                            results[index] = expectedPoint; // Fallback lineare
-                            return;
-                        }
-
-                        using Mat searchRegion = new Mat(fullImage, searchRect);
-                        using Mat searchF = NormalizeAndConvertTo32F(searchRegion);
-                        using Mat res = new Mat();
-
-                        // B. Match Template
-                        Cv2.MatchTemplate(searchF, templateF, res, TemplateMatchModes.CCoeffNormed);
-                        Cv2.MinMaxLoc(res, out _, out double maxVal, out _, out OpenCvSharp.Point maxLoc);
-
-                        if (maxVal < 0.5)
-                        {
-                            results[index] = expectedPoint; // Match fallito, usa lineare
-                            return;
-                        }
-
-                        // C. Raffinamento
-                        double matchCX = maxLoc.X + (templateF.Width / 2.0);
-                        double matchCY = maxLoc.Y + (templateF.Height / 2.0);
-                        Point roughLocal = new Point(matchCX, matchCY);
+                        // In automatico usiamo l'intera immagine
+                        // GetCenterOfLocalRegion è l'unico abbastanza robusto per blind search
+                        Point center = _processingService.GetCenterOfLocalRegion(fullImageMat);
                         
-                        Rect refineRect = CreateSafeRoi(searchRegion, roughLocal, searchRadius);
-                        using Mat refineCrop = new Mat(searchRegion, refineRect);
-                        Point subPixelCenter = _processingService.GetCenterOfLocalRegion(refineCrop);
-
-                        // D. Globalizzazione
-                        double globalX = subPixelCenter.X + refineRect.X + searchRect.X;
-                        double globalY = subPixelCenter.Y + refineRect.Y + searchRect.Y;
-                        
-                        results[index] = new Point(globalX, globalY);
+                        results[index] = center;
                     }
                     catch (Exception ex)
                     {
-                        Debug.WriteLine($"[Guided] Crash Img {index}: {ex.Message}");
-                        results[index] = expectedPoint;
+                        Debug.WriteLine($"[Auto] Err img {index}: {ex.Message}");
+                        results[index] = null;
                     }
                     finally
                     {
@@ -277,25 +169,111 @@ public class AlignmentService : IAlignmentService
                 }));
             }
 
-            await Task.WhenAll(intermediateTasks);
-        }
-        catch (Exception ex)
-        {
-            Debug.WriteLine($"[Guided] Fatal Error: {ex.Message}");
-            return currentCoordinates; // Abort guided
-        }
-        finally
-        {
-            tempRawTemplate?.Dispose();
-            templateF?.Dispose();
+            await Task.WhenAll(processingTasks);
+            return results;
         }
 
-        return results;
+        // ====================================================================
+        // --- STRATEGIA 3: GUIDATA (REFECTORED SRP) ---
+        // ====================================================================
+        else if (mode == AlignmentMode.Guided)
+        {
+            var p1Guess = guesses.FirstOrDefault();
+            var pNGuess = guesses.LastOrDefault();
+
+            // Controllo preliminare requisiti Guided
+            if (n < 2 || !p1Guess.HasValue || !pNGuess.HasValue || sourceData[0] == null || sourceData[n - 1] == null)
+                return calculateCentersAsync;
+
+            Mat? templateMat = null;
+
+            try
+            {
+                // 1. Estrai Template Raffinato dalla prima immagine (Delegato al Service)
+                var t0 = _processingService.ExtractRefinedTemplate(sourceData[0], p1Guess.Value, searchRadius);
+                templateMat = t0.template;
+                Point center1Precise = t0.preciseCenter;
+                results[0] = center1Precise; 
+
+                // 2. Trova centro preciso dell'ultima immagine (solo per calcolare la traiettoria)
+                // Non serve conservare il template dell'ultima, usiamo Dispose immediato se restituito
+                var tN = _processingService.ExtractRefinedTemplate(sourceData[n - 1], pNGuess.Value, searchRadius);
+                Point centerNPrecise = tN.preciseCenter;
+                results[n - 1] = centerNPrecise;
+                tN.template.Dispose(); 
+
+                // 3. Calcola vettore traiettoria (shift per frame)
+                double stepX = (centerNPrecise.X - center1Precise.X) / (n - 1);
+                double stepY = (centerNPrecise.Y - center1Precise.Y) / (n - 1);
+
+                // 4. Elaborazione parallela dei frame intermedi
+                var intermediateTasks = new List<Task>();
+                
+                for (int i = 1; i < n - 1; i++)
+                {
+                    int index = i;
+                    var fitsData = sourceData[index];
+                    
+                    // Calcola la posizione stimata linearmente
+                    double guessX = center1Precise.X + (i * stepX);
+                    double guessY = center1Precise.Y + (i * stepY);
+                    Point expectedPoint = new Point(guessX, guessY);
+
+                    intermediateTasks.Add(Task.Run(async () =>
+                    {
+                        await semaphore.WaitAsync();
+                        try
+                        {
+                            if (fitsData == null) 
+                            {
+                                results[index] = null;
+                                return;
+                            }
+
+                            using Mat fullImage = _processingService.LoadFitsDataAsMat(fitsData);
+                            
+                            // CHIAMATA SRP: Il service cerca il template vicino al punto atteso
+                            Point? foundMatch = _processingService.FindTemplatePosition(
+                                fullImage, 
+                                templateMat, 
+                                expectedPoint, 
+                                searchRadius
+                            );
+
+                            // Se il match fallisce (null), usiamo la stima lineare come fallback
+                            results[index] = foundMatch ?? expectedPoint;
+                        }
+                        catch (Exception ex)
+                        {
+                            Debug.WriteLine($"[Guided] Crash Img {index}: {ex.Message}");
+                            results[index] = expectedPoint; // Fallback su errore
+                        }
+                        finally
+                        {
+                            semaphore.Release();
+                        }
+                    }));
+                }
+
+                await Task.WhenAll(intermediateTasks);
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[Guided] Fatal Error: {ex.Message}");
+                return calculateCentersAsync; // In caso di errore grave, ritorna coordinate originali
+            }
+            finally
+            {
+                // Importante: rilasciare il template che abbiamo tenuto vivo per tutto il loop
+                templateMat?.Dispose();
+            }
+
+            return results;
+        }
+
+        // Fallback finale
+        return calculateCentersAsync;
     }
-
-    // Default fallback se nessuna modalità corrisponde
-    return currentCoordinates;
-}
 
     public bool CanCalculate(
         AlignmentMode mode, 
@@ -397,50 +375,6 @@ public class AlignmentService : IAlignmentService
         int finalH = (int)Math.Ceiling(maxRadiusY * 2);
         
         return (finalW > 0 && finalH > 0) ? new Size(finalW, finalH) : new Size(100, 100);
-    }
-    
-    private async Task<(Mat template, Point preciseCenter)> RefineAndExtractTemplateButReturnRaw(
-        FitsImageData fitsData, Point guess, int radius)
-    {
-        using Mat fullImg = _processingService.LoadFitsDataAsMat(fitsData);
-        
-        Rect roi = CreateSafeRoi(fullImg, guess, radius);
-        if (roi.Width <= 0) throw new Exception("ROI non valida");
-        
-        // 1. Trova centro preciso usando LocalRegion (Robust Blob Detection)
-        using Mat crop = new Mat(fullImg, roi);
-        Point local = _processingService.GetCenterOfLocalRegion(crop);
-        Point global = new Point(local.X + roi.X, local.Y + roi.Y);
-        
-        // 2. Estrai Template (Clonato per persistenza)
-        Rect templRect = CreateSafeRoi(fullImg, global, radius);
-        using Mat tempView = new Mat(fullImg, templRect);
-        
-        return (tempView.Clone(), global);
-    }
-
-    private Mat NormalizeAndConvertTo32F(Mat source)
-    {
-        Mat floatMat = new Mat();
-        // Converte a Float32
-        source.ConvertTo(floatMat, MatType.CV_32FC1);
-        
-        // Normalizza tra 0 e 1 per aiutare MatchTemplate
-        Cv2.Normalize(floatMat, floatMat, 0, 1, NormTypes.MinMax);
-        
-        return floatMat;
-    }
-
-    private Rect CreateSafeRoi(Mat mat, Point center, int radius)
-    {
-        int size = radius * 2;
-        int x = (int)(center.X - radius);
-        int y = (int)(center.Y - radius);
-        int sx = Math.Max(0, x);
-        int sy = Math.Max(0, y);
-        int sw = Math.Min(size, mat.Width - sx);
-        int sh = Math.Min(size, mat.Height - sy);
-        return new Rect(sx, sy, sw, sh);
     }
 
 }

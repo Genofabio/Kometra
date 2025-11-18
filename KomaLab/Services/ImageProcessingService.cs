@@ -29,12 +29,12 @@ public class ImageProcessingService : IImageProcessingService
             Debug.WriteLine("[LocalRegion] ERRORE: Matrice di input vuota.");
             return new Point(0, 0);
         }
-
-        // 1. PROMOZIONE A FLOAT IMMEDIATA (CRUCIALE)
-        // Converte qualsiasi input (es. Int32 da FITS) in Float32 per i calcoli
+        
         using Mat workingMat = new Mat();
-        regionMat.ConvertTo(workingMat, MatType.CV_32FC1);
-        // --------------------------------------------
+        if (regionMat.Type() != MatType.CV_64FC1)
+            regionMat.ConvertTo(workingMat, MatType.CV_64FC1);
+        else
+            regionMat.CopyTo(workingMat);
 
         // 1. Statistica Robusta (su workingMat float)
         using Mat statsMat = new Mat();
@@ -130,8 +130,8 @@ public class ImageProcessingService : IImageProcessingService
 
         // 1. PROMOZIONE A FLOAT PRIMA DI TUTTO
         using Mat workingMat = new Mat();
-        if (rawMat.Type() != MatType.CV_32FC1)
-             rawMat.ConvertTo(workingMat, MatType.CV_32FC1);
+        if (rawMat.Type() != MatType.CV_64FC1)
+             rawMat.ConvertTo(workingMat, MatType.CV_64FC1);
         else
              rawMat.CopyTo(workingMat);
 
@@ -238,8 +238,8 @@ public class ImageProcessingService : IImageProcessingService
         
         // 1. PROMOZIONE A FLOAT PRIMA DI TUTTO
         using Mat workingMat = new Mat();
-        if (rawMat.Type() != MatType.CV_32FC1)
-             rawMat.ConvertTo(workingMat, MatType.CV_32FC1);
+        if (rawMat.Type() != MatType.CV_64FC1)
+             rawMat.ConvertTo(workingMat, MatType.CV_64FC1);
         else
              rawMat.CopyTo(workingMat);
              
@@ -277,8 +277,8 @@ public class ImageProcessingService : IImageProcessingService
         
         // 1. PROMOZIONE A FLOAT PRIMA DI TUTTO
         using Mat workingMat = new Mat();
-        if (rawMat.Type() != MatType.CV_32FC1)
-             rawMat.ConvertTo(workingMat, MatType.CV_32FC1);
+        if (rawMat.Type() != MatType.CV_64FC1)
+             rawMat.ConvertTo(workingMat, MatType.CV_64FC1);
         else
              rawMat.CopyTo(workingMat);
 
@@ -360,66 +360,93 @@ public class ImageProcessingService : IImageProcessingService
 
     public Mat LoadFitsDataAsMat(FitsImageData fitsData)
     {
+        if (fitsData == null) return new Mat();
+
         var rawJaggedData = (Array[])fitsData.RawData;
         int width = (int)fitsData.ImageSize.Width;
         int height = (int)fitsData.ImageSize.Height;
         int bitpix = fitsData.FitsHeader.GetIntValue("BITPIX");
 
-        Mat imageMat;
+        // 1. RECUPERO PARAMETRI DI CORREZIONE FISICA
+        // Se non ci sono, i default sono: scala=1, zero=0
+        double bscale = fitsData.FitsHeader.GetDoubleValue("BSCALE", 1.0);
+        double bzero = fitsData.FitsHeader.GetDoubleValue("BZERO", 0.0);
+
+        Mat imageMat = new Mat(); // Matrice finale (Double)
 
         switch (bitpix)
         {
-            case -32: // Float
+            // --- CASO FLOAT/DOUBLE ---
+            // Di solito hanno bscale=1 e bzero=0, ma li applichiamo per sicurezza.
+            case -32: 
                 float[] flatDataF = ConvertJaggedToFlat<float>(rawJaggedData, width, height);
-                imageMat = new Mat(height, width, MatType.CV_32FC1);
-                imageMat.SetArray(flatDataF);
-                break;
-            
-            case -64: // Double
-                double[] flatDataD = ConvertJaggedToFlat<double>(rawJaggedData, width, height);
-                imageMat = new Mat(height, width, MatType.CV_64FC1);
-                imageMat.SetArray(flatDataD);
-                break;
-        
-            case 16: // Short
-                short[] flatDataS = ConvertJaggedToFlat<short>(rawJaggedData, width, height);
-                imageMat = new Mat(height, width, MatType.CV_16SC1);
-                imageMat.SetArray(flatDataS);
-                break;
-
-            case 8: // Byte
-                byte[] flatDataB = ConvertJaggedToFlat<byte>(rawJaggedData, width, height);
-                imageMat = new Mat(height, width, MatType.CV_8UC1);
-                imageMat.SetArray(flatDataB);
-                break;
-
-            case 32: // Int
-                int[] flatDataI = ConvertJaggedToFlat<int>(rawJaggedData, width, height);
-                imageMat = new Mat(height, width, MatType.CV_32SC1);
-                imageMat.SetArray(flatDataI);
+                using (Mat tempF = new Mat(height, width, MatType.CV_32FC1))
+                {
+                    tempF.SetArray(flatDataF);
+                    // Converte a Double e applica la formula: Valore = (Raw * bscale) + bzero
+                    tempF.ConvertTo(imageMat, MatType.CV_64FC1, bscale, bzero);
+                }
                 break;
                 
-            case 64: // Long (64-bit integer)
-                // OpenCV non ha CV_64S. Convertiamo a Double (CV_64F).
+            case -64:
+                double[] flatDataD = ConvertJaggedToFlat<double>(rawJaggedData, width, height);
+                using (Mat tempD = new Mat(height, width, MatType.CV_64FC1))
+                {
+                    tempD.SetArray(flatDataD);
+                    tempD.ConvertTo(imageMat, MatType.CV_64FC1, bscale, bzero);
+                }
+                break;
+
+            // --- CASO INTERI (Il colpevole dello sfarfallio) ---
+            // Qui bzero corregge i valori negativi trasformandoli in positivi corretti.
+            
+            case 8:
+                byte[] flatDataB = ConvertJaggedToFlat<byte>(rawJaggedData, width, height);
+                using (Mat temp8 = new Mat(height, width, MatType.CV_8UC1))
+                {
+                    temp8.SetArray(flatDataB);
+                    temp8.ConvertTo(imageMat, MatType.CV_64FC1, bscale, bzero);
+                }
+                break;
+
+            case 16:
+                short[] flatDataS = ConvertJaggedToFlat<short>(rawJaggedData, width, height);
+                using (Mat temp16 = new Mat(height, width, MatType.CV_16SC1))
+                {
+                    temp16.SetArray(flatDataS);
+                    // Esempio critico: Se il pixel è -32768 e bzero è 32768 -> diventa 0.0
+                    temp16.ConvertTo(imageMat, MatType.CV_64FC1, bscale, bzero);
+                }
+                break;
+
+            case 32:
+                int[] flatDataI = ConvertJaggedToFlat<int>(rawJaggedData, width, height);
+                using (Mat temp32 = new Mat(height, width, MatType.CV_32SC1))
+                {
+                    temp32.SetArray(flatDataI);
+                    temp32.ConvertTo(imageMat, MatType.CV_64FC1, bscale, bzero);
+                }
+                break;
+
+            case 64: // Long (Raro, fallback manuale)
                 imageMat = new Mat(height, width, MatType.CV_64FC1);
                 var indexer = imageMat.GetGenericIndexer<double>();
-                // Eseguiamo la conversione manuale riga per riga per evitare allocazioni di un array double[] flat enorme
                 for(int y = 0; y < height; y++) 
                 {
                     long[] row = (long[])rawJaggedData[y];
                     for(int x = 0; x < width; x++) 
                     {
-                         indexer[y, x] = (double)row[x];
+                        // Applichiamo manualmente la formula
+                        indexer[y, x] = ((double)row[x] * bscale) + bzero;
                     }
                 }
                 break;
 
             default:
                 Debug.WriteLine($"LoadFitsDataAsMat: BITPIX non supportato {bitpix}");
-                imageMat = new Mat();
                 break;
         }
-    
+
         return imageMat;
     }
     
@@ -474,61 +501,67 @@ public class ImageProcessingService : IImageProcessingService
         int bitpix = fitsData.FitsHeader.GetIntValue("BITPIX");
         var jagged = (Array[])fitsData.RawData;
 
-        return CalculateQuantilesBySampling(jagged, bitpix);
+        // 1. RECUPERA I FATTORI DI CORREZIONE
+        // FITS standard: se mancano, scale=1 e zero=0
+        double bscale = fitsData.FitsHeader.GetDoubleValue("BSCALE", 1.0);
+        double bzero = fitsData.FitsHeader.GetDoubleValue("BZERO", 0.0);
+
+        // 2. Passali al calcolatore
+        return CalculateQuantilesBySampling(jagged, bitpix, bscale, bzero);
     }
     
     // --- Helpers Privati ---
 
-    private (double, double) CalculateQuantilesBySampling(Array[] jaggedData, int bitpix, int maxSamples = 20000)
+    private (double, double) CalculateQuantilesBySampling(
+        Array[] jaggedData, 
+        int bitpix, 
+        double bscale, 
+        double bzero, 
+        int maxSamples = 20000)
     {
         if (jaggedData.Length == 0) return (0, 255);
 
         int height = jaggedData.Length;
         int width = jaggedData[0].Length;
         long totalPixels = (long)height * width;
-        
-        if (totalPixels <= maxSamples)
-        {
-             return bitpix switch
-            {
-                8 => GetPercentilesFull(ConvertJaggedArray<byte>(jaggedData)),
-                16 => GetPercentilesFull(ConvertJaggedArray<short>(jaggedData)),
-                32 => GetPercentilesFull(ConvertJaggedArray<int>(jaggedData)),
-                -32 => GetPercentilesFull(ConvertJaggedArray<float>(jaggedData)),
-                -64 => GetPercentilesFull(ConvertJaggedArray<double>(jaggedData)),
-                64 => GetPercentilesFull(ConvertJaggedArray<long>(jaggedData)), // Aggiunto caso 64
-                _ => (0, 255)
-            };
-        }
-
+    
         var samples = new List<double>(maxSamples);
-        double step = totalPixels / (double)maxSamples;
+        // Calcola un passo sicuro per saltare i pixel
+        double step = Math.Max(1.0, totalPixels / (double)maxSamples);
 
         for (int i = 0; i < maxSamples; i++)
         {
             long pixelIndex = (long)(i * step); 
+            if (pixelIndex >= totalPixels) break;
+
             int y = (int)(pixelIndex / width);
             int x = (int)(pixelIndex % width);
 
             try
             {
-                double val = bitpix switch
+                // 1. Leggi il valore RAW (che per gli interi può essere negativo!)
+                double rawVal = bitpix switch
                 {
                     8 => ((byte[])jaggedData[y])[x],
                     16 => ((short[])jaggedData[y])[x],
                     32 => ((int[])jaggedData[y])[x],
                     -32 => ((float[])jaggedData[y])[x],
                     -64 => ((double[])jaggedData[y])[x],
-                    64 => ((long[])jaggedData[y])[x], // Aggiunto caso 64
+                    64 => ((long[])jaggedData[y])[x],
                     _ => 0
                 };
-                
-                if (!double.IsNaN(val) && !double.IsInfinity(val) && val != 0)
-                    samples.Add(val);
+            
+                // 2. APPLICA LA CORREZIONE FISICA
+                // Trasforma il valore raw (es: -32768) nel valore fisico (es: 0.0)
+                // Ora questo valore è COERENTE con quello che vede OpenCV nella Matrice.
+                double physicalVal = (rawVal * bscale) + bzero;
+
+                if (!double.IsNaN(physicalVal) && !double.IsInfinity(physicalVal))
+                    samples.Add(physicalVal);
             }
             catch { }
         }
-        
+    
         return CalculateQuantiles(samples);
     }
 
@@ -566,5 +599,95 @@ public class ImageProcessingService : IImageProcessingService
             k += width;
         }
         return flatArray;
+    }
+    
+    public (Mat template, Point preciseCenter) ExtractRefinedTemplate(FitsImageData? data, Point roughGuess, int radius)
+    {
+        using Mat fullImg = LoadFitsDataAsMat(data);
+        
+        Rect roi = CreateSafeRoi(fullImg, roughGuess, radius);
+        if (roi.Width <= 0) throw new Exception("ROI non valida per estrazione template");
+        
+        // 1. Trova centro preciso localmente
+        using Mat crop = new Mat(fullImg, roi);
+        Point local = GetCenterOfLocalRegion(crop);
+        Point global = new Point(local.X + roi.X, local.Y + roi.Y);
+        
+        // 2. Estrai Template (Clonato per persistenza fuori dal using)
+        Rect templRect = CreateSafeRoi(fullImg, global, radius);
+        using Mat tempRaw = new Mat(fullImg, templRect);
+        
+        // Normalizziamo subito qui per l'uso nel matching
+        Mat templateF = NormalizeAndConvertToFloat(tempRaw);
+        
+        return (templateF, global);
+    }
+
+    public Point? FindTemplatePosition(Mat fullImage, Mat templateF, Point expectedCenter, int searchRadius)
+    {
+        // A. Area di ricerca estesa
+        int searchW = searchRadius * 3;
+        Rect searchRect = CreateSafeRoi(fullImage, expectedCenter, searchW);
+
+        // Check bordi
+        if (searchRect.Width <= templateF.Width || searchRect.Height <= templateF.Height)
+            return null; // Fallback gestito dal chiamante
+
+        using Mat searchRegion = new Mat(fullImage, searchRect);
+        using Mat searchF = NormalizeAndConvertToFloat(searchRegion);
+        using Mat res = new Mat();
+
+        // B. Match Template
+        Cv2.MatchTemplate(searchF, templateF, res, TemplateMatchModes.CCoeffNormed);
+        Cv2.MinMaxLoc(res, out _, out double maxVal, out _, out OpenCvSharp.Point maxLoc);
+
+        if (maxVal < 0.5) return null; // Match fallito
+
+        // C. Calcolo posizione
+        double matchCx = maxLoc.X + (templateF.Width / 2.0);
+        double matchCy = maxLoc.Y + (templateF.Height / 2.0);
+        
+        // D. Raffinamento Sub-Pixel (opzionale ma consigliato)
+        Point roughLocal = new Point(matchCx, matchCy);
+        Rect refineRect = CreateSafeRoi(searchRegion, roughLocal, searchRadius); // Usa raggio originale per raffinare
+        
+        Point subPixelCenter;
+        if (refineRect.Width > 0 && refineRect.Height > 0)
+        {
+            using Mat refineCrop = new Mat(searchRegion, refineRect);
+            Point localRefined = GetCenterOfLocalRegion(refineCrop); // Riutilizza la logica robusta
+            subPixelCenter = new Point(localRefined.X + refineRect.X, localRefined.Y + refineRect.Y);
+        }
+        else
+        {
+            subPixelCenter = roughLocal;
+        }
+
+        // E. Globalizzazione
+        return new Point(subPixelCenter.X + searchRect.X, subPixelCenter.Y + searchRect.Y);
+    }
+
+    // Helper resi privati o interni al service
+    private Mat NormalizeAndConvertToFloat(Mat source)
+    {
+        Mat floatMat = new Mat();
+        MatType targetType = (source.Type() == MatType.CV_64FC1) ? MatType.CV_64FC1 : MatType.CV_32FC1;
+    
+        source.ConvertTo(floatMat, targetType); 
+        Cv2.Normalize(floatMat, floatMat, 0, 1, NormTypes.MinMax);
+    
+        return floatMat;
+    }
+
+    private Rect CreateSafeRoi(Mat mat, Point center, int radius)
+    {
+        int size = radius * 2;
+        int x = (int)(center.X - radius);
+        int y = (int)(center.Y - radius);
+        int sx = Math.Max(0, x);
+        int sy = Math.Max(0, y);
+        int sw = Math.Min(size, mat.Width - sx);
+        int sh = Math.Min(size, mat.Height - sy);
+        return new Rect(sx, sy, sw, sh);
     }
 }
