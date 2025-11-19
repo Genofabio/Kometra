@@ -128,6 +128,21 @@ public partial class BoardViewModel : ObservableObject
         StackImagesCommand.NotifyCanExecuteChanged();
     }
     
+    /// <summary>
+    /// Chiamato da un nodo subito prima di rimuovere se stesso.
+    /// Gestisce la deselezione se l'oggetto rimosso era quello selezionato.
+    /// </summary>
+    public void RemoveNode(BaseNodeViewModel nodeToRemove)
+    {
+        // Se il nodo che sta per essere rimosso è quello attualmente selezionato
+        if (SelectedNode == nodeToRemove)
+        {
+            // Imposta SelectedNode a null e notifica la deselezione.
+            DeselectAllNodes(); 
+        }
+        Nodes.Remove(nodeToRemove);
+    }
+    
     public void DeselectAllNodes()
     {
         if (SelectedNode != null)

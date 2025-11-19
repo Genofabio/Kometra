@@ -81,7 +81,7 @@ public abstract partial class BaseNodeViewModel : ObservableObject
     [RelayCommand]
     private void RemoveSelf()
     {
-        ParentBoard.Nodes.Remove(this); 
+        ParentBoard.RemoveNode(this);
     }
 
     // --- Metodi Pubblici ---

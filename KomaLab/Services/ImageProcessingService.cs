@@ -451,20 +451,20 @@ public class ImageProcessingService : IImageProcessingService
         return imageMat;
     }
     
-    public FitsImageData CreateFitsDataFromMat(Mat mat, FitsImageData originalData)
+    public FitsImageData CreateFitsDataFromMat(Mat processedMat, FitsImageData originalData)
     {
-        int width = mat.Width;
-        int height = mat.Height;
+        int width = processedMat.Width;
+        int height = processedMat.Height;
         Array[] jaggedData = new Array[height];
         
-        // --- FIXED: Salviamo SEMPRE come Double (BITPIX -64) per preservare la qualità ---
-        
+        // 1. PREPARA LA MATRICE PROCESSED PER L'ESTRAZIONE (Tua Logica Invariata)
         using Mat temp = new Mat();
-        if (mat.Type() != MatType.CV_64FC1)
-                mat.ConvertTo(temp, MatType.CV_64FC1);
+        if (processedMat.Type() != MatType.CV_64FC1)
+            processedMat.ConvertTo(temp, MatType.CV_64FC1);
         else
-                mat.CopyTo(temp);
+            processedMat.CopyTo(temp);
 
+        // 2. CONVERSIONE MAT -> JAGGED ARRAY (Tua Logica Invariata)
         var indexer = temp.GetGenericIndexer<double>();
         for (int j = 0; j < height; j++) 
         {
@@ -476,23 +476,40 @@ public class ImageProcessingService : IImageProcessingService
             jaggedData[j] = row;
         }
         
-        // Update Header
+        // 3. CREAZIONE NUOVO HEADER e COPIA/NEUTRALIZZAZIONE
         var newHeader = new Header();
+        
+        // Chiavi da ignorare/sovrascrivere esplicitamente
+        var keysToNeutralize = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "BITPIX", "BSCALE", "BZERO", "DATAMIN", "DATAMAX"
+        };
+
+        // Copia tutte le altre schede FITS (WCS, oggetto, telescopio, ecc.)
         foreach (object item in originalData.FitsHeader)
         {
             if (item is System.Collections.DictionaryEntry entry && entry.Value is HeaderCard card)
             {
-                if (card.Key.ToUpper() == "BITPIX") continue; 
-                newHeader.AddCard(card);
+                if (!keysToNeutralize.Contains(card.Key)) 
+                {
+                    newHeader.AddCard(card);
+                }
             }
         }
-        // Forziamo BITPIX -64 (Double)
-        newHeader.AddCard(new HeaderCard("BITPIX", -64, "Updated by Alignment (Double Precision)"));
+
+        // 4. AGGIUNGIAMO I METADATI NEUTRALIZZATI (Sovrascrittura)
+        // Dichiara che i dati nel RawData sono ora Double (BITPIX -64)
+        newHeader.AddValue("BITPIX", -64, "Data is now 64-bit Floating Point (Double)"); 
         
+        // Neutralizza scala e offset per impedire la doppia correzione BZERO
+        newHeader.AddValue("BSCALE", 1.0, "Scale factor neutralised");
+        newHeader.AddValue("BZERO", 0.0, "Offset neutralised");
+        
+        // --- 5. RITORNA IL NUOVO OGGETTO ---
         return new FitsImageData
         {
             RawData = jaggedData,
-            FitsHeader = newHeader,
+            FitsHeader = newHeader, // Usa l'header pulito
             ImageSize = new Avalonia.Size(width, height)
         };
     }
@@ -578,7 +595,7 @@ public class ImageProcessingService : IImageProcessingService
         var list = pixelValues.ToList();
         if (list.Count == 0) return (0, 255);
         
-        double b = Statistics.Quantile(list, 0.02);
+        double b = Statistics.Quantile(list, 0.15);
         double w = Statistics.Quantile(list, 0.998);
         return (w <= b) ? (list.Min(), list.Max()) : (b, w);
     }
@@ -672,9 +689,8 @@ public class ImageProcessingService : IImageProcessingService
     private Mat NormalizeAndConvertToFloat(Mat source)
     {
         Mat floatMat = new Mat();
-        MatType targetType = (source.Type() == MatType.CV_64FC1) ? MatType.CV_64FC1 : MatType.CV_32FC1;
-    
-        source.ConvertTo(floatMat, targetType); 
+        source.ConvertTo(floatMat, MatType.CV_32FC1); 
+        
         Cv2.Normalize(floatMat, floatMat, 0, 1, NormTypes.MinMax);
     
         return floatMat;
