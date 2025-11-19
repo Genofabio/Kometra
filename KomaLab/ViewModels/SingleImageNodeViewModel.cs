@@ -74,9 +74,6 @@ public partial class SingleImageNodeViewModel : BaseNodeViewModel
     {
         // 1. Notifico che la dimensione del nodo è cambiata
         OnPropertyChanged(nameof(NodeContentSize));
-        
-        // 2. Avvia l'inizializzazione asincrona (che calcola le soglie)
-        _ = value?.InitializeAsync();
     }
 
     /// <summary>

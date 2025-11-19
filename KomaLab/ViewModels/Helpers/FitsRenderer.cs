@@ -53,8 +53,6 @@ public partial class FitsRenderer : ObservableObject
         _imageData = imageData;
         _fitsService = fitsService;
         _processingService = processingService;
-        
-        // Le soglie vengono impostate da InitializeAsync
     }
     
     /// <summary>

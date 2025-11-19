@@ -51,10 +51,25 @@ public class ImageProcessingService : IImageProcessingService
         }
 
         // 2. Parametri Dinamici
-        double threshold = minVal + (dynamicRange * 0.2); 
-        int minArea = 5; 
+        // Invece di MinMaxLoc, calcoliamo Media e Deviazione Standard.
+        // Questo ci dice qual è il "rumore di fondo" reale.
+        using Mat meanMat = new Mat();
+        using Mat stdDevMat = new Mat();
+        Cv2.MeanStdDev(workingMat, meanMat, stdDevMat);
+    
+        double mean = meanMat.Get<double>(0, 0);
+        double sigma = stdDevMat.Get<double>(0, 0);
+    
+        // Parametro K (Sigma Factor):
+        // - 3.0: Standard astronomico (prende il 99.7% del rumore come fondo)
+        // - 2.0: Più aggressivo, prende anche la chioma debole della cometa (ma rischia più rumore)
+        // - 5.0: Prende solo i nuclei forti.
+        double kSigma = 3.0; 
+    
+        double threshold = mean + (sigma * kSigma);
+        int minArea = 8;
 
-        Debug.WriteLine($"[LocalRegion] Statistiche: Min={minVal:F2}, Max={maxVal:F2}, Soglia={threshold:F2}");
+        Debug.WriteLine($"[LocalRegion] Statistica: Media={mean:F2}, Sigma={sigma:F2}, Soglia={threshold:F2} (K={kSigma})");
 
         // 3. Blob Detection
         using Mat maskF = new Mat();
@@ -129,80 +144,98 @@ public class ImageProcessingService : IImageProcessingService
     {
         if (rawMat.Empty()) return new Point(-1, -1);
 
-        // 1. PROMOZIONE A FLOAT PRIMA DI TUTTO
+        // 1. PROMOZIONE A DOUBLE (Se necessario)
         using Mat workingMat = new Mat();
         if (rawMat.Type() != MatType.CV_64FC1)
              rawMat.ConvertTo(workingMat, MatType.CV_64FC1);
         else
              rawMat.CopyTo(workingMat);
 
-        // 2. Pre-processing (Blur su Float)
+        // 2. Pre-processing (Blur)
         using Mat smoothedMat = new Mat();
         if (sigma > 0)
             Cv2.GaussianBlur(workingMat, smoothedMat, new Size(0, 0), sigma, sigma);
         else
             workingMat.CopyTo(smoothedMat);
         
-        // 3. Soglia Automatica (FWHM)
+        // 3. Analisi Min/Max per Normalizzazione
         Cv2.MinMaxLoc(smoothedMat, out double minVal, out double maxVal);
         double dynamicRange = maxVal - minVal;
 
+        // Fallback se piatto
         if (dynamicRange <= 1e-6) 
             return GetCenterByPeak(smoothedMat, sigma: 0); 
 
-        double threshold = minVal + (dynamicRange * 0.5); 
+        // --- CALCOLO FATTORE DI SCALA ---
+        // Questo è il trucco: portiamo tutto nel range 0.0 - 1.0
+        double scaleFactor = 1.0 / dynamicRange;
 
-        // 4. Estrazione Punti
+        // 4. Estrazione Punti (Soglia al 20% del range dinamico sopra il minimo)
+        // Usiamo una soglia bassa per avere abbastanza punti per il fit
+        double threshold = minVal + (dynamicRange * 0.2); 
+
         using Mat maskF = new Mat();
         Cv2.Threshold(smoothedMat, maskF, threshold, 1.0, ThresholdTypes.Binary);
         
         using Mat mask8U = new Mat();
-        maskF.ConvertTo(mask8U, MatType.CV_8UC1, 255.0);
+        maskF.ConvertTo(mask8U, MatType.CV_8UC1);
         
-        // Ottimizzazione FindNonZero corretta
         using Mat locationsMat = new Mat();
         Cv2.FindNonZero(mask8U, locationsMat);
+        
+        // Servono almeno 6 punti per fittare una Gaussiana 2D (6 parametri)
+        if (locationsMat.Total() < 6) return GetCenterByPeak(smoothedMat, sigma: 0);
+        
         locationsMat.GetArray(out OpenCvSharp.Point[] locations);
 
-        if (locations.Length < 6) return GetCenterByPeak(smoothedMat, sigma: 0);
-
+        // 5. Preparazione Dati Normalizzati per MathNet
         List<double[]> xDataList = new List<double[]>(locations.Length);
         List<double> yDataList = new List<double>(locations.Length);
         
-        // smoothedMat è SEMPRE CV_32FC1 qui
-        var indexer = smoothedMat.GetGenericIndexer<float>();
+        var indexer = smoothedMat.GetGenericIndexer<double>();
+        
+        double xoInitNum = 0, yoInitNum = 0, weightSum = 0;
+
         foreach (var p in locations)
         {
+            double rawVal = indexer[p.Y, p.X];
+            
+            // --- NORMALIZZAZIONE QUI ---
+            // Trasformiamo 60.000 in ~1.0
+            double normVal = (rawVal - minVal) * scaleFactor;
+            
             xDataList.Add(new double[] { p.X, p.Y });
-            yDataList.Add(indexer[p.Y, p.X]);
+            yDataList.Add(normVal);
+
+            // Calcolo baricentro pesato sui dati normalizzati per il guess iniziale
+            double w = Math.Max(0, normVal); 
+            xoInitNum += p.X * w;
+            yoInitNum += p.Y * w;
+            weightSum += w;
         }
-        
-        // 5. MathNet Fit
+
+        if (weightSum <= 1e-9) return GetCenterByPeak(smoothedMat, sigma: 0);
+
+        // 6. MathNet Fit (su dati normalizzati)
         double[][] xData = xDataList.ToArray();
         double[] yData = yDataList.ToArray();
         
-        double xoInitNum = 0, yoInitNum = 0, weightSum = 0;
-        for(int i = 0; i < yData.Length; i++)
-        {
-            double w = Math.Max(0, yData[i] - minVal); 
-            xoInitNum += xData[i][0] * w;
-            yoInitNum += xData[i][1] * w;
-            weightSum += w;
-        }
-        if (weightSum <= 1e-9) return GetCenterByPeak(smoothedMat, sigma: 0);
-
+        // Initial Guess:
+        // Ampiezza = 1.0 (perché abbiamo normalizzato al max)
+        // Offset = 0.0 (perché abbiamo sottratto il min)
         var initialGuess = Vector<double>.Build.Dense([
-            dynamicRange, xoInitNum / weightSum, yoInitNum / weightSum, 
-            3.0, 3.0, minVal
+            1.0, xoInitNum / weightSum, yoInitNum / weightSum, 
+            3.0, 3.0, 0.0
         ]);
         
-        var lowerBounds = Vector<double>.Build.Dense([0, 0, 0, 0.1, 0.1, -double.MaxValue]);
-        var upperBounds = Vector<double>.Build.Dense([double.MaxValue, smoothedMat.Width, smoothedMat.Height, smoothedMat.Width, smoothedMat.Height, double.MaxValue]);
+        // Bounds Stretti e Stabili (grazie alla normalizzazione)
+        var lowerBounds = Vector<double>.Build.Dense([0.0, 0, 0, 0.1, 0.1, -0.2]);
+        var upperBounds = Vector<double>.Build.Dense([1.5, smoothedMat.Width, smoothedMat.Height, smoothedMat.Width, smoothedMat.Height, 0.5]);
 
         try
         {
-            double minSig = yData.Where(y => y > 0).DefaultIfEmpty(1.0).Min();
-            var weightsVector = Vector<double>.Build.Dense(yData.Length, i => 1.0 / Math.Sqrt(Math.Max(Math.Abs(yData[i]), minSig)));
+            // Pesi uniformi (o pesati sull'intensità, ma uniformi è più stabile qui)
+            var weightsVector = Vector<double>.Build.Dense(yData.Length, 1.0); 
             var yDataVector = Vector<double>.Build.Dense(yData);
 
             Func<Vector<double>, double> objectiveFunc = (p) =>
@@ -214,22 +247,22 @@ public class ImageProcessingService : IImageProcessingService
                     double dy = (xData[i][1] - yo);
                     return off + amp * Math.Exp(-0.5 * ((dx*dx)/(sX*sX) + (dy*dy)/(sY*sY)));
                 });
-                return (yDataVector - model).PointwiseMultiply(weightsVector).L2Norm();
+                return (yDataVector - model).L2Norm();
             };
 
-            var result = FindMinimum.OfFunctionConstrained(objectiveFunc, lowerBounds, upperBounds, initialGuess, maxIterations: 100);
+            // Aumentiamo le iterazioni perché ora la convergenza è possibile
+            var result = FindMinimum.OfFunctionConstrained(objectiveFunc, lowerBounds, upperBounds, initialGuess, maxIterations: 1000);
             
-            if (double.IsNaN(result[1]) || double.IsNaN(result[2])) throw new Exception("NaN Fit");
+            if (double.IsNaN(result[1]) || double.IsNaN(result[2])) throw new Exception("NaN Fit Result");
+            
+            // Ritorna Xo, Yo (che sono in pixel reali, non affetti dalla normalizzazione Z)
             return new Point(result[1], result[2]);
         }
         catch (Exception ex)
         {
             Debug.WriteLine($"GaussianFit Fallback: {ex.Message}");
-            using Mat mask8UFallback = new Mat();
-            maskF.ConvertTo(mask8UFallback, MatType.CV_8UC1, 255.0);
-            using Mat masked = Mat.Zeros(smoothedMat.Size(), smoothedMat.Type());
-            smoothedMat.CopyTo(masked, mask8UFallback);
-            return GetCenterByPeak(masked, sigma: 0);
+            // Fallback: Peak è meglio del centro geometrico se il fit fallisce
+            return GetCenterByPeak(smoothedMat, sigma: 0);
         }
     }
 

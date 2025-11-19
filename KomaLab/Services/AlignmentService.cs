@@ -48,7 +48,8 @@ public class AlignmentService : IAlignmentService
         Point?[] results = new Point?[n]; 
         
         // Semaforo per limitare l'uso della CPU/RAM (es. elabora max N core alla volta)
-        using var semaphore = new SemaphoreSlim(Environment.ProcessorCount); 
+        int maxConcurrency = Math.Min(4, Environment.ProcessorCount);
+        using var semaphore = new SemaphoreSlim(maxConcurrency); 
         var processingTasks = new List<Task>();
 
         // ====================================================================
