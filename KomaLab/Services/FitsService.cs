@@ -7,6 +7,7 @@ using Avalonia.Platform;
 using KomaLab.Models;
 using MathNet.Numerics.Statistics;
 using nom.tam.fits;
+using nom.tam.util;
 using OpenCvSharp;
 using Size = Avalonia.Size;
 
@@ -195,4 +196,65 @@ public class FitsService : IFitsService
         sourceMat.ConvertTo(dstMat, MatType.CV_8UC1, alpha, beta);
     }
     
+    public async Task SaveFitsFileAsync(FitsImageData data, string destinationPath)
+    {
+        await Task.Run(() =>
+        {
+            // 1. PREPARAZIONE DATI (Flip Verticale)
+            // Dobbiamo clonare e invertire l'array per rispettare lo standard FITS (Bottom-Left origin)
+            // data.RawData è un Array[] (array di righe).
+            
+            var originalSource = (Array)data.RawData;
+            
+            // Creiamo una copia superficiale (Shallow Copy).
+            // Per un array jagged (double[][]), questo crea un nuovo array che punta alle stesse righe.
+            // È veloce e sicuro perché stiamo solo riordinando le righe (Reverse), non modificando i valori dei pixel.
+            var arrayToSave = (Array)originalSource.Clone();
+            
+            // Invertiamo l'ordine delle righe (Flip Y)
+            Array.Reverse(arrayToSave);
+
+            // 2. Creazione HDU dai dati invertiti
+            var hdu = FitsFactory.HDUFactory(arrayToSave);
+            
+            // 3. Copia Header (Identico a prima)
+            var newHeader = hdu.Header;
+            var cursor = data.FitsHeader.GetCursor();
+            
+            while (cursor.MoveNext())
+            {
+                // Fix Casting per CSharpFITS
+                HeaderCard card;
+                if (cursor.Current is System.Collections.DictionaryEntry entry)
+                    card = (HeaderCard)entry.Value;
+                else if (cursor.Current is HeaderCard hCard)
+                    card = hCard;
+                else
+                    continue;
+
+                string key = card.Key.ToUpper();
+
+                if (key == "SIMPLE" || key == "BITPIX" || key == "EXTEND" ||
+                    key == "PCOUNT" || key == "GCOUNT" || 
+                    key == "BZERO" || key == "BSCALE" ||
+                    key == "DATAMIN" || key == "DATAMAX" ||
+                    key.StartsWith("NAXIS")) 
+                {
+                    continue; 
+                }
+                newHeader.AddCard(card);
+            }
+
+            // 4. Scrittura su Disco (ReadWrite + Buffered)
+            using var fileStream = new FileStream(destinationPath, FileMode.Create, FileAccess.ReadWrite);
+            using var bufferedStream = new BufferedDataStream(fileStream);
+            var fitsFile = new Fits();
+            
+            fitsFile.AddHDU(hdu);
+            fitsFile.Write(bufferedStream);
+            
+            bufferedStream.Flush();
+            fileStream.Flush();
+        });
+    }
 }

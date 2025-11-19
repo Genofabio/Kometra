@@ -149,4 +149,9 @@ public partial class SingleImageNodeViewModel : BaseNodeViewModel
     {
         await FitsImage.ResetThresholdsAsync();
     }
+    
+    public override FitsImageData? GetActiveImageData()
+    {
+        return _currentData;
+    }
 }

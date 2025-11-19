@@ -55,6 +55,11 @@ public abstract partial class BaseNodeViewModel : ObservableObject
     /// (Saranno i dati originali o quelli già processati).
     /// </summary>
     public abstract Task<List<FitsImageData?>> GetCurrentDataAsync();
+    
+    /// <summary>
+    /// Restituisce i dati dell'immagine attualmente visibile nel nodo.
+    /// </summary>
+    public abstract FitsImageData? GetActiveImageData();
 
     /// <summary>
     /// Sostituisce i dati in memoria del nodo con una nuova lista di dati processati.

@@ -13,4 +13,6 @@ public interface IDialogService
     /// </summary>
     /// <returns>Una lista di percorsi (path) dei file selezionati, o null se l'utente annulla.</returns>
     Task<IEnumerable<string>?> ShowOpenFitsFileDialogAsync();
+    
+    Task<string?> ShowSaveFitsFileDialogAsync(string defaultFileName);
 }

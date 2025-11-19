@@ -19,6 +19,7 @@ public partial class BoardViewModel : ObservableObject
     private readonly IDialogService _dialogService; 
     private readonly IWindowService _windowService;
     private readonly IImageProcessingService _processingService;
+    private readonly IFitsService _fitsService;
 
     // --- Proprietà ---
     [ObservableProperty] private double _offsetX;
@@ -33,23 +34,17 @@ public partial class BoardViewModel : ObservableObject
         INodeViewModelFactory nodeFactory, 
         IDialogService dialogService, 
         IWindowService windowService,
-        IImageProcessingService processingService)
+        IImageProcessingService processingService,
+        // Aggiungi il parametro qui:
+        IFitsService fitsService) 
     {
         _nodeFactory = nodeFactory;
         _dialogService = dialogService; 
         _windowService = windowService;
-    
-        // Assegna il servizio
-        _processingService = processingService; 
-    
-        _ = LoadInitialNodesAsync();
-    }
-
-    // Caricamento iniziale
-    private async Task LoadInitialNodesAsync()
-    {
-        await AddSingleNodeAsync("avares://KomaLab/Assets/summed_clean.fits", 200, 100);
-        await AddSingleNodeAsync("avares://KomaLab/Assets/summed_clean.fits", 200, 300);
+        _processingService = processingService;
+        
+        // Assegna il campo
+        _fitsService = fitsService; 
     }
     
     // --- Comandi ---
@@ -268,6 +263,41 @@ public partial class BoardViewModel : ObservableObject
         return SelectedNode is MultipleImagesNodeViewModel;
     }
     
+    [RelayCommand(CanExecute = nameof(CanSaveNode))]
+    private async Task SaveSelectedNode()
+    {
+        if (SelectedNode == null) return;
+
+        // 1. POLIMORFISMO: Chiediamo al nodo i dati attivi, qualunque tipo esso sia.
+        FitsImageData? dataToSave = SelectedNode.GetActiveImageData();
+
+        if (dataToSave == null)
+        {
+            Debug.WriteLine("Nessun dato valido da salvare.");
+            return;
+        }
+
+        // 2. Calcola un nome file di default
+        // (Possiamo usare il titolo del nodo + pulizia caratteri invalidi se necessario)
+        string defaultName = $"{SelectedNode.Title}.fits";
+
+        // 3. Dialog e Salvataggio (uguale a prima)
+        var savePath = await _dialogService.ShowSaveFitsFileDialogAsync(defaultName);
+        if (string.IsNullOrWhiteSpace(savePath)) return;
+
+        try
+        {
+            await _fitsService.SaveFitsFileAsync(dataToSave, savePath);
+            Debug.WriteLine($"File salvato: {savePath}");
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"Errore salvataggio: {ex.Message}");
+        }
+    }
+
+    private bool CanSaveNode() => SelectedNode != null;
+    
     // --- Metodi Privati ---
     private async Task AddSingleNodeAsync(string imagePath, double x, double y, bool centerOnPosition = false)
     {
@@ -294,4 +324,6 @@ public partial class BoardViewModel : ObservableObject
             Debug.WriteLine($"ERRORE Aggiunta Nodo Multiplo: {ex.Message}");
         }
     }
+    
+    
 }

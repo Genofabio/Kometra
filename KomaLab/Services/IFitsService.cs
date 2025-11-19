@@ -32,5 +32,7 @@ public interface IFitsService
         double whitePoint,
         IntPtr destinationBuffer, 
         long stride);
-    
+
+    public Task SaveFitsFileAsync(FitsImageData data, string destinationPath);
+
 }

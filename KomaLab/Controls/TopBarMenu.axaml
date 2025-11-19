@@ -33,6 +33,14 @@
                     <avalonia:MaterialIcon Kind="Plus" />
                 </MenuItem.Icon>
             </MenuItem>
+
+            <MenuItem Header="Salva Immagine..." 
+                      Classes="innerMenuItem"
+                      Command="{Binding BoardVm.SaveSelectedNodeCommand}">
+                <MenuItem.Icon>
+                    <avalonia:MaterialIcon Kind="Download" /> 
+                </MenuItem.Icon>
+            </MenuItem>
             
             <Separator />
             
@@ -79,7 +87,8 @@
                           Command="{Binding BoardVm.StackImagesCommand}"
                           CommandParameter="{x:Static models:StackingMode.Median}">
                     <MenuItem.Icon>
-                        <avalonia:MaterialIcon Kind="ChartBox" /> </MenuItem.Icon>
+                        <avalonia:MaterialIcon Kind="ChartBox" /> 
+                    </MenuItem.Icon>
                 </MenuItem>
             </MenuItem>
         </MenuItem>

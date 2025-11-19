@@ -204,6 +204,16 @@ public partial class MultipleImagesNodeViewModel : BaseNodeViewModel
         }
     }
     
+    public override FitsImageData? GetActiveImageData()
+    {
+        // Verifica di sicurezza sugli indici
+        if (CurrentIndex >= 0 && CurrentIndex < _processedDataCache.Count)
+        {
+            return _processedDataCache[CurrentIndex];
+        }
+        return null;
+    }
+    
     // --- Logica di Caricamento (Usa la Cache) ---
 
     private async Task LoadImageAtIndexAsync(int index)

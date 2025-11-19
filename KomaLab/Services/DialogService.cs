@@ -43,4 +43,36 @@ public class DialogService : IDialogService
         
         return null;
     }
+    
+    public async Task<string?> ShowSaveFitsFileDialogAsync(string defaultFileName)
+    {
+        // 1. Ottieni il riferimento alla finestra principale (TopLevel)
+        if (Application.Current?.ApplicationLifetime is not IClassicDesktopStyleApplicationLifetime desktop)
+        {
+            return null; 
+        }
+        var topLevel = TopLevel.GetTopLevel(desktop.MainWindow);
+        if (topLevel == null)
+        {
+            return null;
+        }
+
+        // 2. Definisci il filtro file (lo stesso dell'apertura)
+        var fitsFilter = new FilePickerFileType("File FITS")
+        {
+            Patterns = new[] { "*.fits", "*.fit", "*.fts" }
+        };
+
+        // 3. Apri la finestra di dialogo "Salva con nome"
+        var file = await topLevel.StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
+        {
+            Title = "Salva Immagine FITS",
+            SuggestedFileName = defaultFileName, // Il nome generato dal ViewModel (es. "Titolo.fits")
+            FileTypeChoices = new[] { fitsFilter },
+            DefaultExtension = "fits"
+        });
+
+        // 4. Restituisci il percorso locale (o null se annullato)
+        return file?.TryGetLocalPath();
+    }
 }
