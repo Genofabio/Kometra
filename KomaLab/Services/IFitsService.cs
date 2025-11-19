@@ -21,13 +21,16 @@ public interface IFitsService
     Task<Size> GetFitsImageSizeAsync(string path);
 
     /// <summary>
-    /// Normalizza i dati grezzi in un array di byte per la visualizzazione.
+    /// Normalizza una Matrice OpenCV pre-caricata in un array di byte Gray8
+    /// usando le soglie specificate.
     /// </summary>
     void NormalizeData(
-        object rawData, Header header, int width, int height, 
-        double blackPoint, double whitePoint,
-        IntPtr destinationBuffer,
-        long stride 
-    );
+        OpenCvSharp.Mat sourceMat, // NUOVA SORGENTE: La Matrice cached
+        int width, 
+        int height,
+        double blackPoint, 
+        double whitePoint,
+        IntPtr destinationBuffer, 
+        long stride);
     
 }

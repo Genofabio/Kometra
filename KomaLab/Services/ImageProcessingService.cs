@@ -709,116 +709,123 @@ public class ImageProcessingService : IImageProcessingService
     }
     
     public async Task<FitsImageData> ComputeStackAsync(List<FitsImageData> sources, StackingMode mode)
-{
-    if (sources == null || sources.Count == 0) 
-        throw new ArgumentException("Nessuna immagine da processare");
-
-    // 1. Preparazione: Dimensioni e riferimento
-    // Assumiamo che tutte abbiano la stessa dimensione della prima.
-    var refData = sources[0];
-    int width = (int)refData.ImageSize.Width;
-    int height = (int)refData.ImageSize.Height;
-    int count = sources.Count;
-
-    // Creiamo la matrice risultato (64-bit Double per precisione)
-    Mat resultMat = new Mat(height, width, MatType.CV_64FC1, new Scalar(0));
-
-    await Task.Run(() =>
     {
-        // =================================================
-        // STRATEGIA A: SOMMA O MEDIA (Veloce via OpenCV)
-        // =================================================
-        if (mode == StackingMode.Sum || mode == StackingMode.Average)
+        if (sources == null || sources.Count == 0) 
+            throw new ArgumentException("Nessuna immagine da processare");
+
+        var refData = sources[0];
+        int width = (int)refData.ImageSize.Width;
+        int height = (int)refData.ImageSize.Height;
+        int count = sources.Count;
+
+        // --- FIX MEMORIA 1: Usa 'using' per il risultato temporaneo ---
+        // OpenCV alloca memoria non gestita, deve essere liberata alla fine del metodo.
+        using Mat resultMat = new Mat(height, width, MatType.CV_64FC1, new Scalar(0));
+
+        await Task.Run(() =>
         {
-            // Accumulatore
-            foreach (var sourceData in sources)
+            // =================================================
+            // STRATEGIA A: SOMMA O MEDIA
+            // =================================================
+            if (mode == StackingMode.Sum || mode == StackingMode.Average)
             {
-                // Carica usando il metodo corretto (con BZERO applicato)
-                using Mat currentMat = LoadFitsDataAsMat(sourceData);
-                
-                // Controlla dimensioni per sicurezza
-                if (currentMat.Width != width || currentMat.Height != height) continue;
+                // --- FIX MEMORIA 2: Usa 'using' per il contatore ---
+                using Mat validCountMat = new Mat(height, width, MatType.CV_64FC1, new Scalar(0));
 
-                // Somma accumulativa: Result = Result + Current
-                Cv2.Add(resultMat, currentMat, resultMat);
-            }
-
-            // Se è Media, dividiamo per il numero di immagini
-            if (mode == StackingMode.Average)
-            {
-                // Result = Result * (1.0 / count)
-                resultMat *= (1.0 / count);
-            }
-        }
-        // =================================================
-        // STRATEGIA B: MEDIANA (Intensiva CPU)
-        // =================================================
-        else if (mode == StackingMode.Median)
-        {
-            // 1. Carichiamo TUTTE le matrici in memoria (Double)
-            // Nota: Richiede RAM, ma è l'unico modo veloce.
-            Mat[] stack = new Mat[count];
-            for (int i = 0; i < count; i++)
-            {
-                stack[i] = LoadFitsDataAsMat(sources[i]);
-            }
-
-            try
-            {
-                // 2. Loop Parallelo per ogni pixel
-                // Utilizziamo un unsafe context per velocità massima sui puntatori
-                // Se preferisci safe, usa gli indexer, ma qui la velocità conta.
-                // Qui uso indexer 'Generic' sicuri per semplicità di lettura, 
-                // OpenCV è abbastanza veloce.
-                
-                var resIndexer = resultMat.GetGenericIndexer<double>();
-                
-                Parallel.For(0, height, y =>
+                foreach (var sourceData in sources)
                 {
-                    // Buffer locale per ordinare i pixel di questa "colonna"
-                    double[] pixelStack = new double[count];
+                    using Mat currentMat = LoadFitsDataAsMat(sourceData);
+                    if (currentMat.Width != width || currentMat.Height != height) continue;
 
-                    for (int x = 0; x < width; x++)
-                    {
-                        // Raccogli i valori Z
-                        for (int k = 0; k < count; k++)
-                        {
-                            // Accesso diretto (ottimizzabile con puntatori se lento)
-                            pixelStack[k] = stack[k].At<double>(y, x); 
-                        }
+                    // 1. CREAZIONE MASCHERA (NaN handling corretto)
+                    using Mat nonNanMask = new Mat();
+                    Cv2.Compare(currentMat, currentMat, nonNanMask, CmpType.EQ); 
+        
+                    // 2. SOMMA
+                    Cv2.Add(resultMat, currentMat, resultMat, mask: nonNanMask); 
 
-                        // Ordina
-                        Array.Sort(pixelStack);
+                    // 3. CONTA
+                    using Mat onesMat = new Mat(height, width, MatType.CV_64FC1, new Scalar(1));
+                    Cv2.Add(validCountMat, onesMat, validCountMat, mask: nonNanMask);
+                }
 
-                        // Prendi il mediano
-                        double median;
-                        if (count % 2 == 0)
-                        {
-                            // Pari: media dei due centrali
-                            int mid = count / 2;
-                            median = (pixelStack[mid - 1] + pixelStack[mid]) / 2.0;
-                        }
-                        else
-                        {
-                            // Dispari: centrale esatto
-                            median = pixelStack[count / 2];
-                        }
-
-                        resIndexer[y, x] = median;
-                    }
-                });
+                if (mode == StackingMode.Average)
+                {
+                    // 4. MEDIA: Divisione sicura
+                    // Dove validCountMat è 0 (tutti NaN), il risultato sarà 0 o NaN (gestito da OpenCV)
+                    Cv2.Divide(resultMat, validCountMat, resultMat, scale: 1, dtype: MatType.CV_64FC1);
+                }
+                // Nota: In modalità SUM, le zone dove non c'erano dati (tutti NaN) rimangono a 0 (Nero).
             }
-            finally
+            // =================================================
+            // STRATEGIA B: MEDIANA
+            // =================================================
+            else if (mode == StackingMode.Median)
             {
-                // Pulizia matrici temporanee
-                foreach (var m in stack) m?.Dispose();
-            }
-        }
-    });
+                Mat[] stack = new Mat[count];
+                // Caricamento massivo in memoria
+                for (int i = 0; i < count; i++)
+                {
+                    stack[i] = LoadFitsDataAsMat(sources[i]);
+                }
 
-    // 3. Conversione finale: Mat -> FitsImageData
-    // Usiamo il metodo helper esistente per impacchettare il risultato
-    // (Passiamo refData per copiare l'header originale, utile per WCS ecc.)
-    return CreateFitsDataFromMat(resultMat, refData);
-}
+                try
+                {
+                    var resIndexer = resultMat.GetGenericIndexer<double>();
+                    
+                    Parallel.For(0, height, y =>
+                    {
+                        // Lista locale al thread (Safe)
+                        var valuesToStack = new List<double>(count); 
+
+                        for (int x = 0; x < width; x++)
+                        {
+                            valuesToStack.Clear(); 
+
+                            for (int k = 0; k < count; k++)
+                            {
+                                double val = stack[k].At<double>(y, x); 
+                                if (!double.IsNaN(val))
+                                {
+                                    valuesToStack.Add(val);
+                                }
+                            }
+
+                            if (valuesToStack.Count == 0)
+                            {
+                                resIndexer[y, x] = double.NaN; // Esplicitiamo NaN se nessun dato valido
+                                continue; 
+                            }
+
+                            valuesToStack.Sort(); 
+
+                            double median;
+                            int N_valid = valuesToStack.Count;
+                            if (N_valid % 2 == 0)
+                            {
+                                int mid = N_valid / 2;
+                                median = (valuesToStack[mid - 1] + valuesToStack[mid]) / 2.0;
+                            }
+                            else
+                            {
+                                median = valuesToStack[N_valid / 2];
+                            }
+
+                            resIndexer[y, x] = median;
+                        }
+                    });
+                }
+                finally
+                {
+                    // Pulizia fondamentale
+                    foreach (var m in stack) m?.Dispose();
+                }
+            }
+        });
+
+        // 3. Conversione finale e copia dati
+        // CreateFitsDataFromMat copia i dati dalla Mat (Unmanaged) all'array C# (Managed).
+        // Quindi possiamo permettere che 'resultMat' venga distrutta alla fine del 'using'.
+        return CreateFitsDataFromMat(resultMat, refData);
+    }
 }

@@ -163,25 +163,26 @@ public class FitsService : IFitsService
     /// Normalizza i dati FITS grezzi in un array di byte (Gray8) 
     /// usando le soglie specificate.
     /// </summary>
-    public void NormalizeData(object rawData, Header header, int width, int height,
-        double blackPoint, double whitePoint,
-        IntPtr destinationBuffer, long stride)
+    public void NormalizeData(
+        OpenCvSharp.Mat sourceMat, // Matrice CACHED (CV_64FC1)
+        int width, 
+        int height,
+        double blackPoint, 
+        double whitePoint,
+        IntPtr destinationBuffer, 
+        long stride)
     {
-        using Mat srcMat = _processingService.LoadFitsDataAsMat(
-            new FitsImageData 
-            { 
-                RawData = rawData, 
-                FitsHeader = header, 
-                ImageSize = new Size(width, height) 
-            }
-        );
+        // Il check su BZERO/BSCALE non è più necessario qui, perché è stato fatto 
+        // una sola volta in FitsRenderer.InitializeAsync.
 
-        if (srcMat.Empty()) return; 
-    
+        if (sourceMat.Empty()) return; 
+
+        // Calcolo Alpha e Beta per lo Stretch Lineare
         double range = whitePoint - blackPoint;
-        double alpha = (range <= 0) ? 0 : 255.0 / range;
-        double beta = (range <= 0) ? (blackPoint >= whitePoint ? 0 : 128) : -blackPoint * alpha;
+        double alpha = (Math.Abs(range) < 1e-9) ? 0 : 255.0 / range;
+        double beta = (Math.Abs(range) < 1e-9) ? (blackPoint >= whitePoint ? 0 : 128) : -blackPoint * alpha;
 
+        // 1. Creiamo il wrapper sulla memoria video di destinazione (dstMat)
         using Mat dstMat = Mat.FromPixelData(
             height, 
             width, 
@@ -189,7 +190,9 @@ public class FitsService : IFitsService
             destinationBuffer, 
             stride);
 
-        srcMat.ConvertTo(dstMat, MatType.CV_8UC1, alpha, beta);
+        // 2. Eseguiamo la conversione e lo stretch (Operazione Veloce OpenCV)
+        // Usiamo la Matrice CACHED (sourceMat)
+        sourceMat.ConvertTo(dstMat, MatType.CV_8UC1, alpha, beta);
     }
     
 }

@@ -8,6 +8,8 @@ using Avalonia.Platform;
 using CommunityToolkit.Mvvm.ComponentModel;
 using KomaLab.Models;
 using KomaLab.Services;
+using OpenCvSharp;
+using Size = Avalonia.Size;
 
 namespace KomaLab.ViewModels.Helpers;
 
@@ -38,6 +40,8 @@ public partial class FitsRenderer : ObservableObject
 
     [ObservableProperty]
     private double _whitePoint;
+    
+    private Mat? _cachedScientificMat;
 
     // --- Costruttore ---
     
@@ -58,18 +62,23 @@ public partial class FitsRenderer : ObservableObject
     /// </summary>
     public async Task InitializeAsync()
     {
-        // 1. Calcola le soglie
+        // 1. Esegui il lavoro pesante (BZERO + Mat allocation) una sola volta
+        await Task.Run(() =>
+        {
+            // NOTA: Qui chiamiamo LoadFitsDataAsMat, che contiene la logica BZERO.
+            _cachedScientificMat = _processingService.LoadFitsDataAsMat(_imageData);
+        });
+
+        // 2. Calcola le soglie usando i dati RAW (corretto da CalculateClippedThresholds)
         var (newBlack, newWhite) = await Task.Run(() => 
             _processingService.CalculateClippedThresholds(_imageData)
         );
-        
-        // 2. Imposta le proprietà (usando SetProperty per evitare
-        //    di chiamare TriggerRegeneration() inutilmente)
+    
+        // 3. Imposta le proprietà e attiva il primo render
         SetProperty(ref _blackPoint, newBlack, nameof(BlackPoint));
         SetProperty(ref _whitePoint, newWhite, nameof(WhitePoint));
 
-        // 3. ORA avvia la prima rigenerazione e ATTENDILA
-        await TriggerRegeneration();
+        await TriggerRegeneration(); // Ora il trigger userà la cache
     }
     
     // --- Logica di Rigenerazione ---
@@ -94,46 +103,57 @@ public partial class FitsRenderer : ObservableObject
     /// </summary>
     private async Task RegeneratePreviewImageAsync(CancellationToken token)
     {
+        // Verifica se la Matrice CACHED è disponibile
+        if (_cachedScientificMat == null || _cachedScientificMat.Empty())
+        {
+            // Se la cache non è pronta, usciamo (questo non dovrebbe accadere dopo InitializeAsync)
+            return; 
+        }
+    
         var writeableBmp = new WriteableBitmap(
             new PixelSize((int)_imageData.ImageSize.Width, (int)_imageData.ImageSize.Height),
             new Vector(96, 96),
             PixelFormats.Gray8, AlphaFormat.Opaque);
-    
+
         try
         {
-
             using (var lockedBuffer = writeableBmp.Lock())
             {
                 // Passa il puntatore al Task in background
                 await Task.Run(() =>
                 {
                     token.ThrowIfCancellationRequested();
-                
+            
+                    // --- NUOVA CHIAMATA VELOCE ---
+                    // Invece di passare i dati RAW e l'Header, passiamo la Matrice CACHED.
                     _fitsService.NormalizeData(
-                        _imageData.RawData, _imageData.FitsHeader,
-                        (int)_imageData.ImageSize.Width, (int)_imageData.ImageSize.Height,
-                        BlackPoint, WhitePoint,
+                        _cachedScientificMat, // Passiamo la Matrice (già corretta con BZERO)
+                        (int)_imageData.ImageSize.Width, 
+                        (int)_imageData.ImageSize.Height,
+                        BlackPoint, 
+                        WhitePoint,
                         lockedBuffer.Address,
                         lockedBuffer.RowBytes); 
                 }, token);
             }
-        
+    
             if (token.IsCancellationRequested)
             {
                 writeableBmp.Dispose();
                 return;
             }
-            
+        
             Image = writeableBmp;
         }
         catch (OperationCanceledException)
         {
-            writeableBmp.Dispose(); // Pulisci il bitmap che non useremo
+            writeableBmp.Dispose();
         }
         catch (Exception ex)
         {
-            Debug.WriteLine($"Errore durante la rigenerazione dell'immagine: {ex.Message}");
-            writeableBmp.Dispose(); // Pulisci
+            // Nota: Utilizziamo Debug.WriteLine invece di un'altra variabile per coerenza
+            System.Diagnostics.Debug.WriteLine($"Errore durante la rigenerazione dell'immagine: {ex.Message}");
+            writeableBmp.Dispose();
         }
     }
     
@@ -164,5 +184,9 @@ public partial class FitsRenderer : ObservableObject
         _regenerationCts?.Cancel(); 
         Image?.Dispose();
         Image = null;
+
+        // IMPORTANTE: Libera la Matrice OpenCV
+        _cachedScientificMat?.Dispose(); 
+        _cachedScientificMat = null;
     }
 }
