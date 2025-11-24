@@ -311,4 +311,25 @@ public partial class AlignmentToolView : Window
         }
     }
     
+    protected override void OnKeyDown(KeyEventArgs e)
+    {
+        // Se il focus è dentro una TextBox, lascia che la TextBox gestisca l'Enter (non cambiare immagine)
+        if (e.Source is TextBox)
+        {
+            base.OnKeyDown(e);
+            return;
+        }
+
+        if (e.Key == Key.Enter)
+        {
+            if (DataContext is AlignmentToolViewModel vm && vm.NextImageCommand.CanExecute(null))
+            {
+                vm.NextImageCommand.Execute(null);
+                e.Handled = true;
+            }
+        }
+    
+        base.OnKeyDown(e);
+    }
+    
 }
