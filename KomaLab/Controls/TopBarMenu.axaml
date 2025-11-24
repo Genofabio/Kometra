@@ -44,8 +44,8 @@
             
             <Separator />
             
-            <MenuItem Header="Exit" Classes="innerMenuItem" VerticalAlignment="Center">
-                <MenuItem.Icon>
+            <MenuItem Header="Exit" Command="{Binding ExitAppCommand}">
+                 <MenuItem.Icon>
                     <avalonia:MaterialIcon Kind="ExitToApp" />
                 </MenuItem.Icon>
             </MenuItem>

@@ -1,8 +1,10 @@
-﻿using CommunityToolkit.Mvvm.ComponentModel;
+﻿using Avalonia;
+using Avalonia.Controls.ApplicationLifetimes;
+using CommunityToolkit.Mvvm.Input;
 
 namespace KomaLab.ViewModels;
 
-public class MainWindowViewModel : ObservableObject
+public partial class MainWindowViewModel : ViewModelBase
 {
 
     public BoardViewModel BoardVm { get; }
@@ -10,5 +12,14 @@ public class MainWindowViewModel : ObservableObject
     public MainWindowViewModel(BoardViewModel boardVm)
     {
         BoardVm = boardVm;
+    }
+    
+    [RelayCommand]
+    private void ExitApp()
+    {
+        if (Application.Current?.ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
+        {
+            desktop.Shutdown();
+        }
     }
 }
