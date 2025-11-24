@@ -60,7 +60,7 @@ public partial class GridBackground : Control
         // Inizializzazione Penne
         if (_gridPenVertical == null)
         {
-            var brush = new SolidColorBrush(Color.Parse("#232323"));
+            var brush = new SolidColorBrush(Color.Parse("#272727"));
             _gridPenVertical = new Pen(brush);
             _gridPenHorizontal = new Pen(brush);
         }
