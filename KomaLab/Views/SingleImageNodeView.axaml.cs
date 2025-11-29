@@ -19,29 +19,27 @@ public partial class SingleImageNodeView : UserControl
     }
     
     private void OnPointerPressed(object? sender, PointerPressedEventArgs e)
+{
+    if (DataContext is not SingleImageNodeViewModel vm) return;
+    
+    if (e.GetCurrentPoint(this).Properties.IsLeftButtonPressed)
     {
-        if (DataContext is not SingleImageNodeViewModel vm)
-        {
-            Debug.WriteLine("ERRORE: DataContext non è SingleImageNodeViewModel.");
-            return;
-        }
+        // 1. Seleziona
+        vm.ParentBoard.SetSelectedNode(vm);
         
-        if (e.GetCurrentPoint(this).Properties.IsLeftButtonPressed)
-        {
-            vm.ParentBoard.SetSelectedNode(vm);
+        // 2. Porta in primo piano (Ora cambia solo lo ZIndex, non la lista!)
+        vm.RequestBringToFront(); 
 
-            var boardView = this.GetVisualAncestors().OfType<BoardView>().FirstOrDefault();
-            if (boardView == null)
-            {
-                Debug.WriteLine("ERRORE: boardView non trovato!");
-                return;
-            }
-            
+        // 3. Prepara il trascinamento
+        var boardView = this.GetVisualAncestors().OfType<BoardView>().FirstOrDefault();
+        if (boardView != null)
+        {
             _lastPos = e.GetPosition(boardView); 
-            e.Pointer.Capture(this);
+            e.Pointer.Capture(this); // La cattura ora NON viene persa
             e.Handled = true; 
         }
     }
+}
 
     private void OnPointerReleased(object? sender, PointerReleasedEventArgs e)
     {

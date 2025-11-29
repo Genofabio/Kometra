@@ -55,6 +55,7 @@
                 <ControlTheme TargetType="ContentPresenter">
                     <Setter Property="Canvas.Left" Value="{ReflectionBinding X}" />
                     <Setter Property="Canvas.Top" Value="{ReflectionBinding Y}" />
+                    <Setter Property="Canvas.ZIndex" Value="{ReflectionBinding ZIndex}" />
                 </ControlTheme>
             </ItemsControl.ItemContainerTheme>
 

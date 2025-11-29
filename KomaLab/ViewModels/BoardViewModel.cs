@@ -28,6 +28,7 @@ public partial class BoardViewModel : ObservableObject
     [ObservableProperty] private Rect _viewBounds;
     [ObservableProperty] private BaseNodeViewModel? _selectedNode;
     public ObservableCollection<BaseNodeViewModel> Nodes { get; } = new();
+    private int _maxZIndex = 0;
 
     // --- Costruttore ---
     public BoardViewModel(
@@ -136,6 +137,14 @@ public partial class BoardViewModel : ObservableObject
             DeselectAllNodes(); 
         }
         Nodes.Remove(nodeToRemove);
+    }
+    
+    public void BringNodeToFront(BaseNodeViewModel node)
+    {
+        // Invece di Nodes.Move, incrementiamo lo ZIndex.
+        // Assegnando un valore sempre più alto, il nodo sarà sempre sopra gli altri.
+        _maxZIndex++;
+        node.ZIndex = _maxZIndex;
     }
     
     public void DeselectAllNodes()
@@ -305,6 +314,7 @@ public partial class BoardViewModel : ObservableObject
         {
             var newNodeViewModel = await _nodeFactory.CreateSingleImageNodeAsync(this, imagePath, x, y, centerOnPosition);
             Nodes.Add(newNodeViewModel);
+            BringNodeToFront(newNodeViewModel);
         }
         catch(Exception ex)
         {
@@ -318,6 +328,7 @@ public partial class BoardViewModel : ObservableObject
         {
             var newNodeViewModel = await _nodeFactory.CreateMultipleImagesNodeAsync(this, imagePaths, x, y);
             Nodes.Add(newNodeViewModel);
+            BringNodeToFront(newNodeViewModel);
         }
         catch(Exception ex)
         {

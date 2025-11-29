@@ -89,6 +89,8 @@ public partial class AlignmentToolViewModel : ObservableObject
     
     [ObservableProperty] private double _blackPoint;
     [ObservableProperty] private double _whitePoint;
+    
+    public string ZoomStatusText => $"{Viewport.Scale:P0}";
 
     // --- Stato Mirino (Logico) ---
     public bool IsTargetMarkerVisible => TargetCoordinate.HasValue;
@@ -262,7 +264,7 @@ public partial class AlignmentToolViewModel : ObservableObject
         if (index < 0 || index >= _totalStackCount) return;
 
         _currentStackIndex = index;
-        StackCounterText = $"{_currentStackIndex + 1} / {_totalStackCount}";
+        UpdateStackCounterText();
 
         ActiveImage?.UnloadData(); 
 
@@ -311,17 +313,29 @@ public partial class AlignmentToolViewModel : ObservableObject
     #region Comandi
 
     // --- Comandi Viewport e Stretch Immagine ---
-    [RelayCommand] private void ZoomIn() => Viewport.ZoomIn();
-    [RelayCommand] private void ZoomOut() => Viewport.ZoomOut();
-    [RelayCommand] private void ResetView() => Viewport.ResetView();
+    [RelayCommand] private void ZoomIn() 
+    {
+        Viewport.ZoomIn();
+        OnPropertyChanged(nameof(ZoomStatusText));
+    }
+
+    [RelayCommand] private void ZoomOut() 
+    {
+        Viewport.ZoomOut();
+        OnPropertyChanged(nameof(ZoomStatusText));
+    }
+    
+    [RelayCommand] private void ResetView() 
+    {
+        Viewport.ResetView();
+        OnPropertyChanged(nameof(ZoomStatusText));
+    }
     
     [RelayCommand(CanExecute = nameof(CanResetThresholds))]
     private async Task ResetThresholds() => await ApplyOptimalStretchAsync();
     private bool CanResetThresholds() => ActiveImage != null;
     
     // --- Comandi Navigazione Stack ---
-    private bool CanShowPrevious() => IsStack && _currentStackIndex > 0;
-    private bool CanShowNext() => IsStack && _currentStackIndex < _totalStackCount - 1;
     
     private async Task NavigateToImage(int newIndex)
     {
@@ -332,11 +346,48 @@ public partial class AlignmentToolViewModel : ObservableObject
         await LoadStackImageAtIndexAsync(newIndex);
     }
 
+    // Cerca l'indice precedente valido
+    private int? GetPreviousAccessibleIndex()
+    {
+        for (int i = _currentStackIndex - 1; i >= 0; i--)
+        {
+            if (IsIndexAccessible(i)) return i;
+        }
+        return null;
+    }
+
+// Cerca l'indice successivo valido
+    private int? GetNextAccessibleIndex()
+    {
+        for (int i = _currentStackIndex + 1; i < _totalStackCount; i++)
+        {
+            if (IsIndexAccessible(i)) return i;
+        }
+        return null;
+    }
+
+    private bool CanShowPrevious() => IsStack && GetPreviousAccessibleIndex().HasValue;
+    private bool CanShowNext() => IsStack && GetNextAccessibleIndex().HasValue;
+
     [RelayCommand(CanExecute = nameof(CanShowPrevious))]
-    private async Task PreviousImage() => await NavigateToImage(_currentStackIndex - 1);
+    private async Task PreviousImage()
+    {
+        var prevIndex = GetPreviousAccessibleIndex();
+        if (prevIndex.HasValue)
+        {
+            await NavigateToImage(prevIndex.Value);
+        }
+    }
 
     [RelayCommand(CanExecute = nameof(CanShowNext))]
-    private async Task NextImage() => await NavigateToImage(_currentStackIndex + 1);
+    private async Task NextImage()
+    {
+        var nextIndex = GetNextAccessibleIndex();
+        if (nextIndex.HasValue)
+        {
+            await NavigateToImage(nextIndex.Value);
+        }
+    }
     
     [RelayCommand(CanExecute = nameof(CanShowPrevious))] 
     private async Task GoToFirstImage() => await NavigateToImage(0);
@@ -432,6 +483,7 @@ public partial class AlignmentToolViewModel : ObservableObject
     public void ApplyZoomAtPoint(double scaleFactor, Point viewportZoomPoint)
     {
         Viewport.ApplyZoomAtPoint(scaleFactor, viewportZoomPoint);
+        OnPropertyChanged(nameof(ZoomStatusText));
     }
 
     public void ApplyPan(double deltaX, double deltaY)
@@ -541,7 +593,29 @@ public partial class AlignmentToolViewModel : ObservableObject
     partial void OnSelectedModeChanged(AlignmentMode value)
     {
         Debug.WriteLine($"[AlgnVM] Modalità cambiata: {value}. Reset coordinate.");
+        
         ResetAlignmentState();
+        
+        PreviousImageCommand.NotifyCanExecuteChanged();
+        NextImageCommand.NotifyCanExecuteChanged();
+        GoToFirstImageCommand.NotifyCanExecuteChanged();
+        GoToLastImageCommand.NotifyCanExecuteChanged();
+        
+        if (!IsIndexAccessible(_currentStackIndex))
+        {
+            _ = NavigateToImage(0); 
+        }
+        
+        UpdateStackCounterText();
+    }
+    
+    partial void OnCurrentStateChanged(AlignmentState value)
+    {
+        PreviousImageCommand.NotifyCanExecuteChanged();
+        NextImageCommand.NotifyCanExecuteChanged();
+        GoToFirstImageCommand.NotifyCanExecuteChanged();
+        GoToLastImageCommand.NotifyCanExecuteChanged();
+        UpdateStackCounterText();
     }
     
     // --- Metodi Helper ---
@@ -610,6 +684,53 @@ public partial class AlignmentToolViewModel : ObservableObject
             MaxSearchRadius = (int)Math.Floor(minDimension / 2.0);
         }
         SearchRadius = Math.Clamp(SearchRadius, MinSearchRadius, MaxSearchRadius);
+    }
+    
+    /// <summary>
+    /// Determina se un indice è visibile in base alla modalità e allo stato corrente.
+    /// </summary>
+    private bool IsIndexAccessible(int index)
+    {
+        if (CurrentState != AlignmentState.Initial) return true;
+        
+        if (index < 0 || index >= _totalStackCount) return false;
+
+        switch (SelectedMode)
+        {
+            case AlignmentMode.Automatic:
+                return index == 0;
+
+            case AlignmentMode.Guided:
+                return index == 0 || index == _totalStackCount - 1;
+
+            case AlignmentMode.Manual:
+            default:
+                return true;
+        }
+    }
+    
+    private void UpdateStackCounterText()
+    {
+        if (CurrentState != AlignmentState.Initial || SelectedMode == AlignmentMode.Manual)
+        {
+            StackCounterText = $"{_currentStackIndex + 1} / {_totalStackCount}";
+            return;
+        }
+        
+        if (SelectedMode == AlignmentMode.Automatic)
+        {
+            StackCounterText = "1 / 1";
+            return;
+        }
+        
+        if (SelectedMode == AlignmentMode.Guided)
+        {
+            // Se siamo sulla prima immagine (indice 0) è lo step 1.
+            // Altrimenti (siamo sull'ultima) è lo step 2.
+            int visibleStep = (_currentStackIndex == 0) ? 1 : 2;
+            StackCounterText = $"{visibleStep} / 2";
+            return;
+        }
     }
     
     #endregion

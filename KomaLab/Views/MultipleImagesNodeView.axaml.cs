@@ -20,26 +20,24 @@ public partial class MultipleImagesNodeView : UserControl
     
     private void OnPointerPressed(object? sender, PointerPressedEventArgs e)
     {
-        if (DataContext is not MultipleImagesNodeViewModel vm)
-        {
-            Debug.WriteLine("ERRORE: DataContext non è MultipleImagesNodeViewModel.");
-            return;
-        }
-        
+        if (DataContext is not MultipleImagesNodeViewModel vm) return;
+    
         if (e.GetCurrentPoint(this).Properties.IsLeftButtonPressed)
         {
+            // 1. Seleziona
             vm.ParentBoard.SetSelectedNode(vm);
+        
+            // 2. Porta in primo piano (Ora cambia solo lo ZIndex, non la lista!)
+            vm.RequestBringToFront(); 
 
+            // 3. Prepara il trascinamento
             var boardView = this.GetVisualAncestors().OfType<BoardView>().FirstOrDefault();
-            if (boardView == null)
+            if (boardView != null)
             {
-                Debug.WriteLine("ERRORE: boardView non trovato!");
-                return;
+                _lastPos = e.GetPosition(boardView); 
+                e.Pointer.Capture(this); // La cattura ora NON viene persa
+                e.Handled = true; 
             }
-            
-            _lastPos = e.GetPosition(boardView); 
-            e.Pointer.Capture(this);
-            e.Handled = true; 
         }
     }
 

@@ -36,6 +36,9 @@ public abstract partial class BaseNodeViewModel : ObservableObject
     [ObservableProperty]
     private bool _isSelected;
     
+    [ObservableProperty]
+    private int _zIndex;
+    
     public virtual Size EstimatedTotalSize
     {
         get
@@ -97,5 +100,14 @@ public abstract partial class BaseNodeViewModel : ObservableObject
 
         X += screenDelta.X / currentScale;
         Y += screenDelta.Y / currentScale;
+    }
+    
+    /// <summary>
+    /// Chiede alla Board di portare questo nodo in primo piano visivo.
+    /// </summary>
+    public void RequestBringToFront()
+    {
+        // Delega l'azione al genitore, proprio come RemoveSelf
+        ParentBoard.BringNodeToFront(this);
     }
 }

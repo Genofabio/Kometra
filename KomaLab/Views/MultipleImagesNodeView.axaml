@@ -69,13 +69,14 @@
                                 CornerRadius="4" ClipToBounds="True">
                             
                             <TextBlock Text="{Binding CurrentImageText}"
-                                       Foreground="White" Padding="6,3"
-                                       FontSize="24"/> 
+                                       Foreground="White" Padding="12,8" Margin="12,8"
+                                       FontSize="32"/> 
                         </Border>
                         
                         <Button Classes="NavButton" 
                                 HorizontalAlignment="Left" VerticalAlignment="Center" 
-                                Margin="10,0"
+                                Margin="10,10"
+                                Padding="14,16,18,16"
                                 Command="{Binding PreviousImageCommand}"
                                 IsVisible="{Binding CanShowPrevious}">
                             <avalonia:MaterialIcon Kind="ChevronLeft" />
@@ -83,7 +84,8 @@
                         
                         <Button Classes="NavButton" 
                                 HorizontalAlignment="Right" VerticalAlignment="Center" 
-                                Margin="10,0"
+                                Margin="10,10"
+                                Padding="18,16,14,16"
                                 Command="{Binding NextImageCommand}"
                                 IsVisible="{Binding CanShowNext}">
                             <avalonia:MaterialIcon Kind="ChevronRight" />
