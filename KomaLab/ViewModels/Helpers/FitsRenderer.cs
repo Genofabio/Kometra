@@ -187,4 +187,28 @@ public partial class FitsRenderer : ObservableObject
         _cachedScientificMat?.Dispose(); 
         _cachedScientificMat = null;
     }
+    
+    /// <summary>
+    /// Calcola statistiche rapide sulla matrice in cache per permettere il Sigma Locking.
+    /// </summary>
+    public (double Mean, double StdDev) GetImageStatistics()
+    {
+        // Verifica di sicurezza se la matrice non è ancora pronta
+        if (_cachedScientificMat == null || _cachedScientificMat.Empty()) 
+            return (0, 1); 
+
+        using Mat meanMat = new Mat();
+        using Mat stdDevMat = new Mat();
+    
+        // Calcolo ultra-rapido (OpenCV è ottimizzato SIMD/AVX)
+        Cv2.MeanStdDev(_cachedScientificMat, meanMat, stdDevMat);
+    
+        double mean = meanMat.Get<double>(0, 0);
+        double std = stdDevMat.Get<double>(0, 0);
+    
+        // Evitiamo divisioni per zero in caso di immagini sintetiche/piatte
+        if (std < 0.00001) std = 1.0; 
+
+        return (mean, std);
+    }
 }

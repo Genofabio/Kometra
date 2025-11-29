@@ -60,6 +60,12 @@ public partial class AlignmentToolViewModel : ObservableObject
     private readonly int _totalStackCount;
     
     private Size _viewportSize;
+    
+    private bool _hasLockedThresholds = false;
+    // K_black: Quante sigma dista il punto di nero dalla media?
+    private double _lockedKBlack; 
+    // K_white: Quante sigma dista il punto di bianco dalla media?
+    private double _lockedKWhite;
 
     #endregion
 
@@ -259,7 +265,7 @@ public partial class AlignmentToolViewModel : ObservableObject
     /// Carica un'immagine specifica (dallo stack o singola) all'indice dato.
     /// È l'unico metodo responsabile del caricamento di ActiveImage.
     /// </summary>
-    private async Task LoadStackImageAtIndexAsync(int index)
+   private async Task LoadStackImageAtIndexAsync(int index)
     {
         if (index < 0 || index >= _totalStackCount) return;
 
@@ -270,11 +276,7 @@ public partial class AlignmentToolViewModel : ObservableObject
 
         try
         {
-            // --- MODIFICA ---
-            // Non carica da disco, prende dalla lista in memoria
             var newModel = _sourceData[index];
-            // --- FINE MODIFICA ---
-            
             if (newModel == null) throw new Exception("Dati FITS nulli.");
             
             FitsImageData dataToShow = newModel;
@@ -284,13 +286,57 @@ public partial class AlignmentToolViewModel : ObservableObject
                 _fitsService, 
                 _processingService
             );
+
+            // 1. Inizializza l'immagine (Carica Matrice e calcola Auto-Stretch locale)
             await ActiveImage.InitializeAsync();
             
-            BlackPoint = ActiveImage.BlackPoint;
-            WhitePoint = ActiveImage.WhitePoint;
+            // 2. Ottieni le statistiche dell'immagine corrente (Media e Rumore)
+            var (mean, sigma) = ActiveImage.GetImageStatistics();
+
+            // 3. LOGICA DI ADATTAMENTO VISIVO
+            if (!_hasLockedThresholds)
+            {
+                // === PRIMA IMMAGINE (Master) ===
+                // Usiamo l'Auto-Stretch calcolato da InitializeAsync come riferimento.
+                double masterBlack = ActiveImage.BlackPoint;
+                double masterWhite = ActiveImage.WhitePoint;
+                
+                // Calcoliamo e salviamo i fattori RELATIVI (K)
+                // Formula inversa: K = (Valore - Media) / Sigma
+                _lockedKBlack = (masterBlack - mean) / sigma;
+                _lockedKWhite = (masterWhite - mean) / sigma;
+                
+                _hasLockedThresholds = true;
+                
+                // Aggiorniamo le proprietà del VM per la UI
+                BlackPoint = masterBlack;
+                WhitePoint = masterWhite;
+
+                // Reset visuale solo alla prima immagine
+                Viewport.ImageSize = ActiveImage.ImageSize;
+                Viewport.ResetView(); 
+                OnPropertyChanged(nameof(ZoomStatusText));
+            }
+            else
+            {
+                // === IMMAGINI SUCCESSIVE (Slave) ===
+                // Ignoriamo l'auto-stretch assoluto appena calcolato.
+                // Ricostruiamo le soglie basandoci sulla media/sigma di QUESTA immagine
+                // applicando però lo stesso "stretch factor" (K) della prima.
+                
+                // Formula diretta: Valore = Media + (K * Sigma)
+                double adaptedBlack = mean + (_lockedKBlack * sigma);
+                double adaptedWhite = mean + (_lockedKWhite * sigma);
+
+                // Applichiamo i valori adattati
+                ActiveImage.BlackPoint = adaptedBlack;
+                ActiveImage.WhitePoint = adaptedWhite;
+                
+                // Aggiorniamo le proprietà del VM
+                BlackPoint = adaptedBlack;
+                WhitePoint = adaptedWhite;
+            }
             
-            Viewport.ImageSize = ActiveImage.ImageSize;
-            Viewport.ResetView(); 
             OnPropertyChanged(nameof(CorrectImageSize)); 
             ResetThresholdsCommand.NotifyCanExecuteChanged();
             UpdateReticleVisibilityForCurrentState();
@@ -332,7 +378,24 @@ public partial class AlignmentToolViewModel : ObservableObject
     }
     
     [RelayCommand(CanExecute = nameof(CanResetThresholds))]
-    private async Task ResetThresholds() => await ApplyOptimalStretchAsync();
+    private async Task ResetThresholds() 
+    {
+        if (ActiveImage == null) return;
+
+        // 1. Ricalcola l'Auto-Stretch standard su QUESTA immagine
+        // (Usa i percentili 15% - 99.8% definiti in FitsRenderer/ImageProcessingService)
+        await ApplyOptimalStretchAsync();
+        
+        // 2. Ricalcola i nuovi fattori K basandosi sulle statistiche attuali
+        // Questi diventano il nuovo "standard" per le prossime immagini
+        var (mean, sigma) = ActiveImage.GetImageStatistics();
+        
+        _lockedKBlack = (ActiveImage.BlackPoint - mean) / sigma;
+        _lockedKWhite = (ActiveImage.WhitePoint - mean) / sigma;
+        
+        _hasLockedThresholds = true; 
+    }
+    
     private bool CanResetThresholds() => ActiveImage != null;
     
     // --- Comandi Navigazione Stack ---
@@ -572,12 +635,26 @@ public partial class AlignmentToolViewModel : ObservableObject
     
     partial void OnBlackPointChanged(double value)
     {
-        if (ActiveImage != null) ActiveImage.BlackPoint = value;
+        if (ActiveImage != null)
+        {
+            // 1. Aggiorna il renderer visivo
+            ActiveImage.BlackPoint = value;
+            
+            // 2. IMPORTANTE: Aggiorna la "ricetta" di lock in tempo reale
+            UpdateLockedSigmaFactors();
+        }
     }
     
     partial void OnWhitePointChanged(double value)
     {
-        if (ActiveImage != null) ActiveImage.WhitePoint = value;
+        if (ActiveImage != null)
+        {
+            // 1. Aggiorna il renderer visivo
+            ActiveImage.WhitePoint = value;
+            
+            // 2. IMPORTANTE: Aggiorna la "ricetta" di lock in tempo reale
+            UpdateLockedSigmaFactors();
+        }
     }
     
     partial void OnSearchRadiusChanged(int value)
@@ -729,8 +806,31 @@ public partial class AlignmentToolViewModel : ObservableObject
             // Altrimenti (siamo sull'ultima) è lo step 2.
             int visibleStep = (_currentStackIndex == 0) ? 1 : 2;
             StackCounterText = $"{visibleStep} / 2";
-            return;
         }
+    }
+    
+    /// <summary>
+    /// Ricalcola i fattori Sigma (K) basandosi sui valori correnti di Black/White Point
+    /// e sulle statistiche dell'immagine attuale.
+    /// </summary>
+    private void UpdateLockedSigmaFactors()
+    {
+        // Se non c'è immagine o non è ancora pronta, usciamo
+        if (ActiveImage == null) return;
+        
+        // Non ricalcoliamo se stiamo caricando l'immagine (evitiamo loop inutili)
+        // anche se matematicamente sarebbe innocuo.
+        // Nota: Puoi gestire questo con un flag _isLoading se necessario, 
+        // ma generalmente il calcolo è così veloce che non serve.
+
+        var (mean, sigma) = ActiveImage.GetImageStatistics();
+        
+        // Aggiorniamo la "distanza relativa" dal background.
+        // Da ora in poi, questa è la nuova configurazione che verrà applicata alle prossime immagini.
+        _lockedKBlack = (BlackPoint - mean) / sigma;
+        _lockedKWhite = (WhitePoint - mean) / sigma;
+        
+        _hasLockedThresholds = true;
     }
     
     #endregion
