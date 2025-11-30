@@ -1,0 +1,42 @@
+Decisione su come migliorare l'interfaccia grafica in base alle richieste dei ricercatori
+- veloce
+- più facile da utilizzare
+- immediata
+
+Decisione su quale framework utilizzare per l'interfaccia grafica
+- wpf
+-avalonia
+- basati su html (penso)
+
+Decisione linguaggio da usare
+- uso già librerie ottimizzate in python
+- chiamare le funzioni python da c# introdurrebbe ulteriore latenza
+- traduzione senza librerie impossibile
+- usare librerie direttamente in c è la strada più complicata e introdurrebbe comunque overhead quando si chiamano da c#
+- usiamo le librerie c# e in caso vedremo successivamente come fare meglio.
+
+Dal punto di vista implementativo si è deciso di utilizzare una board in cui saranno presenti più nodi
+- board -> griglia background, pan, zoom
+- nodi -> drag, gestione visualizzazione immagini fits, signolo e multiplo
+- menu
+
+Implementazione finestra di allineamento
+- problema dovuto al fatto che le immagini fits hanno l'origine in basso a sinistra mentre sia opencv che avalonia considerano come (0,0) il punto in alto a sinistra
+- visto che per la visualizzazione uso lo standard fits, devo gestire correttamente i click del mouse in modo che rispecchino le posizioni corrette
+
+Calcolo parametri automatico per centraggio
+- è troppo scomodo richiedere all'utente di imparare e testare i vari parametri -> si cercano di stimare da mediana e varianza immagine
+
+Allineamento automatico
+- al momento si ricerca su tutta l'immagine 
+
+Allineamento guidato 
+- prima testato solo lungo retta ricerca altri punti -> grossolano
+- ricerca template e vari match -> funzionante
+- necessita per le varie operazioni di passare a double anche se interi
+- interpolazione 4 invece che cubica per massima precisione
+
+Problema visualizzazione perchè non era stato gestito bzero e bscale
+
+Per mantenimento soglie quando si scorre sono state fatte le seguenti cose: 
+Invece di fissare i numeri, fissiamo la forma statistica dell'istogramma.Il software non memorizza "Il nero è a 2000", ma memorizza "Il nero si trova esattamente dove inizia il rumore di fondo".La logica si basa su tre passaggi:Analisi Statistica Istantanea (Profiling)Per ogni immagine caricata, il sistema calcola immediatamente due parametri fondamentali:Media ($\mu$): Rappresenta il livello del fondo cielo.Deviazione Standard ($\sigma$): Rappresenta l'ampiezza del rumore e il contrasto intrinseco.Definizione della "Ricetta Master" (Fattori K)Quando viene caricata la prima immagine (o dopo un reset/modifica manuale), il sistema calcola la distanza tra le soglie visive e la statistica dell'immagine.Calcola il fattore $K_{Nero}$: Quante $\sigma$ dista il punto di nero dalla Media? (solitamente vicino a 0).Calcola il fattore $K_{Bianco}$: Quante $\sigma$ dista il punto di bianco dalla Media?Questi due fattori $K$ costituiscono la "Ricetta" di visualizzazione e vengono congelati.Applicazione Adattiva (Adaptive Stretching)Quando carichi una nuova immagine (Immagine B), il sistema applica la ricetta usando la statistica di B:NuovoNero = Media_B + ($K_{Nero}$ $\times$ Sigma_B)NuovoBianco = Media_B + ($K_{Bianco}$ $\times$ Sigma_B)

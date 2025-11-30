@@ -193,21 +193,30 @@ public partial class FitsRenderer : ObservableObject
     /// </summary>
     public (double Mean, double StdDev) GetImageStatistics()
     {
-        // Verifica di sicurezza se la matrice non è ancora pronta
         if (_cachedScientificMat == null || _cachedScientificMat.Empty()) 
-            return (0, 1); 
+            return (0, 1);
 
-        using Mat meanMat = new Mat();
-        using Mat stdDevMat = new Mat();
+        using var meanMat = new Mat();
+        using var stdDevMat = new Mat();
     
-        // Calcolo ultra-rapido (OpenCV è ottimizzato SIMD/AVX)
-        Cv2.MeanStdDev(_cachedScientificMat, meanMat, stdDevMat);
+        // --- FIX PER I NaN ---
+        // 1. Creiamo una maschera. 
+        // OpenCV Compare con EQ: 
+        // - Se pixel è numero valido: Valido == Valido -> TRUE (255)
+        // - Se pixel è NaN: NaN == NaN -> FALSE (0)
+        using var mask = new Mat();
+        Cv2.Compare(_cachedScientificMat, _cachedScientificMat, mask, CmpType.EQ);
     
+        // 2. Calcoliamo statistiche usando la maschera
+        Cv2.MeanStdDev(_cachedScientificMat, meanMat, stdDevMat, mask);
+        // ---------------------
+
         double mean = meanMat.Get<double>(0, 0);
         double std = stdDevMat.Get<double>(0, 0);
     
-        // Evitiamo divisioni per zero in caso di immagini sintetiche/piatte
-        if (std < 0.00001) std = 1.0; 
+        // Protezione extra se l'immagine è tutta NaN
+        if (double.IsNaN(mean)) mean = 0;
+        if (double.IsNaN(std) || std < 1e-9) std = 1.0; 
 
         return (mean, std);
     }

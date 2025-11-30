@@ -172,8 +172,9 @@ public partial class MultipleImagesNodeViewModel : BaseNodeViewModel
 
     public override async Task ApplyProcessedDataAsync(List<FitsImageData> newProcessedData)
     {
+        // 1. Aggiorna cache
         _processedDataCache = newProcessedData.Cast<FitsImageData?>().ToList();
-    
+
         if (newProcessedData.Count > 0)
         {
             var newSize = newProcessedData[0].ImageSize;
@@ -184,6 +185,13 @@ public partial class MultipleImagesNodeViewModel : BaseNodeViewModel
                 OnPropertyChanged(nameof(NodeContentSize));
             }
         }
+
+        // --- FIX: RESETTA IL LOCK ---
+        // I dati sono cambiati (allineamento). La vecchia ricetta K non vale più.
+        // Impostando a false, la successiva LoadImageAtIndexAsync ricalcolerà
+        // i nuovi fattori K basandosi sulla prima immagine allineata (ignorando i NaN grazie al fix sopra).
+        _hasLockedThresholds = false; 
+        // ----------------------------
 
         int tempIndex = CurrentIndex;
         CurrentIndex = -1; 

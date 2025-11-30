@@ -26,20 +26,10 @@ public enum AlignmentMode
 // --- ENUM PER LO STATO ---
 public enum AlignmentState
 {
-    /// <summary>
-    /// Stato iniziale. L'utente sta impostando i parametri.
-    /// </summary>
     Initial,
-    
-    /// <summary>
-    /// Calcolo completato. I risultati sono pronti e l'utente può applicare.
-    /// </summary>
+    Calculating,
     ResultsReady,
-    
-    /// <summary>
-    /// Il pulsante "Applica" è stato premuto. Elaborazione in corso.
-    /// </summary>
-    Processing
+    Processing   
 }
 
 /// <summary>
@@ -115,6 +105,7 @@ public partial class AlignmentToolViewModel : ObservableObject
     [NotifyPropertyChangedFor(nameof(IsSearchRadiusVisible))]
     [NotifyPropertyChangedFor(nameof(IsSearchRadiusControlsVisible))]
     [NotifyPropertyChangedFor(nameof(IsRefinementMessageVisible))]
+    [NotifyPropertyChangedFor(nameof(IsNavigationVisible))]
     private AlignmentMode _selectedMode = AlignmentMode.Automatic;
     
     public bool IsSearchRadiusVisible => SelectedMode != AlignmentMode.Automatic;
@@ -131,11 +122,14 @@ public partial class AlignmentToolViewModel : ObservableObject
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(IsCalculateButtonVisible))]
     [NotifyPropertyChangedFor(nameof(IsApplyCancelButtonsVisible))]
+    [NotifyPropertyChangedFor(nameof(ProcessingStatusText))]
+    [NotifyPropertyChangedFor(nameof(IsProcessingVisible))]
     [NotifyPropertyChangedFor(nameof(IsSearchBoxVisible))]
     [NotifyPropertyChangedFor(nameof(IsSearchRadiusControlsVisible))]
     [NotifyPropertyChangedFor(nameof(IsRefinementMessageVisible))]
     [NotifyCanExecuteChangedFor(nameof(ApplyAlignmentCommand))]
     [NotifyPropertyChangedFor(nameof(IsCoordinateListVisible))]
+    [NotifyPropertyChangedFor(nameof(IsNavigationVisible))]
     private AlignmentState _currentState = AlignmentState.Initial;
     
     /// <summary>
@@ -152,6 +146,29 @@ public partial class AlignmentToolViewModel : ObservableObject
     public bool IsSearchBoxVisible => IsTargetMarkerVisible && CurrentState == AlignmentState.Initial;
     public bool IsSearchRadiusControlsVisible => IsSearchRadiusVisible && CurrentState == AlignmentState.Initial;
     public bool IsRefinementMessageVisible => IsSearchRadiusVisible && CurrentState != AlignmentState.Initial;
+    public bool IsProcessingVisible => CurrentState == AlignmentState.Processing || 
+                                       CurrentState == AlignmentState.Calculating;
+    public string ProcessingStatusText
+    {
+        get
+        {
+            return CurrentState switch
+            {
+                AlignmentState.Calculating => "Calcolo centri in corso...",
+                AlignmentState.Processing => "Allineamento in corso...",
+                _ => "Elaborazione..."
+            };
+        }
+    }
+    public bool IsNavigationVisible
+    {
+        get
+        {
+            if (!IsStack) return false;
+            if (CurrentState != AlignmentState.Initial) return true;
+            return SelectedMode != AlignmentMode.Automatic;
+        }
+    }
     public bool IsCoordinateListVisible => CurrentState != AlignmentState.Initial;
     // --- Helper Pubblici ---
     public IEnumerable<AlignmentMode> AvailableAlignmentModes { get; private set; }
@@ -464,33 +481,47 @@ public partial class AlignmentToolViewModel : ObservableObject
     {
         Debug.WriteLine($"[AlgnVM] Avvio calcolo centri (Modo: {SelectedMode})...");
 
-        var currentCoords = CoordinateEntries.Select(e => e.Coordinate);
+        // 1. CAMBIO STATO: Nasconde il bottone, mostra la barra, imposta il testo
+        CurrentState = AlignmentState.Calculating; 
 
-        // 2. CHIEDI al servizio (con la nuova firma)
-        var newCoords = await _alignmentService.CalculateCentersAsync(
-            SelectedMode, 
-            CenteringMethod.LocalRegion,
-            _sourceData, // <-- Passa i dati in memoria
-            currentCoords, 
-            SearchRadius
-        );
-
-        // 3. Aggiorna la UI (invariato)
-        int i = 0;
-        foreach (var coord in newCoords)
+        try
         {
-            if (i < CoordinateEntries.Count)
+            var currentCoords = CoordinateEntries.Select(e => e.Coordinate);
+
+            // Esegui il lavoro pesante
+            var newCoords = await _alignmentService.CalculateCentersAsync(
+                SelectedMode, 
+                CenteringMethod.LocalRegion,
+                _sourceData, 
+                currentCoords, 
+                SearchRadius
+            );
+
+            // Aggiorna UI
+            int i = 0;
+            foreach (var coord in newCoords)
             {
-                CoordinateEntries[i].Coordinate = coord;
+                if (i < CoordinateEntries.Count)
+                {
+                    CoordinateEntries[i].Coordinate = coord;
+                }
+                i++;
             }
-            i++;
+
+            Debug.WriteLine("[AlgnVM] Calcolo completato.");
+
+            // 2. FINE: Mostra i risultati e i pulsanti Applica/Annulla
+            CurrentState = AlignmentState.ResultsReady;
+            
+            UpdateReticleVisibilityForCurrentState();
+            ApplyAlignmentCommand.NotifyCanExecuteChanged();
         }
-
-        Debug.WriteLine("[AlgnVM] Calcolo completato.");
-
-        CurrentState = AlignmentState.ResultsReady;
-        UpdateReticleVisibilityForCurrentState();
-        ApplyAlignmentCommand.NotifyCanExecuteChanged();
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"Errore calcolo: {ex}");
+            // In caso di errore, torna allo stato iniziale
+            CurrentState = AlignmentState.Initial;
+        }
     }
     
     private bool CanCalculateCenters()
