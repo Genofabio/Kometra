@@ -3,41 +3,40 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
 using System.Threading.Tasks;
+using Avalonia; // Per Size
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using KomaLab.Models;
 using KomaLab.Services;
-using KomaLab.ViewModels.Helpers; 
-using Size = Avalonia.Size;
+using KomaLab.ViewModels.Helpers;
 
 namespace KomaLab.ViewModels;
 
-public partial class MultipleImagesNodeViewModel : BaseNodeViewModel
+public partial class MultipleImagesNodeViewModel : ImageNodeViewModel
 {
-    // --- Campi ---
+    // --- Dipendenze ---
     private readonly IFitsService _fitsService;
-    private readonly MultipleImagesNodeModel _multiModel;
-    private Size _maxImageSize;
-    private readonly int _imageCount;
-    private readonly IImageProcessingService _processingService;
     
-    /// <summary>
-    /// Cache dei dati in memoria (originali o processati).
-    /// </summary>
+    // NUOVE DIPENDENZE
+    private readonly IFitsDataConverter _converter;
+    private readonly IImageAnalysisService _analysis;
+    
+    private readonly MultipleImagesNodeModel _multiModel;
+    
+    // --- Stato Interno ---
+    private readonly int _imageCount;
     private List<FitsImageData?> _processedDataCache;
+    private Size _maxImageSize; // Avalonia.Size per la UI
 
-    // --- NUOVI CAMPI PER SIGMA LOCKING ---
-    private bool _hasLockedThresholds = false;
+    // --- Sigma Locking ---
+    private bool _hasLockedThresholds;
     private double _lockedKBlack; 
     private double _lockedKWhite; 
-    // -------------------------------------
 
-    // --- Proprietà (Stato) ---
+    // --- Proprietà Observable ---
     
     [ObservableProperty]
     private FitsRenderer? _activeFitsImage;
-    
-    public List<string> ImagePaths => _multiModel.ImagePaths;
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(CurrentImageText))]
@@ -45,89 +44,91 @@ public partial class MultipleImagesNodeViewModel : BaseNodeViewModel
     [NotifyPropertyChangedFor(nameof(CanShowNext))]
     private int _currentIndex;
     
-    [ObservableProperty]
-    private double _blackPoint;
+    [ObservableProperty] private double _blackPoint;
+    [ObservableProperty] private double _whitePoint;
 
-    [ObservableProperty]
-    private double _whitePoint;
-
-    // --- Proprietà Calcolate ---
-    public string CurrentImageText => $"{CurrentIndex + 1} / {_imageCount}";
+    // --- Proprietà Esposte ---
+    public List<string> ImagePaths => _multiModel.ImagePaths;
     public Size MaxImageSize => _maxImageSize;
-    protected override Size NodeContentSize => MaxImageSize;
+    public string CurrentImageText => $"{CurrentIndex + 1} / {_imageCount}";
     public bool CanShowPrevious => CurrentIndex > 0;
     public bool CanShowNext => CurrentIndex < _imageCount - 1;
 
+    // --- Override da ImageNodeViewModel ---
+    protected override Size NodeContentSize => _maxImageSize;
+
     // --- Costruttore ---
-    
     public MultipleImagesNodeViewModel(
-        BoardViewModel parentBoard, 
         MultipleImagesNodeModel model,
         IFitsService fitsService,
-        IImageProcessingService processingService,
-        Size maxSize,
+        IFitsDataConverter converter,      // <--- NUOVO
+        IImageAnalysisService analysis,    // <--- NUOVO
+        Size maxSize, 
         FitsImageData initialData) 
-        : base(parentBoard, model)
+        : base(model)
     {
         _fitsService = fitsService;
-        _processingService = processingService;
+        _converter = converter;
+        _analysis = analysis;
         _multiModel = model;
         _maxImageSize = maxSize;
         _imageCount = model.ImagePaths.Count; 
         
         _currentIndex = 0;
         
-        // Inizializza la cache con 'null' e inserisce la prima immagine
+        // Inizializza cache
         _processedDataCache = Enumerable.Repeat<FitsImageData?>(null, _imageCount).ToList();
         _processedDataCache[0] = initialData;
     }
 
     /// <summary>
-    /// Metodo di inizializzazione asincrona, chiamato dalla Factory.
+    /// Metodo di inizializzazione asincrona post-costruttore.
     /// </summary>
     public async Task InitializeAsync()
     {
         var initialData = _processedDataCache[0];
         if (initialData == null)
         {
-            Debug.WriteLine("Errore: i dati iniziali erano nulli in InitializeAsync.");
+            Debug.WriteLine("ERR: Dati iniziali null in InitializeAsync.");
             return;
         }
 
+        // Creazione Renderer con i nuovi servizi
         ActiveFitsImage = new FitsRenderer(
             initialData, 
             _fitsService, 
-            _processingService);
+            _converter, 
+            _analysis);
         
-        // 1. Inizializza (Auto-Stretch interno)
+        // 1. Inizializza renderer
         await ActiveFitsImage.InitializeAsync();
         
-        // 2. Calcola statistiche per il primo Sigma Locking
+        // 2. Calcola statistiche iniziali
         var (mean, sigma) = ActiveFitsImage.GetImageStatistics();
         
-        // Calcola i fattori K iniziali basati sull'auto-stretch della prima immagine
+        // 3. Calcola fattori K iniziali
         _lockedKBlack = (ActiveFitsImage.BlackPoint - mean) / sigma;
         _lockedKWhite = (ActiveFitsImage.WhitePoint - mean) / sigma;
         _hasLockedThresholds = true;
 
-        // 3. Sincronizza UI
+        // 4. Sincronizza UI
         BlackPoint = ActiveFitsImage.BlackPoint;
         WhitePoint = ActiveFitsImage.WhitePoint;
     }
 
-    // --- Comandi di Navigazione ---
+    // --- Comandi ---
 
     [RelayCommand(CanExecute = nameof(CanShowPrevious))]
     private async Task PreviousImage()
     {
-        if (!IsSelected) ParentBoard.SetSelectedNode(this);
+        if (!IsSelected) IsSelected = true;
         await LoadImageAtIndexAsync(CurrentIndex - 1);
     }
     
     [RelayCommand(CanExecute = nameof(CanShowNext))]
     private async Task NextImage()
     {
-        if (!IsSelected) ParentBoard.SetSelectedNode(this);
+        if (!IsSelected) IsSelected = true;
         await LoadImageAtIndexAsync(CurrentIndex + 1);
     }
     
@@ -136,35 +137,75 @@ public partial class MultipleImagesNodeViewModel : BaseNodeViewModel
     {
         if (ActiveFitsImage == null) return;
 
-        // 1. Forza ricalcolo auto-stretch su immagine corrente
         await ActiveFitsImage.ResetThresholdsAsync();
 
-        // 2. Aggiorna UI
         BlackPoint = ActiveFitsImage.BlackPoint;
         WhitePoint = ActiveFitsImage.WhitePoint;
         
-        // 3. Ricalcola la ricetta K (Sigma Lock) per le prossime immagini
         UpdateLockedSigmaFactors();
     }
     
     private bool CanResetThresholds() => ActiveFitsImage != null;
 
-    // --- Implementazione Metodi Base (Contratto) ---
+    // --- Logica Loading & Sigma Lock ---
+
+    private async Task LoadImageAtIndexAsync(int index)
+    {
+        if (index < 0 || index >= _imageCount || index == CurrentIndex) return;
     
+        FitsImageData? dataToShow = await GetOrLoadDataAtIndex(index);
+        if (dataToShow == null) return;
+
+        // 1. Nuovo renderer con i servizi corretti
+        var newFitsImage = new FitsRenderer(
+            dataToShow, 
+            _fitsService, 
+            _converter, 
+            _analysis);
+
+        await newFitsImage.InitializeAsync(); 
+
+        // 2. Logica Sigma Locking
+        var (mean, sigma) = newFitsImage.GetImageStatistics();
+
+        if (!_hasLockedThresholds)
+        {
+            _lockedKBlack = (newFitsImage.BlackPoint - mean) / sigma;
+            _lockedKWhite = (newFitsImage.WhitePoint - mean) / sigma;
+            _hasLockedThresholds = true;
+        }
+        else
+        {
+            double adaptedBlack = mean + (_lockedKBlack * sigma);
+            double adaptedWhite = mean + (_lockedKWhite * sigma);
+            
+            newFitsImage.BlackPoint = adaptedBlack;
+            newFitsImage.WhitePoint = adaptedWhite;
+        }
+
+        // 3. Swap
+        CurrentIndex = index;
+        var oldFitsImage = ActiveFitsImage;
+        ActiveFitsImage = newFitsImage;
+        oldFitsImage?.UnloadData();
+
+        // 4. Update UI
+        BlackPoint = newFitsImage.BlackPoint; 
+        WhitePoint = newFitsImage.WhitePoint;
+    
+        PreviousImageCommand.NotifyCanExecuteChanged();
+        NextImageCommand.NotifyCanExecuteChanged();
+    }
+
+    // --- Metodi Abstract Implementati ---
+
     public override async Task<List<FitsImageData?>> GetCurrentDataAsync()
     {
         for (int i = 0; i < _imageCount; i++)
         {
             if (_processedDataCache[i] == null)
             {
-                try
-                {
-                    _processedDataCache[i] = await _fitsService.LoadFitsFromFileAsync(_multiModel.ImagePaths[i]);
-                }
-                catch (Exception ex)
-                {
-                    Debug.WriteLine($"Caricamento fallito per {i}: {ex.Message}");
-                }
+                await GetOrLoadDataAtIndex(i);
             }
         }
         return _processedDataCache;
@@ -172,26 +213,22 @@ public partial class MultipleImagesNodeViewModel : BaseNodeViewModel
 
     public override async Task ApplyProcessedDataAsync(List<FitsImageData> newProcessedData)
     {
-        // 1. Aggiorna cache
         _processedDataCache = newProcessedData.Cast<FitsImageData?>().ToList();
 
         if (newProcessedData.Count > 0)
         {
-            var newSize = newProcessedData[0].ImageSize;
-            if (newSize.Width > 0 && newSize.Height > 0)
+            var first = newProcessedData[0];
+            // Pattern matching sicuro per width/height > 0
+            if (first is { Width: > 0, Height: > 0 })
             {
-                _maxImageSize = newSize;
+                _maxImageSize = new Size(first.Width, first.Height);
                 OnPropertyChanged(nameof(MaxImageSize));
-                OnPropertyChanged(nameof(NodeContentSize));
+                OnPropertyChanged(nameof(NodeContentSize)); 
+                OnPropertyChanged(nameof(EstimatedTotalSize));
             }
         }
 
-        // --- FIX: RESETTA IL LOCK ---
-        // I dati sono cambiati (allineamento). La vecchia ricetta K non vale più.
-        // Impostando a false, la successiva LoadImageAtIndexAsync ricalcolerà
-        // i nuovi fattori K basandosi sulla prima immagine allineata (ignorando i NaN grazie al fix sopra).
         _hasLockedThresholds = false; 
-        // ----------------------------
 
         int tempIndex = CurrentIndex;
         CurrentIndex = -1; 
@@ -200,7 +237,6 @@ public partial class MultipleImagesNodeViewModel : BaseNodeViewModel
     
     public override async Task ResetThresholdsAsync()
     {
-        // Chiamata esterna per reset (es. dal menu contestuale)
         await ResetThresholds();
     }
     
@@ -212,101 +248,33 @@ public partial class MultipleImagesNodeViewModel : BaseNodeViewModel
         }
         return null;
     }
-    
-    // --- Logica di Caricamento (Usa la Cache) ---
 
-    private async Task LoadImageAtIndexAsync(int index)
-    {
-        if (index < 0 || index >= _imageCount || index == CurrentIndex)
-            return;
-    
-        // Nota: non scarichiamo subito ActiveFitsImage, lo teniamo vivo finché il nuovo non è pronto
-        FitsImageData? dataToShow = await GetOrLoadDataAtIndex(index);
-    
-        if (dataToShow == null) 
-        {
-            Debug.WriteLine($"Impossibile mostrare l'immagine {index}, dati nulli.");
-            return; 
-        }
+    // --- Helpers ---
 
-        // 1. Crea il nuovo renderer
-        var newFitsImage = new FitsRenderer(
-            dataToShow, 
-            _fitsService, 
-            _processingService);
-        
-        // 2. Inizializza (calcola statistiche interne e auto-stretch)
-        await newFitsImage.InitializeAsync(); 
-
-        // 3. APPLICA LA LOGICA SIGMA LOCKING
-        var (mean, sigma) = newFitsImage.GetImageStatistics();
-
-        if (!_hasLockedThresholds)
-        {
-            // Caso raro (se InitializeAsync non fosse stato chiamato prima), calcoliamo il Master Lock
-            _lockedKBlack = (newFitsImage.BlackPoint - mean) / sigma;
-            _lockedKWhite = (newFitsImage.WhitePoint - mean) / sigma;
-            _hasLockedThresholds = true;
-        }
-        else
-        {
-            // Applichiamo la ricetta Master alla nuova immagine
-            double adaptedBlack = mean + (_lockedKBlack * sigma);
-            double adaptedWhite = mean + (_lockedKWhite * sigma);
-            
-            newFitsImage.BlackPoint = adaptedBlack;
-            newFitsImage.WhitePoint = adaptedWhite;
-        }
-
-        // 4. Swap dei renderer
-        CurrentIndex = index;
-        var oldFitsImage = ActiveFitsImage;
-        ActiveFitsImage = newFitsImage;
-        oldFitsImage?.UnloadData();
-
-        // 5. Aggiorna UI (questo farà scattare OnBlackPointChanged, che riconfermerà il lock, ed è ok)
-        BlackPoint = newFitsImage.BlackPoint; 
-        WhitePoint = newFitsImage.WhitePoint;
-    
-        PreviousImageCommand.NotifyCanExecuteChanged();
-        NextImageCommand.NotifyCanExecuteChanged();
-    }
-    
-    /// <summary>
-    /// Helper per la cache: recupera i dati dalla cache o li carica dal disco.
-    /// </summary>
     private async Task<FitsImageData?> GetOrLoadDataAtIndex(int index)
     {
-        if (index < 0 || index >= _imageCount)
-            return null;
+        if (index < 0 || index >= _imageCount) return null;
 
-        FitsImageData? data = _processedDataCache[index];
-        if (data == null)
+        if (_processedDataCache[index] == null)
         {
             try
             {
-                data = await _fitsService.LoadFitsFromFileAsync(_multiModel.ImagePaths[index]);
-                if (data != null)
-                {
-                    _processedDataCache[index] = data; 
-                }
+                var data = await _fitsService.LoadFitsFromFileAsync(_multiModel.ImagePaths[index]);
+                if (data != null) _processedDataCache[index] = data;
             }
             catch (Exception ex)
             {
-                Debug.WriteLine($"Caricamento fallito per {index}: {ex.Message}");
+                Debug.WriteLine($"Error loading {index}: {ex.Message}");
             }
         }
-        return data;
+        return _processedDataCache[index];
     }
-    
-    // --- Metodi Parziali (Collegati alle proprietà) ---
-    
+
     partial void OnBlackPointChanged(double value)
     {
         if (ActiveFitsImage != null)
         {
             ActiveFitsImage.BlackPoint = value;
-            // IMPORTANTE: Se l'utente muove lo slider, aggiorna la ricetta Master
             UpdateLockedSigmaFactors();
         }
     }
@@ -316,23 +284,16 @@ public partial class MultipleImagesNodeViewModel : BaseNodeViewModel
         if (ActiveFitsImage != null)
         {
             ActiveFitsImage.WhitePoint = value;
-            // IMPORTANTE: Se l'utente muove lo slider, aggiorna la ricetta Master
             UpdateLockedSigmaFactors();
         }
     }
 
-    /// <summary>
-    /// Helper fondamentale: aggiorna i fattori K in base alle modifiche manuali dell'utente.
-    /// </summary>
     private void UpdateLockedSigmaFactors()
     {
         if (ActiveFitsImage == null) return;
-
         var (mean, sigma) = ActiveFitsImage.GetImageStatistics();
-        
         _lockedKBlack = (BlackPoint - mean) / sigma;
         _lockedKWhite = (WhitePoint - mean) / sigma;
-        
         _hasLockedThresholds = true;
     }
 }

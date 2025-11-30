@@ -18,8 +18,8 @@ public partial class BoardViewModel : ObservableObject
     private readonly INodeViewModelFactory _nodeFactory;
     private readonly IDialogService _dialogService; 
     private readonly IWindowService _windowService;
-    private readonly IImageProcessingService _processingService;
-    private readonly IFitsService _fitsService;
+    private readonly IFitsService _fitsService;           // Per salvare
+    private readonly IImageOperationService _opsService;  // Per lo stacking (NUOVO)
 
     // --- Proprietà ---
     [ObservableProperty] private double _offsetX;
@@ -27,25 +27,23 @@ public partial class BoardViewModel : ObservableObject
     [ObservableProperty] private double _scale = 0.46;
     [ObservableProperty] private Rect _viewBounds;
     [ObservableProperty] private BaseNodeViewModel? _selectedNode;
+    
     public ObservableCollection<BaseNodeViewModel> Nodes { get; } = new();
-    private int _maxZIndex = 0;
+    private int _maxZIndex;
 
     // --- Costruttore ---
     public BoardViewModel(
         INodeViewModelFactory nodeFactory, 
         IDialogService dialogService, 
         IWindowService windowService,
-        IImageProcessingService processingService,
-        // Aggiungi il parametro qui:
-        IFitsService fitsService) 
+        IFitsService fitsService,
+        IImageOperationService opsService) // Inietto il servizio operazioni
     {
         _nodeFactory = nodeFactory;
         _dialogService = dialogService; 
         _windowService = windowService;
-        _processingService = processingService;
-        
-        // Assegna il campo
-        _fitsService = fitsService; 
+        _fitsService = fitsService;
+        _opsService = opsService;
     }
     
     // --- Comandi ---
@@ -54,40 +52,172 @@ public partial class BoardViewModel : ObservableObject
     private async Task AddNode()
     {
         var imagePaths = await _dialogService.ShowOpenFitsFileDialogAsync();
-        if (imagePaths == null) return; 
-        
-        var pathList = imagePaths.ToList();
-        if (pathList.Count == 0) return; 
-
-        double screenCenterX = ViewBounds.Width / 2;
-        double screenCenterY = ViewBounds.Height / 2;
-        if (Scale == 0) return;
-        double worldX = (screenCenterX - OffsetX) / Scale;
-        double worldY = (screenCenterY - OffsetY) / Scale;
-        
-        if (pathList.Count == 1)
+        if (imagePaths != null)
         {
-            await AddSingleNodeAsync(pathList[0], worldX, worldY, centerOnPosition: true);
-        }
-        else
-        {
-            await AddMultipleNodesAsync(pathList, worldX, worldY);
+            var enumerable = imagePaths as string[] ?? imagePaths.ToArray();
+            if (!enumerable.Any()) return; 
+        
+            var pathList = enumerable.ToList();
+            double screenCenterX = ViewBounds.Width / 2;
+            double screenCenterY = ViewBounds.Height / 2;
+            if (Scale == 0) return;
+        
+            double worldX = (screenCenterX - OffsetX) / Scale;
+            double worldY = (screenCenterY - OffsetY) / Scale;
+        
+            if (pathList.Count == 1)
+            {
+                await AddSingleNodeAsync(pathList[0], worldX, worldY);
+            }
+            else
+            {
+                await AddMultipleNodesAsync(pathList, worldX, worldY);
+            }
         }
     }
+
+    // --- Gestione Eventi Nodi (Disaccoppiamento) ---
+
+    private void RegisterNodeEvents(BaseNodeViewModel node)
+    {
+        // Ci iscriviamo agli eventi del nodo
+        node.RequestRemove += OnNodeRequestRemove;
+        node.RequestBringToFront += OnNodeRequestBringToFront;
+    }
+
+    private void UnregisterNodeEvents(BaseNodeViewModel node)
+    {
+        node.RequestRemove -= OnNodeRequestRemove;
+        node.RequestBringToFront -= OnNodeRequestBringToFront;
+    }
+
+    private void OnNodeRequestRemove(BaseNodeViewModel node)
+    {
+        if (SelectedNode == node) DeselectAllNodes();
+        UnregisterNodeEvents(node);
+        Nodes.Remove(node);
+    }
+
+    private void OnNodeRequestBringToFront(BaseNodeViewModel node)
+    {
+        _maxZIndex++;
+        node.ZIndex = _maxZIndex;
+    }
+
+    // --- Helpers Aggiunta Nodi ---
+
+    private async Task AddSingleNodeAsync(string imagePath, double x, double y)
+    {
+        try
+        {
+            // La factory ora non richiede 'this'
+            var newNode = await _nodeFactory.CreateSingleImageNodeAsync(imagePath, x, y);
+            
+            // Registriamo gli eventi
+            RegisterNodeEvents(newNode);
+            
+            Nodes.Add(newNode);
+            OnNodeRequestBringToFront(newNode);
+        }
+        catch(Exception ex)
+        {
+            Debug.WriteLine($"Error adding single node: {ex.Message}");
+        }
+    }
+    
+    private async Task AddMultipleNodesAsync(List<string> imagePaths, double x, double y)
+    {
+        try
+        {
+            var newNode = await _nodeFactory.CreateMultipleImagesNodeAsync(imagePaths, x, y);
+            RegisterNodeEvents(newNode);
+            Nodes.Add(newNode);
+            OnNodeRequestBringToFront(newNode);
+        }
+        catch(Exception ex)
+        {
+            Debug.WriteLine($"Error adding multiple node: {ex.Message}");
+        }
+    }
+
+    // --- Comandi Operativi ---
 
     [RelayCommand(CanExecute = nameof(CanResetNormalization))]
     private async Task ResetNormalization()
     {
-        if (SelectedNode != null)
+        if (SelectedNode is ImageNodeViewModel imgNode) // Controllo il tipo corretto
         {
-            // Deleghiamo al nodo la logica di reset
-            await SelectedNode.ResetThresholdsAsync();
+            await imgNode.ResetThresholdsAsync();
         }
     }
-    private bool CanResetNormalization() => SelectedNode != null;
+    private bool CanResetNormalization() => SelectedNode is ImageNodeViewModel;
     
+    [RelayCommand(CanExecute = nameof(CanShowAlignmentWindow))]
+    private async Task ShowAlignmentWindow()
+    {
+        // Controllo cast sicuro a ImageNodeViewModel (o specifico se serve)
+        if (SelectedNode is not ImageNodeViewModel imgNode) return;
+
+        try
+        {
+            // Il WindowService dovrà essere aggiornato per accettare ImageNodeViewModel
+            var newProcessedData = await _windowService.ShowAlignmentWindowAsync(imgNode);
+
+            if (newProcessedData != null)
+            {
+                await imgNode.ApplyProcessedDataAsync(newProcessedData);
+            }
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"Alignment failed: {ex.Message}");
+        }
+    }
+    private bool CanShowAlignmentWindow() => SelectedNode is ImageNodeViewModel;
+    
+    [RelayCommand(CanExecute = nameof(CanStackImages))]
+    private async Task StackImages(StackingMode mode)
+    {
+        if (SelectedNode is not MultipleImagesNodeViewModel multiNode) return;
+
+        try
+        {
+            var rawDataList = await multiNode.GetCurrentDataAsync();
+            var sourceImages = rawDataList.Where(d => d != null).Cast<FitsImageData>().ToList();
+
+            if (sourceImages.Count < 2) return;
+
+            // Usa il NUOVO servizio di operazioni
+            var resultData = await _opsService.ComputeStackAsync(sourceImages, mode);
+
+            double newX = multiNode.X + 50;
+            double newY = multiNode.Y + 50;
+        
+            string baseTitle = multiNode.Title;
+            int idx = baseTitle.LastIndexOf('(');
+            if (idx != -1) baseTitle = baseTitle.Substring(0, idx).TrimEnd();
+            
+            string newTitle = $"{baseTitle} ({mode})"; 
+
+            // Factory per nodo da dati in memoria
+            var newNode = await _nodeFactory.CreateSingleImageNodeFromDataAsync(
+                resultData, newTitle, newX, newY
+            );
+
+            RegisterNodeEvents(newNode);
+            Nodes.Add(newNode);
+            SetSelectedNode(newNode);
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"Stacking error: {ex.Message}");
+        }
+    }
+    private bool CanStackImages(StackingMode mode) => SelectedNode is MultipleImagesNodeViewModel;
+
+    // --- Altri Comandi (Pan/Zoom/Selection) ---
+
     [RelayCommand] private void IncrementOffset() { OffsetX += 20; }
-    
     [RelayCommand] private void ResetBoard() { OffsetX = 0.0; OffsetY = 0.0; Scale = 0.5; }
     
     public void Pan(Vector delta) { OffsetX += delta.X; OffsetY += delta.Y; }
@@ -107,234 +237,46 @@ public partial class BoardViewModel : ObservableObject
     {
         if (SelectedNode == nodeToSelect) return;
 
-        if (SelectedNode != null)
-        {
-            SelectedNode.IsSelected = false;
-        }
+        if (SelectedNode != null) SelectedNode.IsSelected = false;
         
         SelectedNode = nodeToSelect;
         
-        if (SelectedNode != null)
-        {
-            SelectedNode.IsSelected = true;
-        }
+        if (SelectedNode != null) SelectedNode.IsSelected = true;
         
+        // Notifica cambio stato comandi
         ResetNormalizationCommand.NotifyCanExecuteChanged();
         ShowAlignmentWindowCommand.NotifyCanExecuteChanged(); 
         StackImagesCommand.NotifyCanExecuteChanged();
-    }
-    
-    /// <summary>
-    /// Chiamato da un nodo subito prima di rimuovere se stesso.
-    /// Gestisce la deselezione se l'oggetto rimosso era quello selezionato.
-    /// </summary>
-    public void RemoveNode(BaseNodeViewModel nodeToRemove)
-    {
-        // Se il nodo che sta per essere rimosso è quello attualmente selezionato
-        if (SelectedNode == nodeToRemove)
-        {
-            // Imposta SelectedNode a null e notifica la deselezione.
-            DeselectAllNodes(); 
-        }
-        Nodes.Remove(nodeToRemove);
-    }
-    
-    public void BringNodeToFront(BaseNodeViewModel node)
-    {
-        // Invece di Nodes.Move, incrementiamo lo ZIndex.
-        // Assegnando un valore sempre più alto, il nodo sarà sempre sopra gli altri.
-        _maxZIndex++;
-        node.ZIndex = _maxZIndex;
+        SaveSelectedNodeCommand.NotifyCanExecuteChanged();
     }
     
     public void DeselectAllNodes()
     {
-        if (SelectedNode != null)
-        {
-            SelectedNode.IsSelected = false;
-        }
+        if (SelectedNode != null) SelectedNode.IsSelected = false;
         SelectedNode = null;
         
         ResetNormalizationCommand.NotifyCanExecuteChanged();
         ShowAlignmentWindowCommand.NotifyCanExecuteChanged(); 
         StackImagesCommand.NotifyCanExecuteChanged();
-    }
-    
-    [RelayCommand(CanExecute = nameof(CanShowAlignmentWindow))]
-    private async Task ShowAlignmentWindow() // <-- 1. Rendi il metodo 'async Task'
-    {
-        if (SelectedNode == null) return;
-
-        try
-        {
-            // 2. Chiama e ATTENDI (await) la versione async del servizio
-            var newProcessedData = await _windowService.ShowAlignmentWindowAsync(SelectedNode);
-
-            // 3. Controlla se l'utente ha premuto "Applica" (il risultato non è nullo)
-            if (newProcessedData != null)
-            {
-                // 4. Passa i nuovi dati processati al nodo.
-                //    Il nodo sa come gestirli (grazie al Passo 1).
-                await SelectedNode.ApplyProcessedDataAsync(newProcessedData);
-            }
-            // Se 'newProcessedData' è nullo, l'utente ha premuto 'Annulla'
-            // o 'Chiudi', quindi non facciamo nulla.
-        }
-        catch (Exception ex)
-        {
-            Debug.WriteLine($"Processo di allineamento fallito: {ex.Message}");
-            // Qui potresti mostrare un DialogService di errore all'utente
-        }
-    }
-    
-    // Il comando si abilita solo se un nodo è selezionato
-    private bool CanShowAlignmentWindow() => SelectedNode != null;
-    
-    [RelayCommand(CanExecute = nameof(CanStackImages))]
-    private async Task StackImages(StackingMode mode)
-    {
-        // 1. Controllo di sicurezza (il CanExecute lo gestisce già per la UI, ma controlliamo comunque)
-        if (SelectedNode is not MultipleImagesNodeViewModel multiNode) return;
-
-        try
-        {
-            // 2. RECUPERO DATI POLIMORFICO
-            var rawDataList = await SelectedNode.GetCurrentDataAsync();
-
-            // 3. Filtriamo eventuali null (sicurezza)
-            var sourceImages = rawDataList
-                .Where(d => d != null)
-                .Cast<FitsImageData>()
-                .ToList();
-
-            if (sourceImages.Count < 2)
-            {
-                Debug.WriteLine("Servono almeno 2 immagini valide per fare uno stack.");
-                return;
-            }
-
-            // 4. Eseguiamo il calcolo (Service)
-            var resultData = await _processingService.ComputeStackAsync(sourceImages, mode);
-
-            // 5. Prepariamo i metadati per il nuovo nodo
-            double newX = multiNode.X + 50;
-            double newY = multiNode.Y + 50;
-        
-            // --- LOGICA DI PULIZIA DEL TITOLO AGGIUNTA QUI ---
-            string baseTitle = multiNode.Title;
-            
-            // Trova l'ultima parentesi aperta e chiusa
-            int lastOpenParen = baseTitle.LastIndexOf('(');
-            int lastCloseParen = baseTitle.LastIndexOf(')');
-
-            // Se l'ultima parentesi aperta esiste ed è prima di quella chiusa,
-            // assumiamo che il contenuto sia un metadato da rimuovere.
-            if (lastOpenParen != -1 && lastCloseParen > lastOpenParen)
-            {
-                // Taglia la stringa fino all'ultima parentesi aperta
-                baseTitle = baseTitle.Substring(0, lastOpenParen).TrimEnd();
-            }
-            
-            string opName = mode switch 
-            {
-                StackingMode.Sum => "Somma",
-                StackingMode.Average => "Media",
-                StackingMode.Median => "Mediana",
-                _ => "Stack"
-            };
-            // Ricostruisce il titolo pulito con il nuovo suffisso dell'operazione
-            string newTitle = $"{baseTitle} ({opName})"; 
-
-            // 6. Creiamo il nuovo nodo (usando la Factory modificata nello step precedente)
-            var newNode = await _nodeFactory.CreateSingleImageNodeFromDataAsync(
-                this, 
-                resultData, 
-                newTitle, 
-                newX, 
-                newY
-            );
-
-            // 7. Aggiungiamo alla Board
-            Nodes.Add(newNode);
-            SetSelectedNode(newNode);
-        
-            Debug.WriteLine($"Stacking {mode} completato.");
-        }
-        catch (Exception ex)
-        {
-            Debug.WriteLine($"Errore durante lo stacking: {ex.Message}");
-        }
+        SaveSelectedNodeCommand.NotifyCanExecuteChanged();
     }
 
-    private bool CanStackImages(StackingMode mode)
-    {
-        // Il comando è abilitato SOLO se il nodo selezionato è di tipo Multiplo
-        return SelectedNode is MultipleImagesNodeViewModel;
-    }
-    
     [RelayCommand(CanExecute = nameof(CanSaveNode))]
     private async Task SaveSelectedNode()
     {
-        if (SelectedNode == null) return;
+        // Cast a ImageNodeViewModel perché BaseNode non ha GetActiveImageData
+        if (SelectedNode is not ImageNodeViewModel imgNode) return;
 
-        // 1. POLIMORFISMO: Chiediamo al nodo i dati attivi, qualunque tipo esso sia.
-        FitsImageData? dataToSave = SelectedNode.GetActiveImageData();
+        FitsImageData? dataToSave = imgNode.GetActiveImageData();
+        if (dataToSave == null) return;
 
-        if (dataToSave == null)
-        {
-            Debug.WriteLine("Nessun dato valido da salvare.");
-            return;
-        }
-
-        // 2. Calcola un nome file di default
-        // (Possiamo usare il titolo del nodo + pulizia caratteri invalidi se necessario)
-        string defaultName = $"{SelectedNode.Title}.fits";
-
-        // 3. Dialog e Salvataggio (uguale a prima)
+        string defaultName = $"{imgNode.Title}.fits";
         var savePath = await _dialogService.ShowSaveFitsFileDialogAsync(defaultName);
-        if (string.IsNullOrWhiteSpace(savePath)) return;
-
-        try
+        
+        if (!string.IsNullOrWhiteSpace(savePath))
         {
             await _fitsService.SaveFitsFileAsync(dataToSave, savePath);
-            Debug.WriteLine($"File salvato: {savePath}");
-        }
-        catch (Exception ex)
-        {
-            Debug.WriteLine($"Errore salvataggio: {ex.Message}");
         }
     }
-
-    private bool CanSaveNode() => SelectedNode != null;
-    
-    // --- Metodi Privati ---
-    private async Task AddSingleNodeAsync(string imagePath, double x, double y, bool centerOnPosition = false)
-    {
-        try
-        {
-            var newNodeViewModel = await _nodeFactory.CreateSingleImageNodeAsync(this, imagePath, x, y, centerOnPosition);
-            Nodes.Add(newNodeViewModel);
-            BringNodeToFront(newNodeViewModel);
-        }
-        catch(Exception ex)
-        {
-            Debug.WriteLine($"ERRORE Aggiunta Nodo Singolo: {ex.Message}");
-        }
-    }
-    
-    private async Task AddMultipleNodesAsync(List<string> imagePaths, double x, double y)
-    {
-        try
-        {
-            var newNodeViewModel = await _nodeFactory.CreateMultipleImagesNodeAsync(this, imagePaths, x, y);
-            Nodes.Add(newNodeViewModel);
-            BringNodeToFront(newNodeViewModel);
-        }
-        catch(Exception ex)
-        {
-            Debug.WriteLine($"ERRORE Aggiunta Nodo Multiplo: {ex.Message}");
-        }
-    }
-    
-    
+    private bool CanSaveNode() => SelectedNode is ImageNodeViewModel;
 }

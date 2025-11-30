@@ -5,7 +5,6 @@ using Avalonia.Input;
 using Avalonia.VisualTree; 
 using KomaLab.ViewModels;
 using System.Linq; 
-using System.Diagnostics; 
 
 namespace KomaLab.Views;
 
@@ -18,28 +17,42 @@ public partial class SingleImageNodeView : UserControl
         InitializeComponent();
     }
     
-    private void OnPointerPressed(object? sender, PointerPressedEventArgs e)
-{
-    if (DataContext is not SingleImageNodeViewModel vm) return;
-    
-    if (e.GetCurrentPoint(this).Properties.IsLeftButtonPressed)
+    // Helper per trovare la BoardView genitore e il suo ViewModel
+    private BoardViewModel? GetParentBoardViewModel(out Visual? visualParent)
     {
-        // 1. Seleziona
-        vm.ParentBoard.SetSelectedNode(vm);
-        
-        // 2. Porta in primo piano (Ora cambia solo lo ZIndex, non la lista!)
-        vm.RequestBringToFront(); 
+        visualParent = this.GetVisualAncestors().OfType<BoardView>().FirstOrDefault();
+        return visualParent?.DataContext as BoardViewModel;
+    }
 
-        // 3. Prepara il trascinamento
-        var boardView = this.GetVisualAncestors().OfType<BoardView>().FirstOrDefault();
-        if (boardView != null)
+    private void OnPointerPressed(object? sender, PointerPressedEventArgs e)
+    {
+        if (DataContext is not SingleImageNodeViewModel nodeVm) return;
+        
+        // Controlliamo che sia il tasto sinistro
+        var properties = e.GetCurrentPoint(this).Properties;
+        if (properties.IsLeftButtonPressed)
         {
-            _lastPos = e.GetPosition(boardView); 
-            e.Pointer.Capture(this); // La cattura ora NON viene persa
-            e.Handled = true; 
+            // 1. Recupera la Board tramite l'albero visuale
+            var boardVm = GetParentBoardViewModel(out var boardView);
+            
+            if (boardVm != null)
+            {
+                // Imposta la selezione sulla Board (che gestisce l'esclusività)
+                boardVm.SetSelectedNode(nodeVm);
+            }
+
+            // 2. Alza l'evento per portare in primo piano (Z-Index)
+            nodeVm.BringToFront(); 
+
+            // 3. Prepara il trascinamento
+            if (boardView != null)
+            {
+                _lastPos = e.GetPosition(boardView); 
+                e.Pointer.Capture(this); 
+                e.Handled = true; 
+            }
         }
     }
-}
 
     private void OnPointerReleased(object? sender, PointerReleasedEventArgs e)
     {
@@ -55,60 +68,52 @@ public partial class SingleImageNodeView : UserControl
     {
         if (_lastPos == null) return;
         
-        if (DataContext is not SingleImageNodeViewModel vm)
-            return;
+        if (DataContext is not SingleImageNodeViewModel nodeVm) return;
         
-        var boardView = this.GetVisualAncestors().OfType<BoardView>().FirstOrDefault();
-        if (boardView == null) return;
+        // Recupera la Board per avere la Scala e il riferimento posizionale
+        var boardVm = GetParentBoardViewModel(out var boardVisual);
         
-        var pos = e.GetPosition(boardView);
-        var delta = pos - _lastPos.Value;
-        _lastPos = pos;
+        if (boardVm == null || boardVisual == null) return;
         
-        vm.MoveNode(delta); 
+        var currentPos = e.GetPosition(boardVisual);
+        var delta = currentPos - _lastPos.Value;
         
+        // IMPORTANTE: Passiamo la scala corrente per muovere il nodo 
+        // della giusta distanza nel mondo virtuale, indipendentemente dallo zoom.
+        nodeVm.MoveNode(delta, boardVm.Scale); 
+        
+        _lastPos = currentPos;
         e.Handled = true;
     }
     
     private void OnPointerWheelChanged(object? sender, PointerWheelEventArgs e)
     {
-        if (DataContext is not SingleImageNodeViewModel vm)
-            return;
+        if (DataContext is not SingleImageNodeViewModel vm) return;
 
-        // 1. Usa Math.Abs per evitare che la direzione si inverta se le soglie sono vicine
+        // Logica per cambiare Black/White Point con la rotella
+        // Nota: Qui agiamo direttamente sul VM del nodo, che è corretto.
+        
         double currentRange = Math.Abs(vm.FitsImage.WhitePoint - vm.FitsImage.BlackPoint);
-    
-        // Fallback se l'immagine è piatta
         if (currentRange < 1.0) currentRange = 1000.0; 
         
         double stepPercentage = 0.10; 
         double deltaAmount = (currentRange * stepPercentage) * e.Delta.Y;
         
         bool isShiftPressed = (e.KeyModifiers & KeyModifiers.Shift) == KeyModifiers.Shift;
-
-        // Gap minimo di sicurezza (1 unità)
-        double gap = 1.0;
+        double gap = 1.0; // Gap minimo tra bianco e nero
 
         if (isShiftPressed)
         {
-            // --- MODIFICA BLACK POINT ---
             double newBlack = vm.FitsImage.BlackPoint + deltaAmount;
-        
-            // BLOCCO: Il nero non può superare il (Bianco - gap)
             double limit = vm.FitsImage.WhitePoint - gap;
             if (newBlack > limit) newBlack = limit;
-
             vm.FitsImage.BlackPoint = newBlack;
         }
         else
         {
-            // --- MODIFICA WHITE POINT ---
             double newWhite = vm.FitsImage.WhitePoint + deltaAmount;
-        
-            // BLOCCO: Il bianco non può scendere sotto il (Nero + gap)
             double limit = vm.FitsImage.BlackPoint + gap;
             if (newWhite < limit) newWhite = limit;
-
             vm.FitsImage.WhitePoint = newWhite;
         }
         

@@ -1,10 +1,9 @@
 ﻿using System;
-using System.Diagnostics;
 using System.Threading;
 using System.Threading.Tasks;
-using Avalonia;
-using Avalonia.Media.Imaging;
-using Avalonia.Platform;
+using Avalonia; 
+using Avalonia.Media.Imaging; 
+using Avalonia.Platform; 
 using CommunityToolkit.Mvvm.ComponentModel;
 using KomaLab.Models;
 using KomaLab.Services;
@@ -13,211 +12,175 @@ using Size = Avalonia.Size;
 
 namespace KomaLab.ViewModels.Helpers;
 
-/// <summary>
-/// Questo ViewModel non è un "Nodo".
-/// È un "motore" riutilizzabile che gestisce lo stato di visualizzazione
-/// (Black/White, Bitmap) di un singolo modello di dati FITS (FitsImageData).
-/// </summary>
-public partial class FitsRenderer : ObservableObject
+public partial class FitsRenderer : ObservableObject, IDisposable
 {
-    // --- Campi ---
-    private readonly FitsImageData _imageData; 
-    private readonly IFitsService _fitsService; 
-    private readonly IImageProcessingService _processingService;
-    
-    public Size ImageSize => _imageData.ImageSize;
+    // --- Dipendenze ---
+    private readonly FitsImageData _imageData;
+    private readonly IFitsService _fitsService;
+    private readonly IFitsDataConverter _converter;
+    private readonly IImageAnalysisService _analysis;
 
-    // --- Campo per l'Ottimizzazione ---
+    // --- Stato Interno ---
     private CancellationTokenSource? _regenerationCts;
-
-    // --- Proprietà (Stato dell'Immagine) ---
-    
-    [ObservableProperty]
-    private Bitmap? _image;
-
-    [ObservableProperty]
-    private double _blackPoint;
-
-    [ObservableProperty]
-    private double _whitePoint;
-    
     private Mat? _cachedScientificMat;
+    private bool _disposedValue;
 
-    // --- Costruttore ---
+    // --- Proprietà ---
     
+    public Size ImageSize => new(_imageData.Width, _imageData.Height);
+    
+    public FitsImageData Data => _imageData;
+
+    [ObservableProperty] private Bitmap? _image;
+    [ObservableProperty] private double _blackPoint;
+    [ObservableProperty] private double _whitePoint;
+
+    // --- Costruttore Aggiornato ---
     public FitsRenderer(
         FitsImageData imageData, 
         IFitsService fitsService, 
-        IImageProcessingService processingService)
+        IFitsDataConverter converter,    
+        IImageAnalysisService analysis)  
     {
         _imageData = imageData;
         _fitsService = fitsService;
-        _processingService = processingService;
+        _converter = converter;
+        _analysis = analysis;
     }
-    
-    /// <summary>
-    /// Avvia la prima generazione dell'immagine e calcola le soglie iniziali.
-    /// </summary>
+
     public async Task InitializeAsync()
     {
-        // 1. Esegui il lavoro pesante (BZERO + Mat allocation) una sola volta
+        if (_disposedValue) return;
+
         await Task.Run(() =>
         {
-            // NOTA: Qui chiamiamo LoadFitsDataAsMat, che contiene la logica BZERO.
-            _cachedScientificMat = _processingService.LoadFitsDataAsMat(_imageData);
+            // Usa il Converter per creare la Matrice OpenCV
+            _cachedScientificMat = _converter.RawToMat(_imageData);
         });
 
-        // 2. Calcola le soglie usando i dati RAW (corretto da CalculateClippedThresholds)
-        var (newBlack, newWhite) = await Task.Run(() => 
-            _processingService.CalculateClippedThresholds(_imageData)
-        );
-    
-        // 3. Imposta le proprietà e attiva il primo render
-        SetProperty(ref _blackPoint, newBlack, nameof(BlackPoint));
-        SetProperty(ref _whitePoint, newWhite, nameof(WhitePoint));
-
-        await TriggerRegeneration(); // Ora il trigger userà la cache
+        await ResetThresholdsAsync(skipRegeneration: true);
+        await TriggerRegeneration();
     }
-    
-    // --- Logica di Rigenerazione ---
-    partial void OnBlackPointChanged(double value) => TriggerRegeneration();
-    partial void OnWhitePointChanged(double value) => TriggerRegeneration();
 
-    /// <summary>
-    /// Avvia una rigenerazione "debounced" (anti-sfarfallio).
-    /// </summary>
-    private Task TriggerRegeneration()
+    // --- Logica Rendering ---
+
+    partial void OnBlackPointChanged(double value) => _ = TriggerRegeneration();
+    partial void OnWhitePointChanged(double value) => _ = TriggerRegeneration();
+
+    private async Task TriggerRegeneration()
     {
+        if (_disposedValue) return;
         _regenerationCts?.Cancel();
         _regenerationCts = new CancellationTokenSource();
-        var token = _regenerationCts.Token;
         
-        return RegeneratePreviewImageAsync(token);
+        try 
+        {
+            await RegeneratePreviewImageAsync(_regenerationCts.Token);
+        }
+        catch (OperationCanceledException) { }
     }
 
-    /// <summary>
-    /// Rigenera il Bitmap usando i dati grezzi e le soglie correnti.
-    /// (Versione ottimizzata "zero-copy").
-    /// </summary>
     private async Task RegeneratePreviewImageAsync(CancellationToken token)
     {
-        // Verifica se la Matrice CACHED è disponibile
-        if (_cachedScientificMat == null || _cachedScientificMat.Empty())
-        {
-            // Se la cache non è pronta, usciamo (questo non dovrebbe accadere dopo InitializeAsync)
-            return; 
-        }
-    
+        if (_cachedScientificMat == null || _cachedScientificMat.IsDisposed) return;
+
         var writeableBmp = new WriteableBitmap(
-            new PixelSize((int)_imageData.ImageSize.Width, (int)_imageData.ImageSize.Height),
-            new Vector(96, 96),
-            PixelFormats.Gray8, AlphaFormat.Opaque);
+            new PixelSize(_imageData.Width, _imageData.Height), 
+            new Vector(96, 96),                                 
+            PixelFormats.Gray8,                                 
+            AlphaFormat.Opaque);                                
 
         try
         {
             using (var lockedBuffer = writeableBmp.Lock())
             {
-                // Passa il puntatore al Task in background
+                var w = _imageData.Width;
+                var h = _imageData.Height;
+                var bp = BlackPoint;
+                var wp = WhitePoint;
+                var addr = lockedBuffer.Address;
+                var rowBytes = lockedBuffer.RowBytes;
+                var mat = _cachedScientificMat;
+
                 await Task.Run(() =>
                 {
                     token.ThrowIfCancellationRequested();
-            
-                    // --- NUOVA CHIAMATA VELOCE ---
-                    // Invece di passare i dati RAW e l'Header, passiamo la Matrice CACHED.
-                    _fitsService.NormalizeData(
-                        _cachedScientificMat, // Passiamo la Matrice (già corretta con BZERO)
-                        (int)_imageData.ImageSize.Width, 
-                        (int)_imageData.ImageSize.Height,
-                        BlackPoint, 
-                        WhitePoint,
-                        lockedBuffer.Address,
-                        lockedBuffer.RowBytes); 
+                    // IFitsService mantiene la responsabilità della visualizzazione
+                    _fitsService.NormalizeData(mat, w, h, bp, wp, addr, rowBytes);
                 }, token);
             }
-    
-            if (token.IsCancellationRequested)
+
+            if (!token.IsCancellationRequested)
+            {
+                Image = writeableBmp;
+            }
+            else
             {
                 writeableBmp.Dispose();
-                return;
             }
-        
-            Image = writeableBmp;
         }
-        catch (OperationCanceledException)
+        catch
         {
             writeableBmp.Dispose();
-        }
-        catch (Exception ex)
-        {
-            // Nota: Utilizziamo Debug.WriteLine invece di un'altra variabile per coerenza
-            System.Diagnostics.Debug.WriteLine($"Errore durante la rigenerazione dell'immagine: {ex.Message}");
-            writeableBmp.Dispose();
+            throw; 
         }
     }
-    
-    /// <summary>
-    /// Ricalcola le soglie ottimali dai dati grezzi
-    /// e aggiorna questo ViewModel (e rigenera l'immagine).
-    /// Chiamato dal pulsante "Reset" della UI.
-    /// </summary>
-    public async Task ResetThresholdsAsync()
-    {
-        // 1. Chiama il servizio di processing
-        var (newBlack, newWhite) = await Task.Run(() => 
-            _processingService.CalculateClippedThresholds(_imageData)
-        );
-        
-        // 2. Aggiorna le proprietà.
-        //    Questo attiverà automaticamente On...Changed
-        //    e quindi TriggerRegeneration().
-        BlackPoint = newBlack;
-        WhitePoint = newWhite;
-    }
-    
-    /// <summary>
-    /// Pulisce il Bitmap per liberare RAM.
-    /// </summary>
-    public void UnloadData()
-    {
-        _regenerationCts?.Cancel(); 
-        Image?.Dispose();
-        Image = null;
 
-        // IMPORTANTE: Libera la Matrice OpenCV
-        _cachedScientificMat?.Dispose(); 
-        _cachedScientificMat = null;
+    public async Task ResetThresholdsAsync(bool skipRegeneration = false)
+    {
+        if (_disposedValue) return;
+
+        // Usa il Converter per calcolare le soglie (sampling veloce)
+        var (newBlack, newWhite) = await Task.Run(() => 
+            _converter.CalculateDisplayThresholds(_imageData)
+        );
+
+        if (skipRegeneration)
+        {
+            SetProperty(ref _blackPoint, newBlack, nameof(BlackPoint));
+            SetProperty(ref _whitePoint, newWhite, nameof(WhitePoint));
+        }
+        else
+        {
+            BlackPoint = newBlack;
+            WhitePoint = newWhite;
+        }
     }
     
-    /// <summary>
-    /// Calcola statistiche rapide sulla matrice in cache per permettere il Sigma Locking.
-    /// </summary>
+    public void UnloadData() => Dispose();
+
+    protected virtual void Dispose(bool disposing)
+    {
+        if (!_disposedValue)
+        {
+            if (disposing)
+            {
+                _regenerationCts?.Cancel();
+                _regenerationCts?.Dispose();
+                Image?.Dispose();
+            }
+            
+            if (_cachedScientificMat != null && !_cachedScientificMat.IsDisposed)
+            {
+                _cachedScientificMat.Dispose();
+                _cachedScientificMat = null;
+            }
+            _disposedValue = true;
+        }
+    }
+    
     public (double Mean, double StdDev) GetImageStatistics()
     {
-        if (_cachedScientificMat == null || _cachedScientificMat.Empty()) 
-            return (0, 1);
+        if (_cachedScientificMat == null || _cachedScientificMat.IsDisposed) 
+            return (0, 1); 
+        
+        // Usa AnalysisService per calcoli matematici
+        return _analysis.ComputeStatistics(_cachedScientificMat);
+    }
 
-        using var meanMat = new Mat();
-        using var stdDevMat = new Mat();
-    
-        // --- FIX PER I NaN ---
-        // 1. Creiamo una maschera. 
-        // OpenCV Compare con EQ: 
-        // - Se pixel è numero valido: Valido == Valido -> TRUE (255)
-        // - Se pixel è NaN: NaN == NaN -> FALSE (0)
-        using var mask = new Mat();
-        Cv2.Compare(_cachedScientificMat, _cachedScientificMat, mask, CmpType.EQ);
-    
-        // 2. Calcoliamo statistiche usando la maschera
-        Cv2.MeanStdDev(_cachedScientificMat, meanMat, stdDevMat, mask);
-        // ---------------------
-
-        double mean = meanMat.Get<double>(0, 0);
-        double std = stdDevMat.Get<double>(0, 0);
-    
-        // Protezione extra se l'immagine è tutta NaN
-        if (double.IsNaN(mean)) mean = 0;
-        if (double.IsNaN(std) || std < 1e-9) std = 1.0; 
-
-        return (mean, std);
+    public void Dispose()
+    {
+        Dispose(disposing: true);
+        GC.SuppressFinalize(this);
     }
 }

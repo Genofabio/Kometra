@@ -1,10 +1,10 @@
 ﻿using System.Collections.Generic;
 using System.Linq;
-using Avalonia.Controls;
-using Avalonia.Platform.Storage;
-using System.Threading.Tasks;
 using Avalonia;
+using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
+using Avalonia.Platform.Storage; // Necessario per FilePickerFileType
+using System.Threading.Tasks;
 
 namespace KomaLab.Services;
 
@@ -12,33 +12,29 @@ public class DialogService : IDialogService
 {
     public async Task<IEnumerable<string>?> ShowOpenFitsFileDialogAsync()
     {
-        if (Application.Current?.ApplicationLifetime is not IClassicDesktopStyleApplicationLifetime desktop)
-        {
-            return null; 
-        }
-        var topLevel = TopLevel.GetTopLevel(desktop.MainWindow);
-        if (topLevel == null)
-        {
-            return null;
-        }
+        var storage = GetStorageProvider();
+        if (storage == null) return null;
 
         var fitsFilter = new FilePickerFileType("File FITS")
         {
             Patterns = new[] { "*.fits", "*.fit", "*.fts" }
         };
 
-        var files = await topLevel.StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
+        var files = await storage.OpenFilePickerAsync(new FilePickerOpenOptions
         {
             Title = "Apri Immagine/i FITS",
             AllowMultiple = true,
             FileTypeFilter = new[] { fitsFilter }
         });
 
-        // Controlla se l'utente ha selezionato almeno un file
         if (files.Count >= 1)
         {
-            // Converte la lista di IStorageFile in una lista di stringhe
-            return files.Select(f => f.TryGetLocalPath()).Where(p => p != null).Cast<string>();
+            // Nota: TryGetLocalPath restituisce null se il file è in cloud/virtuale.
+            // Per un'app desktop classica va bene, ma tienilo a mente.
+            return files
+                .Select(f => f.TryGetLocalPath())
+                .Where(p => !string.IsNullOrEmpty(p))
+                .Cast<string>();
         }
         
         return null;
@@ -46,33 +42,33 @@ public class DialogService : IDialogService
     
     public async Task<string?> ShowSaveFitsFileDialogAsync(string defaultFileName)
     {
-        // 1. Ottieni il riferimento alla finestra principale (TopLevel)
-        if (Application.Current?.ApplicationLifetime is not IClassicDesktopStyleApplicationLifetime desktop)
-        {
-            return null; 
-        }
-        var topLevel = TopLevel.GetTopLevel(desktop.MainWindow);
-        if (topLevel == null)
-        {
-            return null;
-        }
+        var storage = GetStorageProvider();
+        if (storage == null) return null;
 
-        // 2. Definisci il filtro file (lo stesso dell'apertura)
         var fitsFilter = new FilePickerFileType("File FITS")
         {
             Patterns = new[] { "*.fits", "*.fit", "*.fts" }
         };
 
-        // 3. Apri la finestra di dialogo "Salva con nome"
-        var file = await topLevel.StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
+        var file = await storage.SaveFilePickerAsync(new FilePickerSaveOptions
         {
             Title = "Salva Immagine FITS",
-            SuggestedFileName = defaultFileName, // Il nome generato dal ViewModel (es. "Titolo.fits")
+            SuggestedFileName = defaultFileName,
             FileTypeChoices = new[] { fitsFilter },
             DefaultExtension = "fits"
         });
 
-        // 4. Restituisci il percorso locale (o null se annullato)
         return file?.TryGetLocalPath();
+    }
+
+    // --- Helper Privato per ridurre duplicazione ---
+    private IStorageProvider? GetStorageProvider()
+    {
+        if (Application.Current?.ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
+        {
+            var topLevel = TopLevel.GetTopLevel(desktop.MainWindow);
+            return topLevel?.StorageProvider;
+        }
+        return null;
     }
 }

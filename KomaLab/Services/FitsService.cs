@@ -1,171 +1,123 @@
 ﻿using System;
-using System.Collections.Generic;
+using System.Collections;
 using System.IO;
-using System.Linq;
 using System.Threading.Tasks;
-using Avalonia.Platform;
+using Avalonia.Platform; 
 using KomaLab.Models;
-using MathNet.Numerics.Statistics;
 using nom.tam.fits;
 using nom.tam.util;
 using OpenCvSharp;
-using Size = Avalonia.Size;
 
 namespace KomaLab.Services;
 
 public class FitsService : IFitsService
 {
-    private readonly IImageProcessingService _processingService;
-
-    public FitsService(IImageProcessingService processingService)
-    {
-        _processingService = processingService;
-    }
-    
     /// <summary>
-    /// Carica un file FITS (sia da asset che da filesystem), lo parsa e calcola le soglie.
+    /// Carica un file FITS (sia da asset che da filesystem), lo parsa 
+    /// e restituisce il modello dati popolato.
     /// </summary>
     public async Task<FitsImageData?> LoadFitsFromFileAsync(string assetPath)
     {
-        // 1. Apri lo stream corretto (File o Asset)
-        Stream streamToRead;
-        if (assetPath.StartsWith("avares://"))
-        {
-            var uri = new Uri(assetPath);
-            if (!AssetLoader.Exists(uri)) throw new FileNotFoundException("Asset non trovato", assetPath);
-            streamToRead = AssetLoader.Open(uri);
-        }
-        else if (File.Exists(assetPath))
-        {
-            streamToRead = new FileStream(assetPath, FileMode.Open, FileAccess.Read, FileShare.Read);
-        }
-        else
-        {
-            throw new FileNotFoundException("File non trovato", assetPath);
-        }
+        // Apre lo stream (gestisce sia file su disco che risorse embedded)
+        Stream streamToRead = OpenStream(assetPath);
 
-        // 2. 'await using' si assicurerà che lo stream venga chiuso
+        // 'await using' assicura la chiusura dello stream alla fine
         await using (streamToRead)
         {
-            // 3. Esegui il parsing "pesante" in background
+            // Esegue il parsing pesante in background per non bloccare la UI
             return await Task.Run(() =>
             {
-                // 4. Passa lo stream DIRETTO.
+                // Inizializza il lettore FITS
                 var fitsFile = new Fits(streamToRead);
                 fitsFile.Read(); 
 
                 ImageHDU? imageHdu = null;
+                
+                // Cerca la prima HDU che contiene un'immagine valida (almeno 2 assi)
                 for (int i = 0; i < fitsFile.NumberOfHDUs; i++)
                 {
                     var hdu = fitsFile.GetHDU(i);
-                    if (hdu is ImageHDU hduAsImage && hduAsImage.Data?.Kernel != null)
+                    if (hdu is ImageHDU imgHdu && imgHdu.Axes.Length >= 2)
                     {
-                        imageHdu = hduAsImage;
+                        imageHdu = imgHdu;
                         break;
                     }
                 }
 
-                if (imageHdu == null)
-                {
-                    return null; 
-                }
+                // Se non troviamo immagini valide, ritorniamo null
+                if (imageHdu == null) return null;
 
                 var header = imageHdu.Header;
                 
-                // --- PUNTO DI ISPEZIONE DEBUG ---
-                double bzero = header.GetDoubleValue("BZERO", 0.0);
-                double bscale = header.GetDoubleValue("BSCALE", 1.0);
-                int bitpix = header.GetIntValue("BITPIX");
-            
-                System.Diagnostics.Debug.WriteLine($"--------------------------------------------------");
-                System.Diagnostics.Debug.WriteLine($"[FITS LOAD] File: {Path.GetFileName(assetPath)}");
-                System.Diagnostics.Debug.WriteLine($"[FITS LOAD] BITPIX: {bitpix}");
-                System.Diagnostics.Debug.WriteLine($"[FITS LOAD] BZERO : {bzero}"); // Se questo è != 0, è lui la causa
-                System.Diagnostics.Debug.WriteLine($"[FITS LOAD] BSCALE: {bscale}");
-                System.Diagnostics.Debug.WriteLine($"--------------------------------------------------");
-                // --------------------------------
-                
-                int naxis = header.GetIntValue("NAXIS");
-                if (naxis < 2) return null;
-
+                // Lettura dimensioni
                 int width = header.GetIntValue("NAXIS1");
                 int height = header.GetIntValue("NAXIS2");
-                var imageSize = new Size(width, height);
                 
-                var kernelData = imageHdu.Data.Kernel; 
-                if (kernelData == null) return null; 
-
-                var dataArray = (Array)kernelData;
-                if (dataArray.Rank != 1) return null;
-                Array.Reverse(dataArray);
+                // Estrazione dei dati grezzi (Kernel restituisce l'array sottostante)
+                // CSharpFITS solitamente restituisce jagged arrays (es. short[][]) o array rettangolari.
+                var rawData = imageHdu.Kernel; 
                 
-                var rawFitsData = dataArray.Clone(); 
+                if (rawData == null) return null;
 
+                // --- GESTIONE ORIENTAMENTO FITS ---
+                // Lo standard FITS ha l'origine in basso a sinistra (Bottom-Left).
+                // I monitor e le bitmap hanno l'origine in alto a sinistra (Top-Left).
+                // Dobbiamo invertire l'ordine delle righe (Flip Y).
+                if (rawData is Array arr && arr.Rank == 1) 
+                {
+                    // Se è un jagged array (array di array), Array.Reverse inverte l'ordine delle righe.
+                    // Questo è molto efficiente e corregge l'orientamento.
+                    Array.Reverse(arr);
+                }
+
+                // Costruzione del Model
                 return new FitsImageData
                 {
-                    RawData = rawFitsData,
+                    RawData = rawData,
                     FitsHeader = header,
-                    ImageSize = imageSize
+                    Width = width,
+                    Height = height
                 };
             });
         }
     }
     
     /// <summary>
-    /// Legge solo le dimensioni dei file FITS.
+    /// Legge solo l'header del file FITS per ottenerne le dimensioni,
+    /// senza caricare l'intera matrice dati in memoria.
     /// </summary>
-    public async Task<Size> GetFitsImageSizeAsync(string path)
+    public async Task<(int Width, int Height)> GetFitsImageSizeAsync(string path)
     {
-        // 1. Apri lo stream corretto (File o Asset)
-        Stream streamToRead;
-        if (path.StartsWith("avares://"))
-        {
-            var uri = new Uri(path);
-            if (!AssetLoader.Exists(uri)) throw new FileNotFoundException("Asset non trovato", path);
-            streamToRead = AssetLoader.Open(uri);
-        }
-        else if (File.Exists(path))
-        {
-            streamToRead = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
-        }
-        else
-        {
-            throw new FileNotFoundException("File non trovato", path);
-        }
+        Stream streamToRead = OpenStream(path);
 
-        // 2. 'await using' si assicurerà che lo stream venga chiuso
         await using (streamToRead)
         {
-            // 3. Esegui la lettura "leggera" in background
             return await Task.Run(() =>
             {
-                // 4. Passa lo stream (FileStream/AssetStream) DIRETTAMENTE.
                 var fitsFile = new Fits(streamToRead);
+                // Legge (parzialmente se supportato, altrimenti legge tutto lo stream ma parsa solo l'header)
                 fitsFile.Read(); 
     
                 for (int i = 0; i < fitsFile.NumberOfHDUs; i++)
                 {
                     var hdu = fitsFile.GetHDU(i);
-                    if (hdu is ImageHDU hduAsImage)
+                    if (hdu is ImageHDU imgHdu)
                     {
-                        var header = hduAsImage.Header;
-                        int width = header.GetIntValue("NAXIS1");
-                        int height = header.GetIntValue("NAXIS2");
-                        return new Size(width, height);
+                        return (imgHdu.Header.GetIntValue("NAXIS1"), 
+                                imgHdu.Header.GetIntValue("NAXIS2"));
                     }
                 }
-        
-                return default(Size);
+                return (0, 0);
             });
         }
     }
 
     /// <summary>
-    /// Normalizza i dati FITS grezzi in un array di byte (Gray8) 
-    /// usando le soglie specificate.
+    /// Normalizza una Matrice OpenCV (contenente dati scientifici double/float)
+    /// direttamente nella memoria video di una Bitmap 8-bit (Gray8).
     /// </summary>
     public void NormalizeData(
-        OpenCvSharp.Mat sourceMat, // Matrice CACHED (CV_64FC1)
+        Mat sourceMat, 
         int width, 
         int height,
         double blackPoint, 
@@ -173,17 +125,22 @@ public class FitsService : IFitsService
         IntPtr destinationBuffer, 
         long stride)
     {
-        // Il check su BZERO/BSCALE non è più necessario qui, perché è stato fatto 
-        // una sola volta in FitsRenderer.InitializeAsync.
-
         if (sourceMat.Empty()) return; 
 
-        // Calcolo Alpha e Beta per lo Stretch Lineare
+        // Calcolo parametri Stretch Lineare: y = alpha * x + beta
+        // Vogliamo mappare [blackPoint, whitePoint] -> [0, 255]
         double range = whitePoint - blackPoint;
+        
+        // Evitiamo divisioni per zero se black == white
         double alpha = (Math.Abs(range) < 1e-9) ? 0 : 255.0 / range;
-        double beta = (Math.Abs(range) < 1e-9) ? (blackPoint >= whitePoint ? 0 : 128) : -blackPoint * alpha;
+        
+        // Calcolo offset (beta)
+        double beta = (Math.Abs(range) < 1e-9) 
+            ? (blackPoint >= whitePoint ? 0 : 128) 
+            : -blackPoint * alpha;
 
-        // 1. Creiamo il wrapper sulla memoria video di destinazione (dstMat)
+        // Creiamo una "Matrice Wrapper" attorno al buffer di memoria della Bitmap di destinazione.
+        // Non alloca nuova memoria, usa quella passata tramite destinationBuffer.
         using Mat dstMat = Mat.FromPixelData(
             height, 
             width, 
@@ -191,70 +148,105 @@ public class FitsService : IFitsService
             destinationBuffer, 
             stride);
 
-        // 2. Eseguiamo la conversione e lo stretch (Operazione Veloce OpenCV)
-        // Usiamo la Matrice CACHED (sourceMat)
+        // ConvertTo esegue: dst(x,y) = saturate_cast<uchar>( src(x,y)*alpha + beta )
+        // È un'operazione altamente ottimizzata in OpenCV (spesso SIMD/Multithreaded).
         sourceMat.ConvertTo(dstMat, MatType.CV_8UC1, alpha, beta);
     }
     
+    /// <summary>
+    /// Salva i dati correnti su disco in formato FITS.
+    /// Gestisce il re-flip dei dati e la pulizia dell'header.
+    /// </summary>
     public async Task SaveFitsFileAsync(FitsImageData data, string destinationPath)
     {
         await Task.Run(() =>
         {
-            // 1. PREPARAZIONE DATI (Flip Verticale)
-            // Dobbiamo clonare e invertire l'array per rispettare lo standard FITS (Bottom-Left origin)
-            // data.RawData è un Array[] (array di righe).
-            
-            var originalSource = (Array)data.RawData;
-            
-            // Creiamo una copia superficiale (Shallow Copy).
-            // Per un array jagged (double[][]), questo crea un nuovo array che punta alle stesse righe.
-            // È veloce e sicuro perché stiamo solo riordinando le righe (Reverse), non modificando i valori dei pixel.
-            var arrayToSave = (Array)originalSource.Clone();
-            
-            // Invertiamo l'ordine delle righe (Flip Y)
-            Array.Reverse(arrayToSave);
-
-            // 2. Creazione HDU dai dati invertiti
-            var hdu = FitsFactory.HDUFactory(arrayToSave);
-            
-            // 3. Copia Header (Identico a prima)
-            var newHeader = hdu.Header;
-            var cursor = data.FitsHeader.GetCursor();
-            
-            while (cursor.MoveNext())
+            // 1. PREPARAZIONE DATI
+            if (data.RawData is Array originalSource)
             {
-                // Fix Casting per CSharpFITS
-                HeaderCard card;
-                if (cursor.Current is System.Collections.DictionaryEntry entry)
-                    card = (HeaderCard)entry.Value;
-                else if (cursor.Current is HeaderCard hCard)
-                    card = hCard;
-                else
-                    continue;
+                // Creiamo una Shallow Copy dell'array (veloce).
+                // Clona la struttura dell'array principale, ma le righe puntano agli stessi oggetti.
+                // Poiché faremo solo Array.Reverse (riordino puntatori), non modifichiamo i valori dei pixel,
+                // quindi non corrompiamo i dati in memoria dell'applicazione.
+                var arrayToSave = (Array)originalSource.Clone();
+                
+                // Invertiamo nuovamente l'ordine delle righe per tornare allo standard FITS (Bottom-Left)
+                Array.Reverse(arrayToSave);
 
-                string key = card.Key.ToUpper();
-
-                if (key == "SIMPLE" || key == "BITPIX" || key == "EXTEND" ||
-                    key == "PCOUNT" || key == "GCOUNT" || 
-                    key == "BZERO" || key == "BSCALE" ||
-                    key == "DATAMIN" || key == "DATAMAX" ||
-                    key.StartsWith("NAXIS")) 
+                // 2. CREAZIONE NUOVA HDU
+                // FitsFactory analizza il tipo di dati e crea l'HDU corretta (es. Short, Float, ecc.)
+                var hdu = FitsFactory.HDUFactory(arrayToSave);
+                var newHeader = hdu.Header;
+                
+                // 3. COPIA METADATI ASTRONOMICI
+                // Copiamo le chiavi dall'header originale, escludendo quelle tecniche che
+                // la libreria ha appena rigenerato (es. BITPIX, NAXIS).
+                var cursor = data.FitsHeader.GetCursor();
+                
+                while (cursor.MoveNext())
                 {
-                    continue; 
-                }
-                newHeader.AddCard(card);
-            }
+                    HeaderCard? card = null;
 
-            // 4. Scrittura su Disco (ReadWrite + Buffered)
-            using var fileStream = new FileStream(destinationPath, FileMode.Create, FileAccess.ReadWrite);
-            using var bufferedStream = new BufferedDataStream(fileStream);
-            var fitsFile = new Fits();
-            
-            fitsFile.AddHDU(hdu);
-            fitsFile.Write(bufferedStream);
-            
-            bufferedStream.Flush();
-            fileStream.Flush();
+                    // Fix per CSharpFITS: l'iteratore può ritornare DictionaryEntry o HeaderCard
+                    if (cursor.Current is DictionaryEntry entry && entry.Value is HeaderCard hc)
+                        card = hc;
+                    else if (cursor.Current is HeaderCard c)
+                        card = c;
+
+                    if (card == null) continue;
+
+                    string key = card.Key.ToUpper();
+
+                    // Lista delle chiavi da NON copiare (vengono gestite automaticamente)
+                    if (key == "SIMPLE" || key == "BITPIX" || key == "EXTEND" ||
+                        key == "PCOUNT" || key == "GCOUNT" || 
+                        key == "BZERO" || key == "BSCALE" ||
+                        key == "DATAMIN" || key == "DATAMAX" ||
+                        key.StartsWith("NAXIS")) // Filtra NAXIS, NAXIS1, NAXIS2...
+                    {
+                        continue; 
+                    }
+
+                    // Aggiungiamo la carta al nuovo header
+                    newHeader.AddCard(card);
+                }
+
+                // 4. SCRITTURA SU FILE
+                using var fs = new FileStream(destinationPath, FileMode.Create, FileAccess.Write);
+                using var bs = new BufferedDataStream(fs);
+                var fitsFile = new Fits();
+                
+                fitsFile.AddHDU(hdu);
+                fitsFile.Write(bs);
+                
+                // Flush esplicito per sicurezza
+                bs.Flush();
+                fs.Flush();
+            }
         });
+    }
+
+    // --- Helper Privato ---
+    
+    private Stream OpenStream(string path)
+    {
+        // Gestione Risorse Avalonia (es. immagini di default o demo)
+        if (path.StartsWith("avares://"))
+        {
+            var uri = new Uri(path);
+            if (!AssetLoader.Exists(uri)) 
+                throw new FileNotFoundException($"Asset Avalonia non trovato: {path}");
+            
+            return AssetLoader.Open(uri);
+        }
+        
+        // Gestione File System Standard
+        if (File.Exists(path))
+        {
+            // FileShare.Read permette ad altre app di leggere il file mentre lo apriamo
+            return new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+        }
+
+        throw new FileNotFoundException($"File non trovato sul disco: {path}");
     }
 }

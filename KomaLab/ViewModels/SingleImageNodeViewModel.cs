@@ -1,152 +1,158 @@
 ﻿using System;
-using System.Threading.Tasks;
-using Avalonia;
-using KomaLab.Models;
-using KomaLab.Services;
-using nom.tam.fits;
-using CommunityToolkit.Mvvm.ComponentModel;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading.Tasks;
+using Avalonia;
+using CommunityToolkit.Mvvm.ComponentModel;
+using KomaLab.Models;
+using KomaLab.Services;
 using KomaLab.ViewModels.Helpers;
+using nom.tam.fits;
 
 namespace KomaLab.ViewModels;
 
 /// <summary>
 /// ViewModel per un nodo che visualizza una singola immagine FITS.
+/// Eredita da ImageNodeViewModel per sfruttare la logica comune delle immagini.
 /// </summary>
-public partial class SingleImageNodeViewModel : BaseNodeViewModel 
+public partial class SingleImageNodeViewModel : ImageNodeViewModel
 {
-    // --- Campi ---
+    // --- Servizi ---
     private readonly IFitsService _fitsService;
-    private readonly IImageProcessingService _processingService; 
-    private readonly SingleImageNodeModel _imageModel;
+    private readonly IFitsDataConverter _converter;
+    private readonly IImageAnalysisService _analysis;
     
-    /// <summary>
-    /// Questo è lo "stato attuale" dei dati (originali o processati).
-    /// </summary>
+    // --- Model Sottostante ---
+    private readonly SingleImageNodeModel _imageModel;
+
+    // --- Stato Interno ---
     private FitsImageData? _currentData;
 
+    // --- Proprietà Observable ---
     [ObservableProperty]
     private FitsRenderer _fitsImage;
 
-    // --- Implementazione Proprietà Astratte ---
+    // --- Implementazione Proprietà Astratte (da ImageNodeViewModel) ---
     protected override Size NodeContentSize
     {
         get
         {
-            // Legge la dimensione dal "motore" immagine
-            if (FitsImage.ImageSize == default(Size))
-                return new Size(200, 150); // Dimensione di fallback
+            // Protezione contro null o dati vuoti
+            if (FitsImage.Data.Width == 0)
+            {
+                return new Size(200, 150); // Fallback size
+            }
             
-            return FitsImage.ImageSize;
+            return new Size(FitsImage.Data.Width, FitsImage.Data.Height);
         }
     }
 
     // --- Costruttore ---
     public SingleImageNodeViewModel(
-        BoardViewModel parentBoard, 
         SingleImageNodeModel model,
         IFitsService fitsService,
-        IImageProcessingService processingService) 
-        : base(parentBoard, model)
+        IFitsDataConverter converter,      // <--- NUOVO
+        IImageAnalysisService analysis)    // <--- NUOVO
+        : base(model) 
     {
         _fitsService = fitsService;
-        _processingService = processingService;
+        _converter = converter;
+        _analysis = analysis;
         _imageModel = model;
-        
-        // Crea un "motore" segnaposto vuoto
-        var placeholderModel = new FitsImageData
+
+        // Inizializzazione placeholder
+        var placeholderData = new FitsImageData
         {
-            RawData = Array.Empty<byte[]>(),
+            RawData = new Array[0], // Inizializza con array vuoto corretto per il Converter
             FitsHeader = new Header(),
-            ImageSize = default
+            Width = 0,
+            Height = 0
         };
-        
-        _fitsImage = new Helpers.FitsRenderer(
-            placeholderModel, 
+
+        // Passiamo i nuovi servizi al renderer placeholder
+        _fitsImage = new FitsRenderer(
+            placeholderData, 
             _fitsService, 
-            _processingService);
-    }
-    
-    // --- Metodi ---
-    
-    partial void OnFitsImageChanged(Helpers.FitsRenderer? value)
-    {
-        // 1. Notifico che la dimensione del nodo è cambiata
-        OnPropertyChanged(nameof(NodeContentSize));
+            _converter, 
+            _analysis);
     }
 
-    /// <summary>
-    /// Carica i dati FITS *originali* dal disco.
-    /// </summary>
+    // --- Callback Generati dal Toolkit ---
+    partial void OnFitsImageChanged(FitsRenderer? value)
+    {
+        OnPropertyChanged(nameof(NodeContentSize));
+        OnPropertyChanged(nameof(EstimatedTotalSize)); 
+    }
+
+    // --- Logica di Caricamento ---
+    
     public async Task LoadDataAsync()
     {
         try
         {
-            var imageData = await _fitsService.LoadFitsFromFileAsync(_imageModel.ImagePath); 
+            var imageData = await _fitsService.LoadFitsFromFileAsync(_imageModel.ImagePath);
             if (imageData == null)
             {
-                throw new Exception("I dati FITS caricati sono nulli o non validi.");
+                throw new Exception("I dati FITS caricati sono nulli.");
             }
-            
-            // Applica questi dati come "stato attuale"
+
             await ApplyProcessedDataAsync(new List<FitsImageData> { imageData });
         }
         catch (Exception ex)
         {
-            Title = $"ERRE: {ex.Message.Split('\n')[0]}";
+            Title = $"ERR: {ex.Message}";
         }
     }
-    
-    /// <summary>
-    /// Sostituisce l'immagine visualizzata con i nuovi dati.
-    /// </summary>
+
     private async Task SetFitsData(FitsImageData newData)
     {
-        _currentData = newData; 
-    
-        // 1. CREA E PREPARA IL NUOVO
-        var newFitsImage = new FitsRenderer( // Assumendo che tu l'abbia rinominato
-            newData, 
-            _fitsService, 
-            _processingService);
+        _currentData = newData;
+
+        // 1. Crea il nuovo Helper di rendering con i servizi aggiornati
+        var newFitsImage = new FitsRenderer(
+            newData,
+            _fitsService,
+            _converter,
+            _analysis);
+        
+        // Init asincrono (conversione Raw -> Mat)
         await newFitsImage.InitializeAsync();
-    
-        // 2. ESEGUI LO SCAMBIO
+
+        // 2. Scambio atomico
         var oldFitsImage = FitsImage;
         FitsImage = newFitsImage;
-        oldFitsImage?.UnloadData();
+
+        // 3. Cleanup
+        oldFitsImage.UnloadData();
     }
-    
-    // --- Implementazione Metodi Base ---
-    
+
+    // --- Implementazione Metodi Astratti ---
+
     public override async Task<List<FitsImageData?>> GetCurrentDataAsync()
     {
-        // Se i dati non sono ancora stati caricati, caricali ora
         if (_currentData == null)
         {
             await LoadDataAsync();
         }
-        return new List<FitsImageData?> { _currentData };
+        return [_currentData];
     }
 
     public override async Task ApplyProcessedDataAsync(List<FitsImageData> newProcessedData)
     {
-        if (newProcessedData.Count == 0)
-            return;
+        if (newProcessedData.Count == 0) return;
 
-        var newData = newProcessedData.FirstOrDefault(); // Prende solo il primo
-        if (newData == null)
-            return;
-            
-        await SetFitsData(newData);
+        var newData = newProcessedData.FirstOrDefault();
+        if (newData != null)
+        {
+            await SetFitsData(newData);
+        }
     }
-    
+
     public override async Task ResetThresholdsAsync()
     {
         await FitsImage.ResetThresholdsAsync();
     }
-    
+
     public override FitsImageData? GetActiveImageData()
     {
         return _currentData;

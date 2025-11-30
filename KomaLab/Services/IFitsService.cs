@@ -1,31 +1,29 @@
 ﻿using System;
-using Avalonia;
-using KomaLab.Models;
-using nom.tam.fits;
-using System.Collections.Generic;
 using System.Threading.Tasks;
+using KomaLab.Models;
+using OpenCvSharp;
 
 namespace KomaLab.Services;
 
 public interface IFitsService
 {
     /// <summary>
-    /// Carica i DATI COMPLETI (pesante) di un file FITS.
-    /// Restituisce null se il caricamento fallisce.
+    /// Carica i DATI COMPLETI di un file FITS.
     /// </summary>
     Task<FitsImageData?> LoadFitsFromFileAsync(string assetPath);
 
     /// <summary>
-    /// Legge SOLO L'HEADER (leggero) di un file FITS per restituirne la dimensione.
+    /// Legge solo la dimensione dell'immagine (Header).
+    /// Restituisce (Width, Height).
     /// </summary>
-    Task<Size> GetFitsImageSizeAsync(string path);
+    Task<(int Width, int Height)> GetFitsImageSizeAsync(string path);
 
     /// <summary>
-    /// Normalizza una Matrice OpenCV pre-caricata in un array di byte Gray8
-    /// usando le soglie specificate.
+    /// Converte una Matrice OpenCV (contenente dati scientifici) 
+    /// in un buffer di memoria per visualizzazione (Bitmap 8-bit).
     /// </summary>
     void NormalizeData(
-        OpenCvSharp.Mat sourceMat, // NUOVA SORGENTE: La Matrice cached
+        Mat sourceMat, 
         int width, 
         int height,
         double blackPoint, 
@@ -33,6 +31,5 @@ public interface IFitsService
         IntPtr destinationBuffer, 
         long stride);
 
-    public Task SaveFitsFileAsync(FitsImageData data, string destinationPath);
-
+    Task SaveFitsFileAsync(FitsImageData data, string destinationPath);
 }

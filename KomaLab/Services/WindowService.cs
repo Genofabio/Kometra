@@ -4,7 +4,6 @@ using KomaLab.Views;
 using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
-using Avalonia;
 using KomaLab.Models;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -24,38 +23,36 @@ public class WindowService : IWindowService
     {
         _mainWindow = window;
     }
-
-    // --- INIZIO SOSTITUZIONE ---
-    public async Task<List<FitsImageData>?> ShowAlignmentWindowAsync(BaseNodeViewModel nodeToAlign)
+    
+    public async Task<List<FitsImageData>?> ShowAlignmentWindowAsync(ImageNodeViewModel nodeToAlign)
     {
         if (_mainWindow == null)
         {
             throw new InvalidOperationException("La finestra principale non è stata registrata.");
         }
 
-        // 1. Preleva i dati IN MEMORIA dal nodo (non i path)
+        // ORA FUNZIONA: ImageNodeViewModel ha questo metodo
         var currentData = await nodeToAlign.GetCurrentDataAsync();
         
-        // La finestra di allineamento parte "pulita"
-
-        // 2. Risolvi tutti i servizi necessari
+        // Risoluzione dei nuovi servizi (come visto nello step precedente)
         var fitsService = _serviceProvider.GetRequiredService<IFitsService>();
         var alignmentService = _serviceProvider.GetRequiredService<IAlignmentService>();
-        var processingService = _serviceProvider.GetRequiredService<IImageProcessingService>();
+        var converter = _serviceProvider.GetRequiredService<IFitsDataConverter>();
+        var analysis = _serviceProvider.GetRequiredService<IImageAnalysisService>();
     
-        // 3. Crea il ViewModel (LA FIRMA È CAMBIATA)
         var viewModel = new AlignmentToolViewModel(
             currentData,
             fitsService, 
-            alignmentService, 
-            processingService);
+            alignmentService,
+            converter,
+            analysis
+        );
     
         var alignmentWindow = new AlignmentToolView
         {
             DataContext = viewModel
         };
 
-        // 4. Collega e attendi la chiusura (invariato)
         Action closeHandler = () => { alignmentWindow.Close(); };
         viewModel.RequestClose += closeHandler;
 
@@ -63,13 +60,11 @@ public class WindowService : IWindowService
 
         viewModel.RequestClose -= closeHandler;
 
-        // 5. Restituisci i NUOVI dati processati
-        if (viewModel.DialogResult) // Se ha premuto "Applica"
+        if (viewModel.DialogResult) 
         {
             return viewModel.FinalProcessedData; 
         }
     
-        return null; // L'utente ha annullato
+        return null; 
     }
-    // --- FINE SOSTITUZIONE ---
 }

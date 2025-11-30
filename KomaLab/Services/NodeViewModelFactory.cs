@@ -4,57 +4,58 @@ using System.Diagnostics;
 using System.IO;
 using System.Threading.Tasks;
 using Avalonia;
-using KomaLab.Models; // <-- Ora importa la nuova gerarchIA di modelli
+using KomaLab.Models;
 using KomaLab.ViewModels;
-using KomaLab.ViewModels.Helpers;
 
 namespace KomaLab.Services;
 
-/// <summary>
-/// Implementazione concreta di INodeViewModelFactory.
-/// </summary>
 public class NodeViewModelFactory : INodeViewModelFactory
 {
+    // Servizi necessari ai Nodi
     private readonly IFitsService _fitsService;
-    private readonly IImageProcessingService _processingService;
+    private readonly IFitsDataConverter _converter;    // <--- NUOVO
+    private readonly IImageAnalysisService _analysis;  // <--- NUOVO
 
     public NodeViewModelFactory(
-        IFitsService fitsService, 
-        IImageProcessingService processingService) // <-- Aggiungi qui
+        IFitsService fitsService,
+        IFitsDataConverter converter,      // Iniezione dei nuovi servizi separati
+        IImageAnalysisService analysis)
     {
         _fitsService = fitsService;
-        _processingService = processingService; // <-- Salvalo
+        _converter = converter;
+        _analysis = analysis;
     }
 
     /// <summary>
     /// Crea, carica e posiziona un nuovo SingleImageNodeViewModel.
     /// </summary>
     public async Task<SingleImageNodeViewModel> CreateSingleImageNodeAsync(
-        BoardViewModel parent, 
-        string imagePath, 
+        string imagePath, // NOTA: Rimossa BoardViewModel parent
         double x, double y, 
         bool centerOnPosition = false)
     {
         // 1. CREA IL NUOVO MODELLO SPECIFICO
         var newNodeModel = new SingleImageNodeModel
         {
-            ImagePath = imagePath, // <-- Inserisce il percorso nel modello
+            ImagePath = imagePath,
             Title = Path.GetFileName(imagePath),
             X = x,
             Y = y
         };
     
-        // 2. PASSA IL NUOVO MODELLO al costruttore
+        // 2. ISTANZIA IL VIEWMODEL (Con i nuovi servizi)
         var newNodeViewModel = new SingleImageNodeViewModel(
-            parent, 
             newNodeModel,
             _fitsService,
-            _processingService);
+            _converter, // <--- Passiamo il converter
+            _analysis   // <--- Passiamo l'analysis
+        );
         
         await newNodeViewModel.LoadDataAsync();
         
         if (centerOnPosition)
         {
+            // Usiamo EstimatedTotalSize che viene calcolato dal VM dopo il load
             var size = newNodeViewModel.EstimatedTotalSize;
             newNodeViewModel.X = x - (size.Width / 2);
             newNodeViewModel.Y = y - (size.Height / 2);
@@ -62,25 +63,55 @@ public class NodeViewModelFactory : INodeViewModelFactory
         
         return newNodeViewModel;
     }
-    
+
+    public async Task<SingleImageNodeViewModel> CreateSingleImageNodeFromDataAsync(
+        FitsImageData data, 
+        string title, 
+        double x, 
+        double y)
+    {
+        // 1. Crea il Modello per dati in memoria
+        var model = new SingleImageNodeModel
+        {
+            Title = title,
+            X = x,
+            Y = y,
+            ImagePath = string.Empty 
+        };
+
+        // 2. Crea il ViewModel
+        var node = new SingleImageNodeViewModel(
+            model, 
+            _fitsService, 
+            _converter, 
+            _analysis);
+
+        // 3. Inietta i dati calcolati (es. risultato di uno stack)
+        await node.ApplyProcessedDataAsync(new List<FitsImageData> { data });
+
+        return node;
+    }
+
     /// <summary>
     /// Crea, pre-scansiona e pre-carica un nuovo MultipleImagesNodeViewModel.
     /// </summary>
     public async Task<MultipleImagesNodeViewModel> CreateMultipleImagesNodeAsync(
-        BoardViewModel parent, 
         List<string> imagePaths, 
         double x, double y)
     {
-        // --- 1. Pre-scansione (invariato) ---
+        // --- 1. Pre-scansione (Logica originale adattata) ---
         double maxWidth = 0;
         double maxHeight = 0;
+
         foreach (var path in imagePaths)
         {
             try
             {
-                var imgSize = await _fitsService.GetFitsImageSizeAsync(path);
-                if (imgSize.Width > maxWidth) maxWidth = imgSize.Width;
-                if (imgSize.Height > maxHeight) maxHeight = imgSize.Height;
+                // NOTA: GetFitsImageSizeAsync ora ritorna una tupla (int, int)
+                var (w, h) = await _fitsService.GetFitsImageSizeAsync(path);
+                
+                if (w > maxWidth) maxWidth = w;
+                if (h > maxHeight) maxHeight = h;
             }
             catch (Exception ex)
             {
@@ -89,13 +120,13 @@ public class NodeViewModelFactory : INodeViewModelFactory
         }
         var maxSize = new Size(maxWidth, maxHeight);
         
-        // --- 2. Caricamento primo file (invariato) ---
+        // --- 2. Caricamento primo file (Logica originale) ---
         string title;
         FitsImageData? firstImageData;
         try
         {
             firstImageData = await _fitsService.LoadFitsFromFileAsync(imagePaths[0]);
-            if (firstImageData == null) { throw new InvalidOperationException("File FITS iniziale non valido."); }
+            if (firstImageData == null) throw new InvalidOperationException("File FITS iniziale non valido.");
             
             title = firstImageData.FitsHeader.GetStringValue("OBJECT");
             if (string.IsNullOrWhiteSpace(title))
@@ -110,60 +141,31 @@ public class NodeViewModelFactory : INodeViewModelFactory
             throw new InvalidOperationException("Impossibile creare la pila di immagini.", ex);
         }
 
-        // --- 3. CREA IL NUOVO MODELLO SPECIFICO ---
+        // --- 3. CREA IL NUOVO MODELLO ---
         var newNodeModel = new MultipleImagesNodeModel
         {
             Title = title,
             X = x,
             Y = y,
-            ImagePaths = imagePaths // <-- Inserisce la lista di percorsi nel modello
+            ImagePaths = imagePaths
         };
 
-        // --- 4. PASSA IL NUOVO MODELLO al costruttore ---
+        // --- 4. ISTANZIA IL VIEWMODEL ---
         var newNodeViewModel = new MultipleImagesNodeViewModel(
-            parent, 
-            newNodeModel, // <-- Passa il modello
+            newNodeModel, 
             _fitsService, 
-            _processingService,
+            _converter, // <--- Nuovo
+            _analysis,  // <--- Nuovo
             maxSize,
-            firstImageData); // Passa i dati pre-caricati
+            firstImageData); 
         
         await newNodeViewModel.InitializeAsync();
 
-        // --- 5. Centra (invariato) ---
+        // --- 5. Centra ---
         var size = newNodeViewModel.EstimatedTotalSize;
         newNodeViewModel.X = x - (size.Width / 2);
         newNodeViewModel.Y = y - (size.Height / 2);
 
         return newNodeViewModel;
-    }
-    
-    public async Task<SingleImageNodeViewModel> CreateSingleImageNodeFromDataAsync(
-        BoardViewModel parent, 
-        FitsImageData data, 
-        string title, 
-        double x, 
-        double y)
-    {
-        // 1. Crea il Modello (Dati persistenti di base)
-        // Impostiamo ImagePath vuoto o speciale perché i dati non vengono letti da disco
-        var model = new SingleImageNodeModel
-        {
-            Title = title,
-            X = x,
-            Y = y,
-            ImagePath = string.Empty // Segnala che è un nodo "in-memory" o generato
-        };
-
-        // 2. Crea il ViewModel usando il costruttore standard che hai definito
-        // Nota: La Factory deve avere _fitsService e _processingService iniettati nel suo costruttore
-        var node = new SingleImageNodeViewModel(parent, model, _fitsService, _processingService);
-
-        // 3. Inietta i dati calcolati (Stacking)
-        // Questo metodo internamente creerà il FitsRenderer, calcolerà le soglie
-        // e inizializzerà la visualizzazione, esattamente come se avesse caricato un file.
-        await node.ApplyProcessedDataAsync(new List<FitsImageData> { data });
-
-        return node;
     }
 }

@@ -20,6 +20,7 @@ public class App : Application
 
     public override void OnFrameworkInitializationCompleted()
     {
+        // Configura tutti i servizi (vecchi e nuovi)
         Services = ConfigureServices();
         
         var mainViewModel = Services.GetRequiredService<MainWindowViewModel>();
@@ -31,6 +32,7 @@ public class App : Application
                 DataContext = mainViewModel 
             };
              
+            // Manteniamo la tua logica per il WindowService
             var windowService = Services.GetRequiredService<IWindowService>();
             windowService.RegisterMainWindow(desktop.MainWindow);
         }
@@ -42,13 +44,15 @@ public class App : Application
     {
         var services = new ServiceCollection();
         
-        services.AddSingleton<IImageProcessingService, ImageProcessingService>();
+        services.AddSingleton<IFitsDataConverter, FitsDataConverter>();
+        services.AddSingleton<IImageAnalysisService, ImageAnalysisService>();
+        services.AddSingleton<IImageOperationService, ImageOperationService>();
         services.AddSingleton<IFitsService, FitsService>();
+        services.AddSingleton<IAlignmentService, AlignmentService>();
         services.AddSingleton<INodeViewModelFactory, NodeViewModelFactory>();
         services.AddSingleton<IDialogService, DialogService>(); 
         services.AddSingleton<IWindowService, WindowService>();
-        services.AddSingleton<IAlignmentService, AlignmentService>();
-
+        
         services.AddSingleton<BoardViewModel>();
         services.AddSingleton<MainWindowViewModel>();
 
