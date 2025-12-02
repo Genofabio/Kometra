@@ -10,7 +10,7 @@ public interface IAlignmentService
     Task<IEnumerable<Point?>> CalculateCentersAsync(
         AlignmentMode mode, 
         CenteringMethod method,
-        List<FitsImageData?> sourceData, 
+        List<string> sourcePaths, 
         IEnumerable<Point?> currentCoordinates, 
         int searchRadius);
 
@@ -19,7 +19,8 @@ public interface IAlignmentService
         IEnumerable<Point?> currentCoordinates, 
         int totalCount);
     
-    Task<List<FitsImageData?>> ApplyCenteringAsync(
-        List<FitsImageData?> sourceData,
-        List<Point?> centers);
+    Task<List<string>> ApplyCenteringAndSaveAsync(
+        List<string> sourcePaths, 
+        List<Point?> centers,
+        string tempFolderPath);
 }

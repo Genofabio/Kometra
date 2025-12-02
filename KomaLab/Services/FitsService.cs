@@ -164,30 +164,17 @@ public class FitsService : IFitsService
             // 1. PREPARAZIONE DATI
             if (data.RawData is Array originalSource)
             {
-                // Creiamo una Shallow Copy dell'array (veloce).
-                // Clona la struttura dell'array principale, ma le righe puntano agli stessi oggetti.
-                // Poiché faremo solo Array.Reverse (riordino puntatori), non modifichiamo i valori dei pixel,
-                // quindi non corrompiamo i dati in memoria dell'applicazione.
                 var arrayToSave = (Array)originalSource.Clone();
-                
-                // Invertiamo nuovamente l'ordine delle righe per tornare allo standard FITS (Bottom-Left)
                 Array.Reverse(arrayToSave);
 
-                // 2. CREAZIONE NUOVA HDU
-                // FitsFactory analizza il tipo di dati e crea l'HDU corretta (es. Short, Float, ecc.)
                 var hdu = FitsFactory.HDUFactory(arrayToSave);
                 var newHeader = hdu.Header;
-                
-                // 3. COPIA METADATI ASTRONOMICI
-                // Copiamo le chiavi dall'header originale, escludendo quelle tecniche che
-                // la libreria ha appena rigenerato (es. BITPIX, NAXIS).
+            
                 var cursor = data.FitsHeader.GetCursor();
-                
                 while (cursor.MoveNext())
                 {
                     HeaderCard? card = null;
 
-                    // Fix per CSharpFITS: l'iteratore può ritornare DictionaryEntry o HeaderCard
                     if (cursor.Current is DictionaryEntry entry && entry.Value is HeaderCard hc)
                         card = hc;
                     else if (cursor.Current is HeaderCard c)
@@ -197,29 +184,29 @@ public class FitsService : IFitsService
 
                     string key = card.Key.ToUpper();
 
-                    // Lista delle chiavi da NON copiare (vengono gestite automaticamente)
                     if (key == "SIMPLE" || key == "BITPIX" || key == "EXTEND" ||
                         key == "PCOUNT" || key == "GCOUNT" || 
                         key == "BZERO" || key == "BSCALE" ||
                         key == "DATAMIN" || key == "DATAMAX" ||
-                        key.StartsWith("NAXIS")) // Filtra NAXIS, NAXIS1, NAXIS2...
+                        key.StartsWith("NAXIS")) 
                     {
                         continue; 
                     }
 
-                    // Aggiungiamo la carta al nuovo header
                     newHeader.AddCard(card);
                 }
 
                 // 4. SCRITTURA SU FILE
-                using var fs = new FileStream(destinationPath, FileMode.Create, FileAccess.Write);
+                // --- CORREZIONE QUI SOTTO: Usa ReadWrite ---
+                using var fs = new FileStream(destinationPath, FileMode.Create, FileAccess.ReadWrite);
+            
+                // BufferedDataStream richiede che lo stream sottostante sia leggibile anche in scrittura
                 using var bs = new BufferedDataStream(fs);
                 var fitsFile = new Fits();
-                
+            
                 fitsFile.AddHDU(hdu);
                 fitsFile.Write(bs);
-                
-                // Flush esplicito per sicurezza
+            
                 bs.Flush();
                 fs.Flush();
             }

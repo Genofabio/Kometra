@@ -1,9 +1,10 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Collections.ObjectModel; 
 using System.Diagnostics;
-using System.Linq;
+using System.IO;
 using System.Threading.Tasks;
-using Avalonia; // Per Size
+using Avalonia;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using KomaLab.Models;
@@ -16,8 +17,6 @@ public partial class MultipleImagesNodeViewModel : ImageNodeViewModel
 {
     // --- Dipendenze ---
     private readonly IFitsService _fitsService;
-    
-    // NUOVE DIPENDENZE
     private readonly IFitsDataConverter _converter;
     private readonly IImageAnalysisService _analysis;
     
@@ -25,8 +24,11 @@ public partial class MultipleImagesNodeViewModel : ImageNodeViewModel
     
     // --- Stato Interno ---
     private readonly int _imageCount;
-    private List<FitsImageData?> _processedDataCache;
-    private Size _maxImageSize; // Avalonia.Size per la UI
+    
+    // CACHE LRU (Memoria limitata a 3 immagini + Prefetch)
+    private readonly LruCache<int, FitsImageData> _dataCache = new(3);
+    
+    private Size _maxImageSize; 
 
     // --- Sigma Locking ---
     private bool _hasLockedThresholds;
@@ -37,6 +39,11 @@ public partial class MultipleImagesNodeViewModel : ImageNodeViewModel
     
     [ObservableProperty]
     private FitsRenderer? _activeFitsImage;
+
+    public ObservableCollection<string> ImageNames { get; } = new();
+
+    // Proprietà per la pulizia dei file temporanei (allineamento)
+    public string? TemporaryFolderPath { get; set; }
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(CurrentImageText))]
@@ -61,10 +68,10 @@ public partial class MultipleImagesNodeViewModel : ImageNodeViewModel
     public MultipleImagesNodeViewModel(
         MultipleImagesNodeModel model,
         IFitsService fitsService,
-        IFitsDataConverter converter,      // <--- NUOVO
-        IImageAnalysisService analysis,    // <--- NUOVO
+        IFitsDataConverter converter,
+        IImageAnalysisService analysis,
         Size maxSize, 
-        FitsImageData initialData) 
+        FitsImageData? initialData) 
         : base(model)
     {
         _fitsService = fitsService;
@@ -74,89 +81,89 @@ public partial class MultipleImagesNodeViewModel : ImageNodeViewModel
         _maxImageSize = maxSize;
         _imageCount = model.ImagePaths.Count; 
         
+        foreach (var path in model.ImagePaths)
+        {
+            ImageNames.Add(Path.GetFileName(path));
+        }
+
         _currentIndex = 0;
         
-        // Inizializza cache
-        _processedDataCache = Enumerable.Repeat<FitsImageData?>(null, _imageCount).ToList();
-        _processedDataCache[0] = initialData;
+        if (initialData != null)
+        {
+            _dataCache.Add(0, initialData);
+        }
     }
 
-    /// <summary>
-    /// Metodo di inizializzazione asincrona post-costruttore.
-    /// </summary>
+    // --- Initialize ---
     public async Task InitializeAsync()
     {
-        var initialData = _processedDataCache[0];
+        _dataCache.TryGet(0, out var initialData);
+        
         if (initialData == null)
         {
             Debug.WriteLine("ERR: Dati iniziali null in InitializeAsync.");
             return;
         }
 
-        // Creazione Renderer con i nuovi servizi
         ActiveFitsImage = new FitsRenderer(
             initialData, 
             _fitsService, 
             _converter, 
             _analysis);
         
-        // 1. Inizializza renderer
         await ActiveFitsImage.InitializeAsync();
         
-        // 2. Calcola statistiche iniziali
         var (mean, sigma) = ActiveFitsImage.GetImageStatistics();
-        
-        // 3. Calcola fattori K iniziali
         _lockedKBlack = (ActiveFitsImage.BlackPoint - mean) / sigma;
         _lockedKWhite = (ActiveFitsImage.WhitePoint - mean) / sigma;
         _hasLockedThresholds = true;
 
-        // 4. Sincronizza UI
         BlackPoint = ActiveFitsImage.BlackPoint;
         WhitePoint = ActiveFitsImage.WhitePoint;
+        
+        _ = PrefetchImageAsync(1);
+    }
+
+    partial void OnCurrentIndexChanged(int value)
+    {
+        _ = LoadImageAtIndexAsync(value);
     }
 
     // --- Comandi ---
-
     [RelayCommand(CanExecute = nameof(CanShowPrevious))]
-    private async Task PreviousImage()
+    private void PreviousImage()
     {
         if (!IsSelected) IsSelected = true;
-        await LoadImageAtIndexAsync(CurrentIndex - 1);
+        if (CurrentIndex > 0) CurrentIndex--;
     }
     
     [RelayCommand(CanExecute = nameof(CanShowNext))]
-    private async Task NextImage()
+    private void NextImage()
     {
         if (!IsSelected) IsSelected = true;
-        await LoadImageAtIndexAsync(CurrentIndex + 1);
+        if (CurrentIndex < _imageCount - 1) CurrentIndex++;
     }
     
     [RelayCommand(CanExecute = nameof(CanResetThresholds))]
     private async Task ResetThresholds()
     {
         if (ActiveFitsImage == null) return;
-
         await ActiveFitsImage.ResetThresholdsAsync();
-
         BlackPoint = ActiveFitsImage.BlackPoint;
         WhitePoint = ActiveFitsImage.WhitePoint;
-        
         UpdateLockedSigmaFactors();
     }
-    
     private bool CanResetThresholds() => ActiveFitsImage != null;
 
     // --- Logica Loading & Sigma Lock ---
-
     private async Task LoadImageAtIndexAsync(int index)
     {
-        if (index < 0 || index >= _imageCount || index == CurrentIndex) return;
+        if (index < 0 || index >= _imageCount) return;
+        if (index == CurrentIndex && ActiveFitsImage != null && ActiveFitsImage.Data == await GetOrLoadDataAtIndex(index)) return;
     
         FitsImageData? dataToShow = await GetOrLoadDataAtIndex(index);
         if (dataToShow == null) return;
 
-        // 1. Nuovo renderer con i servizi corretti
         var newFitsImage = new FitsRenderer(
             dataToShow, 
             _fitsService, 
@@ -165,7 +172,6 @@ public partial class MultipleImagesNodeViewModel : ImageNodeViewModel
 
         await newFitsImage.InitializeAsync(); 
 
-        // 2. Logica Sigma Locking
         var (mean, sigma) = newFitsImage.GetImageStatistics();
 
         if (!_hasLockedThresholds)
@@ -176,49 +182,45 @@ public partial class MultipleImagesNodeViewModel : ImageNodeViewModel
         }
         else
         {
-            double adaptedBlack = mean + (_lockedKBlack * sigma);
-            double adaptedWhite = mean + (_lockedKWhite * sigma);
-            
-            newFitsImage.BlackPoint = adaptedBlack;
-            newFitsImage.WhitePoint = adaptedWhite;
+            newFitsImage.BlackPoint = mean + (_lockedKBlack * sigma);
+            newFitsImage.WhitePoint = mean + (_lockedKWhite * sigma);
         }
 
-        // 3. Swap
-        CurrentIndex = index;
         var oldFitsImage = ActiveFitsImage;
         ActiveFitsImage = newFitsImage;
         oldFitsImage?.UnloadData();
 
-        // 4. Update UI
         BlackPoint = newFitsImage.BlackPoint; 
         WhitePoint = newFitsImage.WhitePoint;
     
         PreviousImageCommand.NotifyCanExecuteChanged();
         NextImageCommand.NotifyCanExecuteChanged();
+        
+        _ = PrefetchImageAsync(index + 1);
     }
 
     // --- Metodi Abstract Implementati ---
-
     public override async Task<List<FitsImageData?>> GetCurrentDataAsync()
     {
+        var fullList = new List<FitsImageData?>();
         for (int i = 0; i < _imageCount; i++)
         {
-            if (_processedDataCache[i] == null)
-            {
-                await GetOrLoadDataAtIndex(i);
-            }
+            fullList.Add(await GetOrLoadDataAtIndex(i));
         }
-        return _processedDataCache;
+        return fullList;
     }
 
     public override async Task ApplyProcessedDataAsync(List<FitsImageData> newProcessedData)
     {
-        _processedDataCache = newProcessedData.Cast<FitsImageData?>().ToList();
+        _dataCache.Clear();
+        for (int i = 0; i < newProcessedData.Count; i++)
+        {
+            _dataCache.Add(i, newProcessedData[i]);
+        }
 
         if (newProcessedData.Count > 0)
         {
             var first = newProcessedData[0];
-            // Pattern matching sicuro per width/height > 0
             if (first is { Width: > 0, Height: > 0 })
             {
                 _maxImageSize = new Size(first.Width, first.Height);
@@ -229,12 +231,22 @@ public partial class MultipleImagesNodeViewModel : ImageNodeViewModel
         }
 
         _hasLockedThresholds = false; 
-
+        
         int tempIndex = CurrentIndex;
-        CurrentIndex = -1; 
+        if (tempIndex == 0) CurrentIndex = -1; else CurrentIndex = 0; 
+        CurrentIndex = tempIndex; 
+        
         await LoadImageAtIndexAsync(tempIndex);
     }
     
+    // --- IMPLEMENTAZIONE PREPARE INPUT PATHS ---
+    // Questo è fondamentale per l'allineamento Low RAM
+    public override Task<List<string>> PrepareInputPathsAsync(IFitsService fitsService)
+    {
+        // Restituisce semplicemente i path che ha già, non serve salvare nulla
+        return Task.FromResult(new List<string>(ImagePaths));
+    }
+
     public override async Task ResetThresholdsAsync()
     {
         await ResetThresholds();
@@ -242,32 +254,41 @@ public partial class MultipleImagesNodeViewModel : ImageNodeViewModel
     
     public override FitsImageData? GetActiveImageData()
     {
-        if (CurrentIndex >= 0 && CurrentIndex < _processedDataCache.Count)
-        {
-            return _processedDataCache[CurrentIndex];
-        }
-        return null;
+        return ActiveFitsImage?.Data;
     }
 
     // --- Helpers ---
-
     private async Task<FitsImageData?> GetOrLoadDataAtIndex(int index)
     {
         if (index < 0 || index >= _imageCount) return null;
+        if (_dataCache.TryGet(index, out var cachedData)) return cachedData;
+        return await LoadDataFromDiskAsync(index);
+    }
 
-        if (_processedDataCache[index] == null)
+    private async Task<FitsImageData?> LoadDataFromDiskAsync(int index)
+    {
+        try
         {
-            try
-            {
-                var data = await _fitsService.LoadFitsFromFileAsync(_multiModel.ImagePaths[index]);
-                if (data != null) _processedDataCache[index] = data;
-            }
-            catch (Exception ex)
-            {
-                Debug.WriteLine($"Error loading {index}: {ex.Message}");
-            }
+            var data = await _fitsService.LoadFitsFromFileAsync(_multiModel.ImagePaths[index]);
+            if (data != null) _dataCache.Add(index, data);
+            return data;
         }
-        return _processedDataCache[index];
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"Error loading {index}: {ex.Message}");
+            return null;
+        }
+    }
+
+    private async Task PrefetchImageAsync(int nextIndex)
+    {
+        if (nextIndex >= _imageCount) return;
+        if (_dataCache.TryGet(nextIndex, out _)) return;
+
+        await Task.Run(async () =>
+        {
+            await LoadDataFromDiskAsync(nextIndex);
+        });
     }
 
     partial void OnBlackPointChanged(double value)
@@ -295,5 +316,33 @@ public partial class MultipleImagesNodeViewModel : ImageNodeViewModel
         _lockedKBlack = (BlackPoint - mean) / sigma;
         _lockedKWhite = (WhitePoint - mean) / sigma;
         _hasLockedThresholds = true;
+    }
+    
+    // --- Dispose ---
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            ActiveFitsImage?.UnloadData();
+            _dataCache.Clear(); 
+        }
+        
+        // --- PULIZIA DISCO ---
+        if (!string.IsNullOrEmpty(TemporaryFolderPath) && Directory.Exists(TemporaryFolderPath))
+        {
+            try
+            {
+                Directory.Delete(TemporaryFolderPath, true);
+#if DEBUG
+                Debug.WriteLine($"[STEP 4: DISK CLEANUP] Eliminata cartella temporanea: {TemporaryFolderPath}");
+#endif
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[DISK CLEANUP ERROR] Impossibile eliminare temp: {ex.Message}");
+            }
+        }
+        
+        base.Dispose(disposing);
     }
 }

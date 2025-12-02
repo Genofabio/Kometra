@@ -20,5 +20,5 @@ public interface IWindowService
     /// <summary>
     /// Apre la finestra di allineamento per il nodo specificato.
     /// </summary>
-    Task<List<FitsImageData>?> ShowAlignmentWindowAsync(ImageNodeViewModel nodeToAlign);
+    Task<List<string>?> ShowAlignmentWindowAsync(List<string> sourcePaths);
 }

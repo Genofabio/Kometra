@@ -249,11 +249,16 @@
                                 <TranslateTransform X="{Binding Viewport.OffsetX}" Y="{Binding Viewport.OffsetY}"/>
                             </TransformGroup>
                         </Canvas.RenderTransform>
-                        <Image Name="PreviewImage" Source="{Binding ActiveImage.Image}" Stretch="None"
-                               RenderOptions.BitmapInterpolationMode="None" Canvas.Left="0" Canvas.Top="0"/>
+        
+                        <Image Name="PreviewImage" 
+                               Source="{Binding SafeImage}" 
+                               Stretch="None"
+                               RenderOptions.BitmapInterpolationMode="None" 
+                               Canvas.Left="0" Canvas.Top="0"/>
+               
                         <Canvas Name="InteractionCanvas" Background="Transparent"
-                                Width="{Binding ActiveImage.ImageSize.Width}"
-                                Height="{Binding ActiveImage.ImageSize.Height}"
+                                Width="{Binding SafeImageWidth}"
+                                Height="{Binding SafeImageHeight}"
                                 Canvas.Left="0" Canvas.Top="0"
                                 PointerPressed="OnInteractionCanvasPointerPressed"/>
                     </Canvas>

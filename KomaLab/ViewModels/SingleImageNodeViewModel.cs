@@ -13,7 +13,6 @@ namespace KomaLab.ViewModels;
 
 /// <summary>
 /// ViewModel per un nodo che visualizza una singola immagine FITS.
-/// Eredita da ImageNodeViewModel per sfruttare la logica comune delle immagini.
 /// </summary>
 public partial class SingleImageNodeViewModel : ImageNodeViewModel
 {
@@ -30,15 +29,14 @@ public partial class SingleImageNodeViewModel : ImageNodeViewModel
 
     // --- Proprietà Observable ---
     [ObservableProperty]
-    private FitsRenderer _fitsImage;
+    private FitsRenderer? _fitsImage;
 
-    // --- Implementazione Proprietà Astratte (da ImageNodeViewModel) ---
+    // --- Implementazione Proprietà Astratte ---
     protected override Size NodeContentSize
     {
         get
         {
-            // Protezione contro null o dati vuoti
-            if (FitsImage.Data.Width == 0)
+            if (FitsImage?.Data == null || FitsImage.Data.Width == 0)
             {
                 return new Size(200, 150); // Fallback size
             }
@@ -51,8 +49,8 @@ public partial class SingleImageNodeViewModel : ImageNodeViewModel
     public SingleImageNodeViewModel(
         SingleImageNodeModel model,
         IFitsService fitsService,
-        IFitsDataConverter converter,      // <--- NUOVO
-        IImageAnalysisService analysis)    // <--- NUOVO
+        IFitsDataConverter converter,      
+        IImageAnalysisService analysis)    
         : base(model) 
     {
         _fitsService = fitsService;
@@ -60,16 +58,15 @@ public partial class SingleImageNodeViewModel : ImageNodeViewModel
         _analysis = analysis;
         _imageModel = model;
 
-        // Inizializzazione placeholder
+        // Placeholder vuoto
         var placeholderData = new FitsImageData
         {
-            RawData = new Array[0], // Inizializza con array vuoto corretto per il Converter
+            RawData = new Array[0],
             FitsHeader = new Header(),
             Width = 0,
             Height = 0
         };
 
-        // Passiamo i nuovi servizi al renderer placeholder
         _fitsImage = new FitsRenderer(
             placeholderData, 
             _fitsService, 
@@ -77,7 +74,7 @@ public partial class SingleImageNodeViewModel : ImageNodeViewModel
             _analysis);
     }
 
-    // --- Callback Generati dal Toolkit ---
+    // --- Callback Generati ---
     partial void OnFitsImageChanged(FitsRenderer? value)
     {
         OnPropertyChanged(nameof(NodeContentSize));
@@ -90,6 +87,8 @@ public partial class SingleImageNodeViewModel : ImageNodeViewModel
     {
         try
         {
+            if (string.IsNullOrEmpty(_imageModel.ImagePath)) return;
+
             var imageData = await _fitsService.LoadFitsFromFileAsync(_imageModel.ImagePath);
             if (imageData == null)
             {
@@ -108,22 +107,21 @@ public partial class SingleImageNodeViewModel : ImageNodeViewModel
     {
         _currentData = newData;
 
-        // 1. Crea il nuovo Helper di rendering con i servizi aggiornati
+        // 1. Crea nuovo Renderer
         var newFitsImage = new FitsRenderer(
             newData,
             _fitsService,
             _converter,
             _analysis);
         
-        // Init asincrono (conversione Raw -> Mat)
         await newFitsImage.InitializeAsync();
 
-        // 2. Scambio atomico
+        // 2. Swap atomico
         var oldFitsImage = FitsImage;
         FitsImage = newFitsImage;
 
-        // 3. Cleanup
-        oldFitsImage.UnloadData();
+        // 3. Cleanup immediato
+        oldFitsImage?.UnloadData();
     }
 
     // --- Implementazione Metodi Astratti ---
@@ -134,7 +132,7 @@ public partial class SingleImageNodeViewModel : ImageNodeViewModel
         {
             await LoadDataAsync();
         }
-        return [_currentData];
+        return new List<FitsImageData?> { _currentData };
     }
 
     public override async Task ApplyProcessedDataAsync(List<FitsImageData> newProcessedData)
@@ -150,11 +148,60 @@ public partial class SingleImageNodeViewModel : ImageNodeViewModel
 
     public override async Task ResetThresholdsAsync()
     {
-        await FitsImage.ResetThresholdsAsync();
+        // FIX SICUREZZA: Controllo esplicito prima dell'await
+        if (FitsImage != null)
+        {
+            await FitsImage.ResetThresholdsAsync();
+        }
     }
 
     public override FitsImageData? GetActiveImageData()
     {
         return _currentData;
+    }
+    
+    public override async Task<List<string>> PrepareInputPathsAsync(IFitsService fitsService)
+    {
+        // CASO A: Il file esiste già su disco (es. caricato dall'utente)
+        if (!string.IsNullOrEmpty(_imageModel.ImagePath) && System.IO.File.Exists(_imageModel.ImagePath))
+        {
+            return new List<string> { _imageModel.ImagePath };
+        }
+
+        // CASO B: I dati sono solo in memoria (es. risultato di uno Stack)
+        if (_currentData != null)
+        {
+            // Creiamo un file temporaneo
+            string tempPath = System.IO.Path.GetTempFileName(); 
+            // Nota: GetTempFileName crea un file 0-byte, a volte le lib FITS si lamentano.
+            // Meglio cancellarlo e ricrearlo col nome giusto o usare GUID.
+            string cleanTempPath = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"Temp_AlignInput_{Guid.NewGuid()}.fits");
+
+            try 
+            {
+                await fitsService.SaveFitsFileAsync(_currentData, cleanTempPath);
+                return new List<string> { cleanTempPath };
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Errore creazione temp per allineamento: {ex.Message}");
+                return new List<string>();
+            }
+        }
+
+        return new List<string>();
+    }
+    
+    // --- Gestione Memoria (IDisposable) ---
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            FitsImage?.UnloadData();
+            FitsImage = null;
+            _currentData = null;
+        }
+        
+        base.Dispose(disposing);
     }
 }

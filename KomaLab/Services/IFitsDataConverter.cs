@@ -11,6 +11,12 @@ public interface IFitsDataConverter
     /// Gestisce automaticamente BZERO e BSCALE.
     /// </summary>
     Mat RawToMat(FitsImageData fitsData);
+    
+    /// <summary>
+    /// Converte solo una porzione (striscia orizzontale) dei dati raw in Matrice.
+    /// Fondamentale per risparmiare RAM durante lo stacking.
+    /// </summary>
+    Mat RawToMatRect(FitsImageData fitsData, int yStart, int height);
 
     /// <summary>
     /// Converte una Matrice OpenCV (Double) in una struttura FitsImageData 
@@ -24,4 +30,5 @@ public interface IFitsDataConverter
     /// SENZA allocare una Matrice OpenCV (molto leggero).
     /// </summary>
     (double Black, double White) CalculateDisplayThresholds(FitsImageData data);
+    
 }

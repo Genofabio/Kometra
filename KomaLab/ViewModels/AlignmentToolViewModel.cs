@@ -7,7 +7,8 @@ using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Linq;
-using KomaLab.Models; // Qui trova AlignmentMode e AlignmentState
+using Avalonia.Media.Imaging;
+using KomaLab.Models; 
 using KomaLab.ViewModels.Helpers;
 using CoordinateEntry = KomaLab.ViewModels.Helpers.CoordinateEntry;
 using Point = Avalonia.Point;
@@ -15,18 +16,18 @@ using Size = Avalonia.Size;
 
 namespace KomaLab.ViewModels;
 
-public partial class AlignmentToolViewModel : ObservableObject
+public partial class AlignmentToolViewModel : ObservableObject, IDisposable
 {
     #region Campi
     
     private readonly IFitsService _fitsService;
     private readonly IAlignmentService _alignmentService;
-    
-    // NUOVE DIPENDENZE
     private readonly IFitsDataConverter _converter;
     private readonly IImageAnalysisService _analysis;
     
-    private readonly List<FitsImageData?> _sourceData; 
+    private readonly List<string> _sourcePaths; 
+    // RIMOSSO: LruCache (Per strategia Low RAM Strict)
+
     private int _currentStackIndex;
     private readonly int _totalStackCount;
     
@@ -38,8 +39,9 @@ public partial class AlignmentToolViewModel : ObservableObject
 
     #endregion
 
-    #region Proprietà e Stato
-
+    #region Proprietà
+    
+    public List<string>? FinalProcessedPaths { get; private set; }
     public ViewportManager Viewport { get; } = new();
     public ObservableCollection<CoordinateEntry> CoordinateEntries { get; } = new();
 
@@ -55,10 +57,18 @@ public partial class AlignmentToolViewModel : ObservableObject
     
     [ObservableProperty] 
     [NotifyPropertyChangedFor(nameof(CorrectImageSize))]
+    [NotifyPropertyChangedFor(nameof(SafeImage))]       // Per Binding Safe
+    [NotifyPropertyChangedFor(nameof(SafeImageWidth))]  // Per Binding Safe
+    [NotifyPropertyChangedFor(nameof(SafeImageHeight))] // Per Binding Safe
     private FitsRenderer? _activeImage; 
     
     public Size CorrectImageSize => ActiveImage?.ImageSize ?? default;
     
+    // --- PROPRIETÀ SAFE (Per evitare errori Binding in chiusura) ---
+    public Bitmap? SafeImage => ActiveImage?.Image;
+    public double SafeImageWidth => ActiveImage?.ImageSize.Width ?? 100;
+    public double SafeImageHeight => ActiveImage?.ImageSize.Height ?? 100;
+
     [ObservableProperty] private double _blackPoint;
     [ObservableProperty] private double _whitePoint;
     
@@ -100,7 +110,6 @@ public partial class AlignmentToolViewModel : ObservableObject
     [NotifyPropertyChangedFor(nameof(IsNavigationVisible))]
     private AlignmentState _currentState = AlignmentState.Initial;
     
-    public List<FitsImageData>? FinalProcessedData { get; private set; }
     public bool DialogResult { get; private set; }
     public event Action? RequestClose;
 
@@ -137,20 +146,20 @@ public partial class AlignmentToolViewModel : ObservableObject
     #region Costruttore
 
     public AlignmentToolViewModel(
-        List<FitsImageData?> sourceData,
+        List<string> sourcePaths, 
         IFitsService fitsService,
         IAlignmentService alignmentService,
-        IFitsDataConverter converter,      // <--- NUOVO
-        IImageAnalysisService analysis)    // <--- NUOVO
+        IFitsDataConverter converter,      
+        IImageAnalysisService analysis)    
     {
         _fitsService = fitsService;
         _alignmentService = alignmentService;
         _converter = converter;
         _analysis = analysis;
         
-        _sourceData = sourceData;
+        _sourcePaths = sourcePaths; 
+        _totalStackCount = sourcePaths.Count;
         _currentStackIndex = 0;
-        _totalStackCount = sourceData.Count;
         IsStack = _totalStackCount > 1;
 
         if (IsStack)
@@ -173,33 +182,24 @@ public partial class AlignmentToolViewModel : ObservableObject
             CoordinateEntries.Clear();
             for (int i = 0; i < _totalStackCount; i++)
             {
-                string? displayName = $"Immagine {i + 1}";
-                double imageHeight = 0;
-                if (_sourceData[i] != null)
-                {
-                    imageHeight = _sourceData[i]!.Height; 
-                    try
-                    {
-                        displayName = _sourceData[i]?.FitsHeader.GetStringValue("OBJECT");
-                        if (string.IsNullOrWhiteSpace(displayName))
-                            displayName = $"Immagine {i + 1}";
-                    }
-                    catch
-                    {
-                        // ignored
-                    }
-                }
-
+                string fileName = System.IO.Path.GetFileName(_sourcePaths[i]);
+            
                 CoordinateEntries.Add(new CoordinateEntry
                 {
                     Index = i,
-                    DisplayName = displayName,
+                    DisplayName = fileName,
                     Coordinate = null,
-                    ImageHeight = imageHeight
+                    ImageHeight = 0 // Sarà aggiornato al load
                 });
             }
 
             await LoadStackImageAtIndexAsync(_currentStackIndex);
+        
+            if (ActiveImage != null)
+            {
+                double h = ActiveImage.ImageSize.Height;
+                foreach (var entry in CoordinateEntries) entry.ImageHeight = h;
+            }
         }
         catch (Exception ex)
         {
@@ -207,43 +207,54 @@ public partial class AlignmentToolViewModel : ObservableObject
         }
         finally
         {
-            ImageLoadedTcs.SetResult();
+            ImageLoadedTcs.TrySetResult();
             CalculateCentersCommand.NotifyCanExecuteChanged();
             ApplyAlignmentCommand.NotifyCanExecuteChanged();
             RefreshNavigationCommands();
         }
     }
 
-   private async Task LoadStackImageAtIndexAsync(int index)
+    // --- METODO CRITICO PER LA MEMORIA ---
+    private async Task LoadStackImageAtIndexAsync(int index)
     {
         if (index < 0 || index >= _totalStackCount) return;
+
+        if (index == _currentStackIndex && ActiveImage != null) return;
 
         _currentStackIndex = index;
         UpdateStackCounterText();
 
-        ActiveImage?.UnloadData(); 
+        FitsRenderer? newRenderer = null;
 
         try
         {
-            var newModel = _sourceData[index];
-            if (newModel == null) throw new Exception("Dati FITS nulli.");
+            // Caricamento ON-DEMAND da disco
+            string path = _sourcePaths[index];
             
-            // CREAZIONE RENDERER CON NUOVI SERVIZI
-            ActiveImage = new FitsRenderer(
-                newModel, 
-                _fitsService, 
-                _converter, 
-                _analysis
-            );
+            var newModel = await _fitsService.LoadFitsFromFileAsync(path);
+            
+            if (newModel != null)
+            {
+                newRenderer = new FitsRenderer(newModel, _fitsService, _converter, _analysis);
+                await newRenderer.InitializeAsync();
+            }
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"Errore caricamento: {ex.Message}");
+            newRenderer?.UnloadData();
+            return;
+        }
 
-            await ActiveImage.InitializeAsync();
-            
-            var (mean, sigma) = ActiveImage.GetImageStatistics();
+        // Logica Sigma Locking
+        if (newRenderer != null)
+        {
+            var (mean, sigma) = newRenderer.GetImageStatistics();
 
             if (!_hasLockedThresholds)
             {
-                double masterBlack = ActiveImage.BlackPoint;
-                double masterWhite = ActiveImage.WhitePoint;
+                double masterBlack = newRenderer.BlackPoint;
+                double masterWhite = newRenderer.WhitePoint;
                 
                 _lockedKBlack = (masterBlack - mean) / sigma;
                 _lockedKWhite = (masterWhite - mean) / sigma;
@@ -251,34 +262,41 @@ public partial class AlignmentToolViewModel : ObservableObject
                 
                 BlackPoint = masterBlack;
                 WhitePoint = masterWhite;
-
-                Viewport.ImageSize = ActiveImage.ImageSize;
+                
+                Viewport.ImageSize = newRenderer.ImageSize;
                 Viewport.ResetView(); 
                 OnPropertyChanged(nameof(ZoomStatusText));
             }
             else
             {
-                double adaptedBlack = mean + (_lockedKBlack * sigma);
-                double adaptedWhite = mean + (_lockedKWhite * sigma);
-
-                ActiveImage.BlackPoint = adaptedBlack;
-                ActiveImage.WhitePoint = adaptedWhite;
-                
-                BlackPoint = adaptedBlack;
-                WhitePoint = adaptedWhite;
+                newRenderer.BlackPoint = mean + (_lockedKBlack * sigma);
+                newRenderer.WhitePoint = mean + (_lockedKWhite * sigma);
+                BlackPoint = newRenderer.BlackPoint;
+                WhitePoint = newRenderer.WhitePoint;
             }
-            
-            OnPropertyChanged(nameof(CorrectImageSize)); 
-            ResetThresholdsCommand.NotifyCanExecuteChanged();
-            UpdateReticleVisibilityForCurrentState();
-            UpdateSearchRadiusRange();
-            RefreshNavigationCommands();
         }
-        catch (Exception ex)
-        {
-            Debug.WriteLine($"[AlgnVM] Errore caricamento immagine stack: {ex.Message}");
-            ActiveImage = null;
-        }
+
+        // SWAP E PULIZIA IMMEDIATA (Low RAM Strategy)
+        var oldRenderer = ActiveImage;
+        
+        ActiveImage = newRenderer; // Questo notifica anche SafeImage
+        
+        // Distruggi subito il vecchio (niente cache)
+        oldRenderer?.UnloadData(); 
+
+        OnPropertyChanged(nameof(CorrectImageSize)); 
+        ResetThresholdsCommand.NotifyCanExecuteChanged();
+        UpdateReticleVisibilityForCurrentState();
+        UpdateSearchRadiusRange();
+        RefreshNavigationCommands();
+    }
+
+    public void Dispose()
+    {
+        ActiveImage?.UnloadData();
+        ActiveImage = null; // Notifica SafeImage -> View legge null -> Nessun errore
+        RequestClose = null;
+        GC.SuppressFinalize(this);
     }
 
     private void RefreshNavigationCommands()
@@ -293,6 +311,7 @@ public partial class AlignmentToolViewModel : ObservableObject
 
     #region Comandi
 
+    // ... (Zoom, Pan, ResetView invariati) ...
     [RelayCommand] private void ZoomIn() 
     {
         Viewport.ZoomIn();
@@ -315,15 +334,12 @@ public partial class AlignmentToolViewModel : ObservableObject
     private async Task ResetThresholds() 
     {
         if (ActiveImage == null) return;
-
         await ApplyOptimalStretchAsync();
-        
         var (mean, sigma) = ActiveImage.GetImageStatistics();
         _lockedKBlack = (ActiveImage.BlackPoint - mean) / sigma;
         _lockedKWhite = (ActiveImage.WhitePoint - mean) / sigma;
         _hasLockedThresholds = true; 
     }
-    
     private bool CanResetThresholds() => ActiveImage != null;
     
     // --- Navigazione ---
@@ -332,7 +348,6 @@ public partial class AlignmentToolViewModel : ObservableObject
     {
         if (newIndex < 0 || newIndex >= _totalStackCount || newIndex == _currentStackIndex)
             return;
-        
         TargetCoordinate = null; 
         await LoadStackImageAtIndexAsync(newIndex);
     }
@@ -384,11 +399,12 @@ public partial class AlignmentToolViewModel : ObservableObject
         try
         {
             var currentCoords = CoordinateEntries.Select(e => e.Coordinate);
-
+            
+            // Passiamo i PATHS
             var newCoords = await _alignmentService.CalculateCentersAsync(
                 SelectedMode, 
                 CenteringMethod.LocalRegion,
-                _sourceData, 
+                _sourcePaths, 
                 currentCoords, 
                 SearchRadius
             );
@@ -425,7 +441,14 @@ public partial class AlignmentToolViewModel : ObservableObject
         try
         {
             var centers = CoordinateEntries.Select(e => e.Coordinate).ToList();
-            FinalProcessedData = (await _alignmentService.ApplyCenteringAsync(_sourceData, centers))!;
+            string tempFolder = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "KomaLab_Aligned", Guid.NewGuid().ToString());
+
+            // Passiamo i PATHS
+            FinalProcessedPaths = await _alignmentService.ApplyCenteringAndSaveAsync(
+                _sourcePaths, 
+                centers, 
+                tempFolder);
+        
             DialogResult = true; 
             RequestClose?.Invoke();
         }
@@ -445,6 +468,7 @@ public partial class AlignmentToolViewModel : ObservableObject
     
     #region Metodi Pubblici
 
+    // ... (Public methods for Code-Behind) ...
     public void ApplyZoomAtPoint(double scaleFactor, Point viewportZoomPoint)
     {
         Viewport.ApplyZoomAtPoint(scaleFactor, viewportZoomPoint);
@@ -504,6 +528,7 @@ public partial class AlignmentToolViewModel : ObservableObject
     
     #region Helpers
 
+    // ... (Partial methods e helpers Sigma Locking) ...
     partial void OnBlackPointChanged(double value)
     {
         if (ActiveImage != null)

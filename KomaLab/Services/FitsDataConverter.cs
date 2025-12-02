@@ -11,88 +11,65 @@ namespace KomaLab.Services;
 
 public class FitsDataConverter : IFitsDataConverter
 {
-    public Mat RawToMat(FitsImageData fitsData)
+    public Mat RawToMat(FitsImageData fitsData) 
     {
-        if (fitsData == null || fitsData.RawData == null) 
-            throw new ArgumentNullException(nameof(fitsData));
+        return RawToMatRect(fitsData, 0, fitsData.Height);
+    }
+    
+    public Mat RawToMatRect(FitsImageData? fitsData, int yStart, int rowsToRead)
+    {
+        if (fitsData?.RawData == null) throw new ArgumentNullException(nameof(fitsData));
 
         var rawJaggedData = (Array[])fitsData.RawData;
-        int width = fitsData.Width; // Usa le int property del nuovo Model
-        int height = fitsData.Height;
+        int width = fitsData.Width;
+        // L'altezza della matrice risultante sarà solo quella della striscia
         int bitpix = fitsData.FitsHeader.GetIntValue("BITPIX");
-        
-        // Recupero parametri fisici
         double bscale = fitsData.FitsHeader.GetDoubleValue("BSCALE", 1.0);
         double bzero = fitsData.FitsHeader.GetDoubleValue("BZERO", 0.0);
 
-        // Creiamo la matrice destinazione (Double precision)
-        // Nota: Non usiamo 'using' qui perché l'oggetto deve essere ritornato vivo.
-        Mat imageMat = new Mat(height, width, MatType.CV_64FC1);
+        Mat stripMat = new Mat(rowsToRead, width, MatType.CV_64FC1);
 
         try
         {
             switch (bitpix)
             {
-                case 8:
-                    CopyJaggedToMat<byte>(rawJaggedData, imageMat, MatType.CV_8UC1, bscale, bzero);
-                    break;
-                case 16:
-                    CopyJaggedToMat<short>(rawJaggedData, imageMat, MatType.CV_16SC1, bscale, bzero);
-                    break;
-                case 32:
-                    CopyJaggedToMat<int>(rawJaggedData, imageMat, MatType.CV_32SC1, bscale, bzero);
-                    break;
-                case -32:
-                    CopyJaggedToMat<float>(rawJaggedData, imageMat, MatType.CV_32FC1, bscale, bzero);
-                    break;
-                case -64:
-                    CopyJaggedToMat<double>(rawJaggedData, imageMat, MatType.CV_64FC1, bscale, bzero);
-                    break;
-                default:
-                    // Fallback lento per tipi esotici (es. Int64)
-                    FallbackSlowLoad(rawJaggedData, imageMat, bscale, bzero);
-                    break;
+                case 8:  CopyRegionToMat<byte>(rawJaggedData, stripMat, MatType.CV_8UC1, bscale, bzero, yStart); break;
+                case 16: CopyRegionToMat<short>(rawJaggedData, stripMat, MatType.CV_16SC1, bscale, bzero, yStart); break;
+                case 32: CopyRegionToMat<int>(rawJaggedData, stripMat, MatType.CV_32SC1, bscale, bzero, yStart); break;
+                case -32: CopyRegionToMat<float>(rawJaggedData, stripMat, MatType.CV_32FC1, bscale, bzero, yStart); break;
+                case -64: CopyRegionToMat<double>(rawJaggedData, stripMat, MatType.CV_64FC1, bscale, bzero, yStart); break;
             }
         }
         catch
         {
-            imageMat.Dispose();
+            stripMat.Dispose();
             throw;
         }
 
-        return imageMat;
+        return stripMat;
     }
-
-    /// <summary>
-    /// Metodo generico ottimizzato per copiare riga per riga senza buffer intermedi.
-    /// </summary>
-    private void CopyJaggedToMat<T>(Array[] source, Mat destDouble, MatType tempType, double bscale, double bzero) 
+    
+    private void CopyRegionToMat<T>(Array[] source, Mat destDouble, MatType tempType, double bscale, double bzero, int ySourceStart) 
         where T : struct
     {
-        int h = destDouble.Rows;
+        int h = destDouble.Rows; // Altezza della striscia
         int w = destDouble.Cols;
 
-        // 1. Creiamo una matrice temporanea del tipo nativo (es. Short)
         using Mat tempMat = new Mat(h, w, tempType);
 
-        // 2. Copia riga per riga (Memory Copy veloce)
-        // Evita di creare un array 'flat' gigante in C#
         for (int y = 0; y < h; y++)
         {
-            T[] row = (T[])source[y];
-            
-            // Ottieni il puntatore alla riga Y della matrice OpenCV
+            // Leggiamo dall'array originale all'indice [y + offset]
+            // Scriviamo nella matrice temporanea all'indice [y] (locale)
+            T[] row = (T[])source[y + ySourceStart];
+        
             IntPtr rowPtr = tempMat.Ptr(y);
-            
-            // Copia i dati dall'array C# direttamente alla memoria non gestita di OpenCV
             MarshalCopy(row, 0, rowPtr, w);
         }
 
-        // 3. Conversione finale a Double applicando la fisica (bscale/bzero)
-        // Questa operazione è interna a OpenCV e molto ottimizzata (SIMD)
         tempMat.ConvertTo(destDouble, MatType.CV_64FC1, bscale, bzero);
     }
-    
+
     // Helper per gestire i diversi overload di Marshal.Copy tramite Generics (trucco C#)
     private void MarshalCopy<T>(T[] source, int startIndex, IntPtr destination, int length)
     {
@@ -102,23 +79,6 @@ public class FitsDataConverter : IFitsDataConverter
         else if (source is float[] f) Marshal.Copy(f, startIndex, destination, length);
         else if (source is double[] d) Marshal.Copy(d, startIndex, destination, length);
         else throw new NotSupportedException($"Type {typeof(T)} not supported for Marshal.Copy");
-    }
-
-    private void FallbackSlowLoad(Array[] rawData, Mat destMat, double bscale, double bzero)
-    {
-        var indexer = destMat.GetGenericIndexer<double>();
-        int h = destMat.Rows;
-        int w = destMat.Cols;
-
-        for (int y = 0; y < h; y++)
-        {
-            Array row = rawData[y];
-            for (int x = 0; x < w; x++)
-            {
-                double val = Convert.ToDouble(row.GetValue(x));
-                indexer[y, x] = (val * bscale) + bzero;
-            }
-        }
     }
 
     public FitsImageData MatToFitsData(Mat mat, FitsImageData? originalTemplate)

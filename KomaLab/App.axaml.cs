@@ -16,6 +16,7 @@ public class App : Application
     public override void Initialize()
     {
         AvaloniaXamlLoader.Load(this);
+        CleanUpOrphanedTempFiles();
     }
 
     public override void OnFrameworkInitializationCompleted()
@@ -57,5 +58,18 @@ public class App : Application
         services.AddSingleton<MainWindowViewModel>();
 
         return services.BuildServiceProvider();
+    }
+    
+    private void CleanUpOrphanedTempFiles()
+    {
+        try
+        {
+            string tempRoot = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "KomaLab_Aligned");
+            if (System.IO.Directory.Exists(tempRoot))
+            {
+                System.IO.Directory.Delete(tempRoot, true);
+            }
+        }
+        catch { /* Ignora errori se file sono in uso da altra istanza */ }
     }
 }

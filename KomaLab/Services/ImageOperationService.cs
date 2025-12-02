@@ -204,60 +204,68 @@ public class ImageOperationService : IImageOperationService
             }
             else if (mode == StackingMode.Median)
             {
-                Mat[] stack = new Mat[count];
-                try 
-                {
-                    for (int i = 0; i < count; i++)
-                    {
-                        stack[i] = _converter.RawToMat(sources[i]);
-                    }
+                // Definisci quanto grande deve essere una striscia (es. 200 righe)
+                // Più è piccolo, meno RAM usa, ma un po' più overhead CPU.
+                int stripHeight = 200; 
 
-                    var resIndexer = resultMat.GetGenericIndexer<double>();
+                for (int yStart = 0; yStart < height; yStart += stripHeight)
+                {
+                    // Calcola l'altezza effettiva di questa striscia (l'ultima potrebbe essere più piccola)
+                    int currentStripH = Math.Min(stripHeight, height - yStart);
                     
-                    Parallel.For(0, height, y =>
+                    // Carica SOLO la striscia corrente da tutte le immagini
+                    Mat[] stripStack = new Mat[count];
+                    try
                     {
-                        var valuesToStack = new List<double>(count); 
-
-                        for (int x = 0; x < width; x++)
+                        // 1. Caricamento Parziale (Leggero in RAM)
+                        var start = yStart;
+                        Parallel.For(0, count, i =>
                         {
-                            valuesToStack.Clear(); 
+                            stripStack[i] = _converter.RawToMatRect(sources[i], start, currentStripH);
+                        });
 
-                            for (int k = 0; k < count; k++)
+                        // 2. Calcolo Mediana sulla Striscia
+                        // Nota: usiamo currentStripH invece di height
+                        var start1 = yStart;
+                        Parallel.For(0, currentStripH, yRel => 
+                        {
+                            var valuesToStack = new List<double>(count);
+                            
+                            for (int x = 0; x < width; x++)
                             {
-                                double val = stack[k].At<double>(y, x); 
-                                if (!double.IsNaN(val))
+                                valuesToStack.Clear();
+                                for (int k = 0; k < count; k++)
                                 {
-                                    valuesToStack.Add(val);
+                                    // yRel è relativo alla striscia (0...200)
+                                    double val = stripStack[k].At<double>(yRel, x);
+                                    if (!double.IsNaN(val)) valuesToStack.Add(val);
                                 }
-                            }
 
-                            if (valuesToStack.Count == 0)
-                            {
-                                resIndexer[y, x] = double.NaN;
-                                continue; 
-                            }
+                                if (valuesToStack.Count == 0) continue; // Lascia 0 o gestisci NaN
 
-                            valuesToStack.Sort(); 
+                                valuesToStack.Sort();
+                                
+                                double median;
+                                int n = valuesToStack.Count;
+                                if (n % 2 == 0) median = (valuesToStack[n/2 - 1] + valuesToStack[n/2]) / 2.0;
+                                else median = valuesToStack[n/2];
 
-                            double median;
-                            int nValid = valuesToStack.Count;
-                            if (nValid % 2 == 0)
-                            {
-                                int mid = nValid / 2;
-                                median = (valuesToStack[mid - 1] + valuesToStack[mid]) / 2.0;
+                                // Scriviamo nel risultato globale alla posizione assoluta (yStart + yRel)
+                                // resultMat è l'unica matrice "Gigante" che teniamo in memoria (inevitabile per l'output)
+                                // Ma resultMat.Set è thread-safe se scriviamo su righe diverse? 
+                                // In OpenCV C++ sì, ma per sicurezza in C# usiamo un lock o accesso diretto se thread safe.
+                                // Parallel.For su righe distinte è sicuro su Mat se non cambia la struttura.
+                                
+                                // Accesso ottimizzato (non thread-safe se concorrenza su stessa cella, ma qui siamo su celle diverse)
+                                resultMat.Set(start1 + yRel, x, median);
                             }
-                            else
-                            {
-                                median = valuesToStack[nValid / 2];
-                            }
-
-                            resIndexer[y, x] = median;
-                        }
-                    });
-                }
-                finally
-                {
-                    foreach (var m in stack) m.Dispose();
+                        });
+                    }
+                    finally
+                    {
+                        // 3. Pulizia immediata della striscia
+                        foreach (var m in stripStack) m.Dispose();
+                    }
                 }
             }
         });

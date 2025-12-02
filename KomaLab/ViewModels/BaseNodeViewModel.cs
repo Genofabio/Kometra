@@ -6,19 +6,16 @@ using System;
 
 namespace KomaLab.ViewModels;
 
-/// <summary>
-/// Gestisce SOLO la posizione, la selezione e l'identità del nodo.
-/// Non sa nulla di immagini FITS.
-/// </summary>
-public abstract partial class BaseNodeViewModel : ObservableObject
+// 1. AGGIUNGI L'INTERFACCIA IDisposable QUI
+public abstract partial class BaseNodeViewModel : ObservableObject, IDisposable
 {
+    private bool _disposedValue;
+    
     protected readonly BaseNodeModel Model;
 
-    // --- Eventi per comunicare con la Board (Disaccoppiamento) ---
     public event Action<BaseNodeViewModel>? RequestRemove;
     public event Action<BaseNodeViewModel>? RequestBringToFront;
 
-    // --- Proprietà Posizionali ---
     public double X
     {
         get => Model.X;
@@ -31,29 +28,34 @@ public abstract partial class BaseNodeViewModel : ObservableObject
         set => SetProperty(Model.Y, value, Model, (m, v) => m.Y = v);
     }
 
-    [ObservableProperty] private string _title = "";
+    public string Title
+    {
+        get => Model.Title;
+        set => SetProperty(Model.Title, value, Model, (m, v) => m.Title = v);
+    }
+    
     [ObservableProperty] private bool _isSelected;
     [ObservableProperty] private int _zIndex;
 
-    // --- Costruttore ---
     protected BaseNodeViewModel(BaseNodeModel model)
     {
         Model = model;
         Title = model.Title;
     }
+    
+    ~BaseNodeViewModel()
+    {
+        Dispose(false);
+    }
 
-    // --- Comandi ---
     [RelayCommand]
     private void RemoveSelf()
     {
-        // Invece di chiamare ParentBoard.RemoveNode(this), alziamo la mano.
         RequestRemove?.Invoke(this);
     }
 
-    // --- Metodi di gestione UI/Layout ---
     public void MoveNode(Vector screenDelta, double currentScale)
     {
-        // Passiamo la scala come parametro, così il nodo non deve conoscere la Board.
         if (currentScale == 0) return;
         X += screenDelta.X / currentScale;
         Y += screenDelta.Y / currentScale;
@@ -62,5 +64,27 @@ public abstract partial class BaseNodeViewModel : ObservableObject
     public void BringToFront()
     {
         RequestBringToFront?.Invoke(this);
+    }
+
+    // --- IMPLEMENTAZIONE IDISPOSABLE (Pattern Standard) ---
+    
+    public void Dispose()
+    {
+        Dispose(true);
+        GC.SuppressFinalize(this); 
+    }
+    
+    protected virtual void Dispose(bool disposing)
+    {
+        if (!_disposedValue)
+        {
+            if (disposing)
+            {
+                RequestRemove = null;
+                RequestBringToFront = null;
+            }
+            
+            _disposedValue = true;
+        }
     }
 }

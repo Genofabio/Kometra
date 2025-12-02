@@ -18,8 +18,8 @@ public partial class BoardViewModel : ObservableObject
     private readonly INodeViewModelFactory _nodeFactory;
     private readonly IDialogService _dialogService; 
     private readonly IWindowService _windowService;
-    private readonly IFitsService _fitsService;           // Per salvare
-    private readonly IImageOperationService _opsService;  // Per lo stacking (NUOVO)
+    private readonly IFitsService _fitsService;           
+    private readonly IImageOperationService _opsService;  
 
     // --- Proprietà ---
     [ObservableProperty] private double _offsetX;
@@ -37,7 +37,7 @@ public partial class BoardViewModel : ObservableObject
         IDialogService dialogService, 
         IWindowService windowService,
         IFitsService fitsService,
-        IImageOperationService opsService) // Inietto il servizio operazioni
+        IImageOperationService opsService) 
     {
         _nodeFactory = nodeFactory;
         _dialogService = dialogService; 
@@ -76,11 +76,10 @@ public partial class BoardViewModel : ObservableObject
         }
     }
 
-    // --- Gestione Eventi Nodi (Disaccoppiamento) ---
+    // --- Gestione Eventi Nodi ---
 
     private void RegisterNodeEvents(BaseNodeViewModel node)
     {
-        // Ci iscriviamo agli eventi del nodo
         node.RequestRemove += OnNodeRequestRemove;
         node.RequestBringToFront += OnNodeRequestBringToFront;
     }
@@ -96,6 +95,9 @@ public partial class BoardViewModel : ObservableObject
         if (SelectedNode == node) DeselectAllNodes();
         UnregisterNodeEvents(node);
         Nodes.Remove(node);
+        
+        // FONDAMENTALE: Pulizia Memoria
+        node.Dispose();
     }
 
     private void OnNodeRequestBringToFront(BaseNodeViewModel node)
@@ -110,12 +112,8 @@ public partial class BoardViewModel : ObservableObject
     {
         try
         {
-            // La factory ora non richiede 'this'
             var newNode = await _nodeFactory.CreateSingleImageNodeAsync(imagePath, x, y);
-            
-            // Registriamo gli eventi
             RegisterNodeEvents(newNode);
-            
             Nodes.Add(newNode);
             OnNodeRequestBringToFront(newNode);
         }
@@ -145,36 +143,81 @@ public partial class BoardViewModel : ObservableObject
     [RelayCommand(CanExecute = nameof(CanResetNormalization))]
     private async Task ResetNormalization()
     {
-        if (SelectedNode is ImageNodeViewModel imgNode) // Controllo il tipo corretto
+        if (SelectedNode is ImageNodeViewModel imgNode) 
         {
             await imgNode.ResetThresholdsAsync();
         }
     }
     private bool CanResetNormalization() => SelectedNode is ImageNodeViewModel;
     
+    // --- LOGICA ALLINEAMENTO (CORRETTA) ---
     [RelayCommand(CanExecute = nameof(CanShowAlignmentWindow))]
     private async Task ShowAlignmentWindow()
     {
-        // Controllo cast sicuro a ImageNodeViewModel (o specifico se serve)
+        // 1. Controllo generico (va bene sia Single che Multi)
         if (SelectedNode is not ImageNodeViewModel imgNode) return;
 
         try
         {
-            // Il WindowService dovrà essere aggiornato per accettare ImageNodeViewModel
-            var newProcessedData = await _windowService.ShowAlignmentWindowAsync(imgNode);
+            // 2. POLIMORFISMO: Chiediamo al nodo di darci i file di input.
+            //    Se è un SingleNode in memoria, si salverà da solo in Temp.
+            var inputPaths = await imgNode.PrepareInputPathsAsync(_fitsService);
 
-            if (newProcessedData != null)
+            if (inputPaths.Count == 0) return; // Nessun dato valido
+
+            // 3. Chiamiamo il servizio (che lavora con stringhe, Low RAM)
+            var newPaths = await _windowService.ShowAlignmentWindowAsync(inputPaths);
+
+            if (newPaths != null && newPaths.Count > 0)
             {
-                await imgNode.ApplyProcessedDataAsync(newProcessedData);
+                double newX = imgNode.X + 60;
+                double newY = imgNode.Y + 60;
+                
+                // Pulizia titolo
+                string cleanTitle = imgNode.Title.Replace(" (Aligned)", "").Trim();
+                string newTitle = $"{cleanTitle} (Aligned)";
+                
+                // Recupera cartella temp per il Dispose
+                string? dirPath = System.IO.Path.GetDirectoryName(newPaths[0]);
+                bool isTemp = dirPath != null && dirPath.Contains("KomaLab_Aligned");
+
+                BaseNodeViewModel newNode;
+
+                // 4. DECISIONE INTELLIGENTE: Creare Single o Multi?
+                if (newPaths.Count == 1)
+                {
+                    // Se l'allineamento restituisce 1 sola immagine (es. crop su singola)
+                    newNode = await _nodeFactory.CreateSingleImageNodeAsync(newPaths[0], newX, newY);
+                    // Non impostiamo TemporaryFolderPath su SingleNode (perché non lo supporta ancora),
+                    // ma essendo un solo file non è gravissimo. 
+                    // (Se vuoi supportarlo, aggiungi la prop TemporaryFolderPath anche a SingleNodeViewModel).
+                }
+                else
+                {
+                    // Caso standard: Stack allineato
+                    var multiNode = await _nodeFactory.CreateMultipleImagesNodeAsync(newPaths, newX, newY);
+                    if (isTemp) multiNode.TemporaryFolderPath = dirPath;
+                    newNode = multiNode;
+                }
+
+                newNode.Title = newTitle;
+
+                // 5. Aggiunta alla Board
+                RegisterNodeEvents(newNode);
+                Nodes.Add(newNode);
+                SetSelectedNode(newNode);
+                OnNodeRequestBringToFront(newNode);
             }
         }
         catch (Exception ex)
         {
-            Debug.WriteLine($"Alignment failed: {ex.Message}");
+            Debug.WriteLine($"Alignment failed: {ex}");
         }
     }
+    
     private bool CanShowAlignmentWindow() => SelectedNode is ImageNodeViewModel;
     
+    // --- LOGICA STACKING ---
     [RelayCommand(CanExecute = nameof(CanStackImages))]
     private async Task StackImages(StackingMode mode)
     {
@@ -187,9 +230,8 @@ public partial class BoardViewModel : ObservableObject
 
             if (sourceImages.Count < 2) return;
 
-            // Usa il NUOVO servizio di operazioni
             var resultData = await _opsService.ComputeStackAsync(sourceImages, mode);
-
+            
             double newX = multiNode.X + 50;
             double newY = multiNode.Y + 50;
         
@@ -199,7 +241,6 @@ public partial class BoardViewModel : ObservableObject
             
             string newTitle = $"{baseTitle} ({mode})"; 
 
-            // Factory per nodo da dati in memoria
             var newNode = await _nodeFactory.CreateSingleImageNodeFromDataAsync(
                 resultData, newTitle, newX, newY
             );
@@ -215,7 +256,7 @@ public partial class BoardViewModel : ObservableObject
     }
     private bool CanStackImages(StackingMode mode) => SelectedNode is MultipleImagesNodeViewModel;
 
-    // --- Altri Comandi (Pan/Zoom/Selection) ---
+    // --- Altri Comandi ---
 
     [RelayCommand] private void IncrementOffset() { OffsetX += 20; }
     [RelayCommand] private void ResetBoard() { OffsetX = 0.0; OffsetY = 0.0; Scale = 0.5; }
@@ -243,7 +284,6 @@ public partial class BoardViewModel : ObservableObject
         
         if (SelectedNode != null) SelectedNode.IsSelected = true;
         
-        // Notifica cambio stato comandi
         ResetNormalizationCommand.NotifyCanExecuteChanged();
         ShowAlignmentWindowCommand.NotifyCanExecuteChanged(); 
         StackImagesCommand.NotifyCanExecuteChanged();
@@ -264,7 +304,6 @@ public partial class BoardViewModel : ObservableObject
     [RelayCommand(CanExecute = nameof(CanSaveNode))]
     private async Task SaveSelectedNode()
     {
-        // Cast a ImageNodeViewModel perché BaseNode non ha GetActiveImageData
         if (SelectedNode is not ImageNodeViewModel imgNode) return;
 
         FitsImageData? dataToSave = imgNode.GetActiveImageData();
@@ -279,4 +318,5 @@ public partial class BoardViewModel : ObservableObject
         }
     }
     private bool CanSaveNode() => SelectedNode is ImageNodeViewModel;
+    
 }

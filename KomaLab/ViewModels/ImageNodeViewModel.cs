@@ -2,26 +2,20 @@
 using System.Threading.Tasks;
 using Avalonia;
 using KomaLab.Models;
+using KomaLab.Services;
 
 namespace KomaLab.ViewModels;
 
 /// <summary>
-/// Specializzazione per nodi che manipolano immagini FITS.
+/// Specializzazione astratta per nodi che manipolano immagini FITS.
 /// </summary>
 public abstract class ImageNodeViewModel : BaseNodeViewModel
 {
-    // Qui manteniamo la logica della dimensione stimata se ti serve per i connettori
+    // Stima dell'altezza dell'header della finestra (Titolo + Controlli)
     protected const double ESTIMATED_UI_HEIGHT = 60.0;
 
     protected ImageNodeViewModel(BaseNodeModel model) : base(model)
     {
-        this.PropertyChanged += (_, e) =>
-        {
-            if (e.PropertyName == nameof(NodeContentSize))
-            {
-                OnPropertyChanged(nameof(EstimatedTotalSize));
-            }
-        };
     }
 
     public virtual Size EstimatedTotalSize
@@ -35,10 +29,31 @@ public abstract class ImageNodeViewModel : BaseNodeViewModel
 
     protected abstract Size NodeContentSize { get; }
 
-    // --- Metodi Astratti Specifici per Immagini ---
+    // --- Metodi Astratti (Contratto per le sottoclassi) ---
     
+    /// <summary>
+    /// Ricalcola i livelli di visualizzazione (Auto-Stretch).
+    /// </summary>
     public abstract Task ResetThresholdsAsync();
+    
+    /// <summary>
+    /// Recupera la lista completa dei dati gestiti da questo nodo 
+    /// (es. per passarli al tool di allineamento o stacking).
+    /// </summary>
     public abstract Task<List<FitsImageData?>> GetCurrentDataAsync();
+    
+    /// <summary>
+    /// Restituisce l'immagine singola attualmente visualizzata 
+    /// (es. per il salvataggio file).
+    /// </summary>
     public abstract FitsImageData? GetActiveImageData();
+    
+    /// <summary>
+    /// Inietta dati processati direttamente in memoria (es. risultato di uno stack).
+    /// </summary>
     public abstract Task ApplyProcessedDataAsync(List<FitsImageData> newProcessedData);
+
+    // Restituisce i percorsi file (esistenti o temporanei) da passare al tool.
+    // Richiede IFitsService per salvare eventuali dati in memoria.
+    public abstract Task<List<string>> PrepareInputPathsAsync(IFitsService fitsService);
 }

@@ -209,7 +209,6 @@ public class ImageAnalysisService : IImageAnalysisService
         double[][] xData = xDataList.ToArray();
         double[] yData = yDataList.ToArray();
         
-        // Vettori MathNet (COPIATI DAL TUO CODICE)
         var initialGuess = Vector<double>.Build.Dense([
             1.0, xoInitNum / weightSum, yoInitNum / weightSum, 
             3.0, 3.0, 0.0

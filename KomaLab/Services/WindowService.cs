@@ -3,8 +3,8 @@ using KomaLab.ViewModels;
 using KomaLab.Views; 
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Threading.Tasks;
-using KomaLab.Models;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace KomaLab.Services;
@@ -23,25 +23,23 @@ public class WindowService : IWindowService
     {
         _mainWindow = window;
     }
-    
-    public async Task<List<FitsImageData>?> ShowAlignmentWindowAsync(ImageNodeViewModel nodeToAlign)
-    {
-        if (_mainWindow == null)
-        {
-            throw new InvalidOperationException("La finestra principale non è stata registrata.");
-        }
 
-        // ORA FUNZIONA: ImageNodeViewModel ha questo metodo
-        var currentData = await nodeToAlign.GetCurrentDataAsync();
-        
-        // Risoluzione dei nuovi servizi (come visto nello step precedente)
+    // MODIFICA: Accettiamo List<string> invece di ImageNodeViewModel
+    // Questo ci permette di passare solo i percorsi leggeri
+    public async Task<List<string>?> ShowAlignmentWindowAsync(List<string> sourcePaths)
+    {
+        if (_mainWindow == null) throw new InvalidOperationException("Finestra principale non registrata.");
+
+        // Risoluzione servizi
         var fitsService = _serviceProvider.GetRequiredService<IFitsService>();
         var alignmentService = _serviceProvider.GetRequiredService<IAlignmentService>();
         var converter = _serviceProvider.GetRequiredService<IFitsDataConverter>();
         var analysis = _serviceProvider.GetRequiredService<IImageAnalysisService>();
     
-        var viewModel = new AlignmentToolViewModel(
-            currentData,
+        // CREAZIONE VIEWMODEL (Versione Low RAM)
+        // Passiamo i percorsi, non i dati in memoria
+        using var viewModel = new AlignmentToolViewModel(
+            sourcePaths,
             fitsService, 
             alignmentService,
             converter,
@@ -56,13 +54,14 @@ public class WindowService : IWindowService
         Action closeHandler = () => { alignmentWindow.Close(); };
         viewModel.RequestClose += closeHandler;
 
+        // Mostra la finestra modale
         await alignmentWindow.ShowDialog<object>(_mainWindow); 
 
         viewModel.RequestClose -= closeHandler;
 
         if (viewModel.DialogResult) 
         {
-            return viewModel.FinalProcessedData; 
+            return viewModel.FinalProcessedPaths; 
         }
     
         return null; 
