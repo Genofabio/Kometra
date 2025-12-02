@@ -18,6 +18,7 @@
 
     <Window.Resources>
         <converters:EqualityConverter x:Key="EqualityConverter" />
+        <converters:AlignmentModeNameConverter x:Key="AlignmentModeNameConverter" />
         
         <!-- DataTemplate aggiornato con CoordinateString -->
         <DataTemplate x:Key="CoordinateItemTemplate"
@@ -100,7 +101,7 @@
     <Grid ColumnDefinitions="300, *">
         
         <!-- Pannello Laterale Sinistro -->
-        <Border Grid.Column="0" Background="#2C2C2C" Padding="15">
+        <Border Grid.Column="0" Background="#2C2C2C" Padding="15" IsEnabled="{Binding IsInteractionEnabled}">
             <Grid RowDefinitions="Auto, *, Auto">
                 
                 <!-- Riga 0: Controlli Principali -->
@@ -110,7 +111,15 @@
                     
                     <ComboBox ItemsSource="{Binding AvailableAlignmentModes}"
                               SelectedItem="{Binding SelectedMode}"
-                              HorizontalAlignment="Stretch"/>
+                              HorizontalAlignment="Stretch">
+        
+                        <ComboBox.ItemTemplate>
+                            <DataTemplate>
+                                <TextBlock Text="{Binding ., Converter={StaticResource AlignmentModeNameConverter}}" />
+                            </DataTemplate>
+                        </ComboBox.ItemTemplate>
+        
+                    </ComboBox>
                     
                     <TextBlock TextWrapping="Wrap" Opacity="0.7" MinHeight="40">
                         <TextBlock.IsVisible>
@@ -182,7 +191,8 @@
                 
                 <!-- Riga 1: Lista Coordinate con ScrollViewer -->
                 <ScrollViewer Grid.Row="1" Margin="0,5,0,0" VerticalScrollBarVisibility="Auto"
-                            IsVisible="{Binding IsCoordinateListVisible}">
+                              IsEnabled="{Binding IsInteractionEnabled}" 
+                              IsVisible="{Binding IsCoordinateListVisible}">
                     <ItemsControl ItemsSource="{Binding CoordinateEntries}"
                                   ItemTemplate="{StaticResource CoordinateItemTemplate}"/>
                 </ScrollViewer>
@@ -196,10 +206,12 @@
                             HorizontalAlignment="Stretch"
                             HorizontalContentAlignment="Center"
                             IsVisible="{Binding IsCalculateButtonVisible}"
+                            IsEnabled="{Binding IsInteractionEnabled}"
                             Classes="calculate"/> 
                     
                     <Grid ColumnDefinitions="*, *" ColumnSpacing="10"
-                          IsVisible="{Binding IsApplyCancelButtonsVisible}">
+                          IsVisible="{Binding IsApplyCancelButtonsVisible}"
+                          IsEnabled="{Binding IsInteractionEnabled}">
                         
                         <Button Grid.Column="0" Content="Annulla" 
                                 HorizontalAlignment="Stretch" 
@@ -251,14 +263,14 @@
                         </Canvas.RenderTransform>
         
                         <Image Name="PreviewImage" 
-                               Source="{Binding SafeImage}" 
+                               Source="{Binding ActiveImage.Image}" 
                                Stretch="None"
                                RenderOptions.BitmapInterpolationMode="None" 
                                Canvas.Left="0" Canvas.Top="0"/>
                
                         <Canvas Name="InteractionCanvas" Background="Transparent"
-                                Width="{Binding SafeImageWidth}"
-                                Height="{Binding SafeImageHeight}"
+                                Width="{Binding ActiveImage.ImageSize.Width}"
+                                Height="{Binding ActiveImage.ImageSize.Height}"
                                 Canvas.Left="0" Canvas.Top="0"
                                 PointerPressed="OnInteractionCanvasPointerPressed"/>
                     </Canvas>
@@ -301,7 +313,8 @@
                     <StackPanel Orientation="Horizontal" Spacing="4" Margin="10"
                                 HorizontalAlignment="Right" VerticalAlignment="Bottom"
                                 ZIndex="1"
-                                Background="Transparent" PointerPressed="OnControlsPointerPressed"> 
+                                Background="Transparent" PointerPressed="OnControlsPointerPressed"
+                                IsEnabled="{Binding IsInteractionEnabled}"> 
                         <Button Name="ZoomOutButton" ToolTip.Tip="Zoom Out">
                             <avalonia:MaterialIcon Kind="Minus" Width="16" Height="16" />
                         </Button>
@@ -321,6 +334,7 @@
                                 HorizontalAlignment="Left" VerticalAlignment="Bottom"
                                 ZIndex="1" Classes="NavControls"
                                 IsVisible="{Binding IsNavigationVisible}"
+                                IsEnabled="{Binding IsInteractionEnabled}"
                                 Background="Transparent" PointerPressed="OnControlsPointerPressed">
 
                         <Button Name="GoToFirstImageButton" ToolTip.Tip="Prima Immagine"

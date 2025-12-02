@@ -1,4 +1,5 @@
-﻿using System.Collections.Generic;
+﻿using System;
+using System.Collections.Generic;
 using System.Threading.Tasks;
 using KomaLab.Models;
 using Point = Avalonia.Point;
@@ -9,10 +10,11 @@ public interface IAlignmentService
 {
     Task<IEnumerable<Point?>> CalculateCentersAsync(
         AlignmentMode mode, 
-        CenteringMethod method,
+        CenteringMethod method, 
         List<string> sourcePaths, 
         IEnumerable<Point?> currentCoordinates, 
-        int searchRadius);
+        int searchRadius,
+        IProgress<(int Index, Point? Center)>? progress = null);
 
     bool CanCalculate(
         AlignmentMode mode, 

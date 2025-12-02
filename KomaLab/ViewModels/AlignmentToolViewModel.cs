@@ -26,8 +26,6 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
     private readonly IImageAnalysisService _analysis;
     
     private readonly List<string> _sourcePaths; 
-    // RIMOSSO: LruCache (Per strategia Low RAM Strict)
-
     private int _currentStackIndex;
     private readonly int _totalStackCount;
     
@@ -36,6 +34,7 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
     private bool _hasLockedThresholds;
     private double _lockedKBlack; 
     private double _lockedKWhite;
+    private bool _isInternalChange;
 
     #endregion
 
@@ -108,6 +107,7 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
     [NotifyCanExecuteChangedFor(nameof(ApplyAlignmentCommand))]
     [NotifyPropertyChangedFor(nameof(IsCoordinateListVisible))]
     [NotifyPropertyChangedFor(nameof(IsNavigationVisible))]
+    [NotifyPropertyChangedFor(nameof(IsInteractionEnabled))]
     private AlignmentState _currentState = AlignmentState.Initial;
     
     public bool DialogResult { get; private set; }
@@ -119,6 +119,7 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
     public bool IsSearchRadiusControlsVisible => IsSearchRadiusVisible && CurrentState == AlignmentState.Initial;
     public bool IsRefinementMessageVisible => IsSearchRadiusVisible && CurrentState != AlignmentState.Initial;
     public bool IsProcessingVisible => CurrentState == AlignmentState.Processing || CurrentState == AlignmentState.Calculating;
+    public bool IsInteractionEnabled => !IsProcessingVisible;
     
     public string ProcessingStatusText => CurrentState switch
     {
@@ -132,12 +133,20 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
         get
         {
             if (!IsStack) return false;
-            if (CurrentState != AlignmentState.Initial) return true;
+
+            // 1. Durante il calcolo iniziale (barra 1) nascondiamo tutto
+            if (CurrentState == AlignmentState.Calculating) return false;
+
+            // 2. Se i risultati sono pronti OPPURE stiamo applicando (barra 2), mostriamo la navigazione
+            if (CurrentState == AlignmentState.ResultsReady || CurrentState == AlignmentState.Processing) 
+                return true;
+
+            // 3. Logica stato Initial
             return SelectedMode != AlignmentMode.Automatic;
         }
     }
     
-    public bool IsCoordinateListVisible => CurrentState != AlignmentState.Initial;
+    public bool IsCoordinateListVisible => CurrentState == AlignmentState.ResultsReady || CurrentState == AlignmentState.Processing;
     public IEnumerable<AlignmentMode> AvailableAlignmentModes { get; private set; }
     public TaskCompletionSource ImageLoadedTcs { get; } = new();
 
@@ -217,8 +226,10 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
     // --- METODO CRITICO PER LA MEMORIA ---
     private async Task LoadStackImageAtIndexAsync(int index)
     {
+        // 1. Validazione input
         if (index < 0 || index >= _totalStackCount) return;
-
+        
+        // Evitiamo di ricaricare se siamo già sulla stessa immagine e l'immagine è caricata
         if (index == _currentStackIndex && ActiveImage != null) return;
 
         _currentStackIndex = index;
@@ -226,11 +237,10 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
 
         FitsRenderer? newRenderer = null;
 
+        // 2. Caricamento ON-DEMAND (IO asincrono)
         try
         {
-            // Caricamento ON-DEMAND da disco
             string path = _sourcePaths[index];
-            
             var newModel = await _fitsService.LoadFitsFromFileAsync(path);
             
             if (newModel != null)
@@ -241,18 +251,24 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
         }
         catch (Exception ex)
         {
-            Debug.WriteLine($"Errore caricamento: {ex.Message}");
+            Debug.WriteLine($"Errore caricamento immagine stack [{index}]: {ex.Message}");
             newRenderer?.UnloadData();
-            return;
+            return; // O gestire diversamente l'errore
         }
 
-        // Logica Sigma Locking
+        // Variabili per memorizzare i valori da applicare alla UI alla fine
+        double targetBlack = 0;
+        double targetWhite = 0;
+        bool shouldUpdateThresholds = false;
+
+        // 3. Calcolo Statistiche e Logica Sigma Locking (Senza aggiornare ancora le Property)
         if (newRenderer != null)
         {
             var (mean, sigma) = newRenderer.GetImageStatistics();
 
             if (!_hasLockedThresholds)
             {
+                // PRIMA VOLTA: Calcoliamo i fattori K basati sui valori di default dell'immagine
                 double masterBlack = newRenderer.BlackPoint;
                 double masterWhite = newRenderer.WhitePoint;
                 
@@ -260,35 +276,64 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
                 _lockedKWhite = (masterWhite - mean) / sigma;
                 _hasLockedThresholds = true;
                 
-                BlackPoint = masterBlack;
-                WhitePoint = masterWhite;
-                
+                // Salviamo i valori target
+                targetBlack = masterBlack;
+                targetWhite = masterWhite;
+                shouldUpdateThresholds = true;
+
+                // Reset vista solo al primo avvio
                 Viewport.ImageSize = newRenderer.ImageSize;
                 Viewport.ResetView(); 
                 OnPropertyChanged(nameof(ZoomStatusText));
             }
             else
             {
-                newRenderer.BlackPoint = mean + (_lockedKBlack * sigma);
-                newRenderer.WhitePoint = mean + (_lockedKWhite * sigma);
-                BlackPoint = newRenderer.BlackPoint;
-                WhitePoint = newRenderer.WhitePoint;
+                // VOLTE SUCCESSIVE: Calcoliamo le nuove soglie basandoci sui fattori K bloccati
+                // e le statistiche della NUOVA immagine
+                double newBlack = mean + (_lockedKBlack * sigma);
+                double newWhite = mean + (_lockedKWhite * sigma);
+                
+                // Impostiamo i valori interni del renderer (non triggera ancora la UI)
+                newRenderer.BlackPoint = newBlack;
+                newRenderer.WhitePoint = newWhite;
+                
+                // Salviamo i valori target
+                targetBlack = newBlack;
+                targetWhite = newWhite;
+                shouldUpdateThresholds = true;
             }
         }
 
-        // SWAP E PULIZIA IMMEDIATA (Low RAM Strategy)
+        // 4. CRITICO: Swap dei Renderer (Low RAM Strategy)
+        // È fondamentale farlo ORA, prima di toccare BlackPoint/WhitePoint properties
         var oldRenderer = ActiveImage;
         
-        ActiveImage = newRenderer; // Questo notifica anche SafeImage
+        ActiveImage = newRenderer; // Questo aggiorna anche SafeImage
         
-        // Distruggi subito il vecchio (niente cache)
+        // Distruggiamo subito il vecchio per liberare RAM
         oldRenderer?.UnloadData(); 
 
+        // 5. Aggiornamenti UI dipendenti dall'immagine
         OnPropertyChanged(nameof(CorrectImageSize)); 
         ResetThresholdsCommand.NotifyCanExecuteChanged();
         UpdateReticleVisibilityForCurrentState();
         UpdateSearchRadiusRange();
         RefreshNavigationCommands();
+
+        // 6. Aggiornamento delle Proprietà Observable (Triggera OnChanged)
+        if (shouldUpdateThresholds)
+        {
+            try 
+            {
+                _isInternalChange = true; 
+                BlackPoint = targetBlack;
+                WhitePoint = targetWhite;
+            }
+            finally
+            {
+                _isInternalChange = false;
+            }
+        }
     }
 
     public void Dispose()
@@ -400,15 +445,31 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
         {
             var currentCoords = CoordinateEntries.Select(e => e.Coordinate);
             
-            // Passiamo i PATHS
+            // 1. CREIAMO IL GESTORE DEL PROGRESSO
+            // Questo blocco di codice viene eseguito automaticamente sul thread della UI
+            // ogni volta che il service chiama 'progress.Report(...)'
+            var progressHandler = new Progress<(int Index, Point? Center)>(update =>
+            {
+                // Aggiornamento in tempo reale del singolo elemento
+                if (update.Index >= 0 && update.Index < CoordinateEntries.Count)
+                {
+                    CoordinateEntries[update.Index].Coordinate = update.Center;
+                }
+            });
+
+            // 2. CHIAMATA AL SERVICE
+            // Passiamo 'progressHandler' come ultimo argomento
             var newCoords = await _alignmentService.CalculateCentersAsync(
                 SelectedMode, 
                 CenteringMethod.LocalRegion,
                 _sourcePaths, 
                 currentCoords, 
-                SearchRadius
+                SearchRadius,
+                progressHandler // <--- PASSAGGIO FONDAMENTALE
             );
 
+            // 3. SINCRONIZZAZIONE FINALE (per sicurezza)
+            // Sovrascriviamo tutto alla fine per essere certi al 100% che la lista sia coerente
             int i = 0;
             foreach (var coord in newCoords)
             {
@@ -534,16 +595,23 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
         if (ActiveImage != null)
         {
             ActiveImage.BlackPoint = value;
-            UpdateLockedSigmaFactors();
+            // Se il cambiamento è interno (cambio immagine), NON ricalcolare K
+            if (!_isInternalChange) 
+            {
+                UpdateLockedSigmaFactors();
+            }
         }
     }
-    
+
     partial void OnWhitePointChanged(double value)
     {
         if (ActiveImage != null)
         {
             ActiveImage.WhitePoint = value;
-            UpdateLockedSigmaFactors();
+            if (!_isInternalChange)
+            {
+                UpdateLockedSigmaFactors();
+            }
         }
     }
     

@@ -192,7 +192,7 @@ public class FitsDataConverter : IFitsDataConverter
 
         if (samples.Count == 0) return (0, 1);
 
-        double b = Statistics.Quantile(samples, 0.05); // Un po' più conservativo del 0.15
+        double b = Statistics.Quantile(samples, 0.3); // Un po' più conservativo del 0.15
         double w = Statistics.Quantile(samples, 0.995);
         
         // Protezione contro immagini piatte

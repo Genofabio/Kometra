@@ -333,9 +333,6 @@ public partial class MultipleImagesNodeViewModel : ImageNodeViewModel
             try
             {
                 Directory.Delete(TemporaryFolderPath, true);
-#if DEBUG
-                Debug.WriteLine($"[STEP 4: DISK CLEANUP] Eliminata cartella temporanea: {TemporaryFolderPath}");
-#endif
             }
             catch (Exception ex)
             {

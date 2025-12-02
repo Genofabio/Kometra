@@ -2,7 +2,8 @@
 using System.Collections.Generic; 
 using System.Collections.ObjectModel;
 using System.Diagnostics;
-using System.Linq; 
+using System.Linq;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using Avalonia;
 using KomaLab.Services;
@@ -154,18 +155,13 @@ public partial class BoardViewModel : ObservableObject
     [RelayCommand(CanExecute = nameof(CanShowAlignmentWindow))]
     private async Task ShowAlignmentWindow()
     {
-        // 1. Controllo generico (va bene sia Single che Multi)
         if (SelectedNode is not ImageNodeViewModel imgNode) return;
 
         try
         {
-            // 2. POLIMORFISMO: Chiediamo al nodo di darci i file di input.
-            //    Se è un SingleNode in memoria, si salverà da solo in Temp.
             var inputPaths = await imgNode.PrepareInputPathsAsync(_fitsService);
+            if (inputPaths.Count == 0) return; 
 
-            if (inputPaths.Count == 0) return; // Nessun dato valido
-
-            // 3. Chiamiamo il servizio (che lavora con stringhe, Low RAM)
             var newPaths = await _windowService.ShowAlignmentWindowAsync(inputPaths);
 
             if (newPaths != null && newPaths.Count > 0)
@@ -173,36 +169,27 @@ public partial class BoardViewModel : ObservableObject
                 double newX = imgNode.X + 60;
                 double newY = imgNode.Y + 60;
                 
-                // Pulizia titolo
-                string cleanTitle = imgNode.Title.Replace(" (Aligned)", "").Trim();
-                string newTitle = $"{cleanTitle} (Aligned)";
+                // --- MODIFICA NOME (ITALIANO) ---
+                string newTitle = $"{imgNode.Title} (Allineata)";
                 
-                // Recupera cartella temp per il Dispose
                 string? dirPath = System.IO.Path.GetDirectoryName(newPaths[0]);
                 bool isTemp = dirPath != null && dirPath.Contains("KomaLab_Aligned");
 
                 BaseNodeViewModel newNode;
 
-                // 4. DECISIONE INTELLIGENTE: Creare Single o Multi?
                 if (newPaths.Count == 1)
                 {
-                    // Se l'allineamento restituisce 1 sola immagine (es. crop su singola)
                     newNode = await _nodeFactory.CreateSingleImageNodeAsync(newPaths[0], newX, newY);
-                    // Non impostiamo TemporaryFolderPath su SingleNode (perché non lo supporta ancora),
-                    // ma essendo un solo file non è gravissimo. 
-                    // (Se vuoi supportarlo, aggiungi la prop TemporaryFolderPath anche a SingleNodeViewModel).
                 }
                 else
                 {
-                    // Caso standard: Stack allineato
                     var multiNode = await _nodeFactory.CreateMultipleImagesNodeAsync(newPaths, newX, newY);
                     if (isTemp) multiNode.TemporaryFolderPath = dirPath;
                     newNode = multiNode;
                 }
 
-                newNode.Title = newTitle;
+                newNode.Title = newTitle; 
 
-                // 5. Aggiunta alla Board
                 RegisterNodeEvents(newNode);
                 Nodes.Add(newNode);
                 SetSelectedNode(newNode);
@@ -214,7 +201,6 @@ public partial class BoardViewModel : ObservableObject
             Debug.WriteLine($"Alignment failed: {ex}");
         }
     }
-    
     private bool CanShowAlignmentWindow() => SelectedNode is ImageNodeViewModel;
     
     // --- LOGICA STACKING ---
@@ -235,11 +221,22 @@ public partial class BoardViewModel : ObservableObject
             double newX = multiNode.X + 50;
             double newY = multiNode.Y + 50;
         
-            string baseTitle = multiNode.Title;
-            int idx = baseTitle.LastIndexOf('(');
-            if (idx != -1) baseTitle = baseTitle.Substring(0, idx).TrimEnd();
+            string currentTitle = multiNode.Title;
+
+            // 1. Rimuoviamo "(n immagini)"
+            string cleanTitle = Regex.Replace(currentTitle, @"\s*\(\d+\s*immagini\)", "", RegexOptions.IgnoreCase);
             
-            string newTitle = $"{baseTitle} ({mode})"; 
+            // 2. Traduzione Modalità in Italiano
+            string modeString = mode switch
+            {
+                StackingMode.Average => "Media",
+                StackingMode.Median  => "Mediana",
+                StackingMode.Sum     => "Somma",
+                _ => mode.ToString()
+            };
+
+            // 3. Creazione Titolo
+            string newTitle = $"{cleanTitle.Trim()} ({modeString})"; 
 
             var newNode = await _nodeFactory.CreateSingleImageNodeFromDataAsync(
                 resultData, newTitle, newX, newY
@@ -248,6 +245,7 @@ public partial class BoardViewModel : ObservableObject
             RegisterNodeEvents(newNode);
             Nodes.Add(newNode);
             SetSelectedNode(newNode);
+            OnNodeRequestBringToFront(newNode);
         }
         catch (Exception ex)
         {

@@ -44,3 +44,12 @@ Invece di fissare i numeri, fissiamo la forma statistica dell'istogramma.Il soft
 Ottimizzazione occupazione emmoria:
 - uso di Strip Processing in Median Stacking di ImageOperationService
 - Prima si era provato a tenere la maggior parte delle immagini in ram ma questo la saturava velocemente -> uso di cache per i nodi (non è bastato) -> uso di cache anche per alignmentwindow (il problema è che quando si passavano tutte le immagini dovevano essere tutte caricate in ram) -> utilizzo di path per scaricare un po' di roba su disco
+- Utilizzo semafori per concorrenza nel calcolo dei centri -> massima concorrenza stimata in base a dimensione immagini -> non si usa effettiva ram disponibile per evitare complicazioni eccessive
+
+
+
+
+
+
+
+

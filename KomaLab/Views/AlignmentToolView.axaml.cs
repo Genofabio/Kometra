@@ -93,9 +93,20 @@ public partial class AlignmentToolView : Window
             Debug.WriteLine($"--- CRASH IN TestView.CenterImageAsync --- {ex}");
         }
     }
+    
+    private bool IsInteractionBlocked()
+    {
+        if (DataContext is AlignmentToolViewModel vm)
+        {
+            return !vm.IsInteractionEnabled; // O vm.IsProcessingVisible
+        }
+        return true; // Se non c'è VM, blocca per sicurezza
+    }
 
     private void OnPreviewPointerPressed(object? sender, PointerPressedEventArgs e)
     {
+        if (IsInteractionBlocked()) return;
+        
         if (DataContext is not AlignmentToolViewModel vm || this.PreviewBorder == null) return;
         
         var props = e.GetCurrentPoint(this.PreviewBorder).Properties;
@@ -141,6 +152,8 @@ public partial class AlignmentToolView : Window
 
     private void OnPreviewPointerMoved(object? sender, PointerEventArgs e)
     {
+        if (IsInteractionBlocked()) return;
+        
         if (!_isPanning || DataContext is not AlignmentToolViewModel vm || this.PreviewBorder == null) return;
         
         if (!e.GetCurrentPoint(this.PreviewBorder).Properties.IsMiddleButtonPressed)
@@ -162,6 +175,8 @@ public partial class AlignmentToolView : Window
     
     private void OnPreviewPointerWheelChanged(object? sender, PointerWheelEventArgs e)
     {
+        if (IsInteractionBlocked()) return;
+        
         if (e.Handled || DataContext is not AlignmentToolViewModel vm || this.PreviewBorder == null) return;
         if (_isPanning) return; 
         if (vm.ActiveImage == null) return; 
@@ -228,6 +243,8 @@ public partial class AlignmentToolView : Window
     
     private void OnInteractionCanvasPointerPressed(object? sender, PointerPressedEventArgs e)
     {
+        if (IsInteractionBlocked()) return;
+        
         if (DataContext is not AlignmentToolViewModel vm || 
             vm.ActiveImage == null || 
             sender is not Control canvas)
@@ -313,6 +330,8 @@ public partial class AlignmentToolView : Window
     
     protected override void OnKeyDown(KeyEventArgs e)
     {
+        if (IsInteractionBlocked()) return;
+        
         // Se il focus è dentro una TextBox, lascia che la TextBox gestisca l'Enter (non cambiare immagine)
         if (e.Source is TextBox)
         {

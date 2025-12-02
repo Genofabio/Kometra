@@ -36,7 +36,8 @@ public class AlignmentService : IAlignmentService
         CenteringMethod method, 
         List<string> sourcePaths, 
         IEnumerable<Point?> currentCoordinates, 
-        int searchRadius)
+        int searchRadius,
+        IProgress<(int Index, Point? Center)>? progress = null) // <--- NUOVO PARAMETRO
     {
         if (searchRadius <= 0 && (mode == AlignmentMode.Manual || mode == AlignmentMode.Guided))
         {
@@ -47,8 +48,30 @@ public class AlignmentService : IAlignmentService
         int n = sourcePaths.Count;
         Point?[] results = new Point?[n]; 
         
-        // Controlla la concorrenza per non intasare la RAM con troppe Matrici
-        int maxConcurrency = Math.Min(4, Environment.ProcessorCount);
+        long firstFileSize = 0;
+        try 
+        {
+            if (sourcePaths.Count > 0) 
+                firstFileSize = new System.IO.FileInfo(sourcePaths[0]).Length;
+        }
+        catch { /* Ignora errori di accesso al file qui */ }
+
+        // 2. Definisci soglie di sicurezza (Valori empirici per PC da 16GB RAM)
+        int maxConcurrency;
+    
+        if (firstFileSize > 100 * 1024 * 1024) // > 100 MB
+        {
+            maxConcurrency = 1; 
+        }
+        else if (firstFileSize > 20 * 1024 * 1024) // > 20 MB
+        {
+            maxConcurrency = Math.Clamp(Environment.ProcessorCount / 2, 2, 3);
+        }
+        else 
+        {
+            maxConcurrency = Math.Clamp(Environment.ProcessorCount, 2, 4);
+        }
+        
         using var semaphore = new SemaphoreSlim(maxConcurrency); 
         var processingTasks = new List<Task>();
 
@@ -66,61 +89,20 @@ public class AlignmentService : IAlignmentService
                 processingTasks.Add(Task.Run(async () =>
                 {
                     await semaphore.WaitAsync();
-                    FitsImageData? fitsData = null; // Dichiarato fuori per il finally
-                    
                     try
                     {
-                        // 1. CARICA RAW DATA (RAM sale)
-                        fitsData = await _fitsService.LoadFitsFromFileAsync(path);
-                        if (fitsData == null) { results[index] = null; return; }
-
-                        // 2. CONVERTI & LIBERA RAW DATA SUBITO
-                        using Mat fullImageMat = _converter.RawToMat(fitsData);
-                        fitsData = null; // Rende l'array C# liberabile
+                        // Chiamiamo il tuo helper che gestisce Retry e Garbage Collection
+                        Point? result = await AttemptCalculationWithRetryAsync(
+                            index, path, guessPoint, mode, method, searchRadius
+                        );
                         
-                        // 3. CALCOLA
-                        if (mode == AlignmentMode.Automatic)
-                        {
-                            results[index] = _analysis.FindCenterOfLocalRegion(fullImageMat);
-                        }
-                        else // Manual
-                        {
-                            if (guessPoint == null) { results[index] = null; return; }
-                            
-                            // Logica ROI (Identica alla tua)
-                            int size = searchRadius * 2;
-                            int x = (int)(guessPoint.Value.X - searchRadius);
-                            int y = (int)(guessPoint.Value.Y - searchRadius);
-                            
-                            Rect imageBounds = new Rect(0, 0, fullImageMat.Width, fullImageMat.Height);
-                            Rect targetRect = new Rect(x, y, size, size);
-                            Rect roiRect = imageBounds.Intersect(targetRect);
-
-                            if (roiRect.Width <= 0 || roiRect.Height <= 0) { results[index] = guessPoint; return; }
-
-                            var cvRoi = new OpenCvSharp.Rect((int)roiRect.X, (int)roiRect.Y, (int)roiRect.Width, (int)roiRect.Height);
-                            using Mat regionCrop = new Mat(fullImageMat, cvRoi);
-                            Point localCenter;
-
-                            switch (method)
-                            {
-                                case CenteringMethod.Centroid: localCenter = _analysis.FindCentroid(regionCrop); break;
-                                case CenteringMethod.GaussianFit: localCenter = _analysis.FindGaussianCenter(regionCrop); break;
-                                case CenteringMethod.Peak: localCenter = _analysis.FindPeak(regionCrop); break;
-                                default: localCenter = _analysis.FindCenterOfLocalRegion(regionCrop); break;
-                            }
-                            results[index] = new Point(localCenter.X + roiRect.X, localCenter.Y + roiRect.Y);
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        Debug.WriteLine($"Err img {index}: {ex.Message}");
-                        results[index] = (mode == AlignmentMode.Manual) ? guessPoint : null;
+                        results[index] = result;
+                        
+                        // Segnala alla UI che questa immagine è finita (rimuove i trattini ---)
+                        progress?.Report((index, result));
                     }
                     finally 
                     { 
-                        // Assicurati che l'oggetto Raw Data sia nullo se è sopravvissuto all'eccezione
-                        if (fitsData != null) fitsData = null;
                         semaphore.Release(); 
                     }
                 }));
@@ -145,21 +127,25 @@ public class AlignmentService : IAlignmentService
             {
                 // 1. Load Start & End (Necessario per Template/Traiettoria)
                 
+                // Frame 0
                 var data0 = await _fitsService.LoadFitsFromFileAsync(sourcePaths[0]);
                 if (data0 == null) return guesses;
                 var t0 = _operations.ExtractRefinedTemplate(data0, p1Guess.Value, searchRadius);
                 templateMat = t0.template;
                 Point center1Precise = t0.preciseCenter;
                 results[0] = center1Precise;
-                data0 = null; // Libera RAM
+                progress?.Report((0, center1Precise)); // <--- Report Img 0
+                data0 = null; 
 
+                // Frame N
                 var dataN = await _fitsService.LoadFitsFromFileAsync(sourcePaths[n - 1]);
                 if (dataN == null) return guesses;
                 var tN = _operations.ExtractRefinedTemplate(dataN, pNGuess.Value, searchRadius);
                 Point centerNPrecise = tN.preciseCenter;
                 results[n - 1] = centerNPrecise;
+                progress?.Report((n - 1, centerNPrecise)); // <--- Report Img N
                 tN.template.Dispose(); 
-                dataN = null; // Libera RAM
+                dataN = null; 
 
                 // 2. Calcola traiettoria
                 double stepX = (centerNPrecise.X - center1Precise.X) / (n - 1);
@@ -191,12 +177,16 @@ public class AlignmentService : IAlignmentService
                             fitsData = null; // Libera RAM
 
                             Point? foundMatch = _operations.FindTemplatePosition(fullImage, templateMat, expectedPoint, searchRadius);
-                            results[index] = foundMatch ?? expectedPoint;
+                            var finalPoint = foundMatch ?? expectedPoint;
+                            
+                            results[index] = finalPoint;
+                            progress?.Report((index, finalPoint)); // <--- Report Intermedi
                         }
                         catch (Exception ex)
                         {
                             Debug.WriteLine($"[Guided] Crash Img {index}: {ex.Message}");
                             results[index] = expectedPoint;
+                            progress?.Report((index, expectedPoint));
                         }
                         finally 
                         { 
@@ -223,17 +213,115 @@ public class AlignmentService : IAlignmentService
         return guesses;
     }
     
+    private async Task<Point?> AttemptCalculationWithRetryAsync(
+        int index, string path, Point? guessPoint, 
+        AlignmentMode mode, CenteringMethod method, int searchRadius)
+    {
+        int attempts = 0;
+        while (attempts < 3) // Riprova fino a 3 volte
+        {
+            attempts++;
+            FitsImageData? fitsData = null;
+            try
+            {
+                // 1. Carica
+                fitsData = await _fitsService.LoadFitsFromFileAsync(path);
+                if (fitsData == null) return null;
+
+                // 2. Converti
+                using Mat fullImageMat = _converter.RawToMat(fitsData);
+                fitsData = null; // Libera subito la memoria raw!
+                
+                // Forziamo il GC se siamo al secondo/terzo tentativo (situazione critica)
+                if (attempts > 1) 
+                {
+                    GC.Collect();
+                    await Task.Delay(50); // Piccolo respiro per la CPU
+                }
+
+                // 3. Logica di Calcolo (Copiata dal tuo vecchio codice)
+                Point? calculatedCenter = null;
+
+                if (mode == AlignmentMode.Automatic)
+                {
+                    calculatedCenter = _analysis.FindCenterOfLocalRegion(fullImageMat);
+                }
+                else // Manual
+                {
+                    if (guessPoint == null) return null;
+                    
+                    int size = searchRadius * 2;
+                    int x = (int)(guessPoint.Value.X - searchRadius);
+                    int y = (int)(guessPoint.Value.Y - searchRadius);
+                    
+                    Rect imageBounds = new Rect(0, 0, fullImageMat.Width, fullImageMat.Height);
+                    Rect targetRect = new Rect(x, y, size, size);
+                    Rect roiRect = imageBounds.Intersect(targetRect);
+
+                    if (roiRect.Width <= 0 || roiRect.Height <= 0) 
+                    {
+                        calculatedCenter = guessPoint;
+                    }
+                    else
+                    {
+                        var cvRoi = new OpenCvSharp.Rect((int)roiRect.X, (int)roiRect.Y, (int)roiRect.Width, (int)roiRect.Height);
+                        using Mat regionCrop = new Mat(fullImageMat, cvRoi);
+                        Point localCenter;
+
+                        switch (method)
+                        {
+                            case CenteringMethod.Centroid: localCenter = _analysis.FindCentroid(regionCrop); break;
+                            case CenteringMethod.GaussianFit: localCenter = _analysis.FindGaussianCenter(regionCrop); break;
+                            case CenteringMethod.Peak: localCenter = _analysis.FindPeak(regionCrop); break;
+                            default: localCenter = _analysis.FindCenterOfLocalRegion(regionCrop); break;
+                        }
+                        calculatedCenter = new Point(localCenter.X + roiRect.X, localCenter.Y + roiRect.Y);
+                    }
+                }
+                
+                return calculatedCenter; // Successo!
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[Retry System] Fallito tentativo {attempts} su Img {index}: {ex.Message}");
+                
+                // Se abbiamo finito i tentativi, restituiamo il valore di fallback
+                if (attempts >= 3) return (mode == AlignmentMode.Manual) ? guessPoint : null;
+                
+                // BACKOFF: Aspetta un po' prima di riprovare (dà tempo alla RAM di svuotarsi)
+                await Task.Delay(200 * attempts);
+            }
+            finally
+            {
+                if (fitsData != null) fitsData = null;
+            }
+        }
+        return null;
+    }
+    
     // --- APPLICAZIONE (Con calcolo canvas perfetto) ---
     public async Task<List<string>> ApplyCenteringAndSaveAsync(
         List<string> sourcePaths, 
         List<Point?> centers,
         string tempFolderPath)
     {
-        // 1. Calcola dimensione canvas ottimale (Metodo recuperato!)
-        //    (Deve essere async perché carica i file uno a uno)
+        // 1. Calcola dimensione canvas ottimale (Metodo esistente, invariato)
         Size perfectSize = await CalculatePerfectCanvasSizeAsync(sourcePaths, centers);
         
-        int maxConcurrency = Math.Min(4, Environment.ProcessorCount);
+        // 2. SMART CONCURRENCY (Euristica basata sulla dimensione file)
+        //    Copiata identica dalla fase di Calcolo
+        long firstFileSize = 0;
+        try 
+        {
+            if (sourcePaths.Count > 0) 
+                firstFileSize = new System.IO.FileInfo(sourcePaths[0]).Length;
+        }
+        catch { /* Ignora */ }
+
+        int maxConcurrency;
+        if (firstFileSize > 100 * 1024 * 1024)      maxConcurrency = 1; // > 100MB: Seriale
+        else  maxConcurrency = Math.Clamp(Environment.ProcessorCount / 2, 2, 3);
+
         using var semaphore = new SemaphoreSlim(maxConcurrency);
         var tasks = new List<Task<string?>>();
 
@@ -246,38 +334,22 @@ public class AlignmentService : IAlignmentService
             var center = centers[i];
             int index = i;
 
+            if (center == null) continue;
+
             tasks.Add(Task.Run(async () =>
             {
                 await semaphore.WaitAsync();
                 try
                 {
-                    if (center == null) return null;
-
-                    // Load
-                    var data = await _fitsService.LoadFitsFromFileAsync(path);
-                    if (data == null) return null;
-
-                    // Process
-                    var processedData = await ProcessSingleImageInternalAsync(data, center, perfectSize);
-                    
-                    // Free input
-                    data = null; 
-
-                    if (processedData == null) return null;
-
-                    // Save
-                    string fileName = $"Aligned_{index}_{Guid.NewGuid()}.fits";
-                    string fullPath = System.IO.Path.Combine(tempFolderPath, fileName);
-                    await _fitsService.SaveFitsFileAsync(processedData, fullPath);
-
-                    return fullPath;
+                    // Chiamata al nuovo Helper Sicuro
+                    return await AttemptProcessAndSaveWithRetryAsync(
+                        index, path, center, perfectSize, tempFolderPath
+                    );
                 }
-                catch (Exception ex)
-                {
-                    Debug.WriteLine($"Errore salvataggio {index}: {ex.Message}");
-                    return null;
+                finally 
+                { 
+                    semaphore.Release(); 
                 }
-                finally { semaphore.Release(); }
             }));
         }
 
@@ -285,16 +357,73 @@ public class AlignmentService : IAlignmentService
         return results.Where(p => p != null).Cast<string>().ToList();
     }
 
-    private async Task<FitsImageData?> ProcessSingleImageInternalAsync(FitsImageData data, Point? center, Size targetSize)
+    // --- NUOVO HELPER: RETRY PATTERN PER SALVATAGGIO ---
+    private async Task<string?> AttemptProcessAndSaveWithRetryAsync(
+        int index, string path, Point? center, Size targetSize, string tempFolderPath)
     {
         if (center == null) return null;
-        
-        return await Task.Run(() => 
+
+        int attempts = 0;
+        while (attempts < 3)
         {
-            using Mat originalMat = _converter.RawToMat(data);
-            using Mat centeredMat = _operations.GetSubPixelCenteredCanvas(originalMat, center.Value, targetSize);
-            return _converter.MatToFitsData(centeredMat, data);
-        });
+            attempts++;
+            FitsImageData? inputData = null;
+            FitsImageData? outputData = null; // Risultato finale da salvare
+
+            try
+            {
+                // 1. Load
+                inputData = await _fitsService.LoadFitsFromFileAsync(path);
+                if (inputData == null) return null;
+
+                // Forziamo pulizia se siamo in retry mode
+                if (attempts > 1) 
+                {
+                    GC.Collect();
+                    await Task.Delay(100);
+                }
+
+                // 2. Process (CPU Intensive + RAM Allocation)
+                // Eseguiamo la trasformazione OpenCV in un Task separato per non bloccare
+                outputData = await Task.Run(() => 
+                {
+                    using Mat originalMat = _converter.RawToMat(inputData);
+                    
+                    // Qui avviene la magia: traslazione sub-pixel
+                    using Mat centeredMat = _operations.GetSubPixelCenteredCanvas(originalMat, center.Value, targetSize);
+                    
+                    return _converter.MatToFitsData(centeredMat, inputData);
+                });
+
+                // Libera subito l'input, non serve più
+                inputData = null; 
+
+                if (outputData == null) return null;
+
+                // 3. Save (Disk I/O Intensive)
+                string fileName = $"Aligned_{index}_{Guid.NewGuid()}.fits";
+                string fullPath = System.IO.Path.Combine(tempFolderPath, fileName);
+                
+                await _fitsService.SaveFitsFileAsync(outputData, fullPath);
+
+                return fullPath; // Successo!
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[Save Retry] Fallito tentativo {attempts} su Img {index}: {ex.Message}");
+                
+                if (attempts >= 3) return null; // Rinuncia
+                
+                await Task.Delay(300 * attempts); // Backoff leggermente più lungo per I/O
+            }
+            finally
+            {
+                // Pulizia aggressiva nel finally
+                if (inputData != null) inputData = null;
+                if (outputData != null) outputData = null;
+            }
+        }
+        return null;
     }
     
     // METODO RECUPERATO E ADATTATO (ASYNC PER LOW RAM)
