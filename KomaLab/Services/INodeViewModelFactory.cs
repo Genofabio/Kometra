@@ -11,5 +11,5 @@ public interface INodeViewModelFactory
     
     Task<SingleImageNodeViewModel> CreateSingleImageNodeFromDataAsync(FitsImageData data, string title, double x, double y);
     
-    Task<MultipleImagesNodeViewModel> CreateMultipleImagesNodeAsync(List<string> paths, double x, double y);
+    Task<MultipleImagesNodeViewModel> CreateMultipleImagesNodeAsync(List<string> paths, double x, double y, bool centerOnPosition = false);
 }

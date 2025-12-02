@@ -36,6 +36,8 @@ public class App : Application
             // Manteniamo la tua logica per il WindowService
             var windowService = Services.GetRequiredService<IWindowService>();
             windowService.RegisterMainWindow(desktop.MainWindow);
+            
+            desktop.Exit += (sender, args) => CleanUpOrphanedTempFiles();
         }
 
         base.OnFrameworkInitializationCompleted();
@@ -64,12 +66,18 @@ public class App : Application
     {
         try
         {
-            string tempRoot = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "KomaLab_Aligned");
+            // MODIFICATO: Ora puntiamo alla cartella radice "Komalab"
+            // Questo eliminerà "Komalab" e tutte le sottocartelle (es. "Aligned")
+            string tempRoot = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "Komalab");
+            
             if (System.IO.Directory.Exists(tempRoot))
             {
-                System.IO.Directory.Delete(tempRoot, true);
+                System.IO.Directory.Delete(tempRoot, true); // true = cancellazione ricorsiva
             }
         }
-        catch { /* Ignora errori se file sono in uso da altra istanza */ }
+        catch 
+        { 
+            // Ignora errori (es. se un file è bloccato o la cartella non esiste) 
+        }
     }
 }

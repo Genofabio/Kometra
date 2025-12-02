@@ -85,8 +85,7 @@ public partial class MultipleImagesNodeView : UserControl
     {
         if (DataContext is not MultipleImagesNodeViewModel vm) return;
     
-        // In MultipleImagesNodeViewModel, BlackPoint e WhitePoint sono esposti
-        // direttamente sul VM (per gestire il Sigma Locking su tutte le immagini)
+        if (!vm.IsSelected) return;
         
         double currentRange = Math.Abs(vm.WhitePoint - vm.BlackPoint);
         if (currentRange < 1.0) currentRange = 1000.0;

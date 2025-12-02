@@ -11,8 +11,6 @@ namespace KomaLab.ViewModels;
 /// </summary>
 public abstract class ImageNodeViewModel : BaseNodeViewModel
 {
-    // Stima dell'altezza dell'header della finestra (Titolo + Controlli)
-    protected const double ESTIMATED_UI_HEIGHT = 60.0;
 
     protected ImageNodeViewModel(BaseNodeModel model) : base(model)
     {
@@ -23,7 +21,7 @@ public abstract class ImageNodeViewModel : BaseNodeViewModel
         get
         {
             var contentSize = this.NodeContentSize;
-            return new Size(contentSize.Width, contentSize.Height + ESTIMATED_UI_HEIGHT);
+            return new Size(contentSize.Width, contentSize.Height);
         }
     }
 

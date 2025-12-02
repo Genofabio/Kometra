@@ -502,7 +502,12 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
         try
         {
             var centers = CoordinateEntries.Select(e => e.Coordinate).ToList();
-            string tempFolder = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "KomaLab_Aligned", Guid.NewGuid().ToString());
+            string tempFolder = System.IO.Path.Combine(
+                System.IO.Path.GetTempPath(), 
+                "Komalab", 
+                "Aligned"
+            );
+            Debug.WriteLine($"[TEMP PATH CHECK] Sto salvando in: {tempFolder}");
 
             // Passiamo i PATHS
             FinalProcessedPaths = await _alignmentService.ApplyCenteringAndSaveAsync(

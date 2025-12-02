@@ -90,8 +90,7 @@ public partial class SingleImageNodeView : UserControl
     {
         if (DataContext is not SingleImageNodeViewModel vm) return;
 
-        // Logica per cambiare Black/White Point con la rotella
-        // Nota: Qui agiamo direttamente sul VM del nodo, che è corretto.
+        if (!vm.IsSelected) return;
         
         double currentRange = Math.Abs(vm.FitsImage.WhitePoint - vm.FitsImage.BlackPoint);
         if (currentRange < 1.0) currentRange = 1000.0; 

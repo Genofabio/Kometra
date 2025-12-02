@@ -97,9 +97,10 @@ public class NodeViewModelFactory : INodeViewModelFactory
     /// </summary>
     public async Task<MultipleImagesNodeViewModel> CreateMultipleImagesNodeAsync(
         List<string> imagePaths, 
-        double x, double y)
+        double x, double y,
+        bool centerOnPosition = false) // <--- Parametro Aggiunto
     {
-        // --- 1. Pre-scansione (Logica originale adattata) ---
+        // --- 1. Pre-scansione (Invariato) ---
         double maxWidth = 0;
         double maxHeight = 0;
 
@@ -107,9 +108,7 @@ public class NodeViewModelFactory : INodeViewModelFactory
         {
             try
             {
-                // NOTA: GetFitsImageSizeAsync ora ritorna una tupla (int, int)
                 var (w, h) = await _fitsService.GetFitsImageSizeAsync(path);
-                
                 if (w > maxWidth) maxWidth = w;
                 if (h > maxHeight) maxHeight = h;
             }
@@ -120,7 +119,7 @@ public class NodeViewModelFactory : INodeViewModelFactory
         }
         var maxSize = new Size(maxWidth, maxHeight);
         
-        // --- 2. Caricamento primo file (Logica originale) ---
+        // --- 2. Caricamento primo file (Invariato) ---
         string title;
         FitsImageData? firstImageData;
         try
@@ -129,10 +128,7 @@ public class NodeViewModelFactory : INodeViewModelFactory
             if (firstImageData == null) throw new InvalidOperationException("File FITS iniziale non valido.");
             
             title = firstImageData.FitsHeader.GetStringValue("OBJECT");
-            if (string.IsNullOrWhiteSpace(title))
-            {
-                title = Path.GetFileName(imagePaths[0]);
-            }
+            if (string.IsNullOrWhiteSpace(title)) title = Path.GetFileName(imagePaths[0]);
             title += $" ({imagePaths.Count} immagini)";
         }
         catch (Exception ex)
@@ -145,26 +141,29 @@ public class NodeViewModelFactory : INodeViewModelFactory
         var newNodeModel = new MultipleImagesNodeModel
         {
             Title = title,
-            X = x,
+            X = x, // Se centerOnPosition=false, questa è già la coordinata Top-Left corretta
             Y = y,
             ImagePaths = imagePaths
         };
 
-        // --- 4. ISTANZIA IL VIEWMODEL ---
+        // --- 4. ISTANZIA IL VIEWMODEL (Invariato) ---
         var newNodeViewModel = new MultipleImagesNodeViewModel(
             newNodeModel, 
             _fitsService, 
-            _converter, // <--- Nuovo
-            _analysis,  // <--- Nuovo
+            _converter,
+            _analysis, 
             maxSize,
             firstImageData); 
         
         await newNodeViewModel.InitializeAsync();
 
-        // --- 5. Centra ---
-        var size = newNodeViewModel.EstimatedTotalSize;
-        newNodeViewModel.X = x - (size.Width / 2);
-        newNodeViewModel.Y = y - (size.Height / 2);
+        // --- 5. Centra (SOLO SE RICHIESTO) ---
+        if (centerOnPosition) // <--- Condizione aggiunta
+        {
+            var size = newNodeViewModel.EstimatedTotalSize;
+            newNodeViewModel.X = x - (size.Width / 2);
+            newNodeViewModel.Y = y - (size.Height / 2);
+        }
 
         return newNodeViewModel;
     }

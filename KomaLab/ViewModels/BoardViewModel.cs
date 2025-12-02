@@ -48,32 +48,29 @@ public partial class BoardViewModel : ObservableObject
     }
     
     // --- Comandi ---
-
+    
     [RelayCommand]
     private async Task AddNode()
     {
         var imagePaths = await _dialogService.ShowOpenFitsFileDialogAsync();
-        if (imagePaths != null)
+
+        // Controllo se nullo O vuoto
+        if (imagePaths == null) return;
+        var pathList = imagePaths.ToList();
+        if (pathList.Count == 0) return;
+
+        // 1. Calcola il centro esatto della visuale attuale
+        Point center = GetCenterOfView();
+
+        if (pathList.Count == 1)
         {
-            var enumerable = imagePaths as string[] ?? imagePaths.ToArray();
-            if (!enumerable.Any()) return; 
-        
-            var pathList = enumerable.ToList();
-            double screenCenterX = ViewBounds.Width / 2;
-            double screenCenterY = ViewBounds.Height / 2;
-            if (Scale == 0) return;
-        
-            double worldX = (screenCenterX - OffsetX) / Scale;
-            double worldY = (screenCenterY - OffsetY) / Scale;
-        
-            if (pathList.Count == 1)
-            {
-                await AddSingleNodeAsync(pathList[0], worldX, worldY);
-            }
-            else
-            {
-                await AddMultipleNodesAsync(pathList, worldX, worldY);
-            }
+            // Passiamo true per centrare il nodo su (center.X, center.Y)
+            await AddSingleNodeAsync(pathList[0], center.X, center.Y, centerOnPosition: true);
+        }
+        else
+        {
+            // Il Factory per i nodi multipli centra di default nell'implementazione attuale
+            await AddMultipleNodesAsync(pathList, center.X, center.Y);
         }
     }
 
@@ -109,11 +106,12 @@ public partial class BoardViewModel : ObservableObject
 
     // --- Helpers Aggiunta Nodi ---
 
-    private async Task AddSingleNodeAsync(string imagePath, double x, double y)
+    private async Task AddSingleNodeAsync(string imagePath, double x, double y, bool centerOnPosition = false)
     {
         try
         {
-            var newNode = await _nodeFactory.CreateSingleImageNodeAsync(imagePath, x, y);
+            // Passiamo il flag al Factory
+            var newNode = await _nodeFactory.CreateSingleImageNodeAsync(imagePath, x, y, centerOnPosition);
             RegisterNodeEvents(newNode);
             Nodes.Add(newNode);
             OnNodeRequestBringToFront(newNode);
@@ -128,7 +126,8 @@ public partial class BoardViewModel : ObservableObject
     {
         try
         {
-            var newNode = await _nodeFactory.CreateMultipleImagesNodeAsync(imagePaths, x, y);
+            // Qui X e Y sono il centro dello schermo, quindi passiamo true
+            var newNode = await _nodeFactory.CreateMultipleImagesNodeAsync(imagePaths, x, y, centerOnPosition: true);
             RegisterNodeEvents(newNode);
             Nodes.Add(newNode);
             OnNodeRequestBringToFront(newNode);
@@ -166,24 +165,29 @@ public partial class BoardViewModel : ObservableObject
 
             if (newPaths != null && newPaths.Count > 0)
             {
-                double newX = imgNode.X + 60;
-                double newY = imgNode.Y + 60;
-                
-                // --- MODIFICA NOME (ITALIANO) ---
+                // --- CALCOLO POSIZIONE A DESTRA (TOP-LEFT) ---
+                double gap = 300;
+                double newX = imgNode.X + imgNode.EstimatedTotalSize.Width + gap;
+                double newY = imgNode.Y; 
+                // ---------------------------------------------
+
                 string newTitle = $"{imgNode.Title} (Allineata)";
                 
                 string? dirPath = System.IO.Path.GetDirectoryName(newPaths[0]);
-                bool isTemp = dirPath != null && dirPath.Contains("KomaLab_Aligned");
+                bool isTemp = dirPath != null && dirPath.Contains("Komalab", StringComparison.OrdinalIgnoreCase);
 
                 BaseNodeViewModel newNode;
 
                 if (newPaths.Count == 1)
                 {
-                    newNode = await _nodeFactory.CreateSingleImageNodeAsync(newPaths[0], newX, newY);
+                    newNode = await _nodeFactory.CreateSingleImageNodeAsync(newPaths[0], newX, newY, centerOnPosition: false);
                 }
                 else
                 {
-                    var multiNode = await _nodeFactory.CreateMultipleImagesNodeAsync(newPaths, newX, newY);
+                    // --- ORA È PERFETTO ---
+                    // Passiamo le coordinate Top-Left esatte e diciamo al factory: "Non toccarle!"
+                    var multiNode = await _nodeFactory.CreateMultipleImagesNodeAsync(newPaths, newX, newY, centerOnPosition: false);
+                    
                     if (isTemp) multiNode.TemporaryFolderPath = dirPath;
                     newNode = multiNode;
                 }
@@ -217,16 +221,16 @@ public partial class BoardViewModel : ObservableObject
             if (sourceImages.Count < 2) return;
 
             var resultData = await _opsService.ComputeStackAsync(sourceImages, mode);
-            
-            double newX = multiNode.X + 50;
-            double newY = multiNode.Y + 50;
         
+            // --- CALCOLO POSIZIONE A DESTRA ---
+            double gap = 300;
+            double newX = multiNode.X + multiNode.EstimatedTotalSize.Width + gap;
+            double newY = multiNode.Y;
+            // ----------------------------------
+    
             string currentTitle = multiNode.Title;
-
-            // 1. Rimuoviamo "(n immagini)"
             string cleanTitle = Regex.Replace(currentTitle, @"\s*\(\d+\s*immagini\)", "", RegexOptions.IgnoreCase);
-            
-            // 2. Traduzione Modalità in Italiano
+        
             string modeString = mode switch
             {
                 StackingMode.Average => "Media",
@@ -235,9 +239,10 @@ public partial class BoardViewModel : ObservableObject
                 _ => mode.ToString()
             };
 
-            // 3. Creazione Titolo
             string newTitle = $"{cleanTitle.Trim()} ({modeString})"; 
 
+            // CreateSingleImageNodeFromDataAsync usa le coordinate come Top-Left (non centra),
+            // quindi il calcolo newX/newY fatto sopra è perfetto così com'è.
             var newNode = await _nodeFactory.CreateSingleImageNodeFromDataAsync(
                 resultData, newTitle, newX, newY
             );
@@ -317,4 +322,19 @@ public partial class BoardViewModel : ObservableObject
     }
     private bool CanSaveNode() => SelectedNode is ImageNodeViewModel;
     
+    private Point GetCenterOfView()
+    {
+        if (ViewBounds.Width == 0 || ViewBounds.Height == 0) return new Point(0, 0);
+
+        // Centro dello schermo in pixel
+        double screenCenterX = ViewBounds.Width / 2.0;
+        double screenCenterY = ViewBounds.Height / 2.0;
+
+        // Conversione in coordinate del "Mondo" (World Coordinates)
+        // Formula: (ScreenCoord - PanOffset) / ZoomScale
+        double worldX = (screenCenterX - OffsetX) / Scale;
+        double worldY = (screenCenterY - OffsetY) / Scale;
+
+        return new Point(worldX, worldY);
+    }
 }
