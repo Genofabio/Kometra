@@ -8,57 +8,65 @@
              mc:Ignorable="d" d:DesignWidth="800" d:DesignHeight="450"
              x:Class="KomaLab.Views.BoardView"
              x:DataType="vm:BoardViewModel"
-             ClipToBounds="False"
+             ClipToBounds="True"
              PointerPressed="OnPointerPressed"
              PointerReleased="OnPointerReleased"
              PointerMoved="OnPointerMoved"
              PointerWheelChanged="OnPointerWheelChanged"
              SizeChanged="OnBoardSizeChanged">
-    
-    <Grid ClipToBounds="False">
+
+    <Grid>
         
-        <controls:GridBackground OffsetX="{Binding OffsetX}"
+        <controls:GridBackground x:Name="BackgroundGrid"
+                                 OffsetX="{Binding OffsetX}"
                                  OffsetY="{Binding OffsetY}"
-                                 Scale="{Binding Scale}" />
+                                 Scale="{Binding Scale}"
+                                 IsHitTestVisible="False" />
 
-        <ItemsControl ItemsSource="{Binding Nodes}" 
-                      Background="Transparent"
-                      RenderTransformOrigin="0,0"
-                      ClipToBounds="False">
+        <Grid x:Name="ViewportContainer" 
+              Background="Transparent"
+              ClipToBounds="False">
             
-            <ItemsControl.RenderTransform>
-                <TransformGroup>
-                    <ScaleTransform ScaleX="{Binding Scale}" ScaleY="{Binding Scale}" />
-                    <TranslateTransform X="{Binding OffsetX}" Y="{Binding OffsetY}" />
-                </TransformGroup>
-            </ItemsControl.RenderTransform>
+            <Grid.RenderTransform>
+                <TranslateTransform X="0" Y="0" />
+            </Grid.RenderTransform>
 
-            <ItemsControl.DataTemplates>
+            <ItemsControl ItemsSource="{Binding Nodes}" 
+                          Background="Transparent"
+                          RenderTransformOrigin="0,0"
+                          ClipToBounds="False">
                 
-                <DataTemplate DataType="vm:SingleImageNodeViewModel">
-                    <views:SingleImageNodeView />
-                </DataTemplate>
-                
-                <DataTemplate DataType="vm:MultipleImagesNodeViewModel">
-                    <views:MultipleImagesNodeView />
-                </DataTemplate>
-                
-            </ItemsControl.DataTemplates>
+                <ItemsControl.RenderTransform>
+                    <TransformGroup>
+                        <ScaleTransform ScaleX="{Binding Scale}" ScaleY="{Binding Scale}" />
+                        <TranslateTransform X="{Binding OffsetX}" Y="{Binding OffsetY}" />
+                    </TransformGroup>
+                </ItemsControl.RenderTransform>
 
-            <ItemsControl.ItemsPanel>
-                <ItemsPanelTemplate>
-                    <Canvas Background="Transparent" />
-                </ItemsPanelTemplate>
-            </ItemsControl.ItemsPanel>
+                <ItemsControl.DataTemplates>
+                    <DataTemplate DataType="vm:SingleImageNodeViewModel">
+                        <views:SingleImageNodeView />
+                    </DataTemplate>
+                    <DataTemplate DataType="vm:MultipleImagesNodeViewModel">
+                        <views:MultipleImagesNodeView />
+                    </DataTemplate>
+                </ItemsControl.DataTemplates>
 
-            <ItemsControl.ItemContainerTheme>
-                <ControlTheme TargetType="ContentPresenter">
-                    <Setter Property="Canvas.Left" Value="{ReflectionBinding X}" />
-                    <Setter Property="Canvas.Top" Value="{ReflectionBinding Y}" />
-                    <Setter Property="Canvas.ZIndex" Value="{ReflectionBinding ZIndex}" />
-                </ControlTheme>
-            </ItemsControl.ItemContainerTheme>
+                <ItemsControl.ItemsPanel>
+                    <ItemsPanelTemplate>
+                        <Canvas Background="Transparent" />
+                    </ItemsPanelTemplate>
+                </ItemsControl.ItemsPanel>
+
+                <ItemsControl.ItemContainerTheme>
+                    <ControlTheme TargetType="ContentPresenter">
+                        <Setter Property="Canvas.Left" Value="{ReflectionBinding X}" />
+                        <Setter Property="Canvas.Top" Value="{ReflectionBinding Y}" />
+                        <Setter Property="Canvas.ZIndex" Value="{ReflectionBinding ZIndex}" />
+                    </ControlTheme>
+                </ItemsControl.ItemContainerTheme>
 
             </ItemsControl>
+        </Grid>
     </Grid>
 </UserControl>

@@ -47,6 +47,9 @@ Ottimizzazione occupazione emmoria:
 - Utilizzo semafori per concorrenza nel calcolo dei centri -> massima concorrenza stimata in base a dimensione immagini -> non si usa effettiva ram disponibile per evitare complicazioni eccessive
 
 
+Ottimizzazione prestazioni grafiche:
+- disaccoppiato spostamento nodi da aggiornamento dati posizionre -> translate transform
+
 
 
 

@@ -60,7 +60,8 @@
                     <Image Source="{Binding ActiveFitsImage.Image}"
                            Stretch="None" 
                            HorizontalAlignment="Center"
-                           VerticalAlignment="Center"/>
+                           VerticalAlignment="Center"
+                           RenderOptions.BitmapInterpolationMode="LowQuality"/>
                     
                     <Grid Name="OverlayGrid">
                         

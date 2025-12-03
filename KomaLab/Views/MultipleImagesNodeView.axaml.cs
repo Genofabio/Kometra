@@ -4,17 +4,21 @@ using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.VisualTree; 
 using KomaLab.ViewModels;
-using System.Linq; 
+using System.Linq;
+using Avalonia.Media;
 
 namespace KomaLab.Views;
 
 public partial class MultipleImagesNodeView : UserControl
 {
-    private Point? _lastPos; 
+    private Point? _startDragPoint;
+    private TranslateTransform? _tempTransform;
     
     public MultipleImagesNodeView()
     {
         InitializeComponent();
+        _tempTransform = new TranslateTransform();
+        this.RenderTransform = _tempTransform;
     }
     
     // Helper per trovare il contesto della Board
@@ -35,16 +39,25 @@ public partial class MultipleImagesNodeView : UserControl
             
             if (boardVm != null)
             {
-                // Gestione selezione tramite Board
                 boardVm.SetSelectedNode(nodeVm);
             }
 
-            // Metodo corretto post-refactoring
             nodeVm.BringToFront(); 
 
             if (boardView != null)
             {
-                _lastPos = e.GetPosition(boardView); 
+                // Salviamo il punto di inizio relativo alla Board
+                _startDragPoint = e.GetPosition(boardView); 
+                
+                // Resettiamo la trasformazione visiva
+                if (_tempTransform == null)
+                {
+                    _tempTransform = new TranslateTransform();
+                    this.RenderTransform = _tempTransform;
+                }
+                _tempTransform.X = 0;
+                _tempTransform.Y = 0;
+
                 e.Pointer.Capture(this); 
                 e.Handled = true; 
             }
@@ -53,9 +66,23 @@ public partial class MultipleImagesNodeView : UserControl
 
     private void OnPointerReleased(object? sender, PointerReleasedEventArgs e)
     {
-        if (_lastPos != null && e.InitialPressMouseButton == MouseButton.Left)
+        if (_startDragPoint != null && e.InitialPressMouseButton == MouseButton.Left)
         {
-            _lastPos = null;
+            if (DataContext is MultipleImagesNodeViewModel nodeVm && _tempTransform != null)
+            {
+                // Commit finale: 
+                // Aggiorniamo le coordinate reali del ViewModel sommando lo spostamento accumulato
+                // Nota: _tempTransform contiene già i valori corretti in "coordinate mondo" 
+                // perché li abbiamo scalati nel PointerMoved.
+                nodeVm.X += _tempTransform.X;
+                nodeVm.Y += _tempTransform.Y;
+
+                // Reset visivo (ora il controllo è posizionato correttamente dal Canvas)
+                _tempTransform.X = 0;
+                _tempTransform.Y = 0;
+            }
+
+            _startDragPoint = null;
             e.Pointer.Capture(null);
             e.Handled = true;
         }
@@ -63,21 +90,28 @@ public partial class MultipleImagesNodeView : UserControl
 
     private void OnPointerMoved(object? sender, PointerEventArgs e)
     {
-        if (_lastPos == null) return;
+        // Se non stiamo trascinando, esci subito
+        if (_startDragPoint == null || _tempTransform == null) return;
         
-        if (DataContext is not MultipleImagesNodeViewModel nodeVm) return;
+        if (DataContext is not MultipleImagesNodeViewModel) return;
         
-        var boardVm = GetParentBoardViewModel(out var boardVisual);
+        // Recuperiamo la Board per calcolare lo spostamento rispetto allo Zoom
+        var boardView = this.GetVisualAncestors().OfType<BoardView>().FirstOrDefault();
+
+        if (boardView == null || boardView.DataContext is not BoardViewModel boardVm) return;
         
-        if (boardVm == null || boardVisual == null) return;
+        var currentPos = e.GetPosition(boardView);
+        var screenDelta = currentPos - _startDragPoint.Value;
         
-        var currentPos = e.GetPosition(boardVisual);
-        var delta = currentPos - _lastPos.Value;
+        // FIX SCALA & LAG:
+        // 1. Dividiamo per Scale per convertire i pixel mouse in unità mondo (mantiene il sync col cursore)
+        // 2. Modifichiamo SOLO _tempTransform per evitare il ricalcolo del layout (fluidità estrema)
+        double scale = boardVm.Scale;
+        if (scale <= 0.001) scale = 0.1; // Protezione
+
+        _tempTransform.X = screenDelta.X / scale;
+        _tempTransform.Y = screenDelta.Y / scale;
         
-        // Passiamo la scala corretta
-        nodeVm.MoveNode(delta, boardVm.Scale); 
-        
-        _lastPos = currentPos;
         e.Handled = true;
     }
     

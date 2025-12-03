@@ -46,7 +46,8 @@
                 
                 <Image Source="{Binding FitsImage.Image}"
                        Stretch="None"
-                       HorizontalAlignment="Center" />
+                       HorizontalAlignment="Center" 
+                       RenderOptions.BitmapInterpolationMode="LowQuality"/>
             </Border>
             
         </Grid>
