@@ -5,12 +5,13 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using KomaLab.Models;
+using KomaLab.Services.Data;
 using OpenCvSharp;
 using Point = Avalonia.Point;
 using Rect = Avalonia.Rect;
 using Size = Avalonia.Size;
 
-namespace KomaLab.Services;
+namespace KomaLab.Services.Imaging;
 
 public class AlignmentService : IAlignmentService
 {

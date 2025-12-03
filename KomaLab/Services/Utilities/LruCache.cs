@@ -1,6 +1,6 @@
 ﻿using System.Collections.Generic;
 
-namespace KomaLab.Services;
+namespace KomaLab.Services.Utilities;
 
 /// <summary>
 /// Cache Thread-Safe a capacità fissa (Least Recently Used).

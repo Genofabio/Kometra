@@ -10,6 +10,11 @@ using KomaLab.Services;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using KomaLab.Models;
+using KomaLab.Services.Data;
+using KomaLab.Services.Factories;
+using KomaLab.Services.Imaging;
+using KomaLab.Services.UI;
+using KomaLab.Services.Undo;
 
 namespace KomaLab.ViewModels;
 
@@ -21,6 +26,7 @@ public partial class BoardViewModel : ObservableObject
     private readonly IWindowService _windowService;
     private readonly IFitsService _fitsService;           
     private readonly IImageOperationService _opsService;  
+    private readonly IUndoService _undoService;
 
     // --- Proprietà ---
     [ObservableProperty] private double _offsetX;
@@ -38,13 +44,15 @@ public partial class BoardViewModel : ObservableObject
         IDialogService dialogService, 
         IWindowService windowService,
         IFitsService fitsService,
-        IImageOperationService opsService) 
+        IImageOperationService opsService,
+        IUndoService undoService) 
     {
         _nodeFactory = nodeFactory;
         _dialogService = dialogService; 
         _windowService = windowService;
         _fitsService = fitsService;
         _opsService = opsService;
+        _undoService = undoService;
     }
     
     // --- Comandi ---
@@ -54,24 +62,45 @@ public partial class BoardViewModel : ObservableObject
     {
         var imagePaths = await _dialogService.ShowOpenFitsFileDialogAsync();
 
-        // Controllo se nullo O vuoto
         if (imagePaths == null) return;
         var pathList = imagePaths.ToList();
         if (pathList.Count == 0) return;
 
-        // 1. Calcola il centro esatto della visuale attuale
         Point center = GetCenterOfView();
 
         if (pathList.Count == 1)
         {
-            // Passiamo true per centrare il nodo su (center.X, center.Y)
             await AddSingleNodeAsync(pathList[0], center.X, center.Y, centerOnPosition: true);
         }
         else
         {
-            // Il Factory per i nodi multipli centra di default nell'implementazione attuale
             await AddMultipleNodesAsync(pathList, center.X, center.Y);
         }
+    }
+    
+    // --- UNDO / REDO ---
+
+    [RelayCommand(CanExecute = nameof(CanUndo))]
+    private void Undo() => _undoService.Undo();
+    private bool CanUndo() => _undoService.CanUndo;
+
+    [RelayCommand(CanExecute = nameof(CanRedo))]
+    private void Redo() => _undoService.Redo();
+    private bool CanRedo() => _undoService.CanRedo;
+
+    // Ascolta i cambiamenti del servizio Undo per aggiornare i bottoni nella UI
+    protected override void OnPropertyChanged(System.ComponentModel.PropertyChangedEventArgs e)
+    {
+        base.OnPropertyChanged(e);
+        
+        // Se siamo qui è perché qualcosa è cambiato nel VM, ma noi vogliamo sapere
+        // quando cambia l'UndoService.
+        // Nota: Idealmente l'UndoService dovrebbe esporre un evento, o implementare INotifyPropertyChanged.
+        // Se UndoService è un ObservableObject, possiamo iscriverci ai suoi eventi nel costruttore.
+        // Qui assumiamo che quando chiamiamo Undo/Redo/AddAction, lo stato cambi.
+        
+        UndoCommand.NotifyCanExecuteChanged();
+        RedoCommand.NotifyCanExecuteChanged();
     }
 
     // --- Gestione Eventi Nodi ---
@@ -90,12 +119,36 @@ public partial class BoardViewModel : ObservableObject
 
     private void OnNodeRequestRemove(BaseNodeViewModel node)
     {
-        if (SelectedNode == node) DeselectAllNodes();
-        UnregisterNodeEvents(node);
-        Nodes.Remove(node);
+        // 1. Definiamo l'azione Undoable
+        var action = new DelegateAction(
+            "Rimuovi Nodo",
+            execute: () => 
+            {
+                // REDO (Cancellazione)
+                if (SelectedNode == node) DeselectAllNodes();
+                UnregisterNodeEvents(node);
+                Nodes.Remove(node);
+            },
+            undo: () => 
+            {
+                // UNDO (Ripristino)
+                if (!Nodes.Contains(node))
+                {
+                    Nodes.Add(node);
+                    RegisterNodeEvents(node);
+                    SetSelectedNode(node); // Opzionale: riseleziona
+                }
+            }
+        );
+
+        // 2. Eseguiamo la rimozione subito
+        action.Execute();
+
+        // 3. Registriamo nello stack
+        _undoService.RecordAction(action);
         
-        // FONDAMENTALE: Pulizia Memoria
-        node.Dispose();
+        // NOTA IMPORTANTE: Rimosso node.Dispose().
+        // Il nodo deve rimanere vivo in memoria nel caso venga ripristinato con CTRL+Z.
     }
 
     private void OnNodeRequestBringToFront(BaseNodeViewModel node)
@@ -104,17 +157,48 @@ public partial class BoardViewModel : ObservableObject
         node.ZIndex = _maxZIndex;
     }
 
-    // --- Helpers Aggiunta Nodi ---
+    // --- Helpers Aggiunta Nodi con Undo Integrato ---
+
+    /// <summary>
+    /// Metodo helper per aggiungere un nodo alla collezione e registrare l'azione Undo.
+    /// </summary>
+    private void RegisterNodeWithUndo(BaseNodeViewModel newNode, string actionName)
+    {
+        var action = new DelegateAction(
+            actionName,
+            execute: () => 
+            {
+                // REDO (Aggiunta)
+                if (!Nodes.Contains(newNode))
+                {
+                    Nodes.Add(newNode);
+                    RegisterNodeEvents(newNode);
+                    OnNodeRequestBringToFront(newNode);
+                }
+            },
+            undo: () => 
+            {
+                // UNDO (Rimozione)
+                if (Nodes.Contains(newNode))
+                {
+                    if (SelectedNode == newNode) DeselectAllNodes();
+                    UnregisterNodeEvents(newNode);
+                    Nodes.Remove(newNode);
+                }
+            }
+        );
+
+        // Eseguiamo e registriamo
+        action.Execute();
+        _undoService.RecordAction(action);
+    }
 
     private async Task AddSingleNodeAsync(string imagePath, double x, double y, bool centerOnPosition = false)
     {
         try
         {
-            // Passiamo il flag al Factory
             var newNode = await _nodeFactory.CreateSingleImageNodeAsync(imagePath, x, y, centerOnPosition);
-            RegisterNodeEvents(newNode);
-            Nodes.Add(newNode);
-            OnNodeRequestBringToFront(newNode);
+            RegisterNodeWithUndo(newNode, "Aggiungi Immagine");
         }
         catch(Exception ex)
         {
@@ -126,11 +210,8 @@ public partial class BoardViewModel : ObservableObject
     {
         try
         {
-            // Qui X e Y sono il centro dello schermo, quindi passiamo true
             var newNode = await _nodeFactory.CreateMultipleImagesNodeAsync(imagePaths, x, y, centerOnPosition: true);
-            RegisterNodeEvents(newNode);
-            Nodes.Add(newNode);
-            OnNodeRequestBringToFront(newNode);
+            RegisterNodeWithUndo(newNode, "Aggiungi Multi-Immagine");
         }
         catch(Exception ex)
         {
@@ -150,7 +231,7 @@ public partial class BoardViewModel : ObservableObject
     }
     private bool CanResetNormalization() => SelectedNode is ImageNodeViewModel;
     
-    // --- LOGICA ALLINEAMENTO (CORRETTA) ---
+    // --- LOGICA ALLINEAMENTO ---
     [RelayCommand(CanExecute = nameof(CanShowAlignmentWindow))]
     private async Task ShowAlignmentWindow()
     {
@@ -165,14 +246,11 @@ public partial class BoardViewModel : ObservableObject
 
             if (newPaths != null && newPaths.Count > 0)
             {
-                // --- CALCOLO POSIZIONE A DESTRA (TOP-LEFT) ---
                 double gap = 300;
                 double newX = imgNode.X + imgNode.EstimatedTotalSize.Width + gap;
                 double newY = imgNode.Y; 
-                // ---------------------------------------------
 
                 string newTitle = $"{imgNode.Title} (Allineata)";
-                
                 string? dirPath = System.IO.Path.GetDirectoryName(newPaths[0]);
                 bool isTemp = dirPath != null && dirPath.Contains("Komalab", StringComparison.OrdinalIgnoreCase);
 
@@ -184,20 +262,16 @@ public partial class BoardViewModel : ObservableObject
                 }
                 else
                 {
-                    // --- ORA È PERFETTO ---
-                    // Passiamo le coordinate Top-Left esatte e diciamo al factory: "Non toccarle!"
                     var multiNode = await _nodeFactory.CreateMultipleImagesNodeAsync(newPaths, newX, newY, centerOnPosition: false);
-                    
                     if (isTemp) multiNode.TemporaryFolderPath = dirPath;
                     newNode = multiNode;
                 }
 
                 newNode.Title = newTitle; 
-
-                RegisterNodeEvents(newNode);
-                Nodes.Add(newNode);
+                
+                // Usiamo l'helper per gestire l'Undo anche qui
+                RegisterNodeWithUndo(newNode, "Allineamento Immagini");
                 SetSelectedNode(newNode);
-                OnNodeRequestBringToFront(newNode);
             }
         }
         catch (Exception ex)
@@ -222,11 +296,9 @@ public partial class BoardViewModel : ObservableObject
 
             var resultData = await _opsService.ComputeStackAsync(sourceImages, mode);
         
-            // --- CALCOLO POSIZIONE A DESTRA ---
             double gap = 300;
             double newX = multiNode.X + multiNode.EstimatedTotalSize.Width + gap;
             double newY = multiNode.Y;
-            // ----------------------------------
     
             string currentTitle = multiNode.Title;
             string cleanTitle = Regex.Replace(currentTitle, @"\s*\(\d+\s*immagini\)", "", RegexOptions.IgnoreCase);
@@ -241,16 +313,13 @@ public partial class BoardViewModel : ObservableObject
 
             string newTitle = $"{cleanTitle.Trim()} ({modeString})"; 
 
-            // CreateSingleImageNodeFromDataAsync usa le coordinate come Top-Left (non centra),
-            // quindi il calcolo newX/newY fatto sopra è perfetto così com'è.
             var newNode = await _nodeFactory.CreateSingleImageNodeFromDataAsync(
                 resultData, newTitle, newX, newY
             );
 
-            RegisterNodeEvents(newNode);
-            Nodes.Add(newNode);
+            // Usiamo l'helper per gestire l'Undo anche qui
+            RegisterNodeWithUndo(newNode, "Stacking Immagini");
             SetSelectedNode(newNode);
-            OnNodeRequestBringToFront(newNode);
         }
         catch (Exception ex)
         {
@@ -330,8 +399,7 @@ public partial class BoardViewModel : ObservableObject
         double screenCenterX = ViewBounds.Width / 2.0;
         double screenCenterY = ViewBounds.Height / 2.0;
 
-        // Conversione in coordinate del "Mondo" (World Coordinates)
-        // Formula: (ScreenCoord - PanOffset) / ZoomScale
+        // Conversione in coordinate del "Mondo"
         double worldX = (screenCenterX - OffsetX) / Scale;
         double worldY = (screenCenterY - OffsetY) / Scale;
 

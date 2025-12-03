@@ -3,7 +3,7 @@ using System.Threading.Tasks;
 using KomaLab.Models;
 using OpenCvSharp;
 
-namespace KomaLab.Services;
+namespace KomaLab.Services.Data;
 
 public interface IFitsService
 {

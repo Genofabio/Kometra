@@ -7,7 +7,7 @@ using MathNet.Numerics.Statistics;
 using nom.tam.fits;
 using OpenCvSharp;
 
-namespace KomaLab.Services;
+namespace KomaLab.Services.Data;
 
 public class FitsDataConverter : IFitsDataConverter
 {

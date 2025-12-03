@@ -1,7 +1,7 @@
 ﻿using System.Collections.Generic;
 using System.Threading.Tasks;
 
-namespace KomaLab.Services;
+namespace KomaLab.Services.UI;
 
 /// <summary>
 /// Definisce un servizio per mostrare finestre di dialogo (Apri/Salva File).

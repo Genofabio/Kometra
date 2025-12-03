@@ -6,6 +6,8 @@ using Avalonia;
 using CommunityToolkit.Mvvm.ComponentModel;
 using KomaLab.Models;
 using KomaLab.Services;
+using KomaLab.Services.Data;
+using KomaLab.Services.Imaging;
 using KomaLab.ViewModels.Helpers;
 using nom.tam.fits;
 

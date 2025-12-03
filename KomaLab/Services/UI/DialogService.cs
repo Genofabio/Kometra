@@ -1,12 +1,13 @@
 ﻿using System.Collections.Generic;
 using System.Linq;
+using System.Threading.Tasks;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
-using Avalonia.Platform.Storage; // Necessario per FilePickerFileType
-using System.Threading.Tasks;
+using Avalonia.Platform.Storage;
+// Necessario per FilePickerFileType
 
-namespace KomaLab.Services;
+namespace KomaLab.Services.UI;
 
 public class DialogService : IDialogService
 {

@@ -3,6 +3,7 @@ using System.Threading.Tasks;
 using Avalonia;
 using KomaLab.Models;
 using KomaLab.Services;
+using KomaLab.Services.Data;
 
 namespace KomaLab.ViewModels;
 

@@ -6,6 +6,11 @@ using KomaLab.Views;
 using KomaLab.Services;
 using Microsoft.Extensions.DependencyInjection;
 using System;
+using KomaLab.Services.Data;
+using KomaLab.Services.Factories;
+using KomaLab.Services.Imaging;
+using KomaLab.Services.UI;
+using KomaLab.Services.Undo;
 
 namespace KomaLab;
 
@@ -55,6 +60,7 @@ public class App : Application
         services.AddSingleton<INodeViewModelFactory, NodeViewModelFactory>();
         services.AddSingleton<IDialogService, DialogService>(); 
         services.AddSingleton<IWindowService, WindowService>();
+        services.AddSingleton<IUndoService, UndoService>();
         
         services.AddSingleton<BoardViewModel>();
         services.AddSingleton<MainWindowViewModel>();

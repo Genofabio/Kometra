@@ -1,10 +1,8 @@
 ﻿using System.Collections.Generic;
 using System.Threading.Tasks;
 using Avalonia.Controls;
-using KomaLab.Models;
-using KomaLab.ViewModels;
 
-namespace KomaLab.Services;
+namespace KomaLab.Services.UI;
 
 /// <summary>
 /// Definisce un servizio per gestire l'apertura di finestre secondarie.

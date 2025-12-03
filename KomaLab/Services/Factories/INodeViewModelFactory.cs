@@ -3,7 +3,7 @@ using System.Threading.Tasks;
 using KomaLab.Models;
 using KomaLab.ViewModels;
 
-namespace KomaLab.Services;
+namespace KomaLab.Services.Factories;
 
 public interface INodeViewModelFactory
 {

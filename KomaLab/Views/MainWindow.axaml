@@ -11,6 +11,13 @@
         Icon="/Assets/avalonia-logo.ico"
         Title="KomaLab"
         WindowState="Maximized">
+        
+        <Window.KeyBindings>
+                <KeyBinding Gesture="Ctrl+Z" Command="{Binding BoardVm.UndoCommand}" />
+                <KeyBinding Gesture="Ctrl+Y" Command="{Binding BoardVm.RedoCommand}" />
+        
+                <KeyBinding Gesture="Ctrl+Shift+Z" Command="{Binding BoardVm.RedoCommand}" />
+        </Window.KeyBindings>
 
         <Grid>
                 <Grid.RowDefinitions>

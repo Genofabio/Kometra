@@ -1,13 +1,14 @@
-﻿using Avalonia.Controls;
-using KomaLab.ViewModels;
-using KomaLab.Views; 
-using System;
+﻿using System;
 using System.Collections.Generic;
-using System.Diagnostics;
 using System.Threading.Tasks;
+using Avalonia.Controls;
+using KomaLab.Services.Data;
+using KomaLab.Services.Imaging;
+using KomaLab.ViewModels;
+using KomaLab.Views;
 using Microsoft.Extensions.DependencyInjection;
 
-namespace KomaLab.Services;
+namespace KomaLab.Services.UI;
 
 public class WindowService : IWindowService
 {

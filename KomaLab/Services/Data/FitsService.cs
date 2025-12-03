@@ -2,13 +2,13 @@
 using System.Collections;
 using System.IO;
 using System.Threading.Tasks;
-using Avalonia.Platform; 
+using Avalonia.Platform;
 using KomaLab.Models;
 using nom.tam.fits;
 using nom.tam.util;
 using OpenCvSharp;
 
-namespace KomaLab.Services;
+namespace KomaLab.Services.Data;
 
 public class FitsService : IFitsService
 {

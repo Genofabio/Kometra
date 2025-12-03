@@ -4,7 +4,7 @@ using System.Threading.Tasks;
 using KomaLab.Models;
 using Point = Avalonia.Point;
 
-namespace KomaLab.Services;
+namespace KomaLab.Services.Imaging;
 
 public interface IAlignmentService
 {

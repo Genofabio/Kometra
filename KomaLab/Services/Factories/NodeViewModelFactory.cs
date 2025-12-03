@@ -5,9 +5,11 @@ using System.IO;
 using System.Threading.Tasks;
 using Avalonia;
 using KomaLab.Models;
+using KomaLab.Services.Data;
+using KomaLab.Services.Imaging;
 using KomaLab.ViewModels;
 
-namespace KomaLab.Services;
+namespace KomaLab.Services.Factories;
 
 public class NodeViewModelFactory : INodeViewModelFactory
 {

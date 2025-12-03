@@ -5,7 +5,7 @@ using OpenCvSharp;
 using Point = Avalonia.Point;
 using Size = Avalonia.Size;
 
-namespace KomaLab.Services;
+namespace KomaLab.Services.Imaging;
 
 public interface IImageOperationService
 {

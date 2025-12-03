@@ -2,7 +2,7 @@
 using Point = Avalonia.Point;
 using Rect = Avalonia.Rect;
 
-namespace KomaLab.Services;
+namespace KomaLab.Services.Imaging;
 
 public interface IImageAnalysisService
 {
