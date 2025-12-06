@@ -46,10 +46,8 @@ public partial class SingleImageNodeView : UserControl
 
             if (boardView != null)
             {
-                // Salviamo il punto iniziale relativo al genitore (la Board)
                 _startDragPoint = e.GetPosition(boardView);
                 
-                // Resettiamo la trasformazione visiva temporanea
                 if (_tempTransform == null) 
                 {
                     _tempTransform = new TranslateTransform();
@@ -57,6 +55,10 @@ public partial class SingleImageNodeView : UserControl
                 }
                 _tempTransform.X = 0;
                 _tempTransform.Y = 0;
+                
+                // Assicuriamoci che anche l'offset logico sia zero all'inizio
+                nodeVm.VisualOffsetX = 0;
+                nodeVm.VisualOffsetY = 0;
 
                 e.Pointer.Capture(this); 
                 e.Handled = true; 
@@ -68,8 +70,10 @@ public partial class SingleImageNodeView : UserControl
     {
         if (_startDragPoint == null || _tempTransform == null) return;
         
+        // Nota: Qui usiamo BaseNodeViewModel o SingleImageNodeViewModel, va bene uguale
+        if (DataContext is not SingleImageNodeViewModel nodeVm) return;
+
         var boardView = this.GetVisualAncestors().OfType<BoardView>().FirstOrDefault();
-        // Recuperiamo anche il ViewModel per sapere lo Scale attuale
         var boardVm = boardView?.DataContext as BoardViewModel;
 
         if (boardView == null || boardVm == null) return;
@@ -77,15 +81,22 @@ public partial class SingleImageNodeView : UserControl
         var currentPos = e.GetPosition(boardView);
         var screenDelta = currentPos - _startDragPoint.Value;
         
-        // --- FIX QUI ---
-        // Dobbiamo convertire i pixel dello schermo in "unità coordinate del mondo".
-        // Se siamo zoomati indietro (scale < 1), dobbiamo spostare il nodo di PIÙ unità 
-        // affinché visivamente copra la stessa distanza del mouse.
         double scale = boardVm.Scale;
-        if (scale <= 0.01) scale = 0.1; // Protezione divisione per zero
+        if (scale <= 0.01) scale = 0.1; 
 
-        _tempTransform.X = screenDelta.X / scale;
-        _tempTransform.Y = screenDelta.Y / scale;
+        // Calcoliamo lo spostamento in coordinate mondo
+        double worldDeltaX = screenDelta.X / scale;
+        double worldDeltaY = screenDelta.Y / scale;
+
+        // 1. Spostiamo il nodo VISIVAMENTE (RenderTransform -> GPU veloce)
+        _tempTransform.X = worldDeltaX;
+        _tempTransform.Y = worldDeltaY;
+
+        // 2. --- MODIFICA FONDAMENTALE ---
+        // Comunichiamo questo spostamento temporaneo al ViewModel.
+        // Questo farà ridisegnare la linea di connessione in tempo reale!
+        nodeVm.VisualOffsetX = worldDeltaX;
+        nodeVm.VisualOffsetY = worldDeltaY;
         
         e.Handled = true;
     }
@@ -96,24 +107,20 @@ public partial class SingleImageNodeView : UserControl
         {
             if (DataContext is SingleImageNodeViewModel nodeVm && _tempTransform != null)
             {
-                // Ora _tempTransform contiene già lo spostamento CORRETTO in coordinate mondo
-                // (perché abbiamo diviso per la scala nel Move).
-                
-                // Opzione A: Aggiorniamo direttamente le proprietà (più efficiente/chiaro qui)
+                // Commit finale: Applichiamo lo spostamento accumulato alla posizione reale
                 nodeVm.X += _tempTransform.X;
                 nodeVm.Y += _tempTransform.Y;
 
-                /* * Opzione B: Se vuoi per forza usare MoveNode, devi "riconvertire" in screen pixels
-                 * per rispettare la firma del tuo metodo, ma è un calcolo ridondante:
-                 * * var boardVm = GetParentBoardViewModel(out _);
-                 * double scale = boardVm?.Scale ?? 1.0;
-                 * var screenDeltaReconstructed = new Vector(_tempTransform.X * scale, _tempTransform.Y * scale);
-                 * nodeVm.MoveNode(screenDeltaReconstructed, scale);
-                 */
-
-                // Reset visivo
+                // Reset Visivo (GPU)
                 _tempTransform.X = 0;
                 _tempTransform.Y = 0;
+                
+                // --- MODIFICA FONDAMENTALE ---
+                // Reset Logico (ViewModel). 
+                // Poiché X e Y sono state aggiornate, l'offset temporaneo deve tornare a 0
+                // altrimenti la linea verrebbe sommata due volte.
+                nodeVm.VisualOffsetX = 0;
+                nodeVm.VisualOffsetY = 0;
             }
 
             _startDragPoint = null;
@@ -122,6 +129,16 @@ public partial class SingleImageNodeView : UserControl
         }
     }
     
+    // Ti consiglio di aggiungere questo per sicurezza contro i memory leak
+    protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
+    {
+        _startDragPoint = null;
+        _tempTransform = null;
+        this.RenderTransform = null;
+        base.OnDetachedFromVisualTree(e);
+    }
+    
+    // ... OnPointerWheelChanged rimane invariato ...
     private void OnPointerWheelChanged(object? sender, PointerWheelEventArgs e)
     {
         if (DataContext is not SingleImageNodeViewModel vm) return;
@@ -137,7 +154,7 @@ public partial class SingleImageNodeView : UserControl
             double deltaAmount = (currentRange * stepPercentage) * e.Delta.Y;
         
             bool isShiftPressed = (e.KeyModifiers & KeyModifiers.Shift) == KeyModifiers.Shift;
-            double gap = 1.0; // Gap minimo tra bianco e nero
+            double gap = 1.0; 
 
             if (isShiftPressed)
             {

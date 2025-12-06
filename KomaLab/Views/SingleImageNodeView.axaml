@@ -14,31 +14,41 @@
              d:DesignHeight="150"
              >
 
-    <Border Classes="NodeFrame" Classes.selected="{Binding IsSelected}">
+    <Border Classes="NodeFrame" 
+            Classes.selected="{Binding IsSelected}"
+            Width="{Binding EstimatedTotalSize.Width}"
+            MinWidth="150"
+            HorizontalAlignment="Center"
+            VerticalAlignment="Center">
         
         <Grid RowDefinitions="Auto, Auto">
             
-            <Border Grid.Row="0" Background="#252525" 
+            <Border Grid.Row="0" Background="#353040" 
                     CornerRadius="8,8,0,0"
                     Margin="0,2,0, -2"
-                    ClipToBounds="True"> <Grid ColumnDefinitions="*,Auto">
+                    ClipToBounds="True"> 
+                
+                <Grid ColumnDefinitions="*,Auto">
                     
                     <TextBlock Grid.Column="0" 
                                Text="{Binding Title}" 
                                FontWeight="Normal"
-                               FontSize="25" 
+                               FontSize="30" 
                                HorizontalAlignment="Left"
                                VerticalAlignment="Center"
-                               Padding="12"/> 
+                               Padding="18"
+                               TextTrimming="CharacterEllipsis"/> 
+                               
                     <Button Grid.Column="1"
-                            Content="X"
+                            Content="✕"
                             Classes="CloseButton"
                             Command="{Binding RemoveSelfCommand}"
-                            
+                            FontSize="24"
                             Width="{Binding $self.Bounds.Height}"/>
                             
                 </Grid>
             </Border>
+            
             <Border Grid.Row="1"
                     Background="#2C2C2C" 
                     CornerRadius="0,0,8,8" ClipToBounds="True"

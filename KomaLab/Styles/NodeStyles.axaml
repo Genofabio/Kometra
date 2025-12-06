@@ -2,9 +2,9 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
     
     <Style Selector="Border.NodeFrame">
-        <Setter Property="BorderBrush" Value="#2C2C2C"/>
-        <Setter Property="BorderThickness" Value="12"/>
-        <Setter Property="Background" Value="#2C2C2C"/>
+        <Setter Property="BorderBrush" Value="#3E3454"/>
+        <Setter Property="BorderThickness" Value="18"/>
+        <Setter Property="Background" Value="#3E3454"/>
         <Setter Property="ClipToBounds" Value="True"/>
         <Setter Property="CornerRadius" Value="8"/> 
     </Style>
@@ -15,7 +15,7 @@
     </Style>
 
     <Style Selector="Button.CloseButton">
-        <Setter Property="Background" Value="#252525"/>
+        <Setter Property="Background" Value="#353040"/>
         <Setter Property="Foreground" Value="White"/>
         <Setter Property="BorderThickness" Value="0"/>
         <Setter Property="CornerRadius" Value="0,8,0,0"/> 

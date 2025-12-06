@@ -17,7 +17,7 @@ public abstract class ImageNodeViewModel : BaseNodeViewModel
     {
     }
 
-    public virtual Size EstimatedTotalSize
+    public override Size EstimatedTotalSize
     {
         get
         {

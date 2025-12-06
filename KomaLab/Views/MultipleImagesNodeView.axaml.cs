@@ -46,10 +46,8 @@ public partial class MultipleImagesNodeView : UserControl
 
             if (boardView != null)
             {
-                // Salviamo il punto di inizio relativo alla Board
                 _startDragPoint = e.GetPosition(boardView); 
                 
-                // Resettiamo la trasformazione visiva
                 if (_tempTransform == null)
                 {
                     _tempTransform = new TranslateTransform();
@@ -57,11 +55,50 @@ public partial class MultipleImagesNodeView : UserControl
                 }
                 _tempTransform.X = 0;
                 _tempTransform.Y = 0;
+                
+                // Assicuriamoci che l'offset logico sia pulito all'inizio
+                nodeVm.VisualOffsetX = 0;
+                nodeVm.VisualOffsetY = 0;
 
                 e.Pointer.Capture(this); 
                 e.Handled = true; 
             }
         }
+    }
+
+    private void OnPointerMoved(object? sender, PointerEventArgs e)
+    {
+        if (_startDragPoint == null || _tempTransform == null) return;
+        
+        // Castiamo il DataContext per accedere alle proprietà VisualOffset
+        if (DataContext is not MultipleImagesNodeViewModel nodeVm) return;
+        
+        var boardView = this.GetVisualAncestors().OfType<BoardView>().FirstOrDefault();
+        // Recuperiamo anche il VM per lo scale
+        var boardVm = boardView?.DataContext as BoardViewModel; 
+
+        if (boardView == null || boardVm == null) return;
+        
+        var currentPos = e.GetPosition(boardView);
+        var screenDelta = currentPos - _startDragPoint.Value;
+        
+        double scale = boardVm.Scale;
+        if (scale <= 0.001) scale = 0.1; 
+
+        // Calcoliamo lo spostamento in unità mondo
+        double worldDeltaX = screenDelta.X / scale;
+        double worldDeltaY = screenDelta.Y / scale;
+
+        // 1. Spostamento Visivo del NODO (GPU)
+        _tempTransform.X = worldDeltaX;
+        _tempTransform.Y = worldDeltaY;
+        
+        // 2. Spostamento Visivo delle CONNESSIONI (ViewModel)
+        // Aggiornando queste proprietà, la linea di connessione verrà ricalcolata in tempo reale
+        nodeVm.VisualOffsetX = worldDeltaX;
+        nodeVm.VisualOffsetY = worldDeltaY;
+        
+        e.Handled = true;
     }
 
     private void OnPointerReleased(object? sender, PointerReleasedEventArgs e)
@@ -70,16 +107,18 @@ public partial class MultipleImagesNodeView : UserControl
         {
             if (DataContext is MultipleImagesNodeViewModel nodeVm && _tempTransform != null)
             {
-                // Commit finale: 
-                // Aggiorniamo le coordinate reali del ViewModel sommando lo spostamento accumulato
-                // Nota: _tempTransform contiene già i valori corretti in "coordinate mondo" 
-                // perché li abbiamo scalati nel PointerMoved.
+                // Commit finale: aggiorniamo la posizione reale X,Y
                 nodeVm.X += _tempTransform.X;
                 nodeVm.Y += _tempTransform.Y;
 
-                // Reset visivo (ora il controllo è posizionato correttamente dal Canvas)
+                // Reset Visivo (GPU)
                 _tempTransform.X = 0;
                 _tempTransform.Y = 0;
+
+                // Reset Logico (ViewModel)
+                // Fondamentale: azzeriamo l'offset temporaneo ora che X e Y sono aggiornate
+                nodeVm.VisualOffsetX = 0;
+                nodeVm.VisualOffsetY = 0;
             }
 
             _startDragPoint = null;
@@ -87,32 +126,14 @@ public partial class MultipleImagesNodeView : UserControl
             e.Handled = true;
         }
     }
-
-    private void OnPointerMoved(object? sender, PointerEventArgs e)
+    
+    // Pulizia per sicurezza
+    protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
     {
-        // Se non stiamo trascinando, esci subito
-        if (_startDragPoint == null || _tempTransform == null) return;
-        
-        if (DataContext is not MultipleImagesNodeViewModel) return;
-        
-        // Recuperiamo la Board per calcolare lo spostamento rispetto allo Zoom
-        var boardView = this.GetVisualAncestors().OfType<BoardView>().FirstOrDefault();
-
-        if (boardView == null || boardView.DataContext is not BoardViewModel boardVm) return;
-        
-        var currentPos = e.GetPosition(boardView);
-        var screenDelta = currentPos - _startDragPoint.Value;
-        
-        // FIX SCALA & LAG:
-        // 1. Dividiamo per Scale per convertire i pixel mouse in unità mondo (mantiene il sync col cursore)
-        // 2. Modifichiamo SOLO _tempTransform per evitare il ricalcolo del layout (fluidità estrema)
-        double scale = boardVm.Scale;
-        if (scale <= 0.001) scale = 0.1; // Protezione
-
-        _tempTransform.X = screenDelta.X / scale;
-        _tempTransform.Y = screenDelta.Y / scale;
-        
-        e.Handled = true;
+        _startDragPoint = null;
+        _tempTransform = null;
+        this.RenderTransform = null;
+        base.OnDetachedFromVisualTree(e);
     }
     
     private void OnPointerWheelChanged(object? sender, PointerWheelEventArgs e)

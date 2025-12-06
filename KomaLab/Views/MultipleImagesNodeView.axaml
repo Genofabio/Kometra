@@ -14,11 +14,21 @@
              PointerWheelChanged="OnPointerWheelChanged">
     
     <UserControl.Styles>
+        
+        <Style Selector="Button.NavButton">
+            <Setter Property="Background" Value="#544869"/>
+            <Setter Property="Foreground" Value="#D0D0D0"/>
+            <Setter Property="BorderThickness" Value="0"/>
+        </Style>
+
         <Style Selector="Button.NavButton avalonia|MaterialIcon">
-            <Setter Property="FontSize" Value="24"/> </Style>
+            <Setter Property="FontSize" Value="24"/> 
+        </Style>
         
         <Style Selector="Button.NavButton:pointerover /template/ ContentPresenter#PART_ContentPresenter">
-            <Setter Property="Background" Value="#3A3A3A"/> <Setter Property="Foreground" Value="White"/>     </Style>
+            <Setter Property="Background" Value="#6B5C85"/> 
+            <Setter Property="Foreground" Value="White"/>     
+        </Style>
         
         <Style Selector="Grid#OverlayGrid">
             <Setter Property="Opacity" Value="0.0"/>
@@ -38,7 +48,7 @@
     <Border Classes="NodeFrame" Classes.selected="{Binding IsSelected}">
         <Grid RowDefinitions="Auto, *">
             
-            <Border Grid.Row="0" Background="#252525" 
+            <Border Grid.Row="0" Background="#353040" 
                     CornerRadius="8,8,0,0" Margin="0,2,0, -2" ClipToBounds="True">
                 <Grid ColumnDefinitions="*,Auto">
                     <TextBlock Grid.Column="0" Text="{Binding Title}" 
@@ -66,7 +76,7 @@
                     <Grid Name="OverlayGrid">
                         
                         <Border HorizontalAlignment="Right" VerticalAlignment="Top"
-                                Background="#80000000" Margin="0,10,10,0"
+                                Background="#B3353040" Margin="0,10,10,0"
                                 CornerRadius="4" ClipToBounds="True">
                             
                             <TextBlock Text="{Binding CurrentImageText}"
@@ -78,6 +88,7 @@
                                 HorizontalAlignment="Left" VerticalAlignment="Center" 
                                 Margin="10,10"
                                 Padding="14,16,18,16"
+                                CornerRadius="4"
                                 Command="{Binding PreviousImageCommand}"
                                 IsVisible="{Binding CanShowPrevious}">
                             <avalonia:MaterialIcon Kind="ChevronLeft" />
@@ -87,6 +98,7 @@
                                 HorizontalAlignment="Right" VerticalAlignment="Center" 
                                 Margin="10,10"
                                 Padding="18,16,14,16"
+                                CornerRadius="4"
                                 Command="{Binding NextImageCommand}"
                                 IsVisible="{Binding CanShowNext}">
                             <avalonia:MaterialIcon Kind="ChevronRight" />

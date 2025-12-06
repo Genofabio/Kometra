@@ -8,12 +8,43 @@
              mc:Ignorable="d" d:DesignWidth="800" d:DesignHeight="450"
              x:Class="KomaLab.Views.BoardView"
              x:DataType="vm:BoardViewModel"
+             
+             Focusable="True"
              ClipToBounds="True"
+             
              PointerPressed="OnPointerPressed"
              PointerReleased="OnPointerReleased"
              PointerMoved="OnPointerMoved"
              PointerWheelChanged="OnPointerWheelChanged"
              SizeChanged="OnBoardSizeChanged">
+
+    <UserControl.KeyBindings>
+        <KeyBinding Gesture="Ctrl+Z" Command="{Binding UndoCommand}" />
+        <KeyBinding Gesture="Ctrl+Y" Command="{Binding RedoCommand}" />
+    </UserControl.KeyBindings>
+
+    <UserControl.Styles>
+        
+        <Style Selector="Path.ConnectionLine">
+            <Setter Property="StrokeThickness" Value="8"/>  
+            <Setter Property="StrokeDashArray" Value="4,2"/> 
+            <Setter Property="Opacity" Value="0.6"/>
+            
+            <Setter Property="Transitions">
+                <Transitions>
+                    <BrushTransition Property="Stroke" Duration="0:0:0.2"/>
+                    <DoubleTransition Property="StrokeThickness" Duration="0:0:0.2"/>
+                    <DoubleTransition Property="Opacity" Duration="0:0:0.2"/>
+                </Transitions>
+            </Setter>
+        </Style>
+
+        <Style Selector="Path.ConnectionLine.highlighted">
+            <Setter Property="StrokeThickness" Value="10"/>  
+            <Setter Property="StrokeDashArray" Value="{x:Null}"/> <Setter Property="Opacity" Value="1.0"/>
+        </Style>
+
+    </UserControl.Styles>
 
     <Grid>
         
@@ -31,9 +62,40 @@
                 <TranslateTransform X="0" Y="0" />
             </Grid.RenderTransform>
 
+            <ItemsControl ItemsSource="{Binding Connections}"
+                          IsHitTestVisible="False"
+                          RenderTransformOrigin="0,0"
+                          ClipToBounds="False"> 
+                
+                <ItemsControl.RenderTransform>
+                    <TransformGroup>
+                        <ScaleTransform ScaleX="{Binding Scale}" ScaleY="{Binding Scale}" />
+                        <TranslateTransform X="{Binding OffsetX}" Y="{Binding OffsetY}" />
+                    </TransformGroup>
+                </ItemsControl.RenderTransform>
+
+                <ItemsControl.ItemsPanel>
+                    <ItemsPanelTemplate>
+                        <Canvas ClipToBounds="False" />
+                    </ItemsPanelTemplate>
+                </ItemsControl.ItemsPanel>
+
+                <ItemsControl.DataTemplates>
+                    <DataTemplate DataType="vm:ConnectionViewModel">
+                        
+                        <Path Data="{Binding CurveGeometry}"
+                              Classes="ConnectionLine"
+                              Classes.highlighted="{Binding IsHighlighted}"
+                              Stroke="{Binding StrokeBrush}"
+                              IsHitTestVisible="False"/>
+                              
+                    </DataTemplate>
+                </ItemsControl.DataTemplates>
+            </ItemsControl>
+
             <ItemsControl ItemsSource="{Binding Nodes}" 
                           Background="Transparent"
-                          RenderTransformOrigin="0,0"
+                          RenderTransformOrigin="0,0" 
                           ClipToBounds="False">
                 
                 <ItemsControl.RenderTransform>

@@ -1,8 +1,9 @@
-﻿using Avalonia;
-using CommunityToolkit.Mvvm.ComponentModel;
+﻿using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using KomaLab.Models;
 using System;
+using System.Collections.ObjectModel;
+using Avalonia;
 
 namespace KomaLab.ViewModels;
 
@@ -34,6 +35,11 @@ public abstract partial class BaseNodeViewModel : ObservableObject, IDisposable
         set => SetProperty(Model.Title, value, Model, (m, v) => m.Title = v);
     }
     
+    public virtual Size EstimatedTotalSize => new Size(0, 0);
+    
+    [ObservableProperty] private double _visualOffsetX;
+    [ObservableProperty] private double _visualOffsetY;
+    
     [ObservableProperty] private bool _isSelected;
     [ObservableProperty] private int _zIndex;
 
@@ -52,13 +58,6 @@ public abstract partial class BaseNodeViewModel : ObservableObject, IDisposable
     private void RemoveSelf()
     {
         RequestRemove?.Invoke(this);
-    }
-
-    public void MoveNode(Vector screenDelta, double currentScale)
-    {
-        if (currentScale == 0) return;
-        X += screenDelta.X / currentScale;
-        Y += screenDelta.Y / currentScale;
     }
 
     public void BringToFront()

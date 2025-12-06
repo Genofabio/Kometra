@@ -1,12 +1,11 @@
 ﻿using System;
-using System.Collections.Generic; 
+using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.Linq;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using Avalonia;
-using KomaLab.Services;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using KomaLab.Models;
@@ -22,10 +21,10 @@ public partial class BoardViewModel : ObservableObject
 {
     // --- Dipendenze ---
     private readonly INodeViewModelFactory _nodeFactory;
-    private readonly IDialogService _dialogService; 
+    private readonly IDialogService _dialogService;
     private readonly IWindowService _windowService;
-    private readonly IFitsService _fitsService;           
-    private readonly IImageOperationService _opsService;  
+    private readonly IFitsService _fitsService;
+    private readonly IImageOperationService _opsService;
     private readonly IUndoService _undoService;
 
     // --- Proprietà ---
@@ -36,27 +35,30 @@ public partial class BoardViewModel : ObservableObject
     [ObservableProperty] private BaseNodeViewModel? _selectedNode;
     
     public ObservableCollection<BaseNodeViewModel> Nodes { get; } = new();
+    
+    // Collezione per i collegamenti (Link) tra i nodi
+    public ObservableCollection<ConnectionViewModel> Connections { get; } = new();
+    
     private int _maxZIndex;
 
     // --- Costruttore ---
     public BoardViewModel(
-        INodeViewModelFactory nodeFactory, 
-        IDialogService dialogService, 
+        INodeViewModelFactory nodeFactory,
+        IDialogService dialogService,
         IWindowService windowService,
         IFitsService fitsService,
         IImageOperationService opsService,
-        IUndoService undoService) 
+        IUndoService undoService)
     {
         _nodeFactory = nodeFactory;
-        _dialogService = dialogService; 
+        _dialogService = dialogService;
         _windowService = windowService;
         _fitsService = fitsService;
         _opsService = opsService;
         _undoService = undoService;
     }
-    
+
     // --- Comandi ---
-    
     [RelayCommand]
     private async Task AddNode()
     {
@@ -77,9 +79,8 @@ public partial class BoardViewModel : ObservableObject
             await AddMultipleNodesAsync(pathList, center.X, center.Y);
         }
     }
-    
-    // --- UNDO / REDO ---
 
+    // --- UNDO / REDO ---
     [RelayCommand(CanExecute = nameof(CanUndo))]
     private void Undo() => _undoService.Undo();
     private bool CanUndo() => _undoService.CanUndo;
@@ -88,17 +89,9 @@ public partial class BoardViewModel : ObservableObject
     private void Redo() => _undoService.Redo();
     private bool CanRedo() => _undoService.CanRedo;
 
-    // Ascolta i cambiamenti del servizio Undo per aggiornare i bottoni nella UI
     protected override void OnPropertyChanged(System.ComponentModel.PropertyChangedEventArgs e)
     {
         base.OnPropertyChanged(e);
-        
-        // Se siamo qui è perché qualcosa è cambiato nel VM, ma noi vogliamo sapere
-        // quando cambia l'UndoService.
-        // Nota: Idealmente l'UndoService dovrebbe esporre un evento, o implementare INotifyPropertyChanged.
-        // Se UndoService è un ObservableObject, possiamo iscriverci ai suoi eventi nel costruttore.
-        // Qui assumiamo che quando chiamiamo Undo/Redo/AddAction, lo stato cambi.
-        
         UndoCommand.NotifyCanExecuteChanged();
         RedoCommand.NotifyCanExecuteChanged();
     }
@@ -119,36 +112,42 @@ public partial class BoardViewModel : ObservableObject
 
     private void OnNodeRequestRemove(BaseNodeViewModel node)
     {
-        // 1. Definiamo l'azione Undoable
+        var connectionsToRemove = Connections
+            .Where(c => c.Source == node || c.Target == node)
+            .ToList();
+
         var action = new DelegateAction(
             "Rimuovi Nodo",
-            execute: () => 
+            execute: () =>
             {
-                // REDO (Cancellazione)
                 if (SelectedNode == node) DeselectAllNodes();
                 UnregisterNodeEvents(node);
+                foreach (var conn in connectionsToRemove)
+                {
+                    Connections.Remove(conn);
+                }
                 Nodes.Remove(node);
             },
-            undo: () => 
+            undo: () =>
             {
-                // UNDO (Ripristino)
                 if (!Nodes.Contains(node))
                 {
                     Nodes.Add(node);
                     RegisterNodeEvents(node);
-                    SetSelectedNode(node); // Opzionale: riseleziona
+                    foreach (var conn in connectionsToRemove)
+                    {
+                        if (!Connections.Contains(conn))
+                        {
+                            Connections.Add(conn);
+                        }
+                    }
+                    SetSelectedNode(node);
                 }
             }
         );
 
-        // 2. Eseguiamo la rimozione subito
         action.Execute();
-
-        // 3. Registriamo nello stack
         _undoService.RecordAction(action);
-        
-        // NOTA IMPORTANTE: Rimosso node.Dispose().
-        // Il nodo deve rimanere vivo in memoria nel caso venga ripristinato con CTRL+Z.
     }
 
     private void OnNodeRequestBringToFront(BaseNodeViewModel node)
@@ -157,18 +156,14 @@ public partial class BoardViewModel : ObservableObject
         node.ZIndex = _maxZIndex;
     }
 
-    // --- Helpers Aggiunta Nodi con Undo Integrato ---
+    // --- Helpers Aggiunta Nodi ---
 
-    /// <summary>
-    /// Metodo helper per aggiungere un nodo alla collezione e registrare l'azione Undo.
-    /// </summary>
     private void RegisterNodeWithUndo(BaseNodeViewModel newNode, string actionName)
     {
         var action = new DelegateAction(
             actionName,
-            execute: () => 
+            execute: () =>
             {
-                // REDO (Aggiunta)
                 if (!Nodes.Contains(newNode))
                 {
                     Nodes.Add(newNode);
@@ -176,9 +171,8 @@ public partial class BoardViewModel : ObservableObject
                     OnNodeRequestBringToFront(newNode);
                 }
             },
-            undo: () => 
+            undo: () =>
             {
-                // UNDO (Rimozione)
                 if (Nodes.Contains(newNode))
                 {
                     if (SelectedNode == newNode) DeselectAllNodes();
@@ -188,7 +182,6 @@ public partial class BoardViewModel : ObservableObject
             }
         );
 
-        // Eseguiamo e registriamo
         action.Execute();
         _undoService.RecordAction(action);
     }
@@ -218,19 +211,25 @@ public partial class BoardViewModel : ObservableObject
             Debug.WriteLine($"Error adding multiple node: {ex.Message}");
         }
     }
-
+    
+    public void CreateConnection(BaseNodeViewModel source, BaseNodeViewModel target)
+    {
+        var connection = new ConnectionViewModel(source, target);
+        Connections.Add(connection);
+    }
+    
     // --- Comandi Operativi ---
 
     [RelayCommand(CanExecute = nameof(CanResetNormalization))]
     private async Task ResetNormalization()
     {
-        if (SelectedNode is ImageNodeViewModel imgNode) 
+        if (SelectedNode is ImageNodeViewModel imgNode)
         {
             await imgNode.ResetThresholdsAsync();
         }
     }
     private bool CanResetNormalization() => SelectedNode is ImageNodeViewModel;
-    
+
     // --- LOGICA ALLINEAMENTO ---
     [RelayCommand(CanExecute = nameof(CanShowAlignmentWindow))]
     private async Task ShowAlignmentWindow()
@@ -240,7 +239,7 @@ public partial class BoardViewModel : ObservableObject
         try
         {
             var inputPaths = await imgNode.PrepareInputPathsAsync(_fitsService);
-            if (inputPaths.Count == 0) return; 
+            if (inputPaths.Count == 0) return;
 
             var newPaths = await _windowService.ShowAlignmentWindowAsync(inputPaths);
 
@@ -248,7 +247,7 @@ public partial class BoardViewModel : ObservableObject
             {
                 double gap = 300;
                 double newX = imgNode.X + imgNode.EstimatedTotalSize.Width + gap;
-                double newY = imgNode.Y; 
+                double newY = imgNode.Y;
 
                 string newTitle = $"{imgNode.Title} (Allineata)";
                 string? dirPath = System.IO.Path.GetDirectoryName(newPaths[0]);
@@ -267,10 +266,36 @@ public partial class BoardViewModel : ObservableObject
                     newNode = multiNode;
                 }
 
-                newNode.Title = newTitle; 
-                
-                // Usiamo l'helper per gestire l'Undo anche qui
-                RegisterNodeWithUndo(newNode, "Allineamento Immagini");
+                newNode.Title = newTitle;
+
+                var action = new DelegateAction(
+                    "Allineamento Immagini",
+                    execute: () =>
+                    {
+                        if (!Nodes.Contains(newNode))
+                        {
+                            Nodes.Add(newNode);
+                            RegisterNodeEvents(newNode);
+                            OnNodeRequestBringToFront(newNode);
+                            CreateConnection(imgNode, newNode);
+                        }
+                    },
+                    undo: () =>
+                    {
+                        if (Nodes.Contains(newNode))
+                        {
+                            var link = Connections.FirstOrDefault(c => c.Source == imgNode && c.Target == newNode);
+                            if (link != null) Connections.Remove(link);
+
+                            if (SelectedNode == newNode) DeselectAllNodes();
+                            UnregisterNodeEvents(newNode);
+                            Nodes.Remove(newNode);
+                        }
+                    }
+                );
+
+                action.Execute();
+                _undoService.RecordAction(action);
                 SetSelectedNode(newNode);
             }
         }
@@ -280,7 +305,7 @@ public partial class BoardViewModel : ObservableObject
         }
     }
     private bool CanShowAlignmentWindow() => SelectedNode is ImageNodeViewModel;
-    
+
     // --- LOGICA STACKING ---
     [RelayCommand(CanExecute = nameof(CanStackImages))]
     private async Task StackImages(StackingMode mode)
@@ -295,30 +320,53 @@ public partial class BoardViewModel : ObservableObject
             if (sourceImages.Count < 2) return;
 
             var resultData = await _opsService.ComputeStackAsync(sourceImages, mode);
-        
             double gap = 300;
             double newX = multiNode.X + multiNode.EstimatedTotalSize.Width + gap;
             double newY = multiNode.Y;
-    
             string currentTitle = multiNode.Title;
             string cleanTitle = Regex.Replace(currentTitle, @"\s*\(\d+\s*immagini\)", "", RegexOptions.IgnoreCase);
-        
             string modeString = mode switch
             {
                 StackingMode.Average => "Media",
-                StackingMode.Median  => "Mediana",
-                StackingMode.Sum     => "Somma",
+                StackingMode.Median => "Mediana",
+                StackingMode.Sum => "Somma",
                 _ => mode.ToString()
             };
 
-            string newTitle = $"{cleanTitle.Trim()} ({modeString})"; 
+            string newTitle = $"{cleanTitle.Trim()} ({modeString})";
 
             var newNode = await _nodeFactory.CreateSingleImageNodeFromDataAsync(
                 resultData, newTitle, newX, newY
             );
 
-            // Usiamo l'helper per gestire l'Undo anche qui
-            RegisterNodeWithUndo(newNode, "Stacking Immagini");
+            var action = new DelegateAction(
+                "Stacking Immagini",
+                execute: () =>
+                {
+                    if (!Nodes.Contains(newNode))
+                    {
+                        Nodes.Add(newNode);
+                        RegisterNodeEvents(newNode);
+                        OnNodeRequestBringToFront(newNode);
+                        CreateConnection(multiNode, newNode);
+                    }
+                },
+                undo: () =>
+                {
+                    if (Nodes.Contains(newNode))
+                    {
+                        var link = Connections.FirstOrDefault(c => c.Source == multiNode && c.Target == newNode);
+                        if (link != null) Connections.Remove(link);
+
+                        if (SelectedNode == newNode) DeselectAllNodes();
+                        UnregisterNodeEvents(newNode);
+                        Nodes.Remove(newNode);
+                    }
+                }
+            );
+
+            action.Execute();
+            _undoService.RecordAction(action);
             SetSelectedNode(newNode);
         }
         catch (Exception ex)
@@ -329,7 +377,6 @@ public partial class BoardViewModel : ObservableObject
     private bool CanStackImages(StackingMode mode) => SelectedNode is MultipleImagesNodeViewModel;
 
     // --- Altri Comandi ---
-
     [RelayCommand] private void IncrementOffset() { OffsetX += 20; }
     [RelayCommand] private void ResetBoard() { OffsetX = 0.0; OffsetY = 0.0; Scale = 0.5; }
     
@@ -351,13 +398,11 @@ public partial class BoardViewModel : ObservableObject
         if (SelectedNode == nodeToSelect) return;
 
         if (SelectedNode != null) SelectedNode.IsSelected = false;
-        
         SelectedNode = nodeToSelect;
-        
         if (SelectedNode != null) SelectedNode.IsSelected = true;
         
         ResetNormalizationCommand.NotifyCanExecuteChanged();
-        ShowAlignmentWindowCommand.NotifyCanExecuteChanged(); 
+        ShowAlignmentWindowCommand.NotifyCanExecuteChanged();
         StackImagesCommand.NotifyCanExecuteChanged();
         SaveSelectedNodeCommand.NotifyCanExecuteChanged();
     }
@@ -368,7 +413,7 @@ public partial class BoardViewModel : ObservableObject
         SelectedNode = null;
         
         ResetNormalizationCommand.NotifyCanExecuteChanged();
-        ShowAlignmentWindowCommand.NotifyCanExecuteChanged(); 
+        ShowAlignmentWindowCommand.NotifyCanExecuteChanged();
         StackImagesCommand.NotifyCanExecuteChanged();
         SaveSelectedNodeCommand.NotifyCanExecuteChanged();
     }
@@ -383,7 +428,6 @@ public partial class BoardViewModel : ObservableObject
 
         string defaultName = $"{imgNode.Title}.fits";
         var savePath = await _dialogService.ShowSaveFitsFileDialogAsync(defaultName);
-        
         if (!string.IsNullOrWhiteSpace(savePath))
         {
             await _fitsService.SaveFitsFileAsync(dataToSave, savePath);
@@ -395,11 +439,9 @@ public partial class BoardViewModel : ObservableObject
     {
         if (ViewBounds.Width == 0 || ViewBounds.Height == 0) return new Point(0, 0);
 
-        // Centro dello schermo in pixel
         double screenCenterX = ViewBounds.Width / 2.0;
         double screenCenterY = ViewBounds.Height / 2.0;
 
-        // Conversione in coordinate del "Mondo"
         double worldX = (screenCenterX - OffsetX) / Scale;
         double worldY = (screenCenterY - OffsetY) / Scale;
 
