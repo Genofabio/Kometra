@@ -2,6 +2,7 @@
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Media;
+using Avalonia.Threading;
 using KomaLab.ViewModels;
 
 namespace KomaLab.Controls;
@@ -9,9 +10,11 @@ namespace KomaLab.Controls;
 public class ConnectionControl : Control
 {
     private ConnectionViewModel? _vm;
-    private readonly Pen _pen;
+    
+    // Penna statica per le linee normali (grigie) -> Performance massima
+    private static readonly IPen DefaultPen = new Pen(new SolidColorBrush(Color.Parse("#99666666")), 12);
 
-    // Definiamo le proprietà per il Binding
+    // Proprietà di dipendenza
     public static readonly StyledProperty<bool> IsHighlightedProperty =
         AvaloniaProperty.Register<ConnectionControl, bool>(nameof(IsHighlighted));
 
@@ -23,11 +26,6 @@ public class ConnectionControl : Control
 
     public ConnectionControl()
     {
-        // Penna riutilizzabile (ottimizzazione memoria)
-        _pen = new Pen(new SolidColorBrush(Colors.Gray), 3);
-        
-        // Disabilitiamo l'HitTest per default (il mouse passa attraverso)
-        // Se ti serve cliccarci sopra, mettilo a True
         IsHitTestVisible = false; 
     }
 
@@ -35,7 +33,6 @@ public class ConnectionControl : Control
     {
         base.OnDataContextChanged(e);
         
-        // Scolleghiamo i vecchi eventi se il DataContext cambia
         if (_vm != null)
         {
             _vm.Source.PropertyChanged -= OnNodePositionChanged;
@@ -46,56 +43,30 @@ public class ConnectionControl : Control
 
         if (_vm != null)
         {
-            // Ci colleghiamo direttamente ai nodi
             _vm.Source.PropertyChanged += OnNodePositionChanged;
             _vm.Target.PropertyChanged += OnNodePositionChanged;
-            
-            // Impostiamo il colore iniziale
-            UpdatePenColor();
         }
         
         InvalidateVisual();
     }
 
-    // Quando cambia la proprietà IsHighlighted (dal Binding)
     protected override void OnPropertyChanged(AvaloniaPropertyChangedEventArgs change)
     {
         base.OnPropertyChanged(change);
         if (change.Property == IsHighlightedProperty)
         {
-            UpdatePenColor();
             InvalidateVisual();
         }
     }
 
     private void OnNodePositionChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
     {
-        // Ridisegna SOLO se cambia posizione o dimensione
         if (e.PropertyName == nameof(BaseNodeViewModel.X) ||
             e.PropertyName == nameof(BaseNodeViewModel.Y) ||
             e.PropertyName == nameof(BaseNodeViewModel.VisualOffsetX) ||
             e.PropertyName == nameof(BaseNodeViewModel.VisualOffsetY))
         {
-            // InvalidateVisual è "pigro": segna questo controllo come "sporco"
-            // Il rendering avverrà al prossimo frame utile.
             InvalidateVisual();
-        }
-    }
-
-    private void UpdatePenColor()
-    {
-        if (_vm == null) return;
-        
-        // Logica semplice per il colore: Viola se selezionato, Grigio se no
-        if (IsHighlighted)
-        {
-            _pen.Brush = new SolidColorBrush(_vm.HighlightColor);
-            _pen.Thickness = 5;
-        }
-        else
-        {
-            _pen.Brush = new SolidColorBrush(_vm.DefaultColor);
-            _pen.Thickness = 3;
         }
     }
 
@@ -103,7 +74,7 @@ public class ConnectionControl : Control
     {
         if (_vm == null) return;
 
-        // 1. Calcolo coordinate (direttamente nella View)
+        // 1. Calcolo coordinate
         var source = _vm.Source;
         var target = _vm.Target;
 
@@ -117,16 +88,13 @@ public class ConnectionControl : Control
             target.Y + target.VisualOffsetY + (target.EstimatedTotalSize.Height / 2)
         );
 
-        // 2. Calcolo Bezier (on-the-fly)
-        // È velocissimo farlo qui, non serve caching complesso per una singola curva
+        // 2. Calcolo Bezier
         double deltaX = p2.X - p1.X;
         double offset = deltaX / 2;
         
         var cp1 = new Point(p1.X + offset, p1.Y);
         var cp2 = new Point(p2.X - offset, p2.Y);
 
-        // 3. Disegno diretto
-        // StreamGeometryContext è il modo più efficiente in assoluto
         var geometry = new StreamGeometry();
         using (var c = geometry.Open())
         {
@@ -134,6 +102,49 @@ public class ConnectionControl : Control
             c.CubicBezierTo(cp1, cp2, p2);
         }
 
-        context.DrawGeometry(null, _pen, geometry);
+        // 3. SCELTA PENNELLO (Qui abbiamo ripristinato il gradiente)
+        IPen penToUse;
+
+        if (!IsHighlighted)
+        {
+            // Caso veloce: Nessuna selezione -> Penna statica grigia
+            penToUse = DefaultPen;
+        }
+        else
+        {
+            // Caso High-Quality: Calcoliamo il gradiente orientato
+            var gradient = new LinearGradientBrush
+            {
+                StartPoint = new RelativePoint(p1, RelativeUnit.Absolute),
+                EndPoint = new RelativePoint(p2, RelativeUnit.Absolute)
+            };
+
+            // Colori presi dal VM o definiti qui
+            var highlightColor = _vm.HighlightColor; 
+            var defaultColor = _vm.DefaultColor; 
+
+            // Logica orientamento:
+            // Se Source è selezionato: Viola -> Grigio
+            // Se Target è selezionato: Grigio -> Viola
+            if (_vm.Source.IsSelected)
+            {
+                gradient.GradientStops.Add(new GradientStop(highlightColor, 0.0));
+                gradient.GradientStops.Add(new GradientStop(highlightColor, 0.45));
+                gradient.GradientStops.Add(new GradientStop(defaultColor, 0.55));
+                gradient.GradientStops.Add(new GradientStop(defaultColor, 1.0));
+            }
+            else // Target Selected o entrambi
+            {
+                gradient.GradientStops.Add(new GradientStop(defaultColor, 0.0));
+                gradient.GradientStops.Add(new GradientStop(defaultColor, 0.45));
+                gradient.GradientStops.Add(new GradientStop(highlightColor, 0.55));
+                gradient.GradientStops.Add(new GradientStop(highlightColor, 1.0));
+            }
+
+            // Spessore maggiorato per l'highlight (es. 5.0)
+            penToUse = new Pen(gradient, 14.0);
+        }
+
+        context.DrawGeometry(null, penToUse, geometry);
     }
 }

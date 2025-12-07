@@ -2,10 +2,10 @@
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
+using Avalonia.Media;
 using Avalonia.VisualTree; 
 using KomaLab.ViewModels;
 using System.Linq;
-using Avalonia.Media;
 
 namespace KomaLab.Views;
 
@@ -14,6 +14,10 @@ public partial class SingleImageNodeView : UserControl
     private Point? _startDragPoint;
     private TranslateTransform? _tempTransform;
     
+    // CACHE: Salviamo i riferimenti per evitare la ricerca continua
+    private BoardViewModel? _cachedBoardVm;
+    private Visual? _cachedBoardView;
+
     public SingleImageNodeView()
     {
         InitializeComponent();
@@ -21,12 +25,28 @@ public partial class SingleImageNodeView : UserControl
         this.RenderTransform = _tempTransform;
     }
     
-    // Helper per trovare la BoardView genitore e il suo ViewModel
-    private BoardViewModel? GetParentBoardViewModel(out Visual? visualParent)
+    // --- OTTIMIZZAZIONE CACHE ---
+    protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)
     {
-        visualParent = this.GetVisualAncestors().OfType<BoardView>().FirstOrDefault();
-        return visualParent?.DataContext as BoardViewModel;
+        base.OnAttachedToVisualTree(e);
+        // Troviamo il genitore UNA volta sola all'inizio
+        _cachedBoardView = this.GetVisualAncestors().OfType<BoardView>().FirstOrDefault();
+        _cachedBoardVm = _cachedBoardView?.DataContext as BoardViewModel;
     }
+
+    protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
+    {
+        // Pulizia riferimenti per evitare memory leaks
+        _cachedBoardVm = null;
+        _cachedBoardView = null;
+        
+        _startDragPoint = null;
+        _tempTransform = null;
+        this.RenderTransform = null;
+        
+        base.OnDetachedFromVisualTree(e);
+    }
+    // ----------------------------
 
     private void OnPointerPressed(object? sender, PointerPressedEventArgs e)
     {
@@ -35,18 +55,23 @@ public partial class SingleImageNodeView : UserControl
         var properties = e.GetCurrentPoint(this).Properties;
         if (properties.IsLeftButtonPressed)
         {
-            var boardVm = GetParentBoardViewModel(out var boardView);
-            
-            if (boardVm != null)
+            // Fallback di sicurezza se la cache è vuota (raro, ma possibile)
+            if (_cachedBoardVm == null || _cachedBoardView == null)
             {
-                boardVm.SetSelectedNode(nodeVm);
+                _cachedBoardView = this.GetVisualAncestors().OfType<BoardView>().FirstOrDefault();
+                _cachedBoardVm = _cachedBoardView?.DataContext as BoardViewModel;
+            }
+            
+            if (_cachedBoardVm != null)
+            {
+                _cachedBoardVm.SetSelectedNode(nodeVm);
             }
 
             nodeVm.BringToFront(); 
 
-            if (boardView != null)
+            if (_cachedBoardView != null)
             {
-                _startDragPoint = e.GetPosition(boardView);
+                _startDragPoint = e.GetPosition(_cachedBoardView);
                 
                 if (_tempTransform == null) 
                 {
@@ -56,7 +81,6 @@ public partial class SingleImageNodeView : UserControl
                 _tempTransform.X = 0;
                 _tempTransform.Y = 0;
                 
-                // Assicuriamoci che anche l'offset logico sia zero all'inizio
                 nodeVm.VisualOffsetX = 0;
                 nodeVm.VisualOffsetY = 0;
 
@@ -68,33 +92,30 @@ public partial class SingleImageNodeView : UserControl
 
     private void OnPointerMoved(object? sender, PointerEventArgs e)
     {
-        if (_startDragPoint == null || _tempTransform == null) return;
+        // Null checks rapidi
+        if (_startDragPoint == null || _tempTransform == null || 
+            _cachedBoardView == null || _cachedBoardVm == null) return;
         
-        // Nota: Qui usiamo BaseNodeViewModel o SingleImageNodeViewModel, va bene uguale
         if (DataContext is not SingleImageNodeViewModel nodeVm) return;
 
-        var boardView = this.GetVisualAncestors().OfType<BoardView>().FirstOrDefault();
-        var boardVm = boardView?.DataContext as BoardViewModel;
-
-        if (boardView == null || boardVm == null) return;
+        // --- QUI L'OTTIMIZZAZIONE ---
+        // Usiamo _cachedBoardView e _cachedBoardVm direttamente (O(1))
+        // Invece di cercarli nell'albero (O(N))
         
-        var currentPos = e.GetPosition(boardView);
+        var currentPos = e.GetPosition(_cachedBoardView);
         var screenDelta = currentPos - _startDragPoint.Value;
         
-        double scale = boardVm.Scale;
+        double scale = _cachedBoardVm.Scale;
         if (scale <= 0.01) scale = 0.1; 
 
-        // Calcoliamo lo spostamento in coordinate mondo
         double worldDeltaX = screenDelta.X / scale;
         double worldDeltaY = screenDelta.Y / scale;
 
-        // 1. Spostiamo il nodo VISIVAMENTE (RenderTransform -> GPU veloce)
+        // 1. Spostamento GPU
         _tempTransform.X = worldDeltaX;
         _tempTransform.Y = worldDeltaY;
 
-        // 2. --- MODIFICA FONDAMENTALE ---
-        // Comunichiamo questo spostamento temporaneo al ViewModel.
-        // Questo farà ridisegnare la linea di connessione in tempo reale!
+        // 2. Spostamento Logico (Connessioni)
         nodeVm.VisualOffsetX = worldDeltaX;
         nodeVm.VisualOffsetY = worldDeltaY;
         
@@ -107,18 +128,12 @@ public partial class SingleImageNodeView : UserControl
         {
             if (DataContext is SingleImageNodeViewModel nodeVm && _tempTransform != null)
             {
-                // Commit finale: Applichiamo lo spostamento accumulato alla posizione reale
                 nodeVm.X += _tempTransform.X;
                 nodeVm.Y += _tempTransform.Y;
 
-                // Reset Visivo (GPU)
                 _tempTransform.X = 0;
                 _tempTransform.Y = 0;
                 
-                // --- MODIFICA FONDAMENTALE ---
-                // Reset Logico (ViewModel). 
-                // Poiché X e Y sono state aggiornate, l'offset temporaneo deve tornare a 0
-                // altrimenti la linea verrebbe sommata due volte.
                 nodeVm.VisualOffsetX = 0;
                 nodeVm.VisualOffsetY = 0;
             }
@@ -129,26 +144,16 @@ public partial class SingleImageNodeView : UserControl
         }
     }
     
-    // Ti consiglio di aggiungere questo per sicurezza contro i memory leak
-    protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
-    {
-        _startDragPoint = null;
-        _tempTransform = null;
-        this.RenderTransform = null;
-        base.OnDetachedFromVisualTree(e);
-    }
-    
-    // ... OnPointerWheelChanged rimane invariato ...
     private void OnPointerWheelChanged(object? sender, PointerWheelEventArgs e)
     {
         if (DataContext is not SingleImageNodeViewModel vm) return;
-
         if (!vm.IsSelected) return;
 
         if (vm.FitsImage != null)
         {
             double currentRange = Math.Abs(vm.FitsImage.WhitePoint - vm.FitsImage.BlackPoint);
-            if (currentRange < 1.0) currentRange = 1000.0; 
+            // Evitiamo divisioni per zero o range troppo piccoli
+            if (currentRange < 0.001) currentRange = 1000.0; 
         
             double stepPercentage = 0.10; 
             double deltaAmount = (currentRange * stepPercentage) * e.Delta.Y;
@@ -159,19 +164,18 @@ public partial class SingleImageNodeView : UserControl
             if (isShiftPressed)
             {
                 double newBlack = vm.FitsImage.BlackPoint + deltaAmount;
-                double limit = vm.FitsImage.WhitePoint - gap;
-                if (newBlack > limit) newBlack = limit;
+                // Clamp intelligente
+                if (newBlack > vm.FitsImage.WhitePoint - gap) newBlack = vm.FitsImage.WhitePoint - gap;
                 vm.FitsImage.BlackPoint = newBlack;
             }
             else
             {
                 double newWhite = vm.FitsImage.WhitePoint + deltaAmount;
-                double limit = vm.FitsImage.BlackPoint + gap;
-                if (newWhite < limit) newWhite = limit;
+                // Clamp intelligente
+                if (newWhite < vm.FitsImage.BlackPoint + gap) newWhite = vm.FitsImage.BlackPoint + gap;
                 vm.FitsImage.WhitePoint = newWhite;
             }
         }
-
         e.Handled = true; 
     }
 }
