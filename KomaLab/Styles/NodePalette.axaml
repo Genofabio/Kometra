@@ -1,0 +1,31 @@
+﻿<ResourceDictionary xmlns="https://github.com/avaloniaui"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <Color x:Key="ImageMainColor">#3E3454</Color>      <Color x:Key="ImageSelectionColor">#8058E8</Color> 
+    <SolidColorBrush x:Key="ImageHeaderBrush" Color="#2A2236" />
+    <SolidColorBrush x:Key="ImageBorderBrush" Color="{StaticResource ImageMainColor}" />
+    <SolidColorBrush x:Key="ImageBodyBrush" Color="#2A2236" />
+    
+    <SolidColorBrush x:Key="ImageSelectionBrush" Color="{StaticResource ImageSelectionColor}" />
+
+
+    <Color x:Key="ProcessMainColor">#1B5E20</Color>
+    <Color x:Key="ProcessSelectionColor">#00E676</Color>
+
+    <SolidColorBrush x:Key="ProcessHeaderBrush" Color="{StaticResource ProcessMainColor}" />
+    <SolidColorBrush x:Key="ProcessBorderBrush" Color="#2E7D32" /> 
+    <SolidColorBrush x:Key="ProcessBodyBrush" Color="#0E3311" />
+
+    <SolidColorBrush x:Key="ProcessSelectionBrush" Color="{StaticResource ProcessSelectionColor}" />
+
+
+    <Color x:Key="OutputMainColor">#B71C1C</Color>
+    <Color x:Key="OutputSelectionColor">#FF5252</Color>
+
+    <SolidColorBrush x:Key="OutputHeaderBrush" Color="{StaticResource OutputMainColor}" />
+    <SolidColorBrush x:Key="OutputBorderBrush" Color="#D32F2F" />
+    <SolidColorBrush x:Key="OutputBodyBrush" Color="#2B0B0B" />
+
+    <SolidColorBrush x:Key="OutputSelectionBrush" Color="{StaticResource OutputSelectionColor}" />
+
+</ResourceDictionary>

@@ -2,28 +2,65 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
     
     <Style Selector="Border.NodeFrame">
-        <Setter Property="BorderBrush" Value="#3E3454"/>
         <Setter Property="BorderThickness" Value="18"/>
-        <Setter Property="Background" Value="#3E3454"/>
         <Setter Property="ClipToBounds" Value="True"/>
-        <Setter Property="CornerRadius" Value="8"/> 
+        <Setter Property="CornerRadius" Value="8"/>
+        <Setter Property="Background" Value="#202020"/>
+        <Setter Property="BorderBrush" Value="#202020"/>
     </Style>
 
-    <Style Selector="Border.NodeFrame.selected">
-        <Setter Property="BorderBrush" Value="#8058E8"/>
-        <Setter Property="Background" Value="#8058E8"/>
+    <Style Selector="Border.NodeFrame[Tag=Image]">
+        <Setter Property="Background" Value="{DynamicResource ImageBodyBrush}"/>
+        <Setter Property="BorderBrush" Value="{DynamicResource ImageBorderBrush}"/>
     </Style>
+    
+    <Style Selector="Border.NodeFrame[Tag=Image] Border.Header">
+        <Setter Property="Background" Value="{DynamicResource ImageHeaderBrush}"/>
+    </Style>
+
+    <Style Selector="Border.NodeFrame[Tag=Image].selected">
+        <Setter Property="BorderBrush" Value="{DynamicResource ImageSelectionBrush}"/>
+        <Setter Property="Background" Value="{DynamicResource ImageBodyBrush}"/> </Style>
+
+
+    <Style Selector="Border.NodeFrame[Tag=Process]">
+        <Setter Property="Background" Value="{DynamicResource ProcessBodyBrush}"/>
+        <Setter Property="BorderBrush" Value="{DynamicResource ProcessBorderBrush}"/>
+    </Style>
+    
+    <Style Selector="Border.NodeFrame[Tag=Process] Border.Header">
+        <Setter Property="Background" Value="{DynamicResource ProcessHeaderBrush}"/>
+    </Style>
+
+    <Style Selector="Border.NodeFrame[Tag=Process].selected">
+        <Setter Property="BorderBrush" Value="{DynamicResource ProcessSelectionBrush}"/>
+        <Setter Property="Background" Value="{DynamicResource ProcessBodyBrush}"/>
+    </Style>
+
+
+    <Style Selector="Border.NodeFrame[Tag=Output]">
+        <Setter Property="Background" Value="{DynamicResource OutputBodyBrush}"/>
+        <Setter Property="BorderBrush" Value="{DynamicResource OutputBorderBrush}"/>
+    </Style>
+
+    <Style Selector="Border.NodeFrame[Tag=Output] Border.Header">
+        <Setter Property="Background" Value="{DynamicResource OutputHeaderBrush}"/>
+    </Style>
+
+    <Style Selector="Border.NodeFrame[Tag=Output].selected">
+        <Setter Property="BorderBrush" Value="{DynamicResource OutputSelectionBrush}"/>
+        <Setter Property="Background" Value="{DynamicResource OutputBodyBrush}"/>
+    </Style>
+
 
     <Style Selector="Button.CloseButton">
-        <Setter Property="Background" Value="#353040"/>
+        <Setter Property="Background" Value="Transparent"/> 
         <Setter Property="Foreground" Value="White"/>
         <Setter Property="BorderThickness" Value="0"/>
-        <Setter Property="CornerRadius" Value="0,8,0,0"/> 
         <Setter Property="FontSize" Value="20"/>
         <Setter Property="FontWeight" Value="Bold"/>
         <Setter Property="HorizontalContentAlignment" Value="Center"/>
         <Setter Property="VerticalContentAlignment" Value="Center"/>
-        <Setter Property="VerticalAlignment" Value="Stretch"/> 
     </Style>
     
 </Styles>

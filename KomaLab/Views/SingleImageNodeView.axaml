@@ -3,6 +3,7 @@
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
              xmlns:vm="clr-namespace:KomaLab.ViewModels"
+             xmlns:conv="clr-namespace:KomaLab.Converters"
              mc:Ignorable="d" 
              x:Class="KomaLab.Views.SingleImageNodeView"
              x:DataType="vm:SingleImageNodeViewModel"
@@ -11,11 +12,17 @@
              PointerMoved="OnPointerMoved"
              PointerWheelChanged="OnPointerWheelChanged"
              d:DesignWidth="200" 
-             d:DesignHeight="150"
-             >
+             d:DesignHeight="150">
+    
+    <UserControl.Resources>
+        <conv:NodeCategoryConverter x:Key="CatToClassConv" />
+    </UserControl.Resources>
 
-    <Border Classes="NodeFrame" 
+    <Border Classes="NodeFrame"
             Classes.selected="{Binding IsSelected}"
+            Tag="{Binding Category, Converter={StaticResource CatToClassConv}}"
+            CornerRadius="8" 
+            
             Width="{Binding EstimatedTotalSize.Width}"
             MinWidth="150"
             HorizontalAlignment="Center"
@@ -23,9 +30,9 @@
         
         <Grid RowDefinitions="Auto, Auto">
             
-            <Border Grid.Row="0" Background="#353040" 
-                    CornerRadius="8,8,0,0"
-                    Margin="0,2,0, -2"
+            <Border Grid.Row="0" 
+                    Classes="Header"
+                    CornerRadius="0"
                     ClipToBounds="True"> 
                 
                 <Grid ColumnDefinitions="*,Auto">
@@ -44,15 +51,24 @@
                             Classes="CloseButton"
                             Command="{Binding RemoveSelfCommand}"
                             FontSize="24"
-                            Width="{Binding $self.Bounds.Height}"/>
                             
+                            VerticalAlignment="Stretch"
+                            VerticalContentAlignment="Center"
+                            HorizontalContentAlignment="Center"
+                            
+                            CornerRadius="0"
+                            BorderThickness="0"
+                            
+                            Margin="0,-1,-1,0"
+                            Padding="0,4,0,0"
+                            
+                            Width="{Binding $self.Bounds.Height}"/>
                 </Grid>
             </Border>
             
             <Border Grid.Row="1"
                     Background="#2C2C2C" 
-                    CornerRadius="0,0,8,8" ClipToBounds="True"
-                    Margin="0,-1,0, 0">
+                    CornerRadius="0,0,8,8" ClipToBounds="True">
                 
                 <Image Source="{Binding FitsImage.Image}"
                        Stretch="None"

@@ -16,6 +16,8 @@ public abstract class ImageNodeViewModel : BaseNodeViewModel
     protected ImageNodeViewModel(BaseNodeModel model) : base(model)
     {
     }
+    
+    public override NodeCategory Category => NodeCategory.Image;
 
     public override Size EstimatedTotalSize
     {

@@ -13,6 +13,7 @@ public abstract partial class BaseNodeViewModel : ObservableObject, IDisposable
     private bool _disposedValue;
     
     protected readonly BaseNodeModel Model;
+    public abstract NodeCategory Category { get; }
 
     public event Action<BaseNodeViewModel>? RequestRemove;
     public event Action<BaseNodeViewModel>? RequestBringToFront;

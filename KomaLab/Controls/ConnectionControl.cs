@@ -1,8 +1,9 @@
 ﻿using System;
+using System.Collections.Generic;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Media;
-using Avalonia.Threading;
+using KomaLab.Models;
 using KomaLab.ViewModels;
 
 namespace KomaLab.Controls;
@@ -11,10 +12,16 @@ public class ConnectionControl : Control
 {
     private ConnectionViewModel? _vm;
     
-    // Penna statica per le linee normali (grigie) -> Performance massima
+    // --- PENNA STATICA DI DEFAULT ---
+    // Usata per il 99% dei casi (linee non selezionate). Spessore 12.
     private static readonly IPen DefaultPen = new Pen(new SolidColorBrush(Color.Parse("#99666666")), 12);
 
-    // Proprietà di dipendenza
+    // --- CACHE COLORI ---
+    // Usiamo una Tupla come chiave: (Categoria, ÈSelezionato?) -> Colore
+    // Questo permette di cacheare separatamente il colore "Main" e il colore "Selection".
+    private static readonly Dictionary<(NodeCategory, bool), Color> ResourceCache = new();
+
+    // --- PROPRIETÀ ---
     public static readonly StyledProperty<bool> IsHighlightedProperty =
         AvaloniaProperty.Register<ConnectionControl, bool>(nameof(IsHighlighted));
 
@@ -26,8 +33,11 @@ public class ConnectionControl : Control
 
     public ConnectionControl()
     {
+        // Disabilitiamo l'HitTest per permettere al mouse di passare attraverso i cavi
         IsHitTestVisible = false; 
     }
+
+    // --- GESTIONE EVENTI ---
 
     protected override void OnDataContextChanged(EventArgs e)
     {
@@ -64,17 +74,53 @@ public class ConnectionControl : Control
         if (e.PropertyName == nameof(BaseNodeViewModel.X) ||
             e.PropertyName == nameof(BaseNodeViewModel.Y) ||
             e.PropertyName == nameof(BaseNodeViewModel.VisualOffsetX) ||
-            e.PropertyName == nameof(BaseNodeViewModel.VisualOffsetY))
+            e.PropertyName == nameof(BaseNodeViewModel.VisualOffsetY) ||
+            e.PropertyName == nameof(BaseNodeViewModel.EstimatedTotalSize))
         {
             InvalidateVisual();
         }
     }
 
+    // --- HELPER RECUPERO COLORI XAML ---
+
+    private Color GetCategoryColor(NodeCategory category, bool isSelected)
+    {
+        // 1. Creiamo la chiave di cache composta
+        var cacheKey = (category, isSelected);
+
+        // 2. Controllo veloce in Cache (RAM)
+        if (ResourceCache.TryGetValue(cacheKey, out var cachedColor))
+            return cachedColor;
+
+        // 3. Costruzione chiave risorsa XAML
+        // Se isSelected = true  -> "ImageSelectionColor" (Viola Acceso)
+        // Se isSelected = false -> "ImageMainColor"      (Viola Scuro)
+        string suffix = isSelected ? "SelectionColor" : "MainColor";
+        string resourceKey = $"{category}{suffix}";
+
+        // 4. Lookup nello XAML
+        if (Application.Current!.TryFindResource(resourceKey, out var res) && res is Color color)
+        {
+            ResourceCache[cacheKey] = color;
+            return color;
+        }
+
+        // Fallback
+        return Colors.Gray; 
+    }
+    
+    public static void InvalidateColorCache()
+    {
+        ResourceCache.Clear();
+    }
+
+    // --- RENDERING ---
+
     public override void Render(DrawingContext context)
     {
         if (_vm == null) return;
 
-        // 1. Calcolo coordinate
+        // 1. Calcolo Coordinate
         var source = _vm.Source;
         var target = _vm.Target;
 
@@ -88,7 +134,7 @@ public class ConnectionControl : Control
             target.Y + target.VisualOffsetY + (target.EstimatedTotalSize.Height / 2)
         );
 
-        // 2. Calcolo Bezier
+        // 2. Calcolo Curva
         double deltaX = p2.X - p1.X;
         double offset = deltaX / 2;
         
@@ -102,49 +148,48 @@ public class ConnectionControl : Control
             c.CubicBezierTo(cp1, cp2, p2);
         }
 
-        // 3. SCELTA PENNELLO (Qui abbiamo ripristinato il gradiente)
+        // 3. Scelta Pennello
         IPen penToUse;
 
         if (!IsHighlighted)
         {
-            // Caso veloce: Nessuna selezione -> Penna statica grigia
             penToUse = DefaultPen;
         }
         else
         {
-            // Caso High-Quality: Calcoliamo il gradiente orientato
             var gradient = new LinearGradientBrush
             {
                 StartPoint = new RelativePoint(p1, RelativeUnit.Absolute),
                 EndPoint = new RelativePoint(p2, RelativeUnit.Absolute)
             };
 
-            // Colori presi dal VM o definiti qui
-            var highlightColor = _vm.HighlightColor; 
-            var defaultColor = _vm.DefaultColor; 
+            // Richiediamo i colori specificando se i nodi sono selezionati
+            var sourceColor = GetCategoryColor(_vm.Source.Category, _vm.Source.IsSelected);
+            var targetColor = GetCategoryColor(_vm.Target.Category, _vm.Target.IsSelected);
+            
+            var neutralColor = Color.Parse("#99666666"); 
 
-            // Logica orientamento:
-            // Se Source è selezionato: Viola -> Grigio
-            // Se Target è selezionato: Grigio -> Viola
             if (_vm.Source.IsSelected)
             {
-                gradient.GradientStops.Add(new GradientStop(highlightColor, 0.0));
-                gradient.GradientStops.Add(new GradientStop(highlightColor, 0.45));
-                gradient.GradientStops.Add(new GradientStop(defaultColor, 0.55));
-                gradient.GradientStops.Add(new GradientStop(defaultColor, 1.0));
+                // Sorgente Attiva: Colore Selezione -> Grigio
+                gradient.GradientStops.Add(new GradientStop(sourceColor, 0.0));
+                gradient.GradientStops.Add(new GradientStop(sourceColor, 0.45));
+                gradient.GradientStops.Add(new GradientStop(neutralColor, 0.55));
+                gradient.GradientStops.Add(new GradientStop(neutralColor, 1.0));
             }
-            else // Target Selected o entrambi
+            else 
             {
-                gradient.GradientStops.Add(new GradientStop(defaultColor, 0.0));
-                gradient.GradientStops.Add(new GradientStop(defaultColor, 0.45));
-                gradient.GradientStops.Add(new GradientStop(highlightColor, 0.55));
-                gradient.GradientStops.Add(new GradientStop(highlightColor, 1.0));
+                // Target Attivo: Grigio -> Colore Selezione
+                gradient.GradientStops.Add(new GradientStop(neutralColor, 0.0));
+                gradient.GradientStops.Add(new GradientStop(neutralColor, 0.45));
+                gradient.GradientStops.Add(new GradientStop(targetColor, 0.55));
+                gradient.GradientStops.Add(new GradientStop(targetColor, 1.0));
             }
 
-            // Spessore maggiorato per l'highlight (es. 5.0)
             penToUse = new Pen(gradient, 14.0);
         }
 
+        // 4. Disegno
         context.DrawGeometry(null, penToUse, geometry);
     }
 }
