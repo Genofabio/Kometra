@@ -29,14 +29,6 @@
             <Setter Property="StrokeThickness" Value="8"/>  
             <Setter Property="StrokeDashArray" Value="4,2"/> 
             <Setter Property="Opacity" Value="0.6"/>
-            
-            <Setter Property="Transitions">
-                <Transitions>
-                    <BrushTransition Property="Stroke" Duration="0:0:0.2"/>
-                    <DoubleTransition Property="StrokeThickness" Duration="0:0:0.2"/>
-                    <DoubleTransition Property="Opacity" Duration="0:0:0.2"/>
-                </Transitions>
-            </Setter>
         </Style>
 
         <Style Selector="Path.ConnectionLine.highlighted">
@@ -83,11 +75,7 @@
                 <ItemsControl.DataTemplates>
                     <DataTemplate DataType="vm:ConnectionViewModel">
                         
-                        <Path Data="{Binding CurveGeometry}"
-                              Classes="ConnectionLine"
-                              Classes.highlighted="{Binding IsHighlighted}"
-                              Stroke="{Binding StrokeBrush}"
-                              IsHitTestVisible="False"/>
+                        <controls:ConnectionControl IsHighlighted="{Binding IsHighlighted}" />
                               
                     </DataTemplate>
                 </ItemsControl.DataTemplates>
@@ -122,9 +110,9 @@
 
                 <ItemsControl.ItemContainerTheme>
                     <ControlTheme TargetType="ContentPresenter">
-                        <Setter Property="Canvas.Left" Value="{ReflectionBinding X}" />
-                        <Setter Property="Canvas.Top" Value="{ReflectionBinding Y}" />
-                        <Setter Property="Canvas.ZIndex" Value="{ReflectionBinding ZIndex}" />
+                        <Setter Property="Canvas.Left" Value="{Binding X, DataType=vm:BaseNodeViewModel}" />
+                        <Setter Property="Canvas.Top" Value="{Binding Y, DataType=vm:BaseNodeViewModel}" />
+                        <Setter Property="Canvas.ZIndex" Value="{Binding ZIndex, DataType=vm:BaseNodeViewModel}" />
                     </ControlTheme>
                 </ItemsControl.ItemContainerTheme>
 
