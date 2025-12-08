@@ -4,10 +4,45 @@
     <Style Selector="Border.NodeFrame">
         <Setter Property="BorderThickness" Value="18"/>
         <Setter Property="ClipToBounds" Value="True"/>
-        <Setter Property="CornerRadius" Value="8"/>
-        <Setter Property="Background" Value="#202020"/>
-        <Setter Property="BorderBrush" Value="#202020"/>
+        <Setter Property="CornerRadius" Value="8,8,8,8"/> <Setter Property="Background" Value="{DynamicResource NodeFrameBackgroundBrush}"/>
+        <Setter Property="BorderBrush" Value="{DynamicResource NodeFrameBorderBrush}"/>
     </Style>
+
+    <Style Selector="Border.Header">
+        <Setter Property="CornerRadius" Value="8,0,0,0"/> <Setter Property="ClipToBounds" Value="True"/>
+    </Style>
+
+    <Style Selector="Border.Body">
+        <Setter Property="Background" Value="{DynamicResource NodeContentBackgroundBrush}"/>
+        <Setter Property="CornerRadius" Value="0,0,8,8"/>
+        <Setter Property="ClipToBounds" Value="True"/>
+    </Style>
+
+    <Style Selector="TextBlock.NodeTitle">
+        <Setter Property="FontWeight" Value="Normal"/>
+        <Setter Property="FontSize" Value="30"/>
+        <Setter Property="Padding" Value="18"/>
+        <Setter Property="HorizontalAlignment" Value="Left"/>
+        <Setter Property="VerticalAlignment" Value="Center"/>
+        <Setter Property="TextTrimming" Value="CharacterEllipsis"/>
+    </Style>
+
+    <Style Selector="Button.CloseButton">
+        <Setter Property="Background" Value="Transparent"/> 
+        <Setter Property="Foreground" Value="White"/>
+        <Setter Property="BorderThickness" Value="0"/>
+        <Setter Property="FontSize" Value="24"/>
+        <Setter Property="FontWeight" Value="Bold"/>
+        
+        <Setter Property="VerticalAlignment" Value="Stretch"/>
+        <Setter Property="VerticalContentAlignment" Value="Center"/>
+        <Setter Property="HorizontalContentAlignment" Value="Center"/>
+        <Setter Property="CornerRadius" Value="0"/>
+        
+        <Setter Property="Margin" Value="0,-1,-1,0"/>
+        <Setter Property="Padding" Value="0,4,0,0"/>
+    </Style>
+
 
     <Style Selector="Border.NodeFrame[Tag=Image]">
         <Setter Property="Background" Value="{DynamicResource ImageBodyBrush}"/>
@@ -20,7 +55,8 @@
 
     <Style Selector="Border.NodeFrame[Tag=Image].selected">
         <Setter Property="BorderBrush" Value="{DynamicResource ImageSelectionBrush}"/>
-        <Setter Property="Background" Value="{DynamicResource ImageBodyBrush}"/> </Style>
+        <Setter Property="Background" Value="{DynamicResource ImageBodyBrush}"/>
+    </Style>
 
 
     <Style Selector="Border.NodeFrame[Tag=Process]">
@@ -42,7 +78,7 @@
         <Setter Property="Background" Value="{DynamicResource OutputBodyBrush}"/>
         <Setter Property="BorderBrush" Value="{DynamicResource OutputBorderBrush}"/>
     </Style>
-
+    
     <Style Selector="Border.NodeFrame[Tag=Output] Border.Header">
         <Setter Property="Background" Value="{DynamicResource OutputHeaderBrush}"/>
     </Style>
@@ -50,17 +86,6 @@
     <Style Selector="Border.NodeFrame[Tag=Output].selected">
         <Setter Property="BorderBrush" Value="{DynamicResource OutputSelectionBrush}"/>
         <Setter Property="Background" Value="{DynamicResource OutputBodyBrush}"/>
-    </Style>
-
-
-    <Style Selector="Button.CloseButton">
-        <Setter Property="Background" Value="Transparent"/> 
-        <Setter Property="Foreground" Value="White"/>
-        <Setter Property="BorderThickness" Value="0"/>
-        <Setter Property="FontSize" Value="20"/>
-        <Setter Property="FontWeight" Value="Bold"/>
-        <Setter Property="HorizontalContentAlignment" Value="Center"/>
-        <Setter Property="VerticalContentAlignment" Value="Center"/>
     </Style>
     
 </Styles>

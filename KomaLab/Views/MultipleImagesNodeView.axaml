@@ -19,10 +19,9 @@
     </UserControl.Resources>
     
     <UserControl.Styles>
-        
         <Style Selector="Button.NavButton">
-            <Setter Property="Background" Value="#544869"/>
-            <Setter Property="Foreground" Value="#D0D0D0"/>
+            <Setter Property="Background" Value="{DynamicResource NavButtonBackgroundBrush}"/>
+            <Setter Property="Foreground" Value="{DynamicResource NavButtonForegroundBrush}"/>
             <Setter Property="BorderThickness" Value="0"/>
         </Style>
 
@@ -31,7 +30,7 @@
         </Style>
         
         <Style Selector="Button.NavButton:pointerover /template/ ContentPresenter#PART_ContentPresenter">
-            <Setter Property="Background" Value="#6B5C85"/> 
+            <Setter Property="Background" Value="{DynamicResource NavButtonHoverBackgroundBrush}"/> 
             <Setter Property="Foreground" Value="White"/>     
         </Style>
         
@@ -43,55 +42,32 @@
                 </Transitions>
             </Setter>
         </Style>
-        
         <Style Selector="Border#ImageBorder:pointerover Grid#OverlayGrid">
             <Setter Property="Opacity" Value="1.0"/>
         </Style>
-        
     </UserControl.Styles>
 
     <Border Classes="NodeFrame" 
             Classes.selected="{Binding IsSelected}"
-            Tag="{Binding Category, Converter={StaticResource CatToClassConv}}"
-            CornerRadius="8,8,8,8">
+            Tag="{Binding Category, Converter={StaticResource CatToClassConv}}">
         
         <Grid RowDefinitions="Auto, *">
             
-            <Border Grid.Row="0" 
-                    Classes="Header"
-                    CornerRadius="8,0,0,0" 
-                    ClipToBounds="True">
-                
+            <Border Grid.Row="0" Classes="Header">
                 <Grid ColumnDefinitions="*,Auto">
-                    <TextBlock Grid.Column="0" Text="{Binding Title}" 
-                               FontWeight="Normal" 
-                               FontSize="30" 
-                               HorizontalAlignment="Left" VerticalAlignment="Center"
-                               Padding="18"
-                               TextTrimming="CharacterEllipsis"/>
+                    <TextBlock Grid.Column="0" 
+                               Classes="NodeTitle"
+                               Text="{Binding Title}"/>
                     
                     <Button Grid.Column="1" 
                             Content="✕" 
                             Classes="CloseButton"
                             Command="{Binding RemoveSelfCommand}"
-                            
-                            FontSize="24"
-                            VerticalAlignment="Stretch"
-                            VerticalContentAlignment="Center"
-                            HorizontalContentAlignment="Center"
-                            
-                            CornerRadius="0"
-                            BorderThickness="0"
-                            
-                            Margin="0,-1,-1,0"
-                            Padding="0,4,0,0"
-                            
                             Width="{Binding $self.Bounds.Height}"/>
                 </Grid>
             </Border>
             
-            <Border Grid.Row="1" Background="#2C2C2C" Name="ImageBorder"
-                    CornerRadius="0,0,8,8" ClipToBounds="True"
+            <Border Grid.Row="1" Name="ImageBorder" Classes="Body"
                     Width="{Binding MaxImageSize.Width}"
                     Height="{Binding MaxImageSize.Height}">
                 
@@ -105,7 +81,8 @@
                     <Grid Name="OverlayGrid">
                         
                         <Border HorizontalAlignment="Right" VerticalAlignment="Top"
-                                Background="#B3353040" Margin="0,10,10,0"
+                                Background="{DynamicResource OverlayBackgroundBrush}" 
+                                Margin="0,10,10,0"
                                 CornerRadius="4" ClipToBounds="True">
                             
                             <TextBlock Text="{Binding CurrentImageText}"
@@ -133,7 +110,6 @@
                             <avalonia:MaterialIcon Kind="ChevronRight" />
                         </Button>
                     </Grid>
-                    
                 </Grid>
             </Border>
         </Grid>

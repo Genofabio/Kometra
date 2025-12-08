@@ -1,31 +1,52 @@
-﻿<ResourceDictionary xmlns="https://github.com/avaloniaui"
+﻿
+<ResourceDictionary xmlns="https://github.com/avaloniaui"
                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
 
-    <Color x:Key="ImageMainColor">#3E3454</Color>      <Color x:Key="ImageSelectionColor">#8058E8</Color> 
+    <!-- BaseColors -->
+    
+    <Color x:Key="NeutralFrameColor">#202020</Color>
+    <SolidColorBrush x:Key="NodeFrameBackgroundBrush" Color="{StaticResource NeutralFrameColor}" />
+    <SolidColorBrush x:Key="NodeFrameBorderBrush" Color="{StaticResource NeutralFrameColor}" />
+    
+    <Color x:Key="NeutralContentColor">#2C2C2C</Color>
+    <SolidColorBrush x:Key="NodeContentBackgroundBrush" Color="{StaticResource NeutralContentColor}" />
+    
+    <Color x:Key="ConnectionInactiveColor">#99666666</Color>
+    
+    <SolidColorBrush x:Key="OverlayBackgroundBrush" Color="#B3353040" />
+    
+    <!-- ImageCategory -->
+    
+    <Color x:Key="ImageMainColor">#3E3454</Color>
+    <Color x:Key="ImageSelectionColor">#8058E8</Color>
+
     <SolidColorBrush x:Key="ImageHeaderBrush" Color="#2A2236" />
     <SolidColorBrush x:Key="ImageBorderBrush" Color="{StaticResource ImageMainColor}" />
     <SolidColorBrush x:Key="ImageBodyBrush" Color="#2A2236" />
-    
     <SolidColorBrush x:Key="ImageSelectionBrush" Color="{StaticResource ImageSelectionColor}" />
+    
+    <!-- Multiple -->
+    <SolidColorBrush x:Key="NavButtonBackgroundBrush" Color="{StaticResource ImageMainColor}" />
+    <SolidColorBrush x:Key="NavButtonForegroundBrush" Color="#D0D0D0" />
+    <SolidColorBrush x:Key="NavButtonHoverBackgroundBrush" Color="#544869" />
 
-
+    <!-- ProcessCategory -->
     <Color x:Key="ProcessMainColor">#1B5E20</Color>
     <Color x:Key="ProcessSelectionColor">#00E676</Color>
 
     <SolidColorBrush x:Key="ProcessHeaderBrush" Color="{StaticResource ProcessMainColor}" />
-    <SolidColorBrush x:Key="ProcessBorderBrush" Color="#2E7D32" /> 
+    <SolidColorBrush x:Key="ProcessBorderBrush" Color="#2E7D32" />
     <SolidColorBrush x:Key="ProcessBodyBrush" Color="#0E3311" />
-
     <SolidColorBrush x:Key="ProcessSelectionBrush" Color="{StaticResource ProcessSelectionColor}" />
 
 
+    <!-- OutputCategory -->
     <Color x:Key="OutputMainColor">#B71C1C</Color>
     <Color x:Key="OutputSelectionColor">#FF5252</Color>
 
     <SolidColorBrush x:Key="OutputHeaderBrush" Color="{StaticResource OutputMainColor}" />
     <SolidColorBrush x:Key="OutputBorderBrush" Color="#D32F2F" />
     <SolidColorBrush x:Key="OutputBodyBrush" Color="#2B0B0B" />
-
     <SolidColorBrush x:Key="OutputSelectionBrush" Color="{StaticResource OutputSelectionColor}" />
 
 </ResourceDictionary>
