@@ -11,17 +11,27 @@ namespace KomaLab.Controls;
 public class ConnectionControl : Control
 {
     private ConnectionViewModel? _vm;
-    
-    // --- PENNA STATICA DI DEFAULT ---
-    // Usata per il 99% dei casi (linee non selezionate). Spessore 12.
-    private static readonly IPen DefaultPen = new Pen(new SolidColorBrush(Color.Parse("#99666666")), 12);
 
-    // --- CACHE COLORI ---
-    // Usiamo una Tupla come chiave: (Categoria, ÈSelezionato?) -> Colore
-    // Questo permette di cacheare separatamente il colore "Main" e il colore "Selection".
-    private static readonly Dictionary<(NodeCategory, bool), Color> ResourceCache = new();
+    // --- COSTANTI DI CONFIGURAZIONE (Spessori) ---
+    private const double ThicknessNormal = 12.0;
+    private const double ThicknessHighlight = 14.0;
+    
+    // Chiave della risorsa definita in AppPalette.axaml
+    private const string InactiveColorKey = "ConnectionInactiveColor";
+
+    // --- CACHE & STATO ---
+    
+    // Cache per i colori delle categorie (Categoria, Selected) -> Colore
+    private static readonly Dictionary<(NodeCategory, bool), Color> _resourceCache = new();
+    
+    // Cache specifica per il colore inattivo (Grigio)
+    private static Color? _cachedInactiveColor;
+    
+    // Cache per la penna di default (ricreata solo se necessario)
+    private static IPen? _cachedDefaultPen;
 
     // --- PROPRIETÀ ---
+    
     public static readonly StyledProperty<bool> IsHighlightedProperty =
         AvaloniaProperty.Register<ConnectionControl, bool>(nameof(IsHighlighted));
 
@@ -33,7 +43,6 @@ public class ConnectionControl : Control
 
     public ConnectionControl()
     {
-        // Disabilitiamo l'HitTest per permettere al mouse di passare attraverso i cavi
         IsHitTestVisible = false; 
     }
 
@@ -83,35 +92,53 @@ public class ConnectionControl : Control
 
     // --- HELPER RECUPERO COLORI XAML ---
 
-    private Color GetCategoryColor(NodeCategory category, bool isSelected)
+    /// <summary>
+    /// Recupera il colore neutro (grigio) dalla Palette.
+    /// </summary>
+    private Color GetInactiveColor()
     {
-        // 1. Creiamo la chiave di cache composta
-        var cacheKey = (category, isSelected);
+        // 1. Controllo cache veloce
+        if (_cachedInactiveColor.HasValue) 
+            return _cachedInactiveColor.Value;
 
-        // 2. Controllo veloce in Cache (RAM)
-        if (ResourceCache.TryGetValue(cacheKey, out var cachedColor))
-            return cachedColor;
-
-        // 3. Costruzione chiave risorsa XAML
-        // Se isSelected = true  -> "ImageSelectionColor" (Viola Acceso)
-        // Se isSelected = false -> "ImageMainColor"      (Viola Scuro)
-        string suffix = isSelected ? "SelectionColor" : "MainColor";
-        string resourceKey = $"{category}{suffix}";
-
-        // 4. Lookup nello XAML
-        if (Application.Current!.TryFindResource(resourceKey, out var res) && res is Color color)
+        // 2. Lookup nello XAML usando la chiave costante
+        if (Application.Current!.TryFindResource(InactiveColorKey, out var res) && res is Color color)
         {
-            ResourceCache[cacheKey] = color;
+            _cachedInactiveColor = color;
             return color;
         }
 
-        // Fallback
+        // Fallback estremo se la risorsa manca
+        return Colors.Gray;
+    }
+
+    /// <summary>
+    /// Recupera il colore specifico della categoria (Main o Selection).
+    /// </summary>
+    private Color GetCategoryColor(NodeCategory category, bool isSelected)
+    {
+        var cacheKey = (category, isSelected);
+
+        if (_resourceCache.TryGetValue(cacheKey, out var cachedColor))
+            return cachedColor;
+
+        string suffix = isSelected ? "SelectionColor" : "MainColor";
+        string resourceKey = $"{category}{suffix}";
+
+        if (Application.Current!.TryFindResource(resourceKey, out var res) && res is Color color)
+        {
+            _resourceCache[cacheKey] = color;
+            return color;
+        }
+
         return Colors.Gray; 
     }
     
     public static void InvalidateColorCache()
     {
-        ResourceCache.Clear();
+        _resourceCache.Clear();
+        _cachedInactiveColor = null;
+        _cachedDefaultPen = null; // Forziamo la ricreazione della penna al prossimo frame
     }
 
     // --- RENDERING ---
@@ -120,7 +147,18 @@ public class ConnectionControl : Control
     {
         if (_vm == null) return;
 
-        // 1. Calcolo Coordinate
+        // 1. Recupera il colore neutro (serve sia per DefaultPen che per Gradient)
+        // Questo rimuove il magic number "#99666666" dal metodo Render
+        Color neutralColor = GetInactiveColor();
+
+        // 2. Gestione Penna Default (Lazy Loading)
+        // Se non esiste ancora, la creiamo usando il colore recuperato dalla palette
+        if (_cachedDefaultPen == null)
+        {
+            _cachedDefaultPen = new Pen(new SolidColorBrush(neutralColor), ThicknessNormal);
+        }
+
+        // 3. Calcolo Geometria (Invariato)
         var source = _vm.Source;
         var target = _vm.Target;
 
@@ -134,10 +172,8 @@ public class ConnectionControl : Control
             target.Y + target.VisualOffsetY + (target.EstimatedTotalSize.Height / 2)
         );
 
-        // 2. Calcolo Curva
         double deltaX = p2.X - p1.X;
         double offset = deltaX / 2;
-        
         var cp1 = new Point(p1.X + offset, p1.Y);
         var cp2 = new Point(p2.X - offset, p2.Y);
 
@@ -148,12 +184,13 @@ public class ConnectionControl : Control
             c.CubicBezierTo(cp1, cp2, p2);
         }
 
-        // 3. Scelta Pennello
+        // 4. Scelta Pennello
         IPen penToUse;
 
         if (!IsHighlighted)
         {
-            penToUse = DefaultPen;
+            // Usa la penna cacheata (colore preso dalla Palette)
+            penToUse = _cachedDefaultPen;
         }
         else
         {
@@ -163,15 +200,13 @@ public class ConnectionControl : Control
                 EndPoint = new RelativePoint(p2, RelativeUnit.Absolute)
             };
 
-            // Richiediamo i colori specificando se i nodi sono selezionati
             var sourceColor = GetCategoryColor(_vm.Source.Category, _vm.Source.IsSelected);
             var targetColor = GetCategoryColor(_vm.Target.Category, _vm.Target.IsSelected);
             
-            var neutralColor = Color.Parse("#99666666"); 
-
+            // Usiamo 'neutralColor' recuperato dinamicamente, non più Color.Parse(...)
+            
             if (_vm.Source.IsSelected)
             {
-                // Sorgente Attiva: Colore Selezione -> Grigio
                 gradient.GradientStops.Add(new GradientStop(sourceColor, 0.0));
                 gradient.GradientStops.Add(new GradientStop(sourceColor, 0.45));
                 gradient.GradientStops.Add(new GradientStop(neutralColor, 0.55));
@@ -179,17 +214,17 @@ public class ConnectionControl : Control
             }
             else 
             {
-                // Target Attivo: Grigio -> Colore Selezione
                 gradient.GradientStops.Add(new GradientStop(neutralColor, 0.0));
                 gradient.GradientStops.Add(new GradientStop(neutralColor, 0.45));
                 gradient.GradientStops.Add(new GradientStop(targetColor, 0.55));
                 gradient.GradientStops.Add(new GradientStop(targetColor, 1.0));
             }
 
-            penToUse = new Pen(gradient, 14.0);
+            // Usiamo la costante ThicknessHighlight (14.0)
+            penToUse = new Pen(gradient, ThicknessHighlight);
         }
 
-        // 4. Disegno
+        // 5. Disegno
         context.DrawGeometry(null, penToUse, geometry);
     }
 }

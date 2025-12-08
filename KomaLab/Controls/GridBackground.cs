@@ -3,17 +3,20 @@ using System.Linq;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Media;
-using Avalonia.Media.Immutable;
 
 namespace KomaLab.Controls;
 
-// RIMOSSO "partial" -> Ora è una classe normale
 public class GridBackground : Control
 {
     // --- PROPRIETÀ STYLED ---
+    
     public static readonly StyledProperty<IBrush?> BackgroundProperty =
         AvaloniaProperty.Register<GridBackground, IBrush?>(nameof(Background));
     
+    // NUOVA PROPRIETÀ: Permette di bindare il colore delle linee da XAML/Palette
+    public static readonly StyledProperty<IBrush?> GridLinesBrushProperty =
+        AvaloniaProperty.Register<GridBackground, IBrush?>(nameof(GridLinesBrush));
+
     public static readonly StyledProperty<double> OffsetXProperty =
         AvaloniaProperty.Register<GridBackground, double>(nameof(OffsetX));
     
@@ -23,10 +26,17 @@ public class GridBackground : Control
     public static readonly StyledProperty<double> ScaleProperty =
         AvaloniaProperty.Register<GridBackground, double>(nameof(Scale), 1.0);
     
+    // Wrapper C#
     public IBrush? Background
     {
         get => GetValue(BackgroundProperty);
         set => SetValue(BackgroundProperty, value);
+    }
+
+    public IBrush? GridLinesBrush
+    {
+        get => GetValue(GridLinesBrushProperty);
+        set => SetValue(GridLinesBrushProperty, value);
     }
 
     public double OffsetX { get => GetValue(OffsetXProperty); set => SetValue(OffsetXProperty, value); }
@@ -38,7 +48,7 @@ public class GridBackground : Control
     private double _tempPanY;
     private readonly double _gridStep = 200; 
     
-    private Pen _gridPen;
+    private Pen _gridPen; // La penna verrà creata dinamicamente
     
     private readonly double[] _baseDashPattern = { 15, 15 };
     private double _basePatternLength; 
@@ -48,25 +58,49 @@ public class GridBackground : Control
 
     static GridBackground()
     {
+        // Diciamo ad Avalonia che se cambia il colore delle linee, deve ridisegnare
         AffectsRender<GridBackground>(
-            BackgroundProperty, OffsetXProperty, OffsetYProperty, ScaleProperty, BoundsProperty
+            BackgroundProperty, 
+            GridLinesBrushProperty, // <--- Aggiunto
+            OffsetXProperty, 
+            OffsetYProperty, 
+            ScaleProperty, 
+            BoundsProperty
         );
     }
 
     public GridBackground()
     {
-        // --- QUI SOSTITUIAMO LO XAML ---
-        // Impostiamo i default che prima avevi nello XAML
         ClipToBounds = false; 
-        Background = new SolidColorBrush(Color.Parse("#121212")); 
-        // -------------------------------
+        
+        // RIMOSSO: Background = ... ("#121212"); 
+        // Ora lasciamo che sia null di default, ci penserà lo XAML a settarlo.
 
         _basePatternLength = _baseDashPattern.Sum();
         
-        var brush = new SolidColorBrush(Color.Parse("#272727")).ToImmutable();
-        _gridPen = new Pen(brush, 1.0);
+        // Inizializziamo una penna di default (trasparente o dummy)
+        // Verrà sovrascritta non appena lo XAML applica il GridLinesBrush
+        _gridPen = new Pen(Brushes.Transparent, 1.0);
     }
     
+    // --- GESTIONE CAMBIO PROPRIETÀ ---
+    protected override void OnPropertyChanged(AvaloniaPropertyChangedEventArgs change)
+    {
+        base.OnPropertyChanged(change);
+
+        // Se cambia il pennello delle linee (es. cambio tema o init iniziale), ricreiamo la Penna
+        if (change.Property == GridLinesBrushProperty)
+        {
+            var newBrush = change.NewValue as IBrush;
+            // Creiamo una nuova penna immutabile per performance
+            _gridPen = new Pen(newBrush ?? Brushes.Gray, 1.0);
+            
+            // Forziamo il ricalcolo dello stile tratteggiato
+            _lastScale = -1; 
+            UpdatePenStyleForScale();
+        }
+    }
+
     public void SetVisualPan(double x, double y)
     {
         if (Math.Abs(_tempPanX - x) < 0.1 && Math.Abs(_tempPanY - y) < 0.1) 
@@ -78,7 +112,7 @@ public class GridBackground : Control
 
     public override void Render(DrawingContext context)
     {
-        // Disegna lo sfondo (gestito manualmente perché Control base non lo disegna da solo)
+        // 1. Disegna Sfondo
         if (Background is not null)
             context.FillRectangle(Background, new Rect(Bounds.Size));
 
@@ -86,6 +120,9 @@ public class GridBackground : Control
         double height = Bounds.Height;
         
         if (width <= 0 || height <= 0 || Scale <= 0.001) return;
+        
+        // Se non abbiamo un pennello per le linee, non disegniamo la griglia
+        if (GridLinesBrush == null) return;
 
         UpdatePenStyleForScale();
 
@@ -95,7 +132,7 @@ public class GridBackground : Control
         
         if (scaledStep < 10) return;
 
-        // Logica allineamento tratteggio
+        // Logica allineamento
         double patternOffsetY = currentOffsetY % _scaledPatternLength;
         if (patternOffsetY > 0) patternOffsetY -= _scaledPatternLength;
         
@@ -123,6 +160,7 @@ public class GridBackground : Control
 
     private void UpdatePenStyleForScale()
     {
+        // Ricalcoliamo solo se la scala cambia
         if (Math.Abs(Scale - _lastScale) < 0.001) return;
 
         _lastScale = Scale;

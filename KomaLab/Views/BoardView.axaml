@@ -23,24 +23,13 @@
         <KeyBinding Gesture="Ctrl+Y" Command="{Binding RedoCommand}" />
     </UserControl.KeyBindings>
 
-    <UserControl.Styles>
-        
-        <Style Selector="Path.ConnectionLine">
-            <Setter Property="StrokeThickness" Value="8"/>  
-            <Setter Property="StrokeDashArray" Value="4,2"/> 
-            <Setter Property="Opacity" Value="0.6"/>
-        </Style>
-
-        <Style Selector="Path.ConnectionLine.highlighted">
-            <Setter Property="StrokeThickness" Value="10"/>  
-            <Setter Property="StrokeDashArray" Value="{x:Null}"/> <Setter Property="Opacity" Value="1.0"/>
-        </Style>
-
-    </UserControl.Styles>
-
     <Grid>
         
         <controls:GridBackground x:Name="BackgroundGrid"
+                                 Background="{DynamicResource AppBackgroundBrush}"
+                         
+                                 GridLinesBrush="{DynamicResource GridLineBrush}"
+                         
                                  OffsetX="{Binding OffsetX}"
                                  OffsetY="{Binding OffsetY}"
                                  Scale="{Binding Scale}"
@@ -74,9 +63,7 @@
 
                 <ItemsControl.DataTemplates>
                     <DataTemplate DataType="vm:ConnectionViewModel">
-                        
                         <controls:ConnectionControl IsHighlighted="{Binding IsHighlighted}" />
-                              
                     </DataTemplate>
                 </ItemsControl.DataTemplates>
             </ItemsControl>
