@@ -181,6 +181,26 @@ public partial class AlignmentToolView : Window
         if (_isPanning) return; 
         if (vm.ActiveImage == null) return; 
 
+        // --- NUOVA LOGICA: ZOOM (CTRL + WHEEL) ---
+        // Coerente con SingleImageNodeView
+        if ((e.KeyModifiers & KeyModifiers.Control) == KeyModifiers.Control)
+        {
+            // Ottieni la posizione del mouse RELATIVA al bordo dell'immagine
+            // Questo permette di zoomare esattamente dove stai puntando col mouse
+            var mousePos = e.GetPosition(this.PreviewBorder);
+            
+            // Fattore di zoom (uguale ai nodi)
+            double factor = e.Delta.Y > 0 ? 1.1 : (1.0 / 1.1);
+
+            // Delega al ViewModel (che usa ImageViewport)
+            vm.ApplyZoomAtPoint(factor, mousePos);
+
+            e.Handled = true;
+            return;
+        }
+        // ------------------------------------------
+
+        // --- LOGICA ESISTENTE: SOGLIE (SHIFT o NESSUN TASTO) ---
         double currentRange = vm.WhitePoint - vm.BlackPoint;
         double step = currentRange * 0.05; 
     

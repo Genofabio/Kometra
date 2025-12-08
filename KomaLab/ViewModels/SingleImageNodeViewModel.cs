@@ -28,6 +28,7 @@ public partial class SingleImageNodeViewModel : ImageNodeViewModel
 
     // --- Stato Interno ---
     private FitsImageData? _currentData;
+    public ImageViewport Viewport { get; } = new();
 
     // --- Proprietà Observable ---
     [ObservableProperty]
@@ -81,6 +82,16 @@ public partial class SingleImageNodeViewModel : ImageNodeViewModel
     {
         OnPropertyChanged(nameof(NodeContentSize));
         OnPropertyChanged(nameof(EstimatedTotalSize)); 
+
+        if (value != null)
+        {
+            // 1. Informiamo il Viewport delle dimensioni reali dell'immagine
+            Viewport.ImageSize = value.ImageSize;
+            
+            // 2. Resettiamo la vista (Zoom to fit)
+            // Nota: Viewport.ViewportSize deve essere aggiornato dalla View (vedi punto 3 sotto)
+            Viewport.ResetView();
+        }
     }
 
     // --- Logica di Caricamento ---

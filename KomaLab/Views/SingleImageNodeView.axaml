@@ -44,11 +44,48 @@
                 </Grid>
             </Border>
             
-            <Border Grid.Row="1" Classes="Body">
-                <Image Source="{Binding FitsImage.Image}"
-                       Stretch="None"
-                       HorizontalAlignment="Center" 
-                       RenderOptions.BitmapInterpolationMode="LowQuality"/>
+            <Border Grid.Row="1" 
+                    Classes="Body" 
+                    ClipToBounds="True"
+                    Name="ImageContainer"
+                    Background="Black">
+
+                <Grid>
+        
+                    <Image Source="{Binding FitsImage.Image}"
+                           Stretch="None"
+                           HorizontalAlignment="Left" 
+                           VerticalAlignment="Top"
+                           RenderTransformOrigin="0,0"
+                           RenderOptions.BitmapInterpolationMode="None">
+            
+                        <Image.RenderTransform>
+                            <TransformGroup>
+                                <ScaleTransform ScaleX="{Binding Viewport.Scale}" 
+                                                ScaleY="{Binding Viewport.Scale}"/>
+                                <TranslateTransform X="{Binding Viewport.OffsetX}" 
+                                                    Y="{Binding Viewport.OffsetY}"/>
+                            </TransformGroup>
+                        </Image.RenderTransform>
+                    </Image>
+
+                    <Border HorizontalAlignment="Left" 
+                            VerticalAlignment="Top"
+                            IsHitTestVisible="False"
+                            Background="{DynamicResource OverlayTextBackgroundBrush}"
+        
+                            Margin="15"
+                            Padding="16,10"
+                            CornerRadius="8"
+        
+                            IsVisible="{Binding Viewport.IsZoomed}">
+    
+                        <TextBlock Text="{Binding Viewport.Scale, StringFormat='{}{0:P0}'}"
+                                   Foreground="{DynamicResource OverlayTextForegroundBrush}" 
+                                   FontSize="28"/>
+                    </Border>
+        
+                </Grid>
             </Border>
             
         </Grid>

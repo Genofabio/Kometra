@@ -43,7 +43,7 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
     #region Proprietà
     
     public List<string>? FinalProcessedPaths { get; private set; }
-    public ViewportManager Viewport { get; } = new();
+    public AlignmentImageViewport Viewport { get; } = new();
     public ObservableCollection<CoordinateEntry> CoordinateEntries { get; } = new();
 
     public Size ViewportSize

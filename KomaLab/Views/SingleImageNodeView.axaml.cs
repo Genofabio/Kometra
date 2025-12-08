@@ -1,49 +1,71 @@
 ﻿using System;
+using System.Linq;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Media;
 using Avalonia.VisualTree; 
 using KomaLab.ViewModels;
-using System.Linq;
 
 namespace KomaLab.Views;
 
 public partial class SingleImageNodeView : UserControl
 {
+    // --- Variabili per il Drag del Nodo (Spostamento sulla Board) ---
     private Point? _startDragPoint;
     private TranslateTransform? _tempTransform;
     
-    // CACHE: Salviamo i riferimenti per evitare la ricerca continua
+    // --- Variabili per il Pan Interno (Spostamento Immagine nel Nodo) ---
+    private bool _isPanningImage;
+    private Point _lastPanPosition;
+    
+    // --- CACHE: Riferimenti per ottimizzazione ---
     private BoardViewModel? _cachedBoardVm;
     private Visual? _cachedBoardView;
 
     public SingleImageNodeView()
     {
         InitializeComponent();
+        
+        // Setup trasformazione per il movimento del nodo
         _tempTransform = new TranslateTransform();
         this.RenderTransform = _tempTransform;
+
+        // --- NUOVO: Sincronizzazione Dimensioni Viewport ---
+        // Troviamo il contenitore (definito nello XAML con x:Name="ImageContainer")
+        // e aggiorniamo il VM quando la dimensione cambia.
+        var container = this.FindControl<Border>("ImageContainer");
+        if (container != null)
+        {
+            container.SizeChanged += (_, e) => 
+            {
+                if (DataContext is SingleImageNodeViewModel vm)
+                {
+                    vm.Viewport.ViewportSize = e.NewSize;
+                    
+                    // Opzionale: Se vuoi che faccia "Zoom to Fit" ogni volta 
+                    // che ridimensioni il nodo, scommenta la riga sotto:
+                    // vm.Viewport.ResetView(); 
+                }
+            };
+        }
     }
     
     // --- OTTIMIZZAZIONE CACHE ---
     protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)
     {
         base.OnAttachedToVisualTree(e);
-        // Troviamo il genitore UNA volta sola all'inizio
         _cachedBoardView = this.GetVisualAncestors().OfType<BoardView>().FirstOrDefault();
         _cachedBoardVm = _cachedBoardView?.DataContext as BoardViewModel;
     }
 
     protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
     {
-        // Pulizia riferimenti per evitare memory leaks
         _cachedBoardVm = null;
         _cachedBoardView = null;
-        
         _startDragPoint = null;
         _tempTransform = null;
         this.RenderTransform = null;
-        
         base.OnDetachedFromVisualTree(e);
     }
     // ----------------------------
@@ -53,9 +75,23 @@ public partial class SingleImageNodeView : UserControl
         if (DataContext is not SingleImageNodeViewModel nodeVm) return;
         
         var properties = e.GetCurrentPoint(this).Properties;
+
+        // --- NUOVO: PAN INTERNO (Tasto Destro) ---
+        // Usiamo il tasto destro per spostare l'immagine DENTRO il nodo
+        // senza spostare il nodo sulla board.
+        if (properties.IsMiddleButtonPressed)
+        {
+            _isPanningImage = true;
+            _lastPanPosition = e.GetPosition(this);
+            this.Cursor = new Cursor(StandardCursorType.SizeAll);
+            e.Pointer.Capture(this);
+            e.Handled = true;
+            return; // Usciamo per non triggerare la selezione del nodo
+        }
+
+        // --- ESISTENTE: DRAG DEL NODO (Tasto Sinistro) ---
         if (properties.IsLeftButtonPressed)
         {
-            // Fallback di sicurezza se la cache è vuota (raro, ma possibile)
             if (_cachedBoardVm == null || _cachedBoardView == null)
             {
                 _cachedBoardView = this.GetVisualAncestors().OfType<BoardView>().FirstOrDefault();
@@ -92,18 +128,28 @@ public partial class SingleImageNodeView : UserControl
 
     private void OnPointerMoved(object? sender, PointerEventArgs e)
     {
-        // Null checks rapidi
+        if (DataContext is not SingleImageNodeViewModel nodeVm) return;
+
+        // --- NUOVO: GESTIONE PAN INTERNO ---
+        if (_isPanningImage)
+        {
+            var currentPos = e.GetPosition(this);
+            var delta = currentPos - _lastPanPosition;
+            _lastPanPosition = currentPos;
+
+            // Deleghiamo la matematica al ViewportManager (codice riutilizzato!)
+            nodeVm.Viewport.ApplyPan(delta.X, delta.Y);
+            
+            e.Handled = true;
+            return;
+        }
+
+        // --- ESISTENTE: GESTIONE DRAG DEL NODO ---
         if (_startDragPoint == null || _tempTransform == null || 
             _cachedBoardView == null || _cachedBoardVm == null) return;
         
-        if (DataContext is not SingleImageNodeViewModel nodeVm) return;
-
-        // --- QUI L'OTTIMIZZAZIONE ---
-        // Usiamo _cachedBoardView e _cachedBoardVm direttamente (O(1))
-        // Invece di cercarli nell'albero (O(N))
-        
-        var currentPos = e.GetPosition(_cachedBoardView);
-        var screenDelta = currentPos - _startDragPoint.Value;
+        var currentBoardPos = e.GetPosition(_cachedBoardView);
+        var screenDelta = currentBoardPos - _startDragPoint.Value;
         
         double scale = _cachedBoardVm.Scale;
         if (scale <= 0.01) scale = 0.1; 
@@ -111,11 +157,9 @@ public partial class SingleImageNodeView : UserControl
         double worldDeltaX = screenDelta.X / scale;
         double worldDeltaY = screenDelta.Y / scale;
 
-        // 1. Spostamento GPU
         _tempTransform.X = worldDeltaX;
         _tempTransform.Y = worldDeltaY;
 
-        // 2. Spostamento Logico (Connessioni)
         nodeVm.VisualOffsetX = worldDeltaX;
         nodeVm.VisualOffsetY = worldDeltaY;
         
@@ -124,6 +168,17 @@ public partial class SingleImageNodeView : UserControl
 
     private void OnPointerReleased(object? sender, PointerReleasedEventArgs e)
     {
+        // --- NUOVO: RILASCIO PAN INTERNO ---
+        if (_isPanningImage && e.InitialPressMouseButton == MouseButton.Middle)
+        {
+            _isPanningImage = false;
+            this.Cursor = Cursor.Default; // Ripristina il cursore normale
+            e.Pointer.Capture(null);
+            e.Handled = true;
+            return;
+        }
+
+        // --- ESISTENTE: RILASCIO DRAG DEL NODO ---
         if (_startDragPoint != null && e.InitialPressMouseButton == MouseButton.Left)
         {
             if (DataContext is SingleImageNodeViewModel nodeVm && _tempTransform != null)
@@ -149,10 +204,31 @@ public partial class SingleImageNodeView : UserControl
         if (DataContext is not SingleImageNodeViewModel vm) return;
         if (!vm.IsSelected) return;
 
+        // --- NUOVO: ZOOM (CTRL + WHEEL) ---
+        if ((e.KeyModifiers & KeyModifiers.Control) == KeyModifiers.Control)
+        {
+            // Troviamo il container per calcolare la posizione relativa del mouse
+            var container = this.FindControl<Border>("ImageContainer");
+            if (container != null)
+            {
+                var centerPoint = new Point(container.Bounds.Width / 2.0, container.Bounds.Height / 2.0);
+                
+                // Usiamo un fattore simile a quello usato nell'AlignmentTool
+                // Delta > 0 = Zoom In, Delta < 0 = Zoom Out
+                double factor = e.Delta.Y > 0 ? 1.1 : (1.0 / 1.1);
+
+                // Deleghiamo al ViewportManager
+                vm.Viewport.ApplyZoomAtPoint(factor, centerPoint);
+            }
+
+            e.Handled = true;
+            return;
+        }
+
+        // --- ESISTENTE: MODIFICA SOGLIE (SHIFT/NONE + WHEEL) ---
         if (vm.FitsImage != null)
         {
             double currentRange = Math.Abs(vm.FitsImage.WhitePoint - vm.FitsImage.BlackPoint);
-            // Evitiamo divisioni per zero o range troppo piccoli
             if (currentRange < 0.001) currentRange = 1000.0; 
         
             double stepPercentage = 0.10; 
@@ -164,14 +240,12 @@ public partial class SingleImageNodeView : UserControl
             if (isShiftPressed)
             {
                 double newBlack = vm.FitsImage.BlackPoint + deltaAmount;
-                // Clamp intelligente
                 if (newBlack > vm.FitsImage.WhitePoint - gap) newBlack = vm.FitsImage.WhitePoint - gap;
                 vm.FitsImage.BlackPoint = newBlack;
             }
             else
             {
                 double newWhite = vm.FitsImage.WhitePoint + deltaAmount;
-                // Clamp intelligente
                 if (newWhite < vm.FitsImage.BlackPoint + gap) newWhite = vm.FitsImage.BlackPoint + gap;
                 vm.FitsImage.WhitePoint = newWhite;
             }

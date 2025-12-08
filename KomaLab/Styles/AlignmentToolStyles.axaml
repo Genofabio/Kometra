@@ -1,23 +1,22 @@
 ﻿<Styles xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
-    
+
     <Style Selector="StackPanel.NavControls TextBlock">
         <Setter Property="Foreground" Value="White"/>
         <Setter Property="HorizontalAlignment" Value="Center"/>
         <Setter Property="Margin" Value="0,4"/>
     </Style>
-    
+
     <Style Selector="Button:pointerover /template/ ContentPresenter#PART_ContentPresenter">
-        <Setter Property="Background" Value="#33FFFFFF"/> 
+        <Setter Property="Background" Value="{DynamicResource MenuBackgroundBrush}"/> 
         <Setter Property="Foreground" Value="White"/> 
     </Style>
+
 
     <Style Selector="Button.calculate">
         <Setter Property="Background" Value="{DynamicResource ActionPrimaryBackgroundBrush}"/> 
         <Setter Property="Foreground" Value="White"/>
         <Setter Property="BorderThickness" Value="0"/>
-        <Setter Property="Padding" Value="10,6"/>
-        <Setter Property="CornerRadius" Value="4"/>
     </Style>
     <Style Selector="Button.calculate:pointerover /template/ ContentPresenter#PART_ContentPresenter">
         <Setter Property="Background" Value="{DynamicResource ActionPrimaryHoverBrush}"/> 
@@ -37,8 +36,6 @@
         <Setter Property="Background" Value="{DynamicResource ActionSuccessBackgroundBrush}"/> 
         <Setter Property="Foreground" Value="White"/>
         <Setter Property="BorderThickness" Value="0"/>
-        <Setter Property="Padding" Value="10,6"/>
-        <Setter Property="CornerRadius" Value="4"/>
     </Style>
     <Style Selector="Button.apply:pointerover /template/ ContentPresenter#PART_ContentPresenter">
         <Setter Property="Background" Value="{DynamicResource ActionSuccessHoverBrush}"/> 
@@ -58,8 +55,6 @@
         <Setter Property="Background" Value="{DynamicResource ActionDestructiveBackgroundBrush}"/> 
         <Setter Property="Foreground" Value="White"/>
         <Setter Property="BorderThickness" Value="0"/>
-        <Setter Property="Padding" Value="10,6"/>
-        <Setter Property="CornerRadius" Value="4"/>
     </Style>
     <Style Selector="Button.cancel:pointerover /template/ ContentPresenter#PART_ContentPresenter">
         <Setter Property="Background" Value="{DynamicResource ActionDestructiveHoverBrush}"/> 
