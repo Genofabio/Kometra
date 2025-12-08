@@ -20,91 +20,34 @@
         <converters:EqualityConverter x:Key="EqualityConverter" />
         <converters:AlignmentModeNameConverter x:Key="AlignmentModeNameConverter" />
         
-        <!-- DataTemplate aggiornato con CoordinateString -->
         <DataTemplate x:Key="CoordinateItemTemplate"
                       x:DataType="helpers:CoordinateEntry">
             <Grid ColumnDefinitions="Auto, *" Margin="2,3" MinHeight="22" ColumnSpacing="5">
-                <!-- Colonna 0: "Immagine N:" -->
                 <TextBlock Grid.Column="0" VerticalAlignment="Center">
                     <Run Text="Immagine "/>
                     <Run Text="{Binding Index}"/>
                     <Run Text=":"/>
                 </TextBlock>
-                <!-- Colonna 1: "(xx.xx; yy.yy)" -->
                 <TextBlock Grid.Column="1"
                            Text="{Binding CoordinateString}"
                            VerticalAlignment="Center"/>
             </Grid>
         </DataTemplate>
-        
     </Window.Resources>
 
     <Window.Styles>
-        <Style Selector="StackPanel.NavControls TextBlock">
-            <Setter Property="Foreground" Value="White"/>
-            <Setter Property="HorizontalAlignment" Value="Center"/>
-            <Setter Property="Margin" Value="0,4"/>
-        </Style>
-        
-        <Style Selector="Button:pointerover /template/ ContentPresenter#PART_ContentPresenter">
-            <Setter Property="Background" Value="#3A3A3A"/> <Setter Property="Foreground" Value="White"/> </Style>
-    
-        <Style Selector="Button.calculate">
-            <Setter Property="Background" Value="#8058E8"/> <Setter Property="Foreground" Value="White"/>
-            <Setter Property="BorderThickness" Value="0"/>
-        </Style>
-        <Style Selector="Button.calculate:pointerover /template/ ContentPresenter#PART_ContentPresenter">
-            <Setter Property="Background" Value="#936BFF"/> <Setter Property="TextBlock.Foreground" Value="White"/>
-        </Style>
-        <Style Selector="Button.calculate:pressed /template/ ContentPresenter#PART_ContentPresenter">
-            <Setter Property="Background" Value="#704AD9"/> <Setter Property="TextBlock.Foreground" Value="White"/>
-        </Style>
-        <Style Selector="Button.calculate:disabled">
-            <Setter Property="Background" Value="#555"/>
-            <Setter Property="Opacity" Value="0.7"/>
-        </Style>
-
-
-        <Style Selector="Button.apply">
-            <Setter Property="Background" Value="#03A077"/> <Setter Property="Foreground" Value="White"/>
-            <Setter Property="BorderThickness" Value="0"/>
-        </Style>
-        <Style Selector="Button.apply:pointerover /template/ ContentPresenter#PART_ContentPresenter">
-            <Setter Property="Background" Value="#04CA95"/> <Setter Property="TextBlock.Foreground" Value="White"/>
-        </Style>
-        <Style Selector="Button.apply:pressed /template/ ContentPresenter#PART_ContentPresenter">
-            <Setter Property="Background" Value="#028A64"/> <Setter Property="TextBlock.Foreground" Value="White"/>
-        </Style>
-        <Style Selector="Button.apply:disabled">
-            <Setter Property="Background" Value="#555"/>
-            <Setter Property="Opacity" Value="0.7"/>
-        </Style>
-
-
-        <Style Selector="Button.cancel">
-            <Setter Property="Background" Value="#E6606A"/> <Setter Property="Foreground" Value="White"/>
-            <Setter Property="BorderThickness" Value="0"/>
-        </Style>
-        <Style Selector="Button.cancel:pointerover /template/ ContentPresenter#PART_ContentPresenter">
-            <Setter Property="Background" Value="#FF7D85"/> <Setter Property="TextBlock.Foreground" Value="White"/>
-        </Style>
-        <Style Selector="Button.cancel:pressed /template/ ContentPresenter#PART_ContentPresenter">
-            <Setter Property="Background" Value="#D94B55"/> <Setter Property="TextBlock.Foreground" Value="White"/>
-        </Style>
-        <Style Selector="Button.cancel:disabled">
-            <Setter Property="Background" Value="#555"/>
-            <Setter Property="Opacity" Value="0.7"/>
-        </Style>
-
+        <StyleInclude Source="/Styles/AlignmentToolStyles.axaml" />
     </Window.Styles>
     
     <Grid ColumnDefinitions="300, *">
         
-        <!-- Pannello Laterale Sinistro -->
-        <Border Grid.Column="0" Background="#2C2C2C" Padding="15" IsEnabled="{Binding IsInteractionEnabled}">
+        <Border Grid.Column="0" 
+                Background="{DynamicResource ToolPanelBackgroundBrush}" 
+                Padding="15" 
+                IsEnabled="{Binding IsInteractionEnabled}">
+            
             <Grid RowDefinitions="Auto, *, Auto">
                 
-                <!-- Riga 0: Controlli Principali -->
                 <StackPanel Grid.Row="0" Spacing="12">
                     <TextBlock Text="Metodologia di Allineamento" 
                                FontSize="16" FontWeight="Bold" />
@@ -189,7 +132,6 @@
                                IsVisible="{Binding IsCoordinateListVisible}"/>
                 </StackPanel>
                 
-                <!-- Riga 1: Lista Coordinate con ScrollViewer -->
                 <ScrollViewer Grid.Row="1" Margin="0,5,0,0" VerticalScrollBarVisibility="Auto"
                               IsEnabled="{Binding IsInteractionEnabled}" 
                               IsVisible="{Binding IsCoordinateListVisible}">
@@ -197,7 +139,6 @@
                                   ItemTemplate="{StaticResource CoordinateItemTemplate}"/>
                 </ScrollViewer>
                 
-                <!-- Riga 2: Pulsanti Calcola/Annulla/Applica -->
                 <StackPanel Grid.Row="2" Spacing="10" Margin="0,15,0,0">
                     <Separator Margin="0,5,0,10"/>
                     
@@ -235,17 +176,19 @@
                         <ProgressBar IsIndeterminate="True" 
                                      Height="4"
                                      HorizontalAlignment="Stretch"
-                                     Foreground="#8058E8"/> 
+                                     Foreground="{DynamicResource ActionPrimaryBackgroundBrush}"/> 
                     </StackPanel>
 
                 </StackPanel>
             </Grid>
         </Border>
 
-        <!-- Area di Visualizzazione Immagine (Pannello Destro) -->
-        <Border Grid.Column="1" Background="#1A1A1A" Padding="10">
+        <Border Grid.Column="1" 
+                Background="{DynamicResource ToolWindowBackgroundBrush}" 
+                Padding="10">
+            
             <Border Name="PreviewBorder"
-                    Background="#222"
+                    Background="{DynamicResource ToolPreviewBackgroundBrush}"
                     ClipToBounds="True"
                     PointerPressed="OnPreviewPointerPressed"
                     PointerReleased="OnPreviewPointerReleased"
@@ -274,8 +217,10 @@
                                 Canvas.Left="0" Canvas.Top="0"
                                 PointerPressed="OnInteractionCanvasPointerPressed"/>
                     </Canvas>
+                    
                     <Canvas Name="TargetOverlayCanvas" IsHitTestVisible="False">
-                        <Rectangle Stroke="#FEC530" StrokeThickness="1" StrokeDashArray="2,2"
+                        <Rectangle Stroke="{DynamicResource OverlaySearchBoxBrush}" 
+                                   StrokeThickness="1" StrokeDashArray="2,2"
                                    Canvas.Left="{Binding Viewport.SearchBoxLeft}"
                                    Canvas.Top="{Binding Viewport.SearchBoxTop}"
                                    Width="{Binding Viewport.SearchBoxWidth}"
@@ -284,7 +229,10 @@
                                 <Binding Path="IsSearchBoxVisible" />
                             </Rectangle.IsVisible>
                         </Rectangle>
-                        <Path Data="M0,10 L20,10 M10,0 L10,20" Stroke="#F84B5F" StrokeThickness="1">
+                        
+                        <Path Data="M0,10 L20,10 M10,0 L10,20" 
+                              Stroke="{DynamicResource OverlayTargetMarkerBrush}" 
+                              StrokeThickness="1">
                             <Path.IsVisible>
                                 <Binding Path="IsTargetMarkerVisible" />
                             </Path.IsVisible>
@@ -299,17 +247,19 @@
                             </Path.RenderTransform>
                         </Path>
                     </Canvas>
+                    
                     <Border HorizontalAlignment="Left" 
                             VerticalAlignment="Top"
                             Margin="10"
                             Padding="8,4"
-                            Background="#99000000"
+                            Background="{DynamicResource OverlayTextBackgroundBrush}"
                             CornerRadius="4"
                             IsHitTestVisible="False">
                         <TextBlock Text="{Binding ZoomStatusText}" 
-                                   Foreground="White" 
+                                   Foreground="{DynamicResource OverlayTextForegroundBrush}" 
                                    FontSize="14"/>
                     </Border>
+                    
                     <StackPanel Orientation="Horizontal" Spacing="4" Margin="10"
                                 HorizontalAlignment="Right" VerticalAlignment="Bottom"
                                 ZIndex="1"
@@ -330,6 +280,7 @@
                             <avalonia:MaterialIcon Kind="Contrast" Width="16" Height="16" />
                         </Button>
                     </StackPanel>
+                    
                     <StackPanel Orientation="Horizontal" Spacing="4" Margin="10"
                                 HorizontalAlignment="Left" VerticalAlignment="Bottom"
                                 ZIndex="1" Classes="NavControls"

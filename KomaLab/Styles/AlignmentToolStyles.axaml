@@ -1,0 +1,77 @@
+﻿<Styles xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    
+    <Style Selector="StackPanel.NavControls TextBlock">
+        <Setter Property="Foreground" Value="White"/>
+        <Setter Property="HorizontalAlignment" Value="Center"/>
+        <Setter Property="Margin" Value="0,4"/>
+    </Style>
+    
+    <Style Selector="Button:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+        <Setter Property="Background" Value="#33FFFFFF"/> 
+        <Setter Property="Foreground" Value="White"/> 
+    </Style>
+
+    <Style Selector="Button.calculate">
+        <Setter Property="Background" Value="{DynamicResource ActionPrimaryBackgroundBrush}"/> 
+        <Setter Property="Foreground" Value="White"/>
+        <Setter Property="BorderThickness" Value="0"/>
+        <Setter Property="Padding" Value="10,6"/>
+        <Setter Property="CornerRadius" Value="4"/>
+    </Style>
+    <Style Selector="Button.calculate:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+        <Setter Property="Background" Value="{DynamicResource ActionPrimaryHoverBrush}"/> 
+        <Setter Property="TextBlock.Foreground" Value="White"/>
+    </Style>
+    <Style Selector="Button.calculate:pressed /template/ ContentPresenter#PART_ContentPresenter">
+        <Setter Property="Background" Value="{DynamicResource ActionPrimaryPressedBrush}"/> 
+        <Setter Property="TextBlock.Foreground" Value="White"/>
+    </Style>
+    <Style Selector="Button.calculate:disabled">
+        <Setter Property="Background" Value="{DynamicResource ActionDisabledBackgroundBrush}"/>
+        <Setter Property="Opacity" Value="0.7"/>
+    </Style>
+
+
+    <Style Selector="Button.apply">
+        <Setter Property="Background" Value="{DynamicResource ActionSuccessBackgroundBrush}"/> 
+        <Setter Property="Foreground" Value="White"/>
+        <Setter Property="BorderThickness" Value="0"/>
+        <Setter Property="Padding" Value="10,6"/>
+        <Setter Property="CornerRadius" Value="4"/>
+    </Style>
+    <Style Selector="Button.apply:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+        <Setter Property="Background" Value="{DynamicResource ActionSuccessHoverBrush}"/> 
+        <Setter Property="TextBlock.Foreground" Value="White"/>
+    </Style>
+    <Style Selector="Button.apply:pressed /template/ ContentPresenter#PART_ContentPresenter">
+        <Setter Property="Background" Value="{DynamicResource ActionSuccessPressedBrush}"/> 
+        <Setter Property="TextBlock.Foreground" Value="White"/>
+    </Style>
+    <Style Selector="Button.apply:disabled">
+        <Setter Property="Background" Value="{DynamicResource ActionDisabledBackgroundBrush}"/>
+        <Setter Property="Opacity" Value="0.7"/>
+    </Style>
+
+
+    <Style Selector="Button.cancel">
+        <Setter Property="Background" Value="{DynamicResource ActionDestructiveBackgroundBrush}"/> 
+        <Setter Property="Foreground" Value="White"/>
+        <Setter Property="BorderThickness" Value="0"/>
+        <Setter Property="Padding" Value="10,6"/>
+        <Setter Property="CornerRadius" Value="4"/>
+    </Style>
+    <Style Selector="Button.cancel:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+        <Setter Property="Background" Value="{DynamicResource ActionDestructiveHoverBrush}"/> 
+        <Setter Property="TextBlock.Foreground" Value="White"/>
+    </Style>
+    <Style Selector="Button.cancel:pressed /template/ ContentPresenter#PART_ContentPresenter">
+        <Setter Property="Background" Value="{DynamicResource ActionDestructivePressedBrush}"/> 
+        <Setter Property="TextBlock.Foreground" Value="White"/>
+    </Style>
+    <Style Selector="Button.cancel:disabled">
+        <Setter Property="Background" Value="{DynamicResource ActionDisabledBackgroundBrush}"/>
+        <Setter Property="Opacity" Value="0.7"/>
+    </Style>
+
+</Styles>

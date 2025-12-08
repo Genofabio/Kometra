@@ -53,5 +53,27 @@
     <SolidColorBrush x:Key="OutputBorderBrush" Color="{StaticResource OutputBorderColor}" />
     <SolidColorBrush x:Key="OutputBodyBrush" Color="{StaticResource OutputBodyColor}" />
     <SolidColorBrush x:Key="OutputSelectionBrush" Color="{StaticResource OutputSelectionColor}" />
+    
+    
+    <!-- AlignmentTool -->
+    <SolidColorBrush x:Key="ToolWindowBackgroundBrush" Color="#1A1A1A" />
+    <SolidColorBrush x:Key="ToolPanelBackgroundBrush" Color="#2C2C2C" />
+    <SolidColorBrush x:Key="ToolPreviewBackgroundBrush" Color="#222222" />
+
+    <SolidColorBrush x:Key="OverlaySearchBoxBrush" Color="#FEC530" />    <SolidColorBrush x:Key="OverlayTargetMarkerBrush" Color="#F84B5F" /> <SolidColorBrush x:Key="OverlayTextBackgroundBrush" Color="#99000000" /> <SolidColorBrush x:Key="OverlayTextForegroundBrush" Color="#FFFFFF" />
+
+    <SolidColorBrush x:Key="ActionDisabledBackgroundBrush" Color="#555555" />
+
+    <SolidColorBrush x:Key="ActionPrimaryBackgroundBrush" Color="#8058E8" />
+    <SolidColorBrush x:Key="ActionPrimaryHoverBrush" Color="#936BFF" />
+    <SolidColorBrush x:Key="ActionPrimaryPressedBrush" Color="#704AD9" />
+
+    <SolidColorBrush x:Key="ActionSuccessBackgroundBrush" Color="#03A077" />
+    <SolidColorBrush x:Key="ActionSuccessHoverBrush" Color="#04CA95" />
+    <SolidColorBrush x:Key="ActionSuccessPressedBrush" Color="#028A64" />
+
+    <SolidColorBrush x:Key="ActionDestructiveBackgroundBrush" Color="#E6606A" />
+    <SolidColorBrush x:Key="ActionDestructiveHoverBrush" Color="#FF7D85" />
+    <SolidColorBrush x:Key="ActionDestructivePressedBrush" Color="#D94B55" />
 
 </ResourceDictionary>
