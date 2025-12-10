@@ -16,6 +16,7 @@ public partial class BoardView : UserControl
     public BoardView()
     {
         InitializeComponent();
+        this.Focusable = true;
         
         // Cache della trasformazione per accesso rapido
         if (ViewportContainer.RenderTransform is TranslateTransform tt)
@@ -53,6 +54,7 @@ public partial class BoardView : UserControl
     private void OnPointerPressed(object? sender, PointerPressedEventArgs e)
     {
         if (e.Handled) return;
+        this.Focus();
 
         var props = e.GetCurrentPoint(this).Properties;
 

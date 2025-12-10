@@ -21,15 +21,23 @@
     <UserControl.KeyBindings>
         <KeyBinding Gesture="Ctrl+Z" Command="{Binding UndoCommand}" />
         <KeyBinding Gesture="Ctrl+Y" Command="{Binding RedoCommand}" />
+
+        <KeyBinding Gesture="Left"  Command="{Binding PanBoardCommand}" CommandParameter="left" />
+        <KeyBinding Gesture="Right" Command="{Binding PanBoardCommand}" CommandParameter="right" />
+        <KeyBinding Gesture="Up"    Command="{Binding PanBoardCommand}" CommandParameter="up" />
+        <KeyBinding Gesture="Down"  Command="{Binding PanBoardCommand}" CommandParameter="down" />
+
+        <KeyBinding Gesture="Add"      Command="{Binding ZoomBoardCommand}" CommandParameter="in" />
+        <KeyBinding Gesture="Subtract" Command="{Binding ZoomBoardCommand}" CommandParameter="out" />
+        
+        <KeyBinding Gesture="Ctrl+Add"      Command="{Binding ZoomBoardCommand}" CommandParameter="in" />
+        <KeyBinding Gesture="Ctrl+Subtract" Command="{Binding ZoomBoardCommand}" CommandParameter="out" />
     </UserControl.KeyBindings>
 
     <Grid>
-        
         <controls:GridBackground x:Name="BackgroundGrid"
                                  Background="{DynamicResource AppBackgroundBrush}"
-                         
                                  GridLinesBrush="{DynamicResource GridLineBrush}"
-                         
                                  OffsetX="{Binding OffsetX}"
                                  OffsetY="{Binding OffsetY}"
                                  Scale="{Binding Scale}"

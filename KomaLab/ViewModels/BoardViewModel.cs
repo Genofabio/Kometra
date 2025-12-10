@@ -459,4 +459,42 @@ public partial class BoardViewModel : ObservableObject
 
         return new Point(worldX, worldY);
     }
+    
+    // --- NAVIGAZIONE TASTIERA ---
+
+    [RelayCommand]
+    private void PanBoard(string direction)
+    {
+        // Definiamo di quanto spostarci (es. 50 pixel)
+        double step = 50.0;
+        
+        // NOTA: Se voglio vedere a Destra, devo spostare il contenuto a Sinistra (negativo)
+        switch (direction.ToLower())
+        {
+            case "left":
+                Pan(new Vector(step, 0)); 
+                break;
+            case "right":
+                Pan(new Vector(-step, 0));
+                break;
+            case "up":
+                Pan(new Vector(0, step));
+                break;
+            case "down":
+                Pan(new Vector(0, -step));
+                break;
+        }
+    }
+
+    [RelayCommand]
+    private void ZoomBoard(string mode)
+    {
+        // Per lo zoom da tastiera, usiamo il CENTRO della vista corrente come pivot
+        var center = new Point(ViewBounds.Width / 2.0, ViewBounds.Height / 2.0);
+        
+        // Simuliamo un delta simile alla rotella del mouse (120 è standard)
+        double delta = mode.ToLower() == "in" ? 120 : -120;
+        
+        Zoom(delta, center);
+    }
 }
