@@ -70,6 +70,7 @@ public partial class MultipleImagesNodeView : UserControl
         // --- PAN INTERNO (Tasto Centrale) ---
         if (properties.IsMiddleButtonPressed)
         {
+            if (!nodeVm.IsSelected) return;
             _isPanningImage = true;
             _lastPanPosition = e.GetPosition(this);
             this.Cursor = new Cursor(StandardCursorType.SizeAll);

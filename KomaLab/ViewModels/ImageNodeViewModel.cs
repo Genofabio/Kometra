@@ -59,4 +59,12 @@ public abstract class ImageNodeViewModel : BaseNodeViewModel
     // Restituisce i percorsi file (esistenti o temporanei) da passare al tool.
     // Richiede IFitsService per salvare eventuali dati in memoria.
     public abstract Task<List<string>> PrepareInputPathsAsync(IFitsService fitsService);
+    
+    // Resetta lo zoom e il pan dell'immagine (Fit to Screen).
+    public void ResetView()
+    {
+        Viewport.Scale = 1.0;
+        Viewport.OffsetX = 0;
+        Viewport.OffsetY = 0;
+    }
 }

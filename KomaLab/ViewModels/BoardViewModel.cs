@@ -229,6 +229,16 @@ public partial class BoardViewModel : ObservableObject
         }
     }
     private bool CanResetNormalization() => SelectedNode is ImageNodeViewModel;
+    
+    [RelayCommand(CanExecute = nameof(CanResetNodeView))]
+    private void ResetNodeView()
+    {
+        if (SelectedNode is ImageNodeViewModel imgNode)
+        {
+            imgNode.ResetView();
+        }
+    }
+    private bool CanResetNodeView() => SelectedNode is ImageNodeViewModel;
 
     // --- LOGICA ALLINEAMENTO ---
     [RelayCommand(CanExecute = nameof(CanShowAlignmentWindow))]
@@ -405,6 +415,7 @@ public partial class BoardViewModel : ObservableObject
         ShowAlignmentWindowCommand.NotifyCanExecuteChanged();
         StackImagesCommand.NotifyCanExecuteChanged();
         SaveSelectedNodeCommand.NotifyCanExecuteChanged();
+        ResetNodeViewCommand.NotifyCanExecuteChanged();
     }
     
     public void DeselectAllNodes()
@@ -416,6 +427,7 @@ public partial class BoardViewModel : ObservableObject
         ShowAlignmentWindowCommand.NotifyCanExecuteChanged();
         StackImagesCommand.NotifyCanExecuteChanged();
         SaveSelectedNodeCommand.NotifyCanExecuteChanged();
+        ResetNodeViewCommand.NotifyCanExecuteChanged();
     }
 
     [RelayCommand(CanExecute = nameof(CanSaveNode))]

@@ -103,12 +103,20 @@
             </MenuItem>
 
             <Separator />
+            
+            <MenuItem Header="Reset Vista Immagine"
+                      Classes="innerMenuItem"
+                      Command="{Binding BoardVm.ResetNodeViewCommand}">
+                <MenuItem.Icon>
+                    <avalonia:MaterialIcon Kind="FitToScreen" />
+                </MenuItem.Icon>
+            </MenuItem>
 
-            <MenuItem Header="Resetta Soglie Immagine"
+            <MenuItem Header="Reset Soglie Immagine"
                       Classes="innerMenuItem"
                       Command="{Binding BoardVm.ResetNormalizationCommand}">
                 <MenuItem.Icon>
-                    <avalonia:MaterialIcon Kind="Restore" />
+                    <avalonia:MaterialIcon Kind="Contrast" />
                 </MenuItem.Icon>
             </MenuItem>
         </MenuItem>
