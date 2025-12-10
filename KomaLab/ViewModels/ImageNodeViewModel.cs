@@ -2,8 +2,8 @@
 using System.Threading.Tasks;
 using Avalonia;
 using KomaLab.Models;
-using KomaLab.Services;
 using KomaLab.Services.Data;
+using KomaLab.ViewModels.Helpers;
 
 namespace KomaLab.ViewModels;
 
@@ -16,6 +16,8 @@ public abstract class ImageNodeViewModel : BaseNodeViewModel
     protected ImageNodeViewModel(BaseNodeModel model) : base(model)
     {
     }
+    
+    public ImageViewport Viewport { get; } = new();
     
     public override NodeCategory Category => NodeCategory.Image;
 

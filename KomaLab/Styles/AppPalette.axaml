@@ -25,6 +25,8 @@
     <Color x:Key="ImageMainColor">#3E3454</Color>       
     <Color x:Key="ImageDarkBaseColor">#2A2236</Color>   
     <Color x:Key="ImageSelectionColor">#8058E8</Color>  
+    <Color x:Key="ImageCanvasBackgroundColor">#080808</Color>
+    <SolidColorBrush x:Key="ImageCanvasBackgroundBrush" Color="{StaticResource ImageCanvasBackgroundColor}" />
     <SolidColorBrush x:Key="ImageHeaderBrush" Color="{StaticResource ImageDarkBaseColor}" />
     <SolidColorBrush x:Key="ImageBodyBrush" Color="{StaticResource ImageDarkBaseColor}" />
     

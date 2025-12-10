@@ -48,7 +48,7 @@
                     Classes="Body" 
                     ClipToBounds="True"
                     Name="ImageContainer"
-                    Background="Black">
+                    Background="{DynamicResource ImageCanvasBackgroundBrush}">
 
                 <Grid>
         

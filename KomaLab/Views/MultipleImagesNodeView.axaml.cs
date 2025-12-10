@@ -1,20 +1,25 @@
 ﻿using System;
+using System.Linq;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Media;
 using Avalonia.VisualTree; 
 using KomaLab.ViewModels;
-using System.Linq;
 
 namespace KomaLab.Views;
 
 public partial class MultipleImagesNodeView : UserControl
 {
+    // --- Variabili per il Drag del Nodo ---
     private Point? _startDragPoint;
     private TranslateTransform? _tempTransform;
     
-    // CACHE: Salviamo il riferimento per non cercarlo 60 volte al secondo
+    // --- Variabili per il Pan Interno ---
+    private bool _isPanningImage;
+    private Point _lastPanPosition;
+    
+    // --- Cache ---
     private BoardViewModel? _cachedBoardVm;
     private Visual? _cachedBoardView;
 
@@ -23,12 +28,25 @@ public partial class MultipleImagesNodeView : UserControl
         InitializeComponent();
         _tempTransform = new TranslateTransform();
         this.RenderTransform = _tempTransform;
+        
+        // --- Sincronizzazione Dimensioni Viewport ---
+        var container = this.FindControl<Border>("ImageContainer"); // Assicurati che il nome nello XAML sia ImageContainer
+        if (container != null)
+        {
+            container.SizeChanged += (_, e) => 
+            {
+                if (DataContext is MultipleImagesNodeViewModel vm)
+                {
+                    vm.Viewport.ViewportSize = e.NewSize;
+                    // Opzionale: vm.Viewport.ResetView();
+                }
+            };
+        }
     }
 
     protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)
     {
         base.OnAttachedToVisualTree(e);
-        // Troviamo i riferimenti una volta sola quando il nodo appare a schermo
         _cachedBoardView = this.GetVisualAncestors().OfType<BoardView>().FirstOrDefault();
         _cachedBoardVm = _cachedBoardView?.DataContext as BoardViewModel;
     }
@@ -37,11 +55,9 @@ public partial class MultipleImagesNodeView : UserControl
     {
         _cachedBoardVm = null;
         _cachedBoardView = null;
-        
         _startDragPoint = null;
         _tempTransform = null;
         this.RenderTransform = null;
-        
         base.OnDetachedFromVisualTree(e);
     }
 
@@ -50,9 +66,21 @@ public partial class MultipleImagesNodeView : UserControl
         if (DataContext is not MultipleImagesNodeViewModel nodeVm) return;
         
         var properties = e.GetCurrentPoint(this).Properties;
+
+        // --- PAN INTERNO (Tasto Centrale) ---
+        if (properties.IsMiddleButtonPressed)
+        {
+            _isPanningImage = true;
+            _lastPanPosition = e.GetPosition(this);
+            this.Cursor = new Cursor(StandardCursorType.SizeAll);
+            e.Pointer.Capture(this);
+            e.Handled = true;
+            return; 
+        }
+
+        // --- DRAG DEL NODO (Tasto Sinistro) ---
         if (properties.IsLeftButtonPressed)
         {
-            // Fallback di sicurezza se la cache è vuota (es. cambio contesto)
             if (_cachedBoardVm == null || _cachedBoardView == null)
             {
                 _cachedBoardView = this.GetVisualAncestors().OfType<BoardView>().FirstOrDefault();
@@ -89,16 +117,27 @@ public partial class MultipleImagesNodeView : UserControl
 
     private void OnPointerMoved(object? sender, PointerEventArgs e)
     {
-        // Controlli null check ultra-rapidi
+        if (DataContext is not MultipleImagesNodeViewModel nodeVm) return;
+        
+        // --- GESTIONE PAN INTERNO ---
+        if (_isPanningImage)
+        {
+            var currentPos = e.GetPosition(this);
+            var delta = currentPos - _lastPanPosition;
+            _lastPanPosition = currentPos;
+
+            nodeVm.Viewport.ApplyPan(delta.X, delta.Y);
+            
+            e.Handled = true;
+            return;
+        }
+
+        // --- GESTIONE DRAG DEL NODO ---
         if (_startDragPoint == null || _tempTransform == null || 
             _cachedBoardView == null || _cachedBoardVm == null) return;
         
-        if (DataContext is not MultipleImagesNodeViewModel nodeVm) return;
-        
-        // --- QUI L'OTTIMIZZAZIONE ---
-        // Usiamo _cachedBoardView invece di cercarlo nell'albero
-        var currentPos = e.GetPosition(_cachedBoardView);
-        var screenDelta = currentPos - _startDragPoint.Value;
+        var currentPosBoard = e.GetPosition(_cachedBoardView);
+        var screenDelta = currentPosBoard - _startDragPoint.Value;
         
         double scale = _cachedBoardVm.Scale;
         if (scale <= 0.001) scale = 0.1; 
@@ -106,11 +145,9 @@ public partial class MultipleImagesNodeView : UserControl
         double worldDeltaX = screenDelta.X / scale;
         double worldDeltaY = screenDelta.Y / scale;
 
-        // Aggiornamento View (GPU)
         _tempTransform.X = worldDeltaX;
         _tempTransform.Y = worldDeltaY;
         
-        // Aggiornamento VM (Logica Connessioni)
         nodeVm.VisualOffsetX = worldDeltaX;
         nodeVm.VisualOffsetY = worldDeltaY;
         
@@ -119,6 +156,17 @@ public partial class MultipleImagesNodeView : UserControl
 
     private void OnPointerReleased(object? sender, PointerReleasedEventArgs e)
     {
+        // --- RILASCIO PAN INTERNO ---
+        if (_isPanningImage && e.InitialPressMouseButton == MouseButton.Middle)
+        {
+            _isPanningImage = false;
+            this.Cursor = Cursor.Default;
+            e.Pointer.Capture(null);
+            e.Handled = true;
+            return;
+        }
+
+        // --- RILASCIO DRAG DEL NODO ---
         if (_startDragPoint != null && e.InitialPressMouseButton == MouseButton.Left)
         {
             if (DataContext is MultipleImagesNodeViewModel nodeVm && _tempTransform != null)
@@ -142,8 +190,23 @@ public partial class MultipleImagesNodeView : UserControl
     {
         if (DataContext is not MultipleImagesNodeViewModel vm) return;
         if (!vm.IsSelected) return;
+
+        // --- ZOOM (CTRL + WHEEL) ---
+        if ((e.KeyModifiers & KeyModifiers.Control) == KeyModifiers.Control)
+        {
+            var container = this.FindControl<Border>("ImageContainer");
+            if (container != null)
+            {
+                var centerPoint = new Point(container.Bounds.Width / 2.0, container.Bounds.Height / 2.0);
+                double factor = e.Delta.Y > 0 ? 1.1 : (1.0 / 1.1);
+                
+                vm.Viewport.ApplyZoomAtPoint(factor, centerPoint);
+            }
+            e.Handled = true;
+            return;
+        }
         
-        // Logica invariata, ma ho aggiunto una guardia per evitare calcoli su valori troppo piccoli
+        // --- SOGLIE (STANDARD) ---
         double currentRange = Math.Abs(vm.WhitePoint - vm.BlackPoint);
         if (currentRange < 0.0001) currentRange = 1000.0;
 

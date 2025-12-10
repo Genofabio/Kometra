@@ -28,7 +28,6 @@ public partial class SingleImageNodeViewModel : ImageNodeViewModel
 
     // --- Stato Interno ---
     private FitsImageData? _currentData;
-    public ImageViewport Viewport { get; } = new();
 
     // --- Proprietà Observable ---
     [ObservableProperty]

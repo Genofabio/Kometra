@@ -8,7 +8,6 @@ using Avalonia;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using KomaLab.Models;
-using KomaLab.Services;
 using KomaLab.Services.Data;
 using KomaLab.Services.Imaging;
 using KomaLab.Services.Utilities;
@@ -39,7 +38,7 @@ public partial class MultipleImagesNodeViewModel : ImageNodeViewModel
     private double _lockedKWhite; 
 
     // --- Proprietà Observable ---
-    
+
     [ObservableProperty]
     private FitsRenderer? _activeFitsImage;
 
@@ -116,6 +115,10 @@ public partial class MultipleImagesNodeViewModel : ImageNodeViewModel
         
         await ActiveFitsImage.InitializeAsync();
         
+        // 2. NUOVO: Aggiorniamo il viewport e resettiamo la vista all'avvio
+        Viewport.ImageSize = ActiveFitsImage.ImageSize;
+        Viewport.ResetView(); 
+
         var (mean, sigma) = ActiveFitsImage.GetImageStatistics();
         _lockedKBlack = (ActiveFitsImage.BlackPoint - mean) / sigma;
         _lockedKWhite = (ActiveFitsImage.WhitePoint - mean) / sigma;
@@ -175,6 +178,11 @@ public partial class MultipleImagesNodeViewModel : ImageNodeViewModel
 
         await newFitsImage.InitializeAsync(); 
 
+        // 3. NUOVO: Aggiorniamo la dimensione dell'immagine nel Viewport
+        // NOTA: NON chiamiamo ResetView() qui. Quando l'utente scorre le immagini,
+        // vuole mantenere lo zoom e il pan attuali per confrontare i dettagli.
+        Viewport.ImageSize = newFitsImage.ImageSize;
+
         var (mean, sigma) = newFitsImage.GetImageStatistics();
 
         if (!_hasLockedThresholds)
@@ -227,6 +235,11 @@ public partial class MultipleImagesNodeViewModel : ImageNodeViewModel
             if (first is { Width: > 0, Height: > 0 })
             {
                 _maxImageSize = new Size(first.Width, first.Height);
+                
+                // 4. NUOVO: Se i dati vengono rimpiazzati (es. nuovo stack), resettiamo la vista
+                Viewport.ImageSize = _maxImageSize;
+                Viewport.ResetView();
+
                 OnPropertyChanged(nameof(MaxImageSize));
                 OnPropertyChanged(nameof(NodeContentSize)); 
                 OnPropertyChanged(nameof(EstimatedTotalSize));
@@ -243,10 +256,8 @@ public partial class MultipleImagesNodeViewModel : ImageNodeViewModel
     }
     
     // --- IMPLEMENTAZIONE PREPARE INPUT PATHS ---
-    // Questo è fondamentale per l'allineamento Low RAM
     public override Task<List<string>> PrepareInputPathsAsync(IFitsService fitsService)
     {
-        // Restituisce semplicemente i path che ha già, non serve salvare nulla
         return Task.FromResult(new List<string>(ImagePaths));
     }
 
@@ -330,7 +341,6 @@ public partial class MultipleImagesNodeViewModel : ImageNodeViewModel
             _dataCache.Clear(); 
         }
         
-        // --- PULIZIA DISCO ---
         if (!string.IsNullOrEmpty(TemporaryFolderPath) && Directory.Exists(TemporaryFolderPath))
         {
             try

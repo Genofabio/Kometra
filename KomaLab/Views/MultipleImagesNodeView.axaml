@@ -42,7 +42,7 @@
                 </Transitions>
             </Setter>
         </Style>
-        <Style Selector="Border#ImageBorder:pointerover Grid#OverlayGrid">
+        <Style Selector="Border#ImageContainer:pointerover Grid#OverlayGrid">
             <Setter Property="Opacity" Value="1.0"/>
         </Style>
     </UserControl.Styles>
@@ -67,16 +67,45 @@
                 </Grid>
             </Border>
             
-            <Border Grid.Row="1" Name="ImageBorder" Classes="Body"
+            <Border Grid.Row="1" 
+                    Name="ImageContainer" 
+                    Classes="Body"
+                    ClipToBounds="True"
                     Width="{Binding MaxImageSize.Width}"
-                    Height="{Binding MaxImageSize.Height}">
+                    Height="{Binding MaxImageSize.Height}"
+                    Background="{DynamicResource ImageCanvasBackgroundBrush}">
                 
                 <Grid>
                     <Image Source="{Binding ActiveFitsImage.Image}"
                            Stretch="None" 
-                           HorizontalAlignment="Center"
-                           VerticalAlignment="Center"
-                           RenderOptions.BitmapInterpolationMode="LowQuality"/>
+                           HorizontalAlignment="Left"
+                           VerticalAlignment="Top"
+                           RenderTransformOrigin="0,0"
+                           RenderOptions.BitmapInterpolationMode="None">
+                        
+                        <Image.RenderTransform>
+                            <TransformGroup>
+                                <ScaleTransform ScaleX="{Binding Viewport.Scale}" 
+                                                ScaleY="{Binding Viewport.Scale}"/>
+                                <TranslateTransform X="{Binding Viewport.OffsetX}" 
+                                                    Y="{Binding Viewport.OffsetY}"/>
+                            </TransformGroup>
+                        </Image.RenderTransform>
+                    </Image>
+                    
+                    <Border HorizontalAlignment="Left" 
+                            VerticalAlignment="Top"
+                            IsHitTestVisible="False"
+                            Background="{DynamicResource OverlayTextBackgroundBrush}"
+                            Margin="15"
+                            Padding="16,10"
+                            CornerRadius="8"
+                            IsVisible="{Binding Viewport.IsZoomed}">
+                        <TextBlock Text="{Binding Viewport.Scale, StringFormat='{}{0:P0}'}"
+                                   Foreground="{DynamicResource OverlayTextForegroundBrush}" 
+                                   FontSize="28"
+                                   FontWeight="Bold"/>
+                    </Border>
                     
                     <Grid Name="OverlayGrid">
                         
