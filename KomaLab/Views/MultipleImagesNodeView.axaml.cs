@@ -64,13 +64,13 @@ public partial class MultipleImagesNodeView : UserControl
     private void OnPointerPressed(object? sender, PointerPressedEventArgs e)
     {
         if (DataContext is not MultipleImagesNodeViewModel nodeVm) return;
-        
         var properties = e.GetCurrentPoint(this).Properties;
 
         // --- PAN INTERNO (Tasto Centrale) ---
         if (properties.IsMiddleButtonPressed)
         {
             if (!nodeVm.IsSelected) return;
+            if (nodeVm.IsAnimating) return;
             _isPanningImage = true;
             _lastPanPosition = e.GetPosition(this);
             this.Cursor = new Cursor(StandardCursorType.SizeAll);
@@ -190,6 +190,7 @@ public partial class MultipleImagesNodeView : UserControl
     private void OnPointerWheelChanged(object? sender, PointerWheelEventArgs e)
     {
         if (DataContext is not MultipleImagesNodeViewModel vm) return;
+        if (vm.IsAnimating) return;
         if (!vm.IsSelected) return;
 
         // --- ZOOM (CTRL + WHEEL) ---

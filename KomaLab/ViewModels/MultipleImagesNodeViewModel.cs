@@ -36,6 +36,14 @@ public partial class MultipleImagesNodeViewModel : ImageNodeViewModel
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(ActiveRenderer))] // Notifica la base che il renderer è cambiato
     private FitsRenderer? _activeFitsImage;
+    
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CanShowPrevious))]
+    [NotifyPropertyChangedFor(nameof(CanShowNext))]
+    [NotifyCanExecuteChangedFor(nameof(PreviousImageCommand))]
+    [NotifyCanExecuteChangedFor(nameof(NextImageCommand))]
+    private bool _isAnimating;
+    private const int AnimationDelayMs = 150;
 
     // Implementazione astratta della base
     public override FitsRenderer? ActiveRenderer => ActiveFitsImage;
@@ -54,8 +62,8 @@ public partial class MultipleImagesNodeViewModel : ImageNodeViewModel
     public List<string> ImagePaths => _multiModel.ImagePaths;
     public Size MaxImageSize => _maxImageSize;
     public string CurrentImageText => $"{CurrentIndex + 1} / {_imageCount}";
-    public bool CanShowPrevious => CurrentIndex > 0;
-    public bool CanShowNext => CurrentIndex < _imageCount - 1;
+    public bool CanShowPrevious => !IsAnimating && CurrentIndex > 0;
+    public bool CanShowNext => !IsAnimating && CurrentIndex < _imageCount - 1;
 
     // Override dimensione contenuto
     protected override Size NodeContentSize => _maxImageSize;
@@ -120,7 +128,10 @@ public partial class MultipleImagesNodeViewModel : ImageNodeViewModel
 
     partial void OnCurrentIndexChanged(int value)
     {
-        _ = LoadImageAtIndexAsync(value);
+        if (!IsAnimating) 
+        {
+            _ = LoadImageAtIndexAsync(value);
+        }
     }
 
     // --- Logica Caricamento e Swap Immagini ---
@@ -270,6 +281,72 @@ public partial class MultipleImagesNodeViewModel : ImageNodeViewModel
         {
             await LoadDataFromDiskAsync(nextIndex);
         });
+    }
+    
+    // --- COMANDO ANIMAZIONE ---
+
+    [RelayCommand]
+    public void ToggleAnimation()
+    {
+        if (IsAnimating)
+        {
+            StopAnimation();
+        }
+        else
+        {
+            StartAnimation();
+        }
+    }
+
+    private void StartAnimation()
+    {
+        if (_imageCount < 2) return;
+        
+        IsAnimating = true;
+
+        _ = AnimationLoopAsync();
+    }
+
+    private void StopAnimation()
+    {
+        IsAnimating = false;
+        // Il loop controlla questa variabile a ogni giro e si fermerà da solo
+    }
+
+    private async Task AnimationLoopAsync()
+    {
+        try
+        {
+            while (IsAnimating)
+            {
+                // 1. Calcola prossimo indice (Loop circolare)
+                int nextIndex = (_currentIndex + 1) % _imageCount;
+
+                // 2. Carica l'immagine (questo metodo gestisce già il rendering e l'SRP)
+                // Usiamo await: il prossimo frame non parte finché questo non è finito!
+                await LoadImageAtIndexAsync(nextIndex);
+                
+                SetProperty(ref _currentIndex, nextIndex, nameof(CurrentIndex));
+                OnPropertyChanged(nameof(CurrentImageText)); // Aggiorna "1/10"
+
+                // 3. Attesa per il frame rate
+                await Task.Delay(AnimationDelayMs);
+            }
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"Animation Error: {ex.Message}");
+            StopAnimation();
+        }
+        finally
+        {
+            // Assicuriamoci che lo stato sia coerente quando usciamo
+            IsAnimating = false; 
+            
+            // Ripristina i pulsanti freccia
+            OnPropertyChanged(nameof(CanShowPrevious));
+            OnPropertyChanged(nameof(CanShowNext));
+        }
     }
 
     // --- Dispose ---

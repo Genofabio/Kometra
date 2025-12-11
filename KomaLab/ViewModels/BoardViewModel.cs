@@ -33,6 +33,8 @@ public partial class BoardViewModel : ObservableObject
     [ObservableProperty] private double _scale = 0.46;
     [ObservableProperty] private Rect _viewBounds;
     [ObservableProperty] private BaseNodeViewModel? _selectedNode;
+    public bool IsGlobalAnimationRunning => 
+        Nodes.OfType<MultipleImagesNodeViewModel>().Any(n => n.IsAnimating);
     
     public ObservableCollection<BaseNodeViewModel> Nodes { get; } = new();
     
@@ -385,6 +387,46 @@ public partial class BoardViewModel : ObservableObject
         }
     }
     private bool CanStackImages(StackingMode mode) => SelectedNode is MultipleImagesNodeViewModel;
+    
+    // --- LOGICA ANIMAZIONE: Play/Pause ---
+    
+    [RelayCommand(CanExecute = nameof(CanToggleAnimation))]
+    private void ToggleNodeAnimation()
+    {
+        // (Tutta la tua logica esistente rimane identica)
+        var runningNode = Nodes.OfType<MultipleImagesNodeViewModel>()
+            .FirstOrDefault(n => n.IsAnimating);
+
+        if (runningNode != null)
+        {
+            runningNode.ToggleAnimation(); 
+        }
+        else if (SelectedNode is MultipleImagesNodeViewModel selectedMulti)
+        {
+            if (selectedMulti.ImagePaths.Count > 1)
+            {
+                selectedMulti.ToggleAnimation();
+            }
+        }
+        
+        OnPropertyChanged(nameof(IsGlobalAnimationRunning)); 
+        
+        ToggleNodeAnimationCommand.NotifyCanExecuteChanged();
+    }
+
+    private bool CanToggleAnimation()
+    {
+        // Il pulsante è abilitato se:
+        // 1. C'è un'animazione in corso (per poterla fermare)
+        // 2. OPPURE c'è un nodo valido selezionato (per poterla avviare)
+        
+        bool isAnyAnimating = Nodes.OfType<MultipleImagesNodeViewModel>().Any(n => n.IsAnimating);
+        
+        bool isSelectionValid = SelectedNode is MultipleImagesNodeViewModel multi && 
+                                multi.ImagePaths.Count > 1;
+
+        return isAnyAnimating || isSelectionValid;
+    }
 
     // --- Altri Comandi ---
     [RelayCommand] private void IncrementOffset() { OffsetX += 20; }
@@ -416,6 +458,7 @@ public partial class BoardViewModel : ObservableObject
         StackImagesCommand.NotifyCanExecuteChanged();
         SaveSelectedNodeCommand.NotifyCanExecuteChanged();
         ResetNodeViewCommand.NotifyCanExecuteChanged();
+        ToggleNodeAnimationCommand.NotifyCanExecuteChanged();
     }
     
     public void DeselectAllNodes()

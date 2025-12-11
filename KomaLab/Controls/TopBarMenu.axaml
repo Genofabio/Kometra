@@ -5,9 +5,15 @@
              xmlns:avalonia="clr-namespace:Material.Icons.Avalonia;assembly=Material.Icons.Avalonia"
              xmlns:vm="clr-namespace:KomaLab.ViewModels"
              xmlns:models="clr-namespace:KomaLab.Models"
+             xmlns:conv="clr-namespace:KomaLab.Converters"
              mc:Ignorable="d" d:DesignWidth="800" d:DesignHeight="450"
              x:Class="KomaLab.Controls.TopBarMenu"
              x:DataType="vm:MainWindowViewModel">
+    
+    <UserControl.Resources>
+        <conv:AnimationIconConverter x:Key="AnimIconConv" />
+        <conv:AnimationTextConverter x:Key="AnimTextConv" />
+    </UserControl.Resources>
     
     <UserControl.Styles>
         <Style Selector="Menu">
@@ -119,6 +125,17 @@
                     <avalonia:MaterialIcon Kind="Contrast" />
                 </MenuItem.Icon>
             </MenuItem>
+
+            <Separator />
+
+            <MenuItem Header="{Binding BoardVm.IsGlobalAnimationRunning, Converter={StaticResource AnimTextConv}}"
+                      Classes="innerMenuItem"
+                      Command="{Binding BoardVm.ToggleNodeAnimationCommand}">
+                <MenuItem.Icon>
+                    <avalonia:MaterialIcon Kind="{Binding BoardVm.IsGlobalAnimationRunning, Converter={StaticResource AnimIconConv}}" />
+                </MenuItem.Icon>
+            </MenuItem>
+
         </MenuItem>
 
         <MenuItem Header="_Help">
