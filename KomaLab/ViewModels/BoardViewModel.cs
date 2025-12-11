@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Diagnostics;
+using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
@@ -459,6 +460,7 @@ public partial class BoardViewModel : ObservableObject
         SaveSelectedNodeCommand.NotifyCanExecuteChanged();
         ResetNodeViewCommand.NotifyCanExecuteChanged();
         ToggleNodeAnimationCommand.NotifyCanExecuteChanged();
+        SaveVideoCommand.NotifyCanExecuteChanged();
     }
     
     public void DeselectAllNodes()
@@ -471,6 +473,7 @@ public partial class BoardViewModel : ObservableObject
         StackImagesCommand.NotifyCanExecuteChanged();
         SaveSelectedNodeCommand.NotifyCanExecuteChanged();
         ResetNodeViewCommand.NotifyCanExecuteChanged();
+        SaveVideoCommand.NotifyCanExecuteChanged();
     }
 
     [RelayCommand(CanExecute = nameof(CanSaveNode))]
@@ -501,6 +504,50 @@ public partial class BoardViewModel : ObservableObject
         double worldY = (screenCenterY - OffsetY) / Scale;
 
         return new Point(worldX, worldY);
+    }
+
+    [RelayCommand(CanExecute = nameof(CanSaveVideo))]
+    private async Task SaveVideo()
+    {
+        // 1. Verifica preliminare
+        if (SelectedNode is not MultipleImagesNodeViewModel multiNode) return;
+        if (multiNode.ActiveRenderer == null) return;
+
+        string cleanTitle = string.Join("_", multiNode.Title.Split(Path.GetInvalidFileNameChars()));
+        string defaultName = $"{cleanTitle}.avi";
+        
+        var savePath = await _dialogService.ShowSaveFileDialogAsync(
+            defaultName, 
+            "Video AVI", 
+            "*.avi"
+        );
+        
+        if (string.IsNullOrWhiteSpace(savePath)) return;
+
+        try
+        {
+            // 3. Cattura le impostazioni visive correnti (Stretch/Contrasto)
+            var contrastProfile = multiNode.ActiveRenderer.CaptureContrastProfile();
+
+            // 4. Esegui l'export (10 FPS di default, potresti volerlo parametrico)
+            await _fitsService.ExportVideoAsync(
+                multiNode.ImagePaths, 
+                savePath, 
+                fps: 5.0, 
+                profile: contrastProfile
+            );
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"Errore esportazione video: {ex.Message}");
+            // Qui potresti mostrare un messaggio di errore all'utente
+        }
+    }
+
+    private bool CanSaveVideo()
+    {
+        // Abilitato solo se è un nodo multiplo con più immagini
+        return SelectedNode is MultipleImagesNodeViewModel vm && vm.ImagePaths.Count > 1;
     }
     
     // --- NAVIGAZIONE TASTIERA ---

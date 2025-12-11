@@ -40,6 +40,8 @@
                 </MenuItem.Icon>
             </MenuItem>
 
+            <Separator />
+
             <MenuItem Header="Salva Immagine..." 
                       Classes="innerMenuItem"
                       Command="{Binding BoardVm.SaveSelectedNodeCommand}">
@@ -47,11 +49,19 @@
                     <avalonia:MaterialIcon Kind="Download" /> 
                 </MenuItem.Icon>
             </MenuItem>
+
+            <MenuItem Header="Salva Video..." 
+                      Classes="innerMenuItem"
+                      Command="{Binding BoardVm.SaveVideoCommand}">
+                <MenuItem.Icon>
+                    <avalonia:MaterialIcon Kind="Movie" /> 
+                </MenuItem.Icon>
+            </MenuItem>
             
             <Separator />
             
             <MenuItem Header="Exit" Command="{Binding ExitAppCommand}">
-                 <MenuItem.Icon>
+                <MenuItem.Icon>
                     <avalonia:MaterialIcon Kind="ExitToApp" />
                 </MenuItem.Icon>
             </MenuItem>

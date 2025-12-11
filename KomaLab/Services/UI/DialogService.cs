@@ -61,6 +61,31 @@ public class DialogService : IDialogService
 
         return file?.TryGetLocalPath();
     }
+    
+    public async Task<string?> ShowSaveFileDialogAsync(string defaultFileName, string filterName, string pattern)
+    {
+        var storage = GetStorageProvider();
+        if (storage == null) return null;
+
+        // Creiamo il filtro dinamico basato sui parametri
+        var fileType = new FilePickerFileType(filterName)
+        {
+            Patterns = new[] { pattern }
+        };
+
+        // Estraiamo l'estensione pulita (da "*.avi" a "avi") per il default
+        var defaultExt = pattern.TrimStart('*', '.');
+
+        var file = await storage.SaveFilePickerAsync(new FilePickerSaveOptions
+        {
+            Title = $"Salva {filterName}",
+            SuggestedFileName = defaultFileName,
+            FileTypeChoices = new[] { fileType },
+            DefaultExtension = defaultExt
+        });
+
+        return file?.TryGetLocalPath();
+    }
 
     // --- Helper Privato per ridurre duplicazione ---
     private IStorageProvider? GetStorageProvider()

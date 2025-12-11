@@ -1,6 +1,8 @@
 ﻿using System;
 using System.Collections;
+using System.Collections.Generic;
 using System.IO;
+using System.Runtime.InteropServices;
 using System.Threading.Tasks;
 using Avalonia.Platform;
 using KomaLab.Models;
@@ -12,156 +14,304 @@ namespace KomaLab.Services.Data;
 
 public class FitsService : IFitsService
 {
-    /// <summary>
-    /// Carica un file FITS (sia da asset che da filesystem), lo parsa 
-    /// e restituisce il modello dati popolato.
-    /// </summary>
+    // --- 1. CARICAMENTO (Refactoring DRY) ---
+
     public async Task<FitsImageData?> LoadFitsFromFileAsync(string assetPath)
     {
-        // Apre lo stream (gestisce sia file su disco che risorse embedded)
-        Stream streamToRead = OpenStream(assetPath);
-
-        // 'await using' assicura la chiusura dello stream alla fine
-        await using (streamToRead)
+        return await Task.Run(() =>
         {
-            // Esegue il parsing pesante in background per non bloccare la UI
-            return await Task.Run(() =>
+            // Usiamo l'helper interno per leggere i dati grezzi
+            var rawResult = ReadRawFitsData(assetPath);
+            if (rawResult == null) return null;
+
+            var (rawData, header, width, height) = rawResult.Value;
+
+            // --- GESTIONE ORIENTAMENTO FITS (Solo per UI/Array C#) ---
+            // FITS è Bottom-Left. Per Avalonia/Bitmap serve Top-Left.
+            // Invertiamo l'array qui per l'uso in UI.
+            // (Nota: Per OpenCV nel video gestiremo il flip separatamente per velocità)
+            if (rawData is Array arr && arr.Rank == 1) 
             {
-                // Inizializza il lettore FITS
-                var fitsFile = new Fits(streamToRead);
-                fitsFile.Read(); 
+                Array.Reverse(arr);
+            }
 
-                ImageHDU? imageHdu = null;
-                
-                // Cerca la prima HDU che contiene un'immagine valida (almeno 2 assi)
-                for (int i = 0; i < fitsFile.NumberOfHDUs; i++)
+            return new FitsImageData
+            {
+                RawData = rawData,
+                FitsHeader = header,
+                Width = width,
+                Height = height
+            };
+        });
+    }
+
+    /// <summary>
+    /// Helper privato DRY: Apre il file, trova l'immagine e restituisce i dati grezzi.
+    /// Non inverte ancora l'array (Flip Y) per lasciare flessibilità.
+    /// </summary>
+    private (Array Data, Header Header, int Width, int Height)? ReadRawFitsData(string path)
+    {
+        try 
+        {
+            using Stream stream = OpenStream(path);
+            var fitsFile = new Fits(stream);
+            fitsFile.Read();
+
+            ImageHDU? imageHdu = null;
+            
+            for (int i = 0; i < fitsFile.NumberOfHDUs; i++)
+            {
+                var hdu = fitsFile.GetHDU(i);
+                if (hdu is ImageHDU imgHdu && imgHdu.Axes.Length >= 2)
                 {
-                    var hdu = fitsFile.GetHDU(i);
-                    if (hdu is ImageHDU imgHdu && imgHdu.Axes.Length >= 2)
-                    {
-                        imageHdu = imgHdu;
-                        break;
-                    }
+                    imageHdu = imgHdu;
+                    break;
                 }
+            }
 
-                // Se non troviamo immagini valide, ritorniamo null
-                if (imageHdu == null) return null;
+            if (imageHdu == null) return null;
 
-                var header = imageHdu.Header;
-                
-                // Lettura dimensioni
-                int width = header.GetIntValue("NAXIS1");
-                int height = header.GetIntValue("NAXIS2");
-                
-                // Estrazione dei dati grezzi (Kernel restituisce l'array sottostante)
-                // CSharpFITS solitamente restituisce jagged arrays (es. short[][]) o array rettangolari.
-                var rawData = imageHdu.Kernel; 
-                
-                if (rawData == null) return null;
+            var header = imageHdu.Header;
+            int width = header.GetIntValue("NAXIS1");
+            int height = header.GetIntValue("NAXIS2");
+            var rawData = imageHdu.Kernel; // Array jagged o rettangolare
 
-                // --- GESTIONE ORIENTAMENTO FITS ---
-                // Lo standard FITS ha l'origine in basso a sinistra (Bottom-Left).
-                // I monitor e le bitmap hanno l'origine in alto a sinistra (Top-Left).
-                // Dobbiamo invertire l'ordine delle righe (Flip Y).
-                if (rawData is Array arr && arr.Rank == 1) 
-                {
-                    // Se è un jagged array (array di array), Array.Reverse inverte l'ordine delle righe.
-                    // Questo è molto efficiente e corregge l'orientamento.
-                    Array.Reverse(arr);
-                }
-
-                // Costruzione del Model
-                return new FitsImageData
-                {
-                    RawData = rawData,
-                    FitsHeader = header,
-                    Width = width,
-                    Height = height
-                };
-            });
+            if (rawData is Array arr)
+            {
+                return (arr, header, width, height);
+            }
+            return null;
         }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"Errore lettura FITS {path}: {ex.Message}");
+            return null;
+        }
+    }
+
+    // --- 2. ESPORTAZIONE VIDEO (Nuova Feature) ---
+
+    public async Task ExportVideoAsync(
+        List<string> sourceFiles, 
+        string outputPath, 
+        double fps,
+        ContrastProfile profile)
+    {
+        await Task.Run(() =>
+        {
+            if (sourceFiles.Count == 0) return;
+
+            VideoWriter? writer = null;
+            Mat? frame8Bit = null; // Buffer riutilizzabile per il frame finale
+
+            try
+            {
+                // 1. Setup Video Writer (usando dimensioni del primo file)
+                var firstData = ReadRawFitsData(sourceFiles[0]);
+                if (firstData == null) throw new Exception("Impossibile leggere il primo file.");
+
+                var size = new Size(firstData.Value.Width, firstData.Value.Height);
+                
+                // Codec MJPG = .avi (Alta compatibilità, qualità buona, file medio-grandi)
+                // Se vuoi MP4 compresso, usa FourCC('H','2','6','4') ma richiede openh264.dll o ffmpeg
+                int fourcc = VideoWriter.FourCC('M', 'J', 'P', 'G');
+                
+                writer = new VideoWriter(outputPath, fourcc, fps, size, isColor: false); // isColor=false per B/N
+
+                if (!writer.IsOpened())
+                    throw new Exception("Impossibile inizializzare il VideoWriter.");
+
+                // Alloca buffer per la conversione finale (Gray8)
+                frame8Bit = new Mat(size.Height, size.Width, MatType.CV_8UC1);
+
+                // 2. Loop di elaborazione frame
+                foreach (string path in sourceFiles)
+                {
+                    var dataTuple = ReadRawFitsData(path);
+                    if (dataTuple == null) continue;
+
+                    var (rawData, _, w, h) = dataTuple.Value;
+
+                    // Validazione dimensioni (devono essere tutte uguali per il video)
+                    if (w != size.Width || h != size.Height) continue;
+
+                    // 2a. Conversione Raw Array -> Matrice OpenCV Scientifica (Double/Float/Short)
+                    using Mat scientificMat = RawArrayToMat(rawData, w, h);
+                    if (scientificMat.Empty()) continue;
+
+                    // 2b. Flip Y (FITS -> Video Convention)
+                    // FITS è origine in basso-sx, Video in alto-sx.
+                    Cv2.Flip(scientificMat, scientificMat, FlipMode.X);
+
+                    // 2c. Calcolo Soglie (Black/White Point)
+                    double black = 0, white = 1;
+
+                    if (profile.IsAbsolute)
+                    {
+                        black = profile.Black;
+                        white = profile.White;
+                    }
+                    else
+                    {
+                        // Calcolo Statistiche (Sigma Clipping dinamico per ogni frame)
+                        Cv2.MeanStdDev(scientificMat, out var meanScalar, out var stdDevScalar);
+                        double mean = meanScalar.Val0;
+                        double sigma = stdDevScalar.Val0;
+
+                        black = mean + (profile.KBlack * sigma);
+                        white = mean + (profile.KWhite * sigma);
+                    }
+
+                    // 2d. Normalizzazione (Auto-Stretch) e scrittura nel buffer 8-bit
+                    // Formula: dst = (src * alpha) + beta
+                    double range = white - black;
+                    double alpha = (Math.Abs(range) < 1e-9) ? 0 : 255.0 / range;
+                    double beta = (Math.Abs(range) < 1e-9) 
+                        ? (black >= white ? 0 : 128) 
+                        : -black * alpha;
+
+                    scientificMat.ConvertTo(frame8Bit, MatType.CV_8UC1, alpha, beta);
+
+                    // 2e. Scrittura Frame
+                    writer.Write(frame8Bit);
+                    
+                    // Il 'using scientificMat' libera la memoria raw di questo frame subito
+                }
+            }
+            finally
+            {
+                writer?.Dispose();
+                frame8Bit?.Dispose();
+            }
+        });
     }
     
     /// <summary>
-    /// Legge solo l'header del file FITS per ottenerne le dimensioni,
-    /// senza caricare l'intera matrice dati in memoria.
+    /// Converte un array C# generico in una Mat OpenCV usando Marshal.Copy.
+    /// È molto più veloce di SetArray ed evita errori di ambiguità sui tipi.
     /// </summary>
+    private Mat RawArrayToMat(Array rawData, int width, int height)
+    {
+        // Caso 1: Array 1D (Appiattito)
+        if (rawData.Rank == 1)
+        {
+            // 1. Short (16-bit signed)
+            if (rawData is short[] sData)
+            {
+                var mat = new Mat(height, width, MatType.CV_16SC1);
+                Marshal.Copy(sData, 0, mat.Data, sData.Length);
+                return mat;
+            }
+            // 2. Float (32-bit float)
+            if (rawData is float[] fData)
+            {
+                var mat = new Mat(height, width, MatType.CV_32FC1);
+                Marshal.Copy(fData, 0, mat.Data, fData.Length);
+                return mat;
+            }
+            // 3. Double (64-bit float)
+            if (rawData is double[] dData)
+            {
+                var mat = new Mat(height, width, MatType.CV_64FC1);
+                Marshal.Copy(dData, 0, mat.Data, dData.Length);
+                return mat;
+            }
+            // 4. Int (32-bit signed)
+            if (rawData is int[] iData)
+            {
+                var mat = new Mat(height, width, MatType.CV_32SC1);
+                Marshal.Copy(iData, 0, mat.Data, iData.Length);
+                return mat;
+            }
+            // 5. Byte (8-bit unsigned)
+            if (rawData is byte[] bData)
+            {
+                var mat = new Mat(height, width, MatType.CV_8UC1);
+                Marshal.Copy(bData, 0, mat.Data, bData.Length);
+                return mat;
+            }
+        }
+        
+        // Caso 2: Jagged Array (short[][]) - Tipico di CSharpFITS
+        if (rawData is IEnumerable enumerable)
+        {
+            Mat? mat = null;
+            int row = 0;
+
+            foreach (var item in enumerable)
+            {
+                if (item is Array rowArray)
+                {
+                    // Inizializzazione Lazy al primo giro
+                    if (mat == null)
+                    {
+                        MatType type = MatType.CV_64FC1; // Default
+                        if (rowArray is short[]) type = MatType.CV_16SC1;
+                        else if (rowArray is float[]) type = MatType.CV_32FC1;
+                        else if (rowArray is double[]) type = MatType.CV_64FC1;
+                        else if (rowArray is int[]) type = MatType.CV_32SC1;
+                        else if (rowArray is byte[]) type = MatType.CV_8UC1;
+
+                        mat = new Mat(height, width, type);
+                    }
+
+                    if (row < height)
+                    {
+                        // Ottieniamo il puntatore all'inizio della riga corrente nella Matrice OpenCV
+                        IntPtr rowPtr = mat.Ptr(row);
+
+                        // Copiamo la riga C# direttamente in quella posizione di memoria
+                        if (rowArray is short[] s) Marshal.Copy(s, 0, rowPtr, s.Length);
+                        else if (rowArray is float[] f) Marshal.Copy(f, 0, rowPtr, f.Length);
+                        else if (rowArray is double[] d) Marshal.Copy(d, 0, rowPtr, d.Length);
+                        else if (rowArray is int[] i) Marshal.Copy(i, 0, rowPtr, i.Length);
+                        else if (rowArray is byte[] b) Marshal.Copy(b, 0, rowPtr, b.Length);
+                    }
+                    row++;
+                }
+            }
+            return mat ?? new Mat();
+        }
+
+        return new Mat();
+    }
+
+    // --- 3. METODI ESISTENTI (GetSize, Save, Normalize) ---
+
     public async Task<(int Width, int Height)> GetFitsImageSizeAsync(string path)
     {
         Stream streamToRead = OpenStream(path);
-
         await using (streamToRead)
         {
             return await Task.Run(() =>
             {
                 var fitsFile = new Fits(streamToRead);
-                // Legge (parzialmente se supportato, altrimenti legge tutto lo stream ma parsa solo l'header)
                 fitsFile.Read(); 
-    
                 for (int i = 0; i < fitsFile.NumberOfHDUs; i++)
                 {
-                    var hdu = fitsFile.GetHDU(i);
-                    if (hdu is ImageHDU imgHdu)
-                    {
-                        return (imgHdu.Header.GetIntValue("NAXIS1"), 
-                                imgHdu.Header.GetIntValue("NAXIS2"));
-                    }
+                    if (fitsFile.GetHDU(i) is ImageHDU imgHdu)
+                        return (imgHdu.Header.GetIntValue("NAXIS1"), imgHdu.Header.GetIntValue("NAXIS2"));
                 }
                 return (0, 0);
             });
         }
     }
 
-    /// <summary>
-    /// Normalizza una Matrice OpenCV (contenente dati scientifici double/float)
-    /// direttamente nella memoria video di una Bitmap 8-bit (Gray8).
-    /// </summary>
-    public void NormalizeData(
-        Mat sourceMat, 
-        int width, 
-        int height,
-        double blackPoint, 
-        double whitePoint,
-        IntPtr destinationBuffer, 
-        long stride)
+    public void NormalizeData(Mat sourceMat, int width, int height, double blackPoint, double whitePoint, IntPtr destinationBuffer, long stride)
     {
         if (sourceMat.Empty()) return; 
-
-        // Calcolo parametri Stretch Lineare: y = alpha * x + beta
-        // Vogliamo mappare [blackPoint, whitePoint] -> [0, 255]
         double range = whitePoint - blackPoint;
-        
-        // Evitiamo divisioni per zero se black == white
         double alpha = (Math.Abs(range) < 1e-9) ? 0 : 255.0 / range;
-        
-        // Calcolo offset (beta)
-        double beta = (Math.Abs(range) < 1e-9) 
-            ? (blackPoint >= whitePoint ? 0 : 128) 
-            : -blackPoint * alpha;
+        double beta = (Math.Abs(range) < 1e-9) ? (blackPoint >= whitePoint ? 0 : 128) : -blackPoint * alpha;
 
-        // Creiamo una "Matrice Wrapper" attorno al buffer di memoria della Bitmap di destinazione.
-        // Non alloca nuova memoria, usa quella passata tramite destinationBuffer.
-        using Mat dstMat = Mat.FromPixelData(
-            height, 
-            width, 
-            MatType.CV_8UC1, 
-            destinationBuffer, 
-            stride);
-
-        // ConvertTo esegue: dst(x,y) = saturate_cast<uchar>( src(x,y)*alpha + beta )
-        // È un'operazione altamente ottimizzata in OpenCV (spesso SIMD/Multithreaded).
+        using Mat dstMat = Mat.FromPixelData(height, width, MatType.CV_8UC1, destinationBuffer, stride);
         sourceMat.ConvertTo(dstMat, MatType.CV_8UC1, alpha, beta);
     }
     
-    /// <summary>
-    /// Salva i dati correnti su disco in formato FITS.
-    /// Gestisce il re-flip dei dati e la pulizia dell'header.
-    /// </summary>
     public async Task SaveFitsFileAsync(FitsImageData data, string destinationPath)
     {
         await Task.Run(() =>
         {
-            // 1. PREPARAZIONE DATI
             if (data.RawData is Array originalSource)
             {
                 var arrayToSave = (Array)originalSource.Clone();
@@ -174,66 +324,35 @@ public class FitsService : IFitsService
                 while (cursor.MoveNext())
                 {
                     HeaderCard? card = null;
-
-                    if (cursor.Current is DictionaryEntry entry && entry.Value is HeaderCard hc)
-                        card = hc;
-                    else if (cursor.Current is HeaderCard c)
-                        card = c;
+                    if (cursor.Current is DictionaryEntry entry && entry.Value is HeaderCard hc) card = hc;
+                    else if (cursor.Current is HeaderCard c) card = c;
 
                     if (card == null) continue;
-
                     string key = card.Key.ToUpper();
-
-                    if (key == "SIMPLE" || key == "BITPIX" || key == "EXTEND" ||
-                        key == "PCOUNT" || key == "GCOUNT" || 
-                        key == "BZERO" || key == "BSCALE" ||
-                        key == "DATAMIN" || key == "DATAMAX" ||
-                        key.StartsWith("NAXIS")) 
-                    {
-                        continue; 
-                    }
-
+                    if (key == "SIMPLE" || key == "BITPIX" || key == "EXTEND" || key.StartsWith("NAXIS") || key == "PCOUNT" || key == "GCOUNT") continue; 
                     newHeader.AddCard(card);
                 }
 
-                // 4. SCRITTURA SU FILE
-                // --- CORREZIONE QUI SOTTO: Usa ReadWrite ---
                 using var fs = new FileStream(destinationPath, FileMode.Create, FileAccess.ReadWrite);
-            
-                // BufferedDataStream richiede che lo stream sottostante sia leggibile anche in scrittura
                 using var bs = new BufferedDataStream(fs);
                 var fitsFile = new Fits();
-            
                 fitsFile.AddHDU(hdu);
                 fitsFile.Write(bs);
-            
                 bs.Flush();
                 fs.Flush();
             }
         });
     }
 
-    // --- Helper Privato ---
-    
     private Stream OpenStream(string path)
     {
-        // Gestione Risorse Avalonia (es. immagini di default o demo)
         if (path.StartsWith("avares://"))
         {
             var uri = new Uri(path);
-            if (!AssetLoader.Exists(uri)) 
-                throw new FileNotFoundException($"Asset Avalonia non trovato: {path}");
-            
+            if (!AssetLoader.Exists(uri)) throw new FileNotFoundException($"Asset non trovato: {path}");
             return AssetLoader.Open(uri);
         }
-        
-        // Gestione File System Standard
-        if (File.Exists(path))
-        {
-            // FileShare.Read permette ad altre app di leggere il file mentre lo apriamo
-            return new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
-        }
-
-        throw new FileNotFoundException($"File non trovato sul disco: {path}");
+        if (File.Exists(path)) return new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+        throw new FileNotFoundException($"File non trovato: {path}");
     }
 }

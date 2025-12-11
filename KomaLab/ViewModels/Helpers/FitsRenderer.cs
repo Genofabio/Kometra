@@ -13,19 +13,6 @@ using Size = Avalonia.Size;
 
 namespace KomaLab.ViewModels.Helpers;
 
-/// <summary>
-/// Record immutabile per trasferire le impostazioni di contrasto tra un renderer e l'altro.
-/// Supporta sia modalità assoluta (stessa immagine) che relativa (sigma clipping su immagini diverse).
-/// </summary>
-public record ContrastProfile(double Val1, double Val2, bool IsAbsolute)
-{
-    // Helpers semantici per leggere i valori
-    public double KBlack => IsAbsolute ? 0 : Val1;
-    public double KWhite => IsAbsolute ? 0 : Val2;
-    public double Black => IsAbsolute ? Val1 : 0;
-    public double White => IsAbsolute ? Val2 : 0;
-}
-
 public partial class FitsRenderer : ObservableObject, IDisposable
 {
     // --- Dipendenze ---
