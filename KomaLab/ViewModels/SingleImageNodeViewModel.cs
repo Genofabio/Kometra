@@ -5,7 +5,6 @@ using System.Threading.Tasks;
 using Avalonia;
 using CommunityToolkit.Mvvm.ComponentModel;
 using KomaLab.Models;
-using KomaLab.Services;
 using KomaLab.Services.Data;
 using KomaLab.Services.Imaging;
 using KomaLab.ViewModels.Helpers;
@@ -15,6 +14,7 @@ namespace KomaLab.ViewModels;
 
 /// <summary>
 /// ViewModel per un nodo che visualizza una singola immagine FITS.
+/// Gestisce il caricamento, il rendering e il mantenimento dello stato di una singola risorsa.
 /// </summary>
 public partial class SingleImageNodeViewModel : ImageNodeViewModel
 {
@@ -28,12 +28,16 @@ public partial class SingleImageNodeViewModel : ImageNodeViewModel
 
     // --- Stato Interno ---
     private FitsImageData? _currentData;
+    private ContrastProfile? _lastContrastProfile;
 
     // --- Proprietà Observable ---
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ActiveRenderer))] // Notifica la base
     private FitsRenderer? _fitsImage;
 
-    // --- Implementazione Proprietà Astratte ---
+    // --- Implementazione Base ---
+    public override FitsRenderer? ActiveRenderer => FitsImage;
+
     protected override Size NodeContentSize
     {
         get
@@ -42,7 +46,6 @@ public partial class SingleImageNodeViewModel : ImageNodeViewModel
             {
                 return new Size(200, 150); // Fallback size
             }
-            
             return new Size(FitsImage.Data.Width, FitsImage.Data.Height);
         }
     }
@@ -60,37 +63,16 @@ public partial class SingleImageNodeViewModel : ImageNodeViewModel
         _analysis = analysis;
         _imageModel = model;
 
-        // Placeholder vuoto
+        // Inizializzazione con Placeholder (evita null checks ovunque)
         var placeholderData = new FitsImageData
         {
-            RawData = new Array[0],
+            RawData = Array.Empty<Array>(),
             FitsHeader = new Header(),
             Width = 0,
             Height = 0
         };
 
-        _fitsImage = new FitsRenderer(
-            placeholderData, 
-            _fitsService, 
-            _converter, 
-            _analysis);
-    }
-
-    // --- Callback Generati ---
-    partial void OnFitsImageChanged(FitsRenderer? value)
-    {
-        OnPropertyChanged(nameof(NodeContentSize));
-        OnPropertyChanged(nameof(EstimatedTotalSize)); 
-
-        if (value != null)
-        {
-            // 1. Informiamo il Viewport delle dimensioni reali dell'immagine
-            Viewport.ImageSize = value.ImageSize;
-            
-            // 2. Resettiamo la vista (Zoom to fit)
-            // Nota: Viewport.ViewportSize deve essere aggiornato dalla View (vedi punto 3 sotto)
-            Viewport.ResetView();
-        }
+        _fitsImage = new FitsRenderer(placeholderData, _fitsService, _converter, _analysis);
     }
 
     // --- Logica di Caricamento ---
@@ -101,12 +83,14 @@ public partial class SingleImageNodeViewModel : ImageNodeViewModel
         {
             if (string.IsNullOrEmpty(_imageModel.ImagePath)) return;
 
+            // Caricamento IO
             var imageData = await _fitsService.LoadFitsFromFileAsync(_imageModel.ImagePath);
             if (imageData == null)
             {
                 throw new Exception("I dati FITS caricati sono nulli.");
             }
 
+            // Applicazione al ViewModel
             await ApplyProcessedDataAsync(new List<FitsImageData> { imageData });
         }
         catch (Exception ex)
@@ -117,26 +101,56 @@ public partial class SingleImageNodeViewModel : ImageNodeViewModel
 
     private async Task SetFitsData(FitsImageData newData)
     {
+        // 1. Salvataggio stato precedente (Contrasto)
+        // FIX: Catturiamo il profilo SOLO se l'immagine precedente era valida (non placeholder)
+        if (FitsImage != null && FitsImage.Data.Width > 0) 
+        {
+            _lastContrastProfile = FitsImage.CaptureContrastProfile();
+        }
+
         _currentData = newData;
 
-        // 1. Crea nuovo Renderer
+        // 2. Creazione Nuovo Renderer
         var newFitsImage = new FitsRenderer(
             newData,
             _fitsService,
             _converter,
             _analysis);
         
-        await newFitsImage.InitializeAsync();
+        await newFitsImage.InitializeAsync(); // Qui calcola l'Auto-Stretch corretto
 
-        // 2. Swap atomico
+        // 3. Ripristino stato visualizzazione (Contrasto)
+        // Se è la prima volta (dal placeholder), _lastContrastProfile sarà null, 
+        // quindi SALTIAMO questo blocco e manteniamo l'Auto-Stretch appena calcolato.
+        if (_lastContrastProfile != null)
+        {
+            newFitsImage.ApplyContrastProfile(_lastContrastProfile);
+        }
+
+        // 4. Aggiornamento Viewport
+        Viewport.ImageSize = newFitsImage.ImageSize;
+        
+        if (FitsImage == null || FitsImage.Data.Width == 0)
+        {
+            Viewport.ResetView();
+        }
+
+        // 5. Swap Atomico
         var oldFitsImage = FitsImage;
         FitsImage = newFitsImage;
 
-        // 3. Cleanup immediato
+        // 6. Sincronizzazione UI (Slider Base)
+        // Ora qui leggerà i valori corretti calcolati da InitializeAsync
+        BlackPoint = newFitsImage.BlackPoint;
+        WhitePoint = newFitsImage.WhitePoint;
+
+        // 7. Notifiche Layout e Cleanup
+        OnPropertyChanged(nameof(NodeContentSize));
+        OnPropertyChanged(nameof(EstimatedTotalSize));
         oldFitsImage?.UnloadData();
     }
 
-    // --- Implementazione Metodi Astratti ---
+    // --- Implementazione Metodi Astratti (Dati & IO) ---
 
     public override async Task<List<FitsImageData?>> GetCurrentDataAsync()
     {
@@ -158,14 +172,7 @@ public partial class SingleImageNodeViewModel : ImageNodeViewModel
         }
     }
 
-    public override async Task ResetThresholdsAsync()
-    {
-        // FIX SICUREZZA: Controllo esplicito prima dell'await
-        if (FitsImage != null)
-        {
-            await FitsImage.ResetThresholdsAsync();
-        }
-    }
+    // Nota: ResetThresholdsAsync è rimosso perché ereditato dalla base
 
     public override FitsImageData? GetActiveImageData()
     {
@@ -174,20 +181,18 @@ public partial class SingleImageNodeViewModel : ImageNodeViewModel
     
     public override async Task<List<string>> PrepareInputPathsAsync(IFitsService fitsService)
     {
-        // CASO A: Il file esiste già su disco (es. caricato dall'utente)
+        // CASO A: File esistente su disco
         if (!string.IsNullOrEmpty(_imageModel.ImagePath) && System.IO.File.Exists(_imageModel.ImagePath))
         {
             return new List<string> { _imageModel.ImagePath };
         }
 
-        // CASO B: I dati sono solo in memoria (es. risultato di uno Stack)
+        // CASO B: Dati in memoria (es. risultato elaborazione) -> Creazione Temp
         if (_currentData != null)
         {
-            // Creiamo un file temporaneo
-            string tempPath = System.IO.Path.GetTempFileName(); 
-            // Nota: GetTempFileName crea un file 0-byte, a volte le lib FITS si lamentano.
-            // Meglio cancellarlo e ricrearlo col nome giusto o usare GUID.
-            string cleanTempPath = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"Temp_AlignInput_{Guid.NewGuid()}.fits");
+            string cleanTempPath = System.IO.Path.Combine(
+                System.IO.Path.GetTempPath(), 
+                $"Temp_AlignInput_{Guid.NewGuid()}.fits");
 
             try 
             {
@@ -196,7 +201,7 @@ public partial class SingleImageNodeViewModel : ImageNodeViewModel
             }
             catch (Exception ex)
             {
-                System.Diagnostics.Debug.WriteLine($"Errore creazione temp per allineamento: {ex.Message}");
+                System.Diagnostics.Debug.WriteLine($"Errore creazione temp: {ex.Message}");
                 return new List<string>();
             }
         }

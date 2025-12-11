@@ -33,10 +33,7 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
     
     private Size _viewportSize;
     
-    private bool _hasLockedThresholds;
-    private double _lockedKBlack; 
-    private double _lockedKWhite;
-    private bool _isInternalChange;
+    private ContrastProfile? _lastContrastProfile;
 
     #endregion
 
@@ -228,23 +225,24 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
     // --- METODO CRITICO PER LA MEMORIA ---
     private async Task LoadStackImageAtIndexAsync(int index)
     {
-        // 1. Validazione input
         if (index < 0 || index >= _totalStackCount) return;
-        
-        // Evitiamo di ricaricare se siamo già sulla stessa immagine e l'immagine è caricata
         if (index == _currentStackIndex && ActiveImage != null) return;
 
         _currentStackIndex = index;
         UpdateStackCounterText();
 
-        FitsRenderer? newRenderer = null;
+        // 1. CATTURA PROFILO CORRENTE (Se esiste un'immagine attiva)
+        if (ActiveImage != null)
+        {
+            _lastContrastProfile = ActiveImage.CaptureContrastProfile();
+            ActiveImage.UnloadData(); // Liberiamo memoria subito
+        }
 
-        // 2. Caricamento ON-DEMAND (IO asincrono)
+        // 2. CARICAMENTO NUOVA IMMAGINE
+        FitsRenderer? newRenderer = null;
         try
         {
-            string path = _sourcePaths[index];
-            var newModel = await _fitsService.LoadFitsFromFileAsync(path);
-            
+            var newModel = await _fitsService.LoadFitsFromFileAsync(_sourcePaths[index]);
             if (newModel != null)
             {
                 newRenderer = new FitsRenderer(newModel, _fitsService, _converter, _analysis);
@@ -253,89 +251,41 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
         }
         catch (Exception ex)
         {
-            Debug.WriteLine($"Errore caricamento immagine stack [{index}]: {ex.Message}");
-            newRenderer?.UnloadData();
-            return; // O gestire diversamente l'errore
+            Debug.WriteLine($"Errore load: {ex.Message}");
+            return;
         }
 
-        // Variabili per memorizzare i valori da applicare alla UI alla fine
-        double targetBlack = 0;
-        double targetWhite = 0;
-        bool shouldUpdateThresholds = false;
+        if (newRenderer == null) return;
 
-        // 3. Calcolo Statistiche e Logica Sigma Locking (Senza aggiornare ancora le Property)
-        if (newRenderer != null)
+        // 3. APPLICAZIONE PROFILO (O DEFAULT)
+        if (_lastContrastProfile != null)
         {
-            var (mean, sigma) = newRenderer.GetImageStatistics();
-
-            if (!_hasLockedThresholds)
-            {
-                // PRIMA VOLTA: Calcoliamo i fattori K basati sui valori di default dell'immagine
-                double masterBlack = newRenderer.BlackPoint;
-                double masterWhite = newRenderer.WhitePoint;
-                
-                _lockedKBlack = (masterBlack - mean) / sigma;
-                _lockedKWhite = (masterWhite - mean) / sigma;
-                _hasLockedThresholds = true;
-                
-                // Salviamo i valori target
-                targetBlack = masterBlack;
-                targetWhite = masterWhite;
-                shouldUpdateThresholds = true;
-
-                // Reset vista solo al primo avvio
-                Viewport.ImageSize = newRenderer.ImageSize;
-                Viewport.ResetView(); 
-                OnPropertyChanged(nameof(ZoomStatusText));
-            }
-            else
-            {
-                // VOLTE SUCCESSIVE: Calcoliamo le nuove soglie basandoci sui fattori K bloccati
-                // e le statistiche della NUOVA immagine
-                double newBlack = mean + (_lockedKBlack * sigma);
-                double newWhite = mean + (_lockedKWhite * sigma);
-                
-                // Impostiamo i valori interni del renderer (non triggera ancora la UI)
-                newRenderer.BlackPoint = newBlack;
-                newRenderer.WhitePoint = newWhite;
-                
-                // Salviamo i valori target
-                targetBlack = newBlack;
-                targetWhite = newWhite;
-                shouldUpdateThresholds = true;
-            }
+            // Applica le stesse impostazioni relative (Sigma) dell'immagine precedente
+            newRenderer.ApplyContrastProfile(_lastContrastProfile);
+        }
+        else
+        {
+            // Primo avvio: il renderer ha già fatto l'auto-stretch in InitializeAsync
+            // Resettiamo la vista solo la prima volta
+            Viewport.ImageSize = newRenderer.ImageSize;
+            Viewport.ResetView();
+            OnPropertyChanged(nameof(ZoomStatusText));
         }
 
-        // 4. CRITICO: Swap dei Renderer (Low RAM Strategy)
-        // È fondamentale farlo ORA, prima di toccare BlackPoint/WhitePoint properties
-        var oldRenderer = ActiveImage;
+        // 4. SWAP E AGGIORNAMENTO UI
+        ActiveImage = newRenderer;
         
-        ActiveImage = newRenderer; // Questo aggiorna anche SafeImage
-        
-        // Distruggiamo subito il vecchio per liberare RAM
-        oldRenderer?.UnloadData(); 
+        // Aggiorniamo gli slider della UI per riflettere i valori del nuovo renderer
+        // Nota: Usiamo SetProperty o assegnazione diretta. 
+        // SetProperty controlla l'uguaglianza, evitando loop infiniti se i valori sono identici.
+        BlackPoint = newRenderer.BlackPoint;
+        WhitePoint = newRenderer.WhitePoint;
 
-        // 5. Aggiornamenti UI dipendenti dall'immagine
-        OnPropertyChanged(nameof(CorrectImageSize)); 
+        OnPropertyChanged(nameof(CorrectImageSize));
         ResetThresholdsCommand.NotifyCanExecuteChanged();
         UpdateReticleVisibilityForCurrentState();
         UpdateSearchRadiusRange();
         RefreshNavigationCommands();
-
-        // 6. Aggiornamento delle Proprietà Observable (Triggera OnChanged)
-        if (shouldUpdateThresholds)
-        {
-            try 
-            {
-                _isInternalChange = true; 
-                BlackPoint = targetBlack;
-                WhitePoint = targetWhite;
-            }
-            finally
-            {
-                _isInternalChange = false;
-            }
-        }
     }
 
     public void Dispose()
@@ -381,11 +331,15 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
     private async Task ResetThresholds() 
     {
         if (ActiveImage == null) return;
-        await ApplyOptimalStretchAsync();
-        var (mean, sigma) = ActiveImage.GetImageStatistics();
-        _lockedKBlack = (ActiveImage.BlackPoint - mean) / sigma;
-        _lockedKWhite = (ActiveImage.WhitePoint - mean) / sigma;
-        _hasLockedThresholds = true; 
+
+        // 1. Calcolo nel renderer
+        await ActiveImage.ResetThresholdsAsync();
+        
+        // 2. Aggiornamento UI
+        BlackPoint = ActiveImage.BlackPoint;
+        WhitePoint = ActiveImage.WhitePoint;
+        
+        // RIMOSSO: Calcolo manuale _lockedKBlack...
     }
     private bool CanResetThresholds() => ActiveImage != null;
     
@@ -602,11 +556,7 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
         if (ActiveImage != null)
         {
             ActiveImage.BlackPoint = value;
-            // Se il cambiamento è interno (cambio immagine), NON ricalcolare K
-            if (!_isInternalChange) 
-            {
-                UpdateLockedSigmaFactors();
-            }
+            // RIMOSSO: UpdateLockedSigmaFactors()
         }
     }
 
@@ -615,10 +565,7 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
         if (ActiveImage != null)
         {
             ActiveImage.WhitePoint = value;
-            if (!_isInternalChange)
-            {
-                UpdateLockedSigmaFactors();
-            }
+            // RIMOSSO: UpdateLockedSigmaFactors()
         }
     }
     
@@ -646,14 +593,6 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
         TargetCoordinate = null;
         CalculateCentersCommand.NotifyCanExecuteChanged();
         ApplyAlignmentCommand.NotifyCanExecuteChanged();
-    }
-    
-    private async Task ApplyOptimalStretchAsync()
-    {
-        if (ActiveImage == null) return;
-        await ActiveImage.ResetThresholdsAsync();
-        BlackPoint = ActiveImage.BlackPoint;
-        WhitePoint = ActiveImage.WhitePoint;
     }
     
     private void UpdateReticleVisibilityForCurrentState()
@@ -714,15 +653,6 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
             int visibleStep = (_currentStackIndex == 0) ? 1 : 2;
             StackCounterText = $"{visibleStep} / 2";
         }
-    }
-    
-    private void UpdateLockedSigmaFactors()
-    {
-        if (ActiveImage == null) return;
-        var (mean, sigma) = ActiveImage.GetImageStatistics();
-        _lockedKBlack = (BlackPoint - mean) / sigma;
-        _lockedKWhite = (WhitePoint - mean) / sigma;
-        _hasLockedThresholds = true;
     }
     
     #endregion

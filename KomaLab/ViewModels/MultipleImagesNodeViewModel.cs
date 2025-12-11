@@ -1,6 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Collections.ObjectModel; 
+using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.IO;
 using System.Threading.Tasks;
@@ -21,49 +21,43 @@ public partial class MultipleImagesNodeViewModel : ImageNodeViewModel
     private readonly IFitsService _fitsService;
     private readonly IFitsDataConverter _converter;
     private readonly IImageAnalysisService _analysis;
-    
     private readonly MultipleImagesNodeModel _multiModel;
-    
+
     // --- Stato Interno ---
     private readonly int _imageCount;
-    
-    // CACHE LRU (Memoria limitata a 3 immagini + Prefetch)
     private readonly LruCache<int, FitsImageData> _dataCache = new(3);
+    private Size _maxImageSize;
     
-    private Size _maxImageSize; 
-
-    // --- Sigma Locking ---
-    private bool _hasLockedThresholds;
-    private double _lockedKBlack; 
-    private double _lockedKWhite; 
+    // Memorizza le preferenze di contrasto (Sigma/Assoluto) durante lo scorrimento
+    private ContrastProfile? _lastContrastProfile;
 
     // --- Proprietà Observable ---
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ActiveRenderer))] // Notifica la base che il renderer è cambiato
     private FitsRenderer? _activeFitsImage;
 
-    public ObservableCollection<string> ImageNames { get; } = new();
-
-    // Proprietà per la pulizia dei file temporanei (allineamento)
-    public string? TemporaryFolderPath { get; set; }
+    // Implementazione astratta della base
+    public override FitsRenderer? ActiveRenderer => ActiveFitsImage;
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(CurrentImageText))]
     [NotifyPropertyChangedFor(nameof(CanShowPrevious))]
     [NotifyPropertyChangedFor(nameof(CanShowNext))]
     private int _currentIndex;
-    
-    [ObservableProperty] private double _blackPoint;
-    [ObservableProperty] private double _whitePoint;
 
-    // --- Proprietà Esposte ---
+    public ObservableCollection<string> ImageNames { get; } = new();
+    
+    public string? TemporaryFolderPath { get; set; }
+
+    // --- Proprietà Esposte (Sola Lettura) ---
     public List<string> ImagePaths => _multiModel.ImagePaths;
     public Size MaxImageSize => _maxImageSize;
     public string CurrentImageText => $"{CurrentIndex + 1} / {_imageCount}";
     public bool CanShowPrevious => CurrentIndex > 0;
     public bool CanShowNext => CurrentIndex < _imageCount - 1;
 
-    // --- Override da ImageNodeViewModel ---
+    // Override dimensione contenuto
     protected override Size NodeContentSize => _maxImageSize;
 
     // --- Costruttore ---
@@ -96,7 +90,7 @@ public partial class MultipleImagesNodeViewModel : ImageNodeViewModel
         }
     }
 
-    // --- Initialize ---
+    // --- Inizializzazione ---
     public async Task InitializeAsync()
     {
         _dataCache.TryGet(0, out var initialData);
@@ -107,23 +101,17 @@ public partial class MultipleImagesNodeViewModel : ImageNodeViewModel
             return;
         }
 
-        ActiveFitsImage = new FitsRenderer(
-            initialData, 
-            _fitsService, 
-            _converter, 
-            _analysis);
-        
+        ActiveFitsImage = new FitsRenderer(initialData, _fitsService, _converter, _analysis);
         await ActiveFitsImage.InitializeAsync();
         
-        // 2. NUOVO: Aggiorniamo il viewport e resettiamo la vista all'avvio
+        // Setup iniziale Viewport
         Viewport.ImageSize = ActiveFitsImage.ImageSize;
-        Viewport.ResetView(); 
+        Viewport.ResetView(); // 1:1
 
-        var (mean, sigma) = ActiveFitsImage.GetImageStatistics();
-        _lockedKBlack = (ActiveFitsImage.BlackPoint - mean) / sigma;
-        _lockedKWhite = (ActiveFitsImage.WhitePoint - mean) / sigma;
-        _hasLockedThresholds = true;
-
+        // Inizializza il profilo di contrasto basato sull'auto-stretch iniziale
+        _lastContrastProfile = ActiveFitsImage.CaptureContrastProfile();
+        
+        // Sincronizza UI (Sliders)
         BlackPoint = ActiveFitsImage.BlackPoint;
         WhitePoint = ActiveFitsImage.WhitePoint;
         
@@ -135,7 +123,50 @@ public partial class MultipleImagesNodeViewModel : ImageNodeViewModel
         _ = LoadImageAtIndexAsync(value);
     }
 
-    // --- Comandi ---
+    // --- Logica Caricamento e Swap Immagini ---
+    private async Task LoadImageAtIndexAsync(int index)
+    {
+        if (index < 0 || index >= _imageCount) return;
+        
+        // Se l'immagine è già quella attiva, usciamo
+        var cachedData = await GetOrLoadDataAtIndex(index);
+        if (ActiveFitsImage != null && ActiveFitsImage.Data == cachedData) return;
+        if (cachedData == null) return;
+
+        // 1. Cattura il profilo di contrasto corrente prima di scaricare il vecchio renderer
+        if (ActiveFitsImage != null)
+        {
+            _lastContrastProfile = ActiveFitsImage.CaptureContrastProfile();
+            ActiveFitsImage.UnloadData();
+        }
+
+        // 2. Crea il nuovo renderer
+        var newFitsImage = new FitsRenderer(cachedData, _fitsService, _converter, _analysis);
+        await newFitsImage.InitializeAsync(); 
+
+        // 3. Applica il profilo di contrasto (Sigma Lock o Assoluto)
+        if (_lastContrastProfile != null)
+        {
+            newFitsImage.ApplyContrastProfile(_lastContrastProfile);
+        }
+
+        // 4. Aggiorna Viewport (solo dimensioni, manteniamo zoom/pan correnti)
+        Viewport.ImageSize = newFitsImage.ImageSize;
+
+        // 5. Scambio Renderer
+        ActiveFitsImage = newFitsImage;
+
+        // 6. Aggiorna Slider UI con i nuovi valori calcolati
+        BlackPoint = newFitsImage.BlackPoint; 
+        WhitePoint = newFitsImage.WhitePoint;
+    
+        PreviousImageCommand.NotifyCanExecuteChanged();
+        NextImageCommand.NotifyCanExecuteChanged();
+        
+        _ = PrefetchImageAsync(index + 1);
+    }
+
+    // --- Comandi Navigazione ---
     [RelayCommand(CanExecute = nameof(CanShowPrevious))]
     private void PreviousImage()
     {
@@ -149,68 +180,9 @@ public partial class MultipleImagesNodeViewModel : ImageNodeViewModel
         if (!IsSelected) IsSelected = true;
         if (CurrentIndex < _imageCount - 1) CurrentIndex++;
     }
-    
-    [RelayCommand(CanExecute = nameof(CanResetThresholds))]
-    private async Task ResetThresholds()
-    {
-        if (ActiveFitsImage == null) return;
-        await ActiveFitsImage.ResetThresholdsAsync();
-        BlackPoint = ActiveFitsImage.BlackPoint;
-        WhitePoint = ActiveFitsImage.WhitePoint;
-        UpdateLockedSigmaFactors();
-    }
-    private bool CanResetThresholds() => ActiveFitsImage != null;
 
-    // --- Logica Loading & Sigma Lock ---
-    private async Task LoadImageAtIndexAsync(int index)
-    {
-        if (index < 0 || index >= _imageCount) return;
-        if (index == CurrentIndex && ActiveFitsImage != null && ActiveFitsImage.Data == await GetOrLoadDataAtIndex(index)) return;
-    
-        FitsImageData? dataToShow = await GetOrLoadDataAtIndex(index);
-        if (dataToShow == null) return;
+    // --- Implementazione Metodi Astratti ---
 
-        var newFitsImage = new FitsRenderer(
-            dataToShow, 
-            _fitsService, 
-            _converter, 
-            _analysis);
-
-        await newFitsImage.InitializeAsync(); 
-
-        // 3. NUOVO: Aggiorniamo la dimensione dell'immagine nel Viewport
-        // NOTA: NON chiamiamo ResetView() qui. Quando l'utente scorre le immagini,
-        // vuole mantenere lo zoom e il pan attuali per confrontare i dettagli.
-        Viewport.ImageSize = newFitsImage.ImageSize;
-
-        var (mean, sigma) = newFitsImage.GetImageStatistics();
-
-        if (!_hasLockedThresholds)
-        {
-            _lockedKBlack = (newFitsImage.BlackPoint - mean) / sigma;
-            _lockedKWhite = (newFitsImage.WhitePoint - mean) / sigma;
-            _hasLockedThresholds = true;
-        }
-        else
-        {
-            newFitsImage.BlackPoint = mean + (_lockedKBlack * sigma);
-            newFitsImage.WhitePoint = mean + (_lockedKWhite * sigma);
-        }
-
-        var oldFitsImage = ActiveFitsImage;
-        ActiveFitsImage = newFitsImage;
-        oldFitsImage?.UnloadData();
-
-        BlackPoint = newFitsImage.BlackPoint; 
-        WhitePoint = newFitsImage.WhitePoint;
-    
-        PreviousImageCommand.NotifyCanExecuteChanged();
-        NextImageCommand.NotifyCanExecuteChanged();
-        
-        _ = PrefetchImageAsync(index + 1);
-    }
-
-    // --- Metodi Abstract Implementati ---
     public override async Task<List<FitsImageData?>> GetCurrentDataAsync()
     {
         var fullList = new List<FitsImageData?>();
@@ -236,7 +208,7 @@ public partial class MultipleImagesNodeViewModel : ImageNodeViewModel
             {
                 _maxImageSize = new Size(first.Width, first.Height);
                 
-                // 4. NUOVO: Se i dati vengono rimpiazzati (es. nuovo stack), resettiamo la vista
+                // Se i dati cambiano radicalmente (es. dopo uno stack), resettiamo la vista 1:1
                 Viewport.ImageSize = _maxImageSize;
                 Viewport.ResetView();
 
@@ -245,33 +217,28 @@ public partial class MultipleImagesNodeViewModel : ImageNodeViewModel
                 OnPropertyChanged(nameof(EstimatedTotalSize));
             }
         }
+        
+        // Reset profilo contrasto per i nuovi dati
+        _lastContrastProfile = null;
 
-        _hasLockedThresholds = false; 
-        
+        // Ricarica la vista corrente
         int tempIndex = CurrentIndex;
-        if (tempIndex == 0) CurrentIndex = -1; else CurrentIndex = 0; 
-        CurrentIndex = tempIndex; 
-        
-        await LoadImageAtIndexAsync(tempIndex);
+        CurrentIndex = -1; 
+        CurrentIndex = tempIndex;
     }
     
-    // --- IMPLEMENTAZIONE PREPARE INPUT PATHS ---
     public override Task<List<string>> PrepareInputPathsAsync(IFitsService fitsService)
     {
         return Task.FromResult(new List<string>(ImagePaths));
     }
 
-    public override async Task ResetThresholdsAsync()
-    {
-        await ResetThresholds();
-    }
-    
     public override FitsImageData? GetActiveImageData()
     {
         return ActiveFitsImage?.Data;
     }
 
-    // --- Helpers ---
+    // --- Helpers Cache & IO ---
+
     private async Task<FitsImageData?> GetOrLoadDataAtIndex(int index)
     {
         if (index < 0 || index >= _imageCount) return null;
@@ -305,33 +272,6 @@ public partial class MultipleImagesNodeViewModel : ImageNodeViewModel
         });
     }
 
-    partial void OnBlackPointChanged(double value)
-    {
-        if (ActiveFitsImage != null)
-        {
-            ActiveFitsImage.BlackPoint = value;
-            UpdateLockedSigmaFactors();
-        }
-    }
-    
-    partial void OnWhitePointChanged(double value)
-    {
-        if (ActiveFitsImage != null)
-        {
-            ActiveFitsImage.WhitePoint = value;
-            UpdateLockedSigmaFactors();
-        }
-    }
-
-    private void UpdateLockedSigmaFactors()
-    {
-        if (ActiveFitsImage == null) return;
-        var (mean, sigma) = ActiveFitsImage.GetImageStatistics();
-        _lockedKBlack = (BlackPoint - mean) / sigma;
-        _lockedKWhite = (WhitePoint - mean) / sigma;
-        _hasLockedThresholds = true;
-    }
-    
     // --- Dispose ---
     protected override void Dispose(bool disposing)
     {
