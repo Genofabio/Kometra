@@ -80,49 +80,34 @@ public partial class FitsRenderer : ObservableObject, IDisposable
 
     // --- Gestione Profili di Contrasto (SRP Logic) ---
 
-    /// <summary>
-    /// Cattura lo stato attuale del contrasto. 
-    /// Calcola i fattori Sigma (K) basati sulla statistica corrente dell'immagine.
-    /// </summary>
     public ContrastProfile CaptureContrastProfile()
     {
         var (mean, sigma) = GetImageStatistics();
 
-        // Se l'immagine è piatta o non valida, usiamo i valori assoluti come fallback
         if (sigma <= 1e-9) 
             return new ContrastProfile(BlackPoint, WhitePoint, IsAbsolute: true);
 
-        // Calcolo fattori K (quante deviazioni standard dalla media)
         double kBlack = (BlackPoint - mean) / sigma;
         double kWhite = (WhitePoint - mean) / sigma;
 
         return new ContrastProfile(kBlack, kWhite, IsAbsolute: false);
     }
 
-    /// <summary>
-    /// Applica un profilo di contrasto a questa immagine.
-    /// Se il profilo è relativo, adatta le soglie alla statistica di QUESTA immagine.
-    /// </summary>
     public void ApplyContrastProfile(ContrastProfile profile)
     {
         if (_disposedValue) return;
 
         if (profile.IsAbsolute)
         {
-            // Ripristino valori esatti (utile per Undo o ricaricamento stessa immagine)
             BlackPoint = profile.Black;
             WhitePoint = profile.White;
         }
         else
         {
-            // Applicazione adattiva (utile per scorrere stack di immagini diverse)
             var (mean, sigma) = GetImageStatistics();
-            
-            // Applica i fattori K alla nuova distribuzione statistica
             BlackPoint = mean + (profile.KBlack * sigma);
             WhitePoint = mean + (profile.KWhite * sigma);
         }
-        // Nota: Il setter delle proprietà triggera automaticamente OnBlackPointChanged -> TriggerRegeneration
     }
 
     // --- Logica Rendering ---
@@ -134,15 +119,18 @@ public partial class FitsRenderer : ObservableObject, IDisposable
     {
         if (_disposedValue) return;
         
-        // Debounce / Cancellation del lavoro precedente
-        _regenerationCts?.Cancel();
+        // FIX MEMORY LEAK (Resource): Dispose del token precedente
+        if (_regenerationCts != null)
+        {
+            _regenerationCts.Cancel();
+            _regenerationCts.Dispose();
+        }
+        
         _regenerationCts = new CancellationTokenSource();
         var token = _regenerationCts.Token;
 
         try 
         {
-            // Piccolo delay per raggruppare modifiche rapide (opzionale, utile per slider fluidi)
-            // await Task.Delay(10, token); 
             await RegeneratePreviewImageAsync(token);
         }
         catch (OperationCanceledException) { }
@@ -156,7 +144,6 @@ public partial class FitsRenderer : ObservableObject, IDisposable
     {
         if (_cachedScientificMat == null || _cachedScientificMat.IsDisposed) return;
 
-        // Allocazione WriteableBitmap
         var writeableBmp = new WriteableBitmap(
             new PixelSize(_imageData.Width, _imageData.Height), 
             new Vector(96, 96),                                 
@@ -167,7 +154,6 @@ public partial class FitsRenderer : ObservableObject, IDisposable
         {
             using (var lockedBuffer = writeableBmp.Lock())
             {
-                // Cattura variabili locali per thread safety
                 var w = _imageData.Width;
                 var h = _imageData.Height;
                 var bp = BlackPoint;
@@ -179,15 +165,14 @@ public partial class FitsRenderer : ObservableObject, IDisposable
                 await Task.Run(() =>
                 {
                     token.ThrowIfCancellationRequested();
-                    // Normalizzazione pixel (Scientifico -> 0-255 Display)
                     _fitsService.NormalizeData(mat, w, h, bp, wp, addr, rowBytes);
                 }, token);
             }
 
             if (!token.IsCancellationRequested)
             {
-                // Aggiornamento proprietà UI (Main Thread)
-                Image = writeableBmp;
+                // FIX MEMORY LEAK (RAM/VRAM): Swap sicuro della bitmap
+                UpdateImage(writeableBmp);
             }
             else
             {
@@ -201,24 +186,32 @@ public partial class FitsRenderer : ObservableObject, IDisposable
         }
     }
 
+    /// <summary>
+    /// Sostituisce l'immagine corrente assicurandosi di disporre quella vecchia
+    /// per liberare immediatamente la memoria video.
+    /// </summary>
+    private void UpdateImage(Bitmap newImage)
+    {
+        var oldImage = Image;
+        Image = newImage;
+        oldImage?.Dispose();
+    }
+
     public async Task ResetThresholdsAsync(bool skipRegeneration = false)
     {
         if (_disposedValue) return;
 
-        // Calcolo automatico soglie (Auto-Stretch)
         var (newBlack, newWhite) = await Task.Run(() => 
             _converter.CalculateDisplayThresholds(_imageData)
         );
 
         if (skipRegeneration)
         {
-            // Aggiorna campi senza scatenare notifiche/rigenerazione
             SetProperty(ref _blackPoint, newBlack, nameof(BlackPoint));
             SetProperty(ref _whitePoint, newWhite, nameof(WhitePoint));
         }
         else
         {
-            // Aggiorna proprietà pubbliche scatenando la rigenerazione
             BlackPoint = newBlack;
             WhitePoint = newWhite;
         }
@@ -244,10 +237,11 @@ public partial class FitsRenderer : ObservableObject, IDisposable
             {
                 _regenerationCts?.Cancel();
                 _regenerationCts?.Dispose();
-                Image?.Dispose(); // Rilascia la bitmap Avalonia
+                
+                // Dispose dell'immagine attiva
+                Image?.Dispose();
             }
             
-            // Risorse non gestite (OpenCV Mat)
             if (_cachedScientificMat != null && !_cachedScientificMat.IsDisposed)
             {
                 _cachedScientificMat.Dispose();

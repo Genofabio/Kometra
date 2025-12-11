@@ -252,6 +252,7 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
         catch (Exception ex)
         {
             Debug.WriteLine($"Errore load: {ex.Message}");
+            newRenderer?.UnloadData(); 
             return;
         }
 
