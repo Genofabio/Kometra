@@ -33,12 +33,12 @@ public class AlignmentService : IAlignmentService
     }
 
     public async Task<IEnumerable<Point?>> CalculateCentersAsync(
-        AlignmentMode mode, 
-        CenteringMethod method, 
-        List<string> sourcePaths, 
-        IEnumerable<Point?> currentCoordinates, 
+        AlignmentMode mode,
+        CenteringMethod method,
+        List<string> sourcePaths,
+        IEnumerable<Point?> currentCoordinates,
         int searchRadius,
-        IProgress<(int Index, Point? Center)>? progress = null) // <--- NUOVO PARAMETRO
+        IProgress<(int Index, Point? Center)>? progress = null)
     {
         if (searchRadius <= 0 && (mode == AlignmentMode.Manual || mode == AlignmentMode.Guided))
         {
@@ -47,33 +47,21 @@ public class AlignmentService : IAlignmentService
 
         var guesses = currentCoordinates.ToList();
         int n = sourcePaths.Count;
-        Point?[] results = new Point?[n]; 
-        
+        Point?[] results = new Point?[n];
         long firstFileSize = 0;
-        try 
+        try
         {
-            if (sourcePaths.Count > 0) 
+            if (sourcePaths.Count > 0)
                 firstFileSize = new System.IO.FileInfo(sourcePaths[0]).Length;
         }
-        catch { /* Ignora errori di accesso al file qui */ }
+        catch { /* Ignora errori */ }
 
-        // 2. Definisci soglie di sicurezza (Valori empirici per PC da 16GB RAM)
         int maxConcurrency;
-    
-        if (firstFileSize > 100 * 1024 * 1024) // > 100 MB
-        {
-            maxConcurrency = 1; 
-        }
-        else if (firstFileSize > 20 * 1024 * 1024) // > 20 MB
-        {
-            maxConcurrency = Math.Clamp(Environment.ProcessorCount / 2, 2, 3);
-        }
-        else 
-        {
-            maxConcurrency = Math.Clamp(Environment.ProcessorCount, 2, 4);
-        }
-        
-        using var semaphore = new SemaphoreSlim(maxConcurrency); 
+        if (firstFileSize > 100 * 1024 * 1024) maxConcurrency = 1;
+        else if (firstFileSize > 20 * 1024 * 1024) maxConcurrency = Math.Clamp(Environment.ProcessorCount / 2, 2, 3);
+        else maxConcurrency = Math.Clamp(Environment.ProcessorCount, 2, 4);
+
+        using var semaphore = new SemaphoreSlim(maxConcurrency);
         var processingTasks = new List<Task>();
 
         // ====================================================================
@@ -92,20 +80,13 @@ public class AlignmentService : IAlignmentService
                     await semaphore.WaitAsync();
                     try
                     {
-                        // Chiamiamo il tuo helper che gestisce Retry e Garbage Collection
                         Point? result = await AttemptCalculationWithRetryAsync(
                             index, path, guessPoint, mode, method, searchRadius
                         );
-                        
                         results[index] = result;
-                        
-                        // Segnala alla UI che questa immagine è finita (rimuove i trattini ---)
                         progress?.Report((index, result));
                     }
-                    finally 
-                    { 
-                        semaphore.Release(); 
-                    }
+                    finally { semaphore.Release(); }
                 }));
             }
             await Task.WhenAll(processingTasks);
@@ -126,8 +107,6 @@ public class AlignmentService : IAlignmentService
 
             try
             {
-                // 1. Load Start & End (Necessario per Template/Traiettoria)
-                
                 // Frame 0
                 var data0 = await _fitsService.LoadFitsFromFileAsync(sourcePaths[0]);
                 if (data0 == null) return guesses;
@@ -135,8 +114,8 @@ public class AlignmentService : IAlignmentService
                 templateMat = t0.template;
                 Point center1Precise = t0.preciseCenter;
                 results[0] = center1Precise;
-                progress?.Report((0, center1Precise)); // <--- Report Img 0
-                data0 = null; 
+                progress?.Report((0, center1Precise));
+                data0 = null;
 
                 // Frame N
                 var dataN = await _fitsService.LoadFitsFromFileAsync(sourcePaths[n - 1]);
@@ -144,22 +123,18 @@ public class AlignmentService : IAlignmentService
                 var tN = _operations.ExtractRefinedTemplate(dataN, pNGuess.Value, searchRadius);
                 Point centerNPrecise = tN.preciseCenter;
                 results[n - 1] = centerNPrecise;
-                progress?.Report((n - 1, centerNPrecise)); // <--- Report Img N
-                tN.template.Dispose(); 
-                dataN = null; 
+                progress?.Report((n - 1, centerNPrecise));
+                tN.template.Dispose();
+                dataN = null;
 
-                // 2. Calcola traiettoria
                 double stepX = (centerNPrecise.X - center1Precise.X) / (n - 1);
                 double stepY = (centerNPrecise.Y - center1Precise.Y) / (n - 1);
 
-                // 3. Elaborazione parallela dei frame intermedi
                 var intermediateTasks = new List<Task>();
-                
                 for (int i = 1; i < n - 1; i++)
                 {
                     int index = i;
                     string path = sourcePaths[index];
-                    
                     double guessX = center1Precise.X + (i * stepX);
                     double guessY = center1Precise.Y + (i * stepY);
                     Point expectedPoint = new Point(guessX, guessY);
@@ -168,20 +143,18 @@ public class AlignmentService : IAlignmentService
                     {
                         await semaphore.WaitAsync();
                         FitsImageData? fitsData = null;
-
                         try
                         {
                             fitsData = await _fitsService.LoadFitsFromFileAsync(path);
                             if (fitsData == null) { results[index] = null; return; }
 
                             using Mat fullImage = _converter.RawToMat(fitsData);
-                            fitsData = null; // Libera RAM
+                            fitsData = null;
 
                             Point? foundMatch = _operations.FindTemplatePosition(fullImage, templateMat, expectedPoint, searchRadius);
                             var finalPoint = foundMatch ?? expectedPoint;
-                            
                             results[index] = finalPoint;
-                            progress?.Report((index, finalPoint)); // <--- Report Intermedi
+                            progress?.Report((index, finalPoint));
                         }
                         catch (Exception ex)
                         {
@@ -189,10 +162,10 @@ public class AlignmentService : IAlignmentService
                             results[index] = expectedPoint;
                             progress?.Report((index, expectedPoint));
                         }
-                        finally 
-                        { 
+                        finally
+                        {
                             if (fitsData != null) fitsData = null;
-                            semaphore.Release(); 
+                            semaphore.Release();
                         }
                     }));
                 }
@@ -207,7 +180,79 @@ public class AlignmentService : IAlignmentService
             {
                 templateMat?.Dispose();
             }
+            return results;
+        }
 
+        // ====================================================================
+        // --- STRATEGIA 4: ALLINEAMENTO STELLARE (STAR ALIGNMENT SEQUENZIALE) ---
+        // ====================================================================
+        else if (mode == AlignmentMode.Stars)
+        {
+            if (n < 2) return guesses;
+
+            Point masterCenter;
+            Mat? prevMat = null;
+            try
+            {
+                var data0 = await _fitsService.LoadFitsFromFileAsync(sourcePaths[0]);
+                if (data0 == null) return results;
+
+                masterCenter = new Point(data0.Width / 2.0, data0.Height / 2.0);
+                results[0] = masterCenter;
+                progress?.Report((0, masterCenter));
+
+                prevMat = _converter.RawToMat(data0);
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"Errore Init Master: {ex.Message}");
+                prevMat?.Dispose();
+                return guesses;
+            }
+
+            double totalShiftX = 0;
+            double totalShiftY = 0;
+
+            for (int i = 1; i < n; i++)
+            {
+                int index = i;
+                string path = sourcePaths[index];
+                try
+                {
+                    var dataTarget = await _fitsService.LoadFitsFromFileAsync(path);
+                    if (dataTarget == null) { results[index] = null; continue; }
+
+                    using Mat currentMat = _converter.RawToMat(dataTarget);
+                    
+                    // Calcolo Shift Sequenziale (i vs i-1)
+                    Point stepShift = _analysis.ComputeStarFieldShift(prevMat, currentMat);
+
+                    totalShiftX += stepShift.X;
+                    totalShiftY += stepShift.Y;
+
+                    // ComputeStarFieldShift ritorna il vettore negativo (-x, -y) per allineare.
+                    // Quindi CumulativeShift accumula valori negativi se l'immagine va a destra.
+                    // La formula corretta è Master - Shift.
+                    Point newCenter = new Point(
+                        masterCenter.X - totalShiftX,
+                        masterCenter.Y - totalShiftY
+                    );
+
+                    results[index] = newCenter;
+                    progress?.Report((index, newCenter));
+
+                    // Swap
+                    prevMat.Dispose();
+                    prevMat = currentMat.Clone();
+                }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"Errore StarAlign img {index}: {ex.Message}");
+                    results[index] = null;
+                }
+            }
+
+            prevMat?.Dispose();
             return results;
         }
 
@@ -215,32 +260,23 @@ public class AlignmentService : IAlignmentService
     }
     
     private async Task<Point?> AttemptCalculationWithRetryAsync(
-        int index, string path, Point? guessPoint, 
+        int index, string path, Point? guessPoint,
         AlignmentMode mode, CenteringMethod method, int searchRadius)
     {
         int attempts = 0;
-        while (attempts < 3) // Riprova fino a 3 volte
+        while (attempts < 3)
         {
             attempts++;
             FitsImageData? fitsData = null;
             try
             {
-                // 1. Carica
                 fitsData = await _fitsService.LoadFitsFromFileAsync(path);
                 if (fitsData == null) return null;
 
-                // 2. Converti
                 using Mat fullImageMat = _converter.RawToMat(fitsData);
-                fitsData = null; // Libera subito la memoria raw!
-                
-                // Forziamo il GC se siamo al secondo/terzo tentativo (situazione critica)
-                if (attempts > 1) 
-                {
-                    GC.Collect();
-                    await Task.Delay(50); // Piccolo respiro per la CPU
-                }
+                fitsData = null;
+                if (attempts > 1) { GC.Collect(); await Task.Delay(50); }
 
-                // 3. Logica di Calcolo (Copiata dal tuo vecchio codice)
                 Point? calculatedCenter = null;
 
                 if (mode == AlignmentMode.Automatic)
@@ -250,16 +286,14 @@ public class AlignmentService : IAlignmentService
                 else // Manual
                 {
                     if (guessPoint == null) return null;
-                    
                     int size = searchRadius * 2;
                     int x = (int)(guessPoint.Value.X - searchRadius);
                     int y = (int)(guessPoint.Value.Y - searchRadius);
-                    
                     Rect imageBounds = new Rect(0, 0, fullImageMat.Width, fullImageMat.Height);
                     Rect targetRect = new Rect(x, y, size, size);
                     Rect roiRect = imageBounds.Intersect(targetRect);
 
-                    if (roiRect.Width <= 0 || roiRect.Height <= 0) 
+                    if (roiRect.Width <= 0 || roiRect.Height <= 0)
                     {
                         calculatedCenter = guessPoint;
                     }
@@ -279,17 +313,12 @@ public class AlignmentService : IAlignmentService
                         calculatedCenter = new Point(localCenter.X + roiRect.X, localCenter.Y + roiRect.Y);
                     }
                 }
-                
-                return calculatedCenter; // Successo!
+                return calculatedCenter;
             }
             catch (Exception ex)
             {
                 Debug.WriteLine($"[Retry System] Fallito tentativo {attempts} su Img {index}: {ex.Message}");
-                
-                // Se abbiamo finito i tentativi, restituiamo il valore di fallback
                 if (attempts >= 3) return (mode == AlignmentMode.Manual) ? guessPoint : null;
-                
-                // BACKOFF: Aspetta un po' prima di riprovare (dà tempo alla RAM di svuotarsi)
                 await Task.Delay(200 * attempts);
             }
             finally
@@ -302,32 +331,28 @@ public class AlignmentService : IAlignmentService
     
     // --- APPLICAZIONE (Con calcolo canvas perfetto) ---
     public async Task<List<string>> ApplyCenteringAndSaveAsync(
-        List<string> sourcePaths, 
+        List<string> sourcePaths,
         List<Point?> centers,
         string tempFolderPath)
     {
-        // 1. Calcola dimensione canvas ottimale (Metodo esistente, invariato)
         Size perfectSize = await CalculatePerfectCanvasSizeAsync(sourcePaths, centers);
-        
-        // 2. SMART CONCURRENCY (Euristica basata sulla dimensione file)
-        //    Copiata identica dalla fase di Calcolo
         long firstFileSize = 0;
-        try 
+        try
         {
-            if (sourcePaths.Count > 0) 
+            if (sourcePaths.Count > 0)
                 firstFileSize = new System.IO.FileInfo(sourcePaths[0]).Length;
         }
         catch { /* Ignora */ }
 
         int maxConcurrency;
-        if (firstFileSize > 100 * 1024 * 1024)      maxConcurrency = 1; // > 100MB: Seriale
-        else  maxConcurrency = Math.Clamp(Environment.ProcessorCount / 2, 2, 3);
+        if (firstFileSize > 100 * 1024 * 1024) maxConcurrency = 1;
+        else maxConcurrency = Math.Clamp(Environment.ProcessorCount / 2, 2, 3);
 
         using var semaphore = new SemaphoreSlim(maxConcurrency);
         var tasks = new List<Task<string?>>();
 
         if (!System.IO.Directory.Exists(tempFolderPath))
-             System.IO.Directory.CreateDirectory(tempFolderPath);
+            System.IO.Directory.CreateDirectory(tempFolderPath);
 
         for (int i = 0; i < sourcePaths.Count; i++)
         {
@@ -342,15 +367,11 @@ public class AlignmentService : IAlignmentService
                 await semaphore.WaitAsync();
                 try
                 {
-                    // Chiamata al nuovo Helper Sicuro
                     return await AttemptProcessAndSaveWithRetryAsync(
                         index, path, center, perfectSize, tempFolderPath
                     );
                 }
-                finally 
-                { 
-                    semaphore.Release(); 
-                }
+                finally { semaphore.Release(); }
             }));
         }
 
@@ -363,63 +384,42 @@ public class AlignmentService : IAlignmentService
         int index, string path, Point? center, Size targetSize, string tempFolderPath)
     {
         if (center == null) return null;
-
         int attempts = 0;
         while (attempts < 3)
         {
             attempts++;
             FitsImageData? inputData = null;
-            FitsImageData? outputData = null; // Risultato finale da salvare
-
+            FitsImageData? outputData = null;
             try
             {
-                // 1. Load
                 inputData = await _fitsService.LoadFitsFromFileAsync(path);
                 if (inputData == null) return null;
+                if (attempts > 1) { GC.Collect(); await Task.Delay(100); }
 
-                // Forziamo pulizia se siamo in retry mode
-                if (attempts > 1) 
-                {
-                    GC.Collect();
-                    await Task.Delay(100);
-                }
-
-                // 2. Process (CPU Intensive + RAM Allocation)
-                // Eseguiamo la trasformazione OpenCV in un Task separato per non bloccare
-                outputData = await Task.Run(() => 
+                outputData = await Task.Run(() =>
                 {
                     using Mat originalMat = _converter.RawToMat(inputData);
-                    
-                    // Qui avviene la magia: traslazione sub-pixel
                     using Mat centeredMat = _operations.GetSubPixelCenteredCanvas(originalMat, center.Value, targetSize);
-                    
                     return _converter.MatToFitsData(centeredMat, inputData);
                 });
 
-                // Libera subito l'input, non serve più
-                inputData = null; 
-
+                inputData = null;
                 if (outputData == null) return null;
 
-                // 3. Save (Disk I/O Intensive)
                 string fileName = $"Aligned_{index}_{Guid.NewGuid()}.fits";
                 string fullPath = System.IO.Path.Combine(tempFolderPath, fileName);
-                
                 await _fitsService.SaveFitsFileAsync(outputData, fullPath);
 
-                return fullPath; // Successo!
+                return fullPath;
             }
             catch (Exception ex)
             {
                 Debug.WriteLine($"[Save Retry] Fallito tentativo {attempts} su Img {index}: {ex.Message}");
-                
-                if (attempts >= 3) return null; // Rinuncia
-                
-                await Task.Delay(300 * attempts); // Backoff leggermente più lungo per I/O
+                if (attempts >= 3) return null;
+                await Task.Delay(300 * attempts);
             }
             finally
             {
-                // Pulizia aggressiva nel finally
                 if (inputData != null) inputData = null;
                 if (outputData != null) outputData = null;
             }
@@ -438,35 +438,28 @@ public class AlignmentService : IAlignmentService
             if (centers[i] == null) continue;
             Point center = centers[i]!.Value;
 
-            // Load -> Measure -> Drop
             var data = await _fitsService.LoadFitsFromFileAsync(paths[i]);
             if (data != null)
             {
                 using Mat mat = _converter.RawToMat(data);
-                
-                // Usa la tua logica originale per trovare il box valido
                 Rect validBox = _analysis.FindValidDataBox(mat);
 
-                if (validBox.Width > 0 && validBox.Height > 0) 
+                if (validBox.Width > 0 && validBox.Height > 0)
                 {
                     double distLeft = center.X - validBox.X;
                     double distRight = (validBox.X + validBox.Width) - center.X;
                     double distTop = center.Y - validBox.Y;
                     double distBottom = (validBox.Y + validBox.Height) - center.Y;
-                    
                     double myRadiusX = Math.Max(distLeft, distRight);
                     double myRadiusY = Math.Max(distTop, distBottom);
-                    
                     if (myRadiusX > maxRadiusX) maxRadiusX = myRadiusX;
                     if (myRadiusY > maxRadiusY) maxRadiusY = myRadiusY;
                 }
             }
-            data = null; // Libera RAM
+            data = null;
         }
-        
         int finalW = (int)Math.Ceiling(maxRadiusX * 2);
         int finalH = (int)Math.Ceiling(maxRadiusY * 2);
-        
         return (finalW > 0 && finalH > 0) ? new Size(finalW, finalH) : new Size(100, 100);
     }
 
@@ -474,10 +467,10 @@ public class AlignmentService : IAlignmentService
     {
         var coordinateList = currentCoordinates.ToList();
         if (coordinateList.Count == 0) return false;
-        
         switch (mode)
         {
-            case AlignmentMode.Automatic: return true; 
+            case AlignmentMode.Automatic: return true;
+            case AlignmentMode.Stars: return true;
             case AlignmentMode.Guided:
                 if (totalCount == 1) return coordinateList[0].HasValue;
                 var hasFirstAndLast = coordinateList.FirstOrDefault().HasValue && coordinateList.LastOrDefault().HasValue;

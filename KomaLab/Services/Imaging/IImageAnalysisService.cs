@@ -42,4 +42,16 @@ public interface IImageAnalysisService
     /// Restituisce il rettangolo contenente dati validi (non-NaN).
     /// </summary>
     Rect FindValidDataBox(Mat image);
+    
+    // --- Analisi Campo Stellare (Allineamento) ---
+
+    /// <summary>
+    /// Calcola lo spostamento (X, Y) tra due immagini usando Phase Correlation.
+    /// Applica internamente la catena Log -> Blur -> Laplaciano per isolare le stelle 
+    /// e ignorare la luminosità della cometa.
+    /// </summary>
+    /// <param name="reference">Immagine di riferimento (solitamente la precedente)</param>
+    /// <param name="target">Immagine da allineare</param>
+    /// <returns>Il vettore di spostamento (positivo).</returns>
+    Point ComputeStarFieldShift(Mat reference, Mat target);
 }

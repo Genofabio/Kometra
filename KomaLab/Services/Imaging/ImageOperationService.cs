@@ -15,40 +15,28 @@ public class ImageOperationService : IImageOperationService
     private readonly IFitsDataConverter _converter;
     private readonly IImageAnalysisService _analysis;
 
-    public ImageOperationService(
-        IFitsDataConverter converter, 
-        IImageAnalysisService analysis)
+    public ImageOperationService(IFitsDataConverter converter, IImageAnalysisService analysis)
     {
         _converter = converter;
         _analysis = analysis;
     }
 
-    // =======================================================================
-    // 1. WARPING (Spostamento Sub-pixel)
-    // =======================================================================
-
     public Mat GetSubPixelCenteredCanvas(Mat source, Point originalCenter, Size outputSize)
     {
         double destCenterX = outputSize.Width / 2.0;
         double destCenterY = outputSize.Height / 2.0;
-    
         double tx = destCenterX - originalCenter.X;
         double ty = destCenterY - originalCenter.Y;
-    
-        // Matrice di trasformazione Affine (Double)
+
         using Mat m = new Mat(2, 3, MatType.CV_64FC1);
         m.Set(0, 0, 1.0); m.Set(0, 1, 0.0); m.Set(0, 2, tx);
         m.Set(1, 0, 0.0); m.Set(1, 1, 1.0); m.Set(1, 2, ty);
-    
-        // Risultato inizializzato a NaN
-        // CAST INT: OpenCvSharp.Size vuole int, Avalonia.Size ha double
+
         var cvSize = new OpenCvSharp.Size((int)outputSize.Width, (int)outputSize.Height);
-        
         Mat result = new Mat(cvSize, MatType.CV_64FC1, new Scalar(double.NaN));
         
         Mat sourceDouble = source;
         bool disposeSource = false;
-
         if (source.Type() != MatType.CV_64FC1)
         {
             sourceDouble = new Mat();
@@ -58,123 +46,75 @@ public class ImageOperationService : IImageOperationService
 
         try
         {
-            Cv2.WarpAffine(
-                sourceDouble, 
-                result, 
-                m, 
-                cvSize, // Usa la size castata
-                InterpolationFlags.Lanczos4, 
-                BorderTypes.Transparent, 
-                new Scalar(double.NaN)
-            );
+            Cv2.WarpAffine(sourceDouble, result, m, cvSize, InterpolationFlags.Lanczos4, BorderTypes.Transparent, new Scalar(double.NaN));
         }
         finally
         {
             if (disposeSource) sourceDouble.Dispose();
         }
-
         return result;
     }
-
-    // =======================================================================
-    // 2. TEMPLATE MATCHING
-    // =======================================================================
 
     public (Mat template, Point preciseCenter) ExtractRefinedTemplate(FitsImageData? data, Point roughGuess, int radius)
     {
         if (data == null) return (new Mat(), roughGuess);
-
         using Mat fullImg = _converter.RawToMat(data);
-        
-        // Rect è Avalonia.Rect (double)
         Rect roi = CreateSafeRoi(fullImg, roughGuess, radius);
-        if (roi.Width <= 0) throw new Exception("ROI non valida per estrazione template");
-        
-        // 1. Trova centro preciso localmente
-        // CAST INT: Creiamo OpenCvSharp.Rect partendo da Avalonia.Rect
+        if (roi.Width <= 0) throw new Exception("ROI non valida");
+
         var cvRoi = new OpenCvSharp.Rect((int)roi.X, (int)roi.Y, (int)roi.Width, (int)roi.Height);
-        
         using Mat crop = new Mat(fullImg, cvRoi);
         Point local = _analysis.FindCenterOfLocalRegion(crop);
         Point global = new Point(local.X + roi.X, local.Y + roi.Y);
-        
-        // 2. Estrai Template Definitivo
+
         Rect templRect = CreateSafeRoi(fullImg, global, radius);
         var cvTemplRect = new OpenCvSharp.Rect((int)templRect.X, (int)templRect.Y, (int)templRect.Width, (int)templRect.Height);
-        
-        // Matrice restituita al chiamante (non usiamo 'using' qui)
-        // Nota: se Normalizzi, crei una copia, quindi puoi fare 'using' sulla raw
         using Mat tempRaw = new Mat(fullImg, cvTemplRect);
         Mat templateF = NormalizeAndConvertToFloat(tempRaw);
-        
         return (templateF, global);
     }
 
     public Point? FindTemplatePosition(Mat fullImage, Mat templateF, Point expectedCenter, int searchRadius)
     {
         if (fullImage.Empty() || templateF.Empty()) return null;
-
-        // A. Area di ricerca estesa
         int searchW = searchRadius * 3;
         Rect searchRect = CreateSafeRoi(fullImage, expectedCenter, searchW);
+        if (searchRect.Width <= templateF.Width || searchRect.Height <= templateF.Height) return null;
 
-        if (searchRect.Width <= templateF.Width || searchRect.Height <= templateF.Height)
-            return null; 
-
-        // CAST INT per il ritaglio
         var cvSearchRect = new OpenCvSharp.Rect((int)searchRect.X, (int)searchRect.Y, (int)searchRect.Width, (int)searchRect.Height);
-
         using Mat searchRegion = new Mat(fullImage, cvSearchRect);
         using Mat searchF = NormalizeAndConvertToFloat(searchRegion);
         using Mat res = new Mat();
 
-        // B. Match Template
         Cv2.MatchTemplate(searchF, templateF, res, TemplateMatchModes.CCoeffNormed);
         Cv2.MinMaxLoc(res, out _, out double maxVal, out _, out OpenCvSharp.Point maxLoc);
 
-        if (maxVal < 0.5) return null; 
+        if (maxVal < 0.5) return null;
 
-        // C. Calcolo posizione
         double matchCx = maxLoc.X + (templateF.Width / 2.0);
         double matchCy = maxLoc.Y + (templateF.Height / 2.0);
-        
-        // D. Raffinamento Sub-Pixel
         Point roughLocal = new Point(matchCx, matchCy);
-        Rect refineRect = CreateSafeRoi(searchRegion, roughLocal, searchRadius); 
-        
+        Rect refineRect = CreateSafeRoi(searchRegion, roughLocal, searchRadius);
         Point subPixelCenter;
+        
         if (refineRect.Width > 0 && refineRect.Height > 0)
         {
             var cvRefineRect = new OpenCvSharp.Rect((int)refineRect.X, (int)refineRect.Y, (int)refineRect.Width, (int)refineRect.Height);
             using Mat refineCrop = new Mat(searchRegion, cvRefineRect);
-            
-            // Delega al servizio di analisi
-            Point localRefined = _analysis.FindCenterOfLocalRegion(refineCrop); 
+            Point localRefined = _analysis.FindCenterOfLocalRegion(refineCrop);
             subPixelCenter = new Point(localRefined.X + refineRect.X, localRefined.Y + refineRect.Y);
         }
-        else
-        {
-            subPixelCenter = roughLocal;
-        }
+        else subPixelCenter = roughLocal;
 
-        // E. Globalizzazione
         return new Point(subPixelCenter.X + searchRect.X, subPixelCenter.Y + searchRect.Y);
     }
 
-    // =======================================================================
-    // 3. STACKING
-    // =======================================================================
-
     public async Task<FitsImageData> ComputeStackAsync(List<FitsImageData> sources, StackingMode mode)
     {
-        if (sources == null || sources.Count == 0) 
-            throw new ArgumentException("Nessuna immagine da processare");
-
+        if (sources == null || sources.Count == 0) throw new ArgumentException("Nessuna immagine");
         var refData = sources[0];
-        int width = refData.Width; 
+        int width = refData.Width;
         int height = refData.Height;
-        int count = sources.Count;
-
         using Mat resultMat = new Mat(height, width, MatType.CV_64FC1, new Scalar(0));
 
         await Task.Run(() =>
@@ -182,104 +122,57 @@ public class ImageOperationService : IImageOperationService
             if (mode == StackingMode.Sum || mode == StackingMode.Average)
             {
                 using Mat validCountMat = new Mat(height, width, MatType.CV_64FC1, new Scalar(0));
-
                 foreach (var sourceData in sources)
                 {
                     using Mat currentMat = _converter.RawToMat(sourceData);
-                    
-                    if (currentMat.Width != width || currentMat.Height != height) continue;
-
                     using Mat nonNanMask = new Mat();
-                    Cv2.Compare(currentMat, currentMat, nonNanMask, CmpType.EQ); 
-        
-                    Cv2.Add(resultMat, currentMat, resultMat, mask: nonNanMask); 
-
+                    Cv2.Compare(currentMat, currentMat, nonNanMask, CmpType.EQ);
+                    Cv2.Add(resultMat, currentMat, resultMat, mask: nonNanMask);
                     using Mat onesMat = new Mat(height, width, MatType.CV_64FC1, new Scalar(1));
                     Cv2.Add(validCountMat, onesMat, validCountMat, mask: nonNanMask);
                 }
-
-                if (mode == StackingMode.Average)
-                {
-                    Cv2.Divide(resultMat, validCountMat, resultMat, scale: 1, dtype: MatType.CV_64FC1);
-                }
+                if (mode == StackingMode.Average) Cv2.Divide(resultMat, validCountMat, resultMat, scale: 1, dtype: MatType.CV_64FC1);
             }
             else if (mode == StackingMode.Median)
             {
-                // Definisci quanto grande deve essere una striscia (es. 200 righe)
-                // Più è piccolo, meno RAM usa, ma un po' più overhead CPU.
-                int stripHeight = 200; 
-
+                int stripHeight = 50;
                 for (int yStart = 0; yStart < height; yStart += stripHeight)
                 {
-                    // Calcola l'altezza effettiva di questa striscia (l'ultima potrebbe essere più piccola)
                     int currentStripH = Math.Min(stripHeight, height - yStart);
-                    
-                    // Carica SOLO la striscia corrente da tutte le immagini
-                    Mat[] stripStack = new Mat[count];
+                    Mat[] stripStack = new Mat[sources.Count];
                     try
                     {
-                        // 1. Caricamento Parziale (Leggero in RAM)
                         var start = yStart;
-                        Parallel.For(0, count, i =>
+                        Parallel.For(0, sources.Count, i => stripStack[i] = _converter.RawToMatRect(sources[i], start, currentStripH));
+                        Parallel.For(0, currentStripH, yRel =>
                         {
-                            stripStack[i] = _converter.RawToMatRect(sources[i], start, currentStripH);
-                        });
-
-                        // 2. Calcolo Mediana sulla Striscia
-                        // Nota: usiamo currentStripH invece di height
-                        var start1 = yStart;
-                        Parallel.For(0, currentStripH, yRel => 
-                        {
-                            var valuesToStack = new List<double>(count);
-                            
+                            var valuesToStack = new List<double>(sources.Count);
                             for (int x = 0; x < width; x++)
                             {
                                 valuesToStack.Clear();
-                                for (int k = 0; k < count; k++)
+                                for (int k = 0; k < sources.Count; k++)
                                 {
-                                    // yRel è relativo alla striscia (0...200)
                                     double val = stripStack[k].At<double>(yRel, x);
                                     if (!double.IsNaN(val)) valuesToStack.Add(val);
                                 }
-
-                                if (valuesToStack.Count == 0) continue; // Lascia 0 o gestisci NaN
-
+                                if (valuesToStack.Count == 0) continue;
                                 valuesToStack.Sort();
-                                
-                                double median;
-                                int n = valuesToStack.Count;
-                                if (n % 2 == 0) median = (valuesToStack[n/2 - 1] + valuesToStack[n/2]) / 2.0;
-                                else median = valuesToStack[n/2];
-
-                                // Scriviamo nel risultato globale alla posizione assoluta (yStart + yRel)
-                                // resultMat è l'unica matrice "Gigante" che teniamo in memoria (inevitabile per l'output)
-                                // Ma resultMat.Set è thread-safe se scriviamo su righe diverse? 
-                                // In OpenCV C++ sì, ma per sicurezza in C# usiamo un lock o accesso diretto se thread safe.
-                                // Parallel.For su righe distinte è sicuro su Mat se non cambia la struttura.
-                                
-                                // Accesso ottimizzato (non thread-safe se concorrenza su stessa cella, ma qui siamo su celle diverse)
-                                resultMat.Set(start1 + yRel, x, median);
+                                double median = (valuesToStack.Count % 2 == 0) ? (valuesToStack[valuesToStack.Count / 2 - 1] + valuesToStack[valuesToStack.Count / 2]) / 2.0 : valuesToStack[valuesToStack.Count / 2];
+                                resultMat.Set(start + yRel, x, median);
                             }
                         });
                     }
-                    finally
-                    {
-                        // 3. Pulizia immediata della striscia
-                        foreach (var m in stripStack) m.Dispose();
-                    }
+                    finally { foreach (var m in stripStack) m?.Dispose(); }
                 }
             }
         });
-
         return _converter.MatToFitsData(resultMat, refData);
     }
-
-    // --- Helpers Privati ---
 
     private Mat NormalizeAndConvertToFloat(Mat source)
     {
         Mat floatMat = new Mat();
-        source.ConvertTo(floatMat, MatType.CV_32FC1); 
+        source.ConvertTo(floatMat, MatType.CV_32FC1);
         Cv2.Normalize(floatMat, floatMat, 0, 1, NormTypes.MinMax);
         return floatMat;
     }
@@ -287,14 +180,10 @@ public class ImageOperationService : IImageOperationService
     private Rect CreateSafeRoi(Mat mat, Point center, int radius)
     {
         int size = radius * 2;
-        // CAST INT: Le coordinate dei pixel sono intere
-        int x = (int)(center.X - radius);
-        int y = (int)(center.Y - radius);
-        int sx = Math.Max(0, x);
-        int sy = Math.Max(0, y);
+        int sx = Math.Max(0, (int)(center.X - radius));
+        int sy = Math.Max(0, (int)(center.Y - radius));
         int sw = Math.Min(size, mat.Width - sx);
         int sh = Math.Min(size, mat.Height - sy);
-        
         return new Rect(sx, sy, sw, sh);
     }
 }

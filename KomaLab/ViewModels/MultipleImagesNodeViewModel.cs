@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.IO;
+using System.Threading;
 using System.Threading.Tasks;
 using Avalonia;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -26,6 +27,7 @@ public partial class MultipleImagesNodeViewModel : ImageNodeViewModel
     // --- Stato Interno ---
     private readonly int _imageCount;
     private readonly LruCache<int, FitsImageData> _dataCache = new(3);
+    private CancellationTokenSource? _loadingCts;
     private Size _maxImageSize;
     
     // Memorizza le preferenze di contrasto (Sigma/Assoluto) durante lo scorrimento
@@ -138,43 +140,88 @@ public partial class MultipleImagesNodeViewModel : ImageNodeViewModel
     private async Task LoadImageAtIndexAsync(int index)
     {
         if (index < 0 || index >= _imageCount) return;
-        
-        // Se l'immagine è già quella attiva, usciamo
-        var cachedData = await GetOrLoadDataAtIndex(index);
-        if (ActiveFitsImage != null && ActiveFitsImage.Data == cachedData) return;
-        if (cachedData == null) return;
 
-        // 1. Cattura il profilo di contrasto corrente prima di scaricare il vecchio renderer
-        if (ActiveFitsImage != null)
+        // --- FIX 1: ANNULLAMENTO PRECEDENTE ---
+        // Se c'è un caricamento in corso, lo annulliamo.
+        // Questo previene che 10 click lancino 10 processi paralleli.
+        _loadingCts?.Cancel();
+        _loadingCts = new CancellationTokenSource();
+        var token = _loadingCts.Token;
+
+        try
         {
-            _lastContrastProfile = ActiveFitsImage.CaptureContrastProfile();
-            ActiveFitsImage.UnloadData();
+            var cachedData = await GetOrLoadDataAtIndex(index);
+            
+            // Se siamo stati annullati nel frattempo (nuovo click), usciamo subito
+            if (token.IsCancellationRequested) return;
+
+            // Se l'immagine è la stessa (es. click veloci avanti/indietro), non fare nulla
+            if (ActiveFitsImage != null && ActiveFitsImage.Data == cachedData) return;
+            if (cachedData == null) return;
+
+            ContrastProfile? profileToApply = _lastContrastProfile;
+
+            // --- FIX 2: CATTURA SICURA ---
+            // Catturiamo il profilo dall'immagine attuale MA NON LA SCARICHIAMO ANCORA.
+            // Se la scaricassimo ora, la UI rimarrebbe nera o crasherebbe durante il caricamento della nuova.
+            if (ActiveFitsImage != null && !ActiveFitsImage.IsDisposed) // Controllo sicurezza
+            {
+                profileToApply = ActiveFitsImage.CaptureContrastProfile();
+                _lastContrastProfile = profileToApply;
+            }
+
+            // Creazione nuovo renderer (Operazione pesante)
+            var newFitsImage = new FitsRenderer(cachedData, _fitsService, _converter, _analysis);
+            
+            // Inizializza (qui dentro avviene il lavoro pesante su thread separato)
+            // Nota: Se FitsRenderer.InitializeAsync supportasse un CancellationToken sarebbe meglio,
+            // ma per ora controlliamo il token subito dopo.
+            await newFitsImage.InitializeAsync();
+
+            // --- FIX 3: PUNTO DI NON RITORNO ---
+            // Se l'utente ha cliccato un'altra volta mentre caricavamo, 
+            // BUTTIAMO VIA il lavoro fatto (Dispose del nuovo) e non tocchiamo la UI.
+            if (token.IsCancellationRequested)
+            {
+                newFitsImage.UnloadData();
+                return;
+            }
+
+            // Applicazione Profilo
+            if (profileToApply != null)
+            {
+                newFitsImage.ApplyContrastProfile(profileToApply);
+            }
+
+            // Aggiorna Viewport
+            Viewport.ImageSize = newFitsImage.ImageSize;
+
+            // --- FIX 4: SWAP ATOMICO E PULIZIA ---
+            // Solo ora che siamo pronti e sicuri, scambiamo i renderer
+            var oldImage = ActiveFitsImage;
+            ActiveFitsImage = newFitsImage; // La UI si aggiorna qui
+
+            // Ora possiamo distruggere quello vecchio in sicurezza
+            oldImage?.UnloadData();
+
+            // Aggiorna UI valori
+            BlackPoint = newFitsImage.BlackPoint;
+            WhitePoint = newFitsImage.WhitePoint;
+
+            PreviousImageCommand.NotifyCanExecuteChanged();
+            NextImageCommand.NotifyCanExecuteChanged();
+
+            // Prefetch senza await (fire and forget sicuro)
+            _ = PrefetchImageAsync(index + 1);
         }
-
-        // 2. Crea il nuovo renderer
-        var newFitsImage = new FitsRenderer(cachedData, _fitsService, _converter, _analysis);
-        await newFitsImage.InitializeAsync(); 
-
-        // 3. Applica il profilo di contrasto (Sigma Lock o Assoluto)
-        if (_lastContrastProfile != null)
+        catch (OperationCanceledException)
         {
-            newFitsImage.ApplyContrastProfile(_lastContrastProfile);
+            // Normale durante click rapidi, ignoriamo
         }
-
-        // 4. Aggiorna Viewport (solo dimensioni, manteniamo zoom/pan correnti)
-        Viewport.ImageSize = newFitsImage.ImageSize;
-
-        // 5. Scambio Renderer
-        ActiveFitsImage = newFitsImage;
-
-        // 6. Aggiorna Slider UI con i nuovi valori calcolati
-        BlackPoint = newFitsImage.BlackPoint; 
-        WhitePoint = newFitsImage.WhitePoint;
-    
-        PreviousImageCommand.NotifyCanExecuteChanged();
-        NextImageCommand.NotifyCanExecuteChanged();
-        
-        _ = PrefetchImageAsync(index + 1);
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"Errore LoadImageAtIndex: {ex.Message}");
+        }
     }
 
     // --- Comandi Navigazione ---

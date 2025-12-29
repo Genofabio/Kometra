@@ -79,7 +79,8 @@ public partial class BoardViewModel : ObservableObject
         }
         else
         {
-            await AddMultipleNodesAsync(pathList, center.X, center.Y);
+            var sortedPaths = await _fitsService.SortFilesByObservationTimeAsync(pathList);
+            await AddMultipleNodesAsync(sortedPaths, center.X, center.Y);
         }
     }
 
@@ -123,6 +124,14 @@ public partial class BoardViewModel : ObservableObject
             "Rimuovi Nodo",
             execute: () =>
             {
+                // --- FIX 1: FERMARE L'ANIMAZIONE ---
+                // Se stiamo rimuovendo un nodo che sta riproducendo il video,
+                // dobbiamo fermarlo esplicitamente.
+                if (node is MultipleImagesNodeViewModel multiNode && multiNode.IsAnimating)
+                {
+                    multiNode.ToggleAnimation(); // Questo imposta IsAnimating = false e ferma il loop
+                }
+
                 if (SelectedNode == node) DeselectAllNodes();
                 UnregisterNodeEvents(node);
                 foreach (var conn in connectionsToRemove)
@@ -130,6 +139,12 @@ public partial class BoardViewModel : ObservableObject
                     Connections.Remove(conn);
                 }
                 Nodes.Remove(node);
+
+                // --- FIX 2: AGGIORNARE LO STATO GLOBALE ---
+                // Notifichiamo alla UI che la lista dei nodi è cambiata e bisogna
+                // ricontrollare se c'è ancora qualcuno che sta animando.
+                OnPropertyChanged(nameof(IsGlobalAnimationRunning));
+                ToggleNodeAnimationCommand.NotifyCanExecuteChanged();
             },
             undo: () =>
             {
@@ -145,6 +160,10 @@ public partial class BoardViewModel : ObservableObject
                         }
                     }
                     SetSelectedNode(node);
+                    
+                    // Anche quando facciamo UNDO (il nodo torna), aggiorniamo lo stato
+                    OnPropertyChanged(nameof(IsGlobalAnimationRunning));
+                    ToggleNodeAnimationCommand.NotifyCanExecuteChanged();
                 }
             }
         );

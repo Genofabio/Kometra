@@ -51,7 +51,9 @@ public enum AlignmentMode
     /// <summary>
     /// L'utente deve cliccare manualmente il soggetto su ogni singola immagine.
     /// </summary>
-    Manual
+    Manual,
+    
+    Stars
 }
 
 /// <summary>

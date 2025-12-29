@@ -12,4 +12,5 @@ public interface IFitsService
     Task SaveFitsFileAsync(FitsImageData data, string destinationPath);
     void NormalizeData(OpenCvSharp.Mat sourceMat, int width, int height, double black, double white, IntPtr dest, long stride);
     Task ExportVideoAsync(List<string> sourceFiles, string outputPath, double fps, ContrastProfile profile);
+    Task<List<string>> SortFilesByObservationTimeAsync(List<string> filePaths);
 }

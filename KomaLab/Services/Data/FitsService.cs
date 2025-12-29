@@ -2,6 +2,7 @@
 using System.Collections;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Runtime.InteropServices;
 using System.Threading.Tasks;
 using Avalonia.Platform;
@@ -354,5 +355,83 @@ public class FitsService : IFitsService
         }
         if (File.Exists(path)) return new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
         throw new FileNotFoundException($"File non trovato: {path}");
+    }
+    
+    // --- 4. ORDINAMENTO TEMPORALE (Metadata Scan) ---
+
+    public async Task<List<string>> SortFilesByObservationTimeAsync(List<string> filePaths)
+    {
+        // Se c'è 0 o 1 file, è già ordinato
+        if (filePaths.Count <= 1) return filePaths;
+
+        return await Task.Run(() =>
+        {
+            // Usiamo una lista thread-safe per raccogliere i risultati
+            var fileInfos = new System.Collections.Concurrent.ConcurrentBag<(string Path, DateTime? Date)>();
+
+            // Scansione parallela degli header (molto più veloce del sequenziale per I/O)
+            Parallel.ForEach(filePaths, (path) =>
+            {
+                var date = TryGetObservationDate(path);
+                fileInfos.Add((path, date));
+            });
+
+            // LOGICA DI ORDINAMENTO:
+            // 1. I file con data valida vengono prima.
+            // 2. Ordina cronologicamente (dal più vecchio al più recente).
+            // 3. Se la data è uguale o manca, usa il nome del file come fallback.
+            
+            var sortedList = fileInfos
+                .OrderBy(x => x.Date.HasValue ? 0 : 1) // Priorità a chi ha la data
+                .ThenBy(x => x.Date)                   // Cronologico
+                .ThenBy(x => x.Path)                   // Alfabetico (Fallback)
+                .Select(x => x.Path)
+                .ToList();
+
+            return sortedList;
+        });
+    }
+
+    /// <summary>
+    /// Legge SOLO l'header del FITS senza caricare i dati immagine.
+    /// Cerca DATE-OBS (Standard) o DATE.
+    /// </summary>
+    private DateTime? TryGetObservationDate(string path)
+    {
+        try
+        {
+            using Stream stream = OpenStream(path);
+            var fitsFile = new Fits(stream);
+            
+            // ReadHDU legge solo l'header iniziale e si ferma prima dei dati.
+            // È l'operazione più leggera possibile.
+            BasicHDU? hdu = fitsFile.ReadHDU();
+            
+            if (hdu == null) return null;
+
+            Header header = hdu.Header;
+            
+            // DATE-OBS è lo standard IAU per "Data e ora dell'osservazione"
+            string? dateStr = header.GetStringValue("DATE-OBS");
+            
+            // Fallback: Alcuni software usano solo "DATE" (che a volte è creazione file, ma meglio di nulla)
+            if (string.IsNullOrEmpty(dateStr)) 
+            {
+                dateStr = header.GetStringValue("DATE");
+            }
+
+            // Tentiamo il parsing
+            if (!string.IsNullOrEmpty(dateStr) && DateTime.TryParse(dateStr, out DateTime dt))
+            {
+                return dt;
+            }
+
+            return null;
+        }
+        catch 
+        {
+            // Se il file è illeggibile o non è un FITS valido, lo mettiamo in fondo
+            return null;
+        }
     }
 }

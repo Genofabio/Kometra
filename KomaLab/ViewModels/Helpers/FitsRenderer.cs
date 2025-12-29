@@ -34,6 +34,8 @@ public partial class FitsRenderer : ObservableObject, IDisposable
     [ObservableProperty] private Bitmap? _image;
     [ObservableProperty] private double _blackPoint;
     [ObservableProperty] private double _whitePoint;
+    
+    public bool IsDisposed => _disposedValue; 
 
     // --- Costruttore ---
     public FitsRenderer(

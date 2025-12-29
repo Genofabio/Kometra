@@ -50,7 +50,14 @@ Ottimizzazione occupazione emmoria:
 Ottimizzazione prestazioni grafiche:
 - disaccoppiato spostamento nodi da aggiornamento dati posizionre -> translate transform
 
-
+Allineamento rispetto a campo stellare:
+- Si prova a sfruttare correlazione di fase e teorema dello shift -> problema: se la cometa è grande influenza troppo la fase
+    - si usa laplaciano per diminuire influenza cometa se è grande
+    - si usa logaritmo per uniformare il più possibile i valori di intensità luminosa
+    - si usa blur per eliminare influenza di possibili pixel caldi
+- Provate due modalità: sequenziale ($i$ vs $i-1$): Soffre di "Random Walk" (Deriva). Se c'è un errore di 1px nel frame 5, questo errore si propaga su tutti i frame successivi. Se hai un "salto" (un frame calcolato male), l'allineamento si rompe per tutto il resto della sequenza.Globale ($i$ vs $0$): Soffre di perdita di overlap. Se il campo si sposta troppo, la Phase Correlation fallisce perché le due immagini non si somigliano più.
+    
+Lettura header per time per ordinare caricamento immagini MultipleImageNode
 
 
 

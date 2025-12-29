@@ -18,6 +18,7 @@ public class AlignmentModeNameConverter : IValueConverter
                 AlignmentMode.Automatic => "Automatica",
                 AlignmentMode.Guided    => "Guidata",
                 AlignmentMode.Manual    => "Manuale",
+                AlignmentMode.Stars     => "Stelle",
                 _ => mode.ToString()
             };
         }
@@ -34,8 +35,7 @@ public class AlignmentModeNameConverter : IValueConverter
                 "Automatica" => AlignmentMode.Automatic,
                 "Guidata"    => AlignmentMode.Guided,
                 "Manuale"    => AlignmentMode.Manual,
-                // Se la stringa non è riconosciuta, restituisce UnsetValue 
-                // (che dice al binding di ignorare l'aggiornamento)
+                "Stelle"     => AlignmentMode.Stars,
                 _ => AvaloniaProperty.UnsetValue 
             };
         }

@@ -89,7 +89,9 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
     [NotifyPropertyChangedFor(nameof(IsNavigationVisible))]
     private AlignmentMode _selectedMode = AlignmentMode.Automatic;
     
-    public bool IsSearchRadiusVisible => SelectedMode != AlignmentMode.Automatic;
+    public bool IsSearchRadiusVisible => 
+        SelectedMode != AlignmentMode.Automatic && 
+        SelectedMode != AlignmentMode.Stars;
 
     [ObservableProperty] private int _minSearchRadius;
     [ObservableProperty] private int _maxSearchRadius = 100;
@@ -131,17 +133,20 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
     {
         get
         {
+            // Se non è uno stack (singola immagine), niente navigazione mai.
             if (!IsStack) return false;
 
-            // 1. Durante il calcolo iniziale (barra 1) nascondiamo tutto
+            // 1. Durante il calcolo nascondiamo tutto per pulizia
             if (CurrentState == AlignmentState.Calculating) return false;
 
-            // 2. Se i risultati sono pronti OPPURE stiamo applicando (barra 2), mostriamo la navigazione
+            // 2. Se i risultati sono pronti (ResultsReady), vogliamo SEMPRE 
+            // mostrare la navigazione per permettere all'utente di controllare il lavoro fatto.
             if (CurrentState == AlignmentState.ResultsReady || CurrentState == AlignmentState.Processing) 
                 return true;
 
-            // 3. Logica stato Initial
-            return SelectedMode != AlignmentMode.Automatic;
+            // 3. Logica stato Initial (Prima del calcolo):
+            return SelectedMode != AlignmentMode.Automatic && 
+                   SelectedMode != AlignmentMode.Stars;
         }
     }
     
@@ -172,7 +177,12 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
 
         if (IsStack)
         {
-            AvailableAlignmentModes = new[] { AlignmentMode.Automatic, AlignmentMode.Guided, AlignmentMode.Manual };
+            AvailableAlignmentModes = new[] { 
+                AlignmentMode.Automatic, 
+                AlignmentMode.Guided, 
+                AlignmentMode.Manual,
+                AlignmentMode.Stars
+            };
         }
         else
         {
@@ -630,6 +640,7 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
         return SelectedMode switch
         {
             AlignmentMode.Automatic => index == 0,
+            AlignmentMode.Stars => index == 0, // <--- AGGIUNTO: Blocca su img 0 in fase iniziale
             AlignmentMode.Guided => index == 0 || index == _totalStackCount - 1,
             _ => true
         };
@@ -643,9 +654,9 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
             return;
         }
         
-        if (SelectedMode == AlignmentMode.Automatic)
+        if (SelectedMode == AlignmentMode.Automatic || SelectedMode == AlignmentMode.Stars)
         {
-            StackCounterText = "1 / 1";
+            StackCounterText = "1 / 1"; // Mostriamo che ne vedi solo 1
             return;
         }
         
