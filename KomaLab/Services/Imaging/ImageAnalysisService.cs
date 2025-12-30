@@ -1,7 +1,5 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Diagnostics;
-using System.Linq;
 using MathNet.Numerics;
 using MathNet.Numerics.LinearAlgebra;
 using OpenCvSharp;
@@ -19,15 +17,21 @@ public class ImageAnalysisService : IImageAnalysisService
     public (double Mean, double StdDev) ComputeStatistics(Mat image)
     {
         if (image.Empty()) return (0, 1);
+        
         using Mat meanMat = new Mat();
         using Mat stdDevMat = new Mat();
         using Mat mask = new Mat();
+        
+        // Compare crea una maschera per escludere eventuali valori non validi se necessario
         Cv2.Compare(image, image, mask, CmpType.EQ);
         Cv2.MeanStdDev(image, meanMat, stdDevMat, mask);
+        
         double mean = meanMat.Get<double>(0, 0);
         double std = stdDevMat.Get<double>(0, 0);
+        
         if (double.IsNaN(mean)) mean = 0;
         if (double.IsNaN(std) || std < 1e-9) std = 1.0;
+        
         return (mean, std);
     }
     
@@ -47,6 +51,7 @@ public class ImageAnalysisService : IImageAnalysisService
     {
         if (regionMat.Empty()) return new Point(0, 0);
         using Mat workingMat = new Mat();
+        
         if (regionMat.Type() != MatType.CV_64FC1) regionMat.ConvertTo(workingMat, MatType.CV_64FC1);
         else regionMat.CopyTo(workingMat);
 
@@ -101,7 +106,7 @@ public class ImageAnalysisService : IImageAnalysisService
     }
 
     // =======================================================================
-    // 3. ALGORITMI CORE
+    // 3. ALGORITMI CORE (GAUSSIAN FITTING)
     // =======================================================================
 
     public Point FindGaussianCenter(Mat rawMat, double sigma = 3.0)
@@ -224,227 +229,187 @@ public class ImageAnalysisService : IImageAnalysisService
     }
 
     // =======================================================================
-    // 4. ANALISI SPOSTAMENTO (ORB + RANSAC + CLAHE)
+    // 4. ANALISI SPOSTAMENTO CAMPO STELLARE (PIPELINE OTTIMIZZATA)
     // =======================================================================
-public Point ComputeStarFieldShift(Mat reference, Mat target)
-{
-    if (reference.Empty() || target.Empty()) return new Point(0, 0);
-
-    // 1. TORNATI AL SOBEL ORIGINALE (Senza threshold aggressivo)
-    using var refEdge = ApplySobelFilter(reference);
-    using var tgtEdge = ApplySobelFilter(target);
-
-    int rows = 3;
-    int cols = 3;
-    
-    List<Point2d> shifts = new List<Point2d>();
-
-    int cellW = refEdge.Width / cols;
-    int cellH = refEdge.Height / rows;
-
-    using var hanningWin = new Mat();
-    Cv2.CreateHanningWindow(hanningWin, new Size(cellW, cellH), MatType.CV_32FC1);
-
-    for (int r = 0; r < rows; r++)
+    public Point ComputeStarFieldShift(Mat reference, Mat target)
     {
-        for (int c = 0; c < cols; c++)
+        if (reference.Empty() || target.Empty()) return new Point(0, 0);
+
+        // 1. Pre-Processing: TOPHAT + SOBEL
+        using var refEdge = ApplySobelFilter(reference);
+        using var tgtEdge = ApplySobelFilter(target);
+
+        int rows = 3;
+        int cols = 3;
+        
+        List<Point2d> shifts = new List<Point2d>(rows * cols); // Capacity pre-allocata
+
+        int cellW = refEdge.Width / cols;
+        int cellH = refEdge.Height / rows;
+
+        // --- RISORSE RIUTILIZZABILI (Allocazione fuori dal loop per performance) ---
+        // Essendo variabili locali dentro il metodo, non serve IDisposable sulla classe.
+        using var hanningWin = new Mat();
+        Cv2.CreateHanningWindow(hanningWin, new Size(cellW, cellH), MatType.CV_32FC1);
+
+        using var meanMat = new Mat();
+        using var stdDevMat = new Mat();
+        
+        using var cellRef32 = new Mat();
+        using var cellTgt32 = new Mat();
+
+        for (int r = 0; r < rows; r++)
         {
-            int x = c * cellW;
-            int y = r * cellH;
-
-            if (x + cellW > refEdge.Width || y + cellH > refEdge.Height) continue;
-
-            var rect = new OpenCvSharp.Rect(x, y, cellW, cellH);
-            
-            // Estrazione Cella
-            using var cellRef = new Mat(refEdge, rect);
-            using var cellTgt = new Mat(tgtEdge, rect);
-            
-            using var cellRef32 = new Mat();
-            using var cellTgt32 = new Mat();
-            
-            if (cellRef.Type() != MatType.CV_32FC1) cellRef.ConvertTo(cellRef32, MatType.CV_32FC1);
-            else cellRef.CopyTo(cellRef32);
-
-            if (cellTgt.Type() != MatType.CV_32FC1) cellTgt.ConvertTo(cellTgt32, MatType.CV_32FC1);
-            else cellTgt.CopyTo(cellTgt32);
-
-            // ============================================================
-            // OTTIMIZZAZIONE 2: SMART GRID / VALIDAZIONE CONTENUTO
-            // ============================================================
-            
-            // Calcoliamo media e deviazione standard della cella
-            using var meanMat = new Mat();
-            using var stdDevMat = new Mat();
-            Cv2.MeanStdDev(cellRef32, meanMat, stdDevMat);
-            
-            double cellMean = meanMat.Get<double>(0, 0);
-            double cellStd = stdDevMat.Get<double>(0, 0);
-
-            // Troviamo il picco massimo di luminosità nella cella
-            double minVal, maxVal;
-            Cv2.MinMaxLoc(cellRef32, out minVal, out maxVal);
-
-            // LOGICA DI SCARTO:
-            // Se il pixel più luminoso non si stacca nettamente dal fondo (media),
-            // significa che in questa cella NON c'è una stella, ma solo rumore piatto.
-            // Usiamo un fattore "Sigma" conservativo (es. 3.0 o 4.0).
-            
-            double noiseThreshold = cellMean + (4.0 * cellStd);
-
-            if (maxVal < noiseThreshold)
+            for (int c = 0; c < cols; c++)
             {
-                // Cella vuota o troppo rumorosa: SALTALA
-                continue;
-            }
-            // ============================================================
+                int x = c * cellW;
+                int y = r * cellH;
 
-            double response;
-            Point2d shift = Cv2.PhaseCorrelate(cellRef32, cellTgt32, hanningWin, out response);
-            
-            // Filtro qualità response (rimasto invariato)
-            if (response > 0.05) 
-            {
-                if (Math.Abs(shift.X) < cellW / 2.0 && Math.Abs(shift.Y) < cellH / 2.0)
+                // Safety Check
+                if (x + cellW > refEdge.Width || y + cellH > refEdge.Height) continue;
+
+                var rect = new OpenCvSharp.Rect(x, y, cellW, cellH);
+                
+                // Estrazione Cella (Lightweight header)
+                using var cellRef = new Mat(refEdge, rect);
+                using var cellTgt = new Mat(tgtEdge, rect);
+                
+                // Conversione sicura nei buffer pre-allocati
+                if (cellRef.Type() != MatType.CV_32FC1) cellRef.ConvertTo(cellRef32, MatType.CV_32FC1);
+                else cellRef.CopyTo(cellRef32);
+
+                if (cellTgt.Type() != MatType.CV_32FC1) cellTgt.ConvertTo(cellTgt32, MatType.CV_32FC1);
+                else cellTgt.CopyTo(cellTgt32);
+
+                // ============================================================
+                // OTTIMIZZAZIONE 2: SMART GRID / VALIDAZIONE CONTENUTO
+                // ============================================================
+                
+                // Statistiche (Riutilizzando i Mat allocati fuori)
+                Cv2.MeanStdDev(cellRef32, meanMat, stdDevMat);
+                
+                double cellMean = meanMat.Get<double>(0, 0);
+                double cellStd = stdDevMat.Get<double>(0, 0);
+
+                // MinMaxLoc veloce
+                Cv2.MinMaxLoc(cellRef32, out _, out double maxVal);
+
+                // LOGICA DI SCARTO:
+                // Se il picco max non supera significativamente il fondo, è rumore.
+                double noiseThreshold = cellMean + (4.0 * cellStd);
+
+                if (maxVal < noiseThreshold)
                 {
-                    shifts.Add(shift);
+                    continue; // Skip cella
+                }
+                // ============================================================
+
+                double response;
+                Point2d shift = Cv2.PhaseCorrelate(cellRef32, cellTgt32, hanningWin, out response);
+                
+                // Filtro qualità response
+                if (response > 0.05) 
+                {
+                    if (Math.Abs(shift.X) < cellW / 2.0 && Math.Abs(shift.Y) < cellH / 2.0)
+                    {
+                        shifts.Add(shift);
+                    }
                 }
             }
         }
+
+        if (shifts.Count == 0) return new Point(0, 0);
+
+        // 3. AGGREGAZIONE: Consensus Clustering
+        Point2d finalShift = ComputeConsensusShift(shifts);
+
+        return new Point(finalShift.X, finalShift.Y); 
     }
 
-    if (shifts.Count == 0) return new Point(0, 0);
-
-    // Usa ancora la mediana geometrica per ora
-    Point2d finalShift = ComputeConsensusShift(shifts);     // NUOVO
-
-    return new Point(finalShift.X, finalShift.Y); 
-}
-
-    // --- HELPER 1: FILTRO SOBEL ---
     // --- HELPER 1: FILTRO MIGLIORATO (TOPHAT + SOBEL) ---
-private Mat ApplySobelFilter(Mat input)
-{
-    using var gray = new Mat();
-    // 1. Gestione canali
-    if (input.Channels() > 1) Cv2.CvtColor(input, gray, ColorConversionCodes.BGR2GRAY);
-    else input.CopyTo(gray);
-
-    using var grayFloat = new Mat();
-    // Conversione in Float per precisione
-    gray.ConvertTo(grayFloat, MatType.CV_32FC1);
-
-    // =========================================================
-    // OTTIMIZZAZIONE FONDO/RUMORE
-    // =========================================================
-
-    // 2. Normalizzazione MinMax
-    // Fondamentale con FITS double: porta i valori tra 0.0 e 1.0 per far lavorare bene i filtri
-    Cv2.Normalize(grayFloat, grayFloat, 0, 1, NormTypes.MinMax);
-
-    // 3. Morphological Top-Hat (IL GAME CHANGER)
-    // Questo filtro estrae elementi piccoli (stelle) e rimuove sfondi e gradienti (cometa/inquinamento).
-    // Size(15, 15): Significa "tieni ciò che è più piccolo di 15px, butta il resto".
-    // Se le tue stelle sono molto grosse, aumenta a 21x21.
-    using var kernel = Cv2.GetStructuringElement(MorphShapes.Rect, new Size(15, 15));
-    using var topHat = new Mat();
-    Cv2.MorphologyEx(grayFloat, topHat, MorphTypes.TopHat, kernel);
-
-    // 4. Gaussian Blur
-    // Riduce il rumore ad altissima frequenza prima di passare al Sobel.
-    // Una sigma bassa (1.5) ammorbidisce il grano senza cancellare le stelle.
-    using var blurred = new Mat();
-    Cv2.GaussianBlur(topHat, blurred, new Size(0, 0), 1.5);
-
-    // =========================================================
-
-    // 5. Sobel (ora lavora su un'immagine pulita!)
-    using var gradX = new Mat();
-    using var gradY = new Mat();
-    
-    // Usa blurred invece di grayFloat
-    Cv2.Sobel(blurred, gradX, MatType.CV_32FC1, 1, 0, ksize: 3);
-    Cv2.Sobel(blurred, gradY, MatType.CV_32FC1, 0, 1, ksize: 3);
-
-    var magnitude = new Mat();
-    Cv2.Magnitude(gradX, gradY, magnitude);
-
-    // 6. Sogliatura Finale (Opzionale ma consigliata)
-    // Taglia via i residui debolissimi rimasti dopo il TopHat
-    using var meanMat = new Mat();
-    using var stdDevMat = new Mat();
-    Cv2.MeanStdDev(magnitude, meanMat, stdDevMat);
-    double mean = meanMat.Get<double>(0, 0);
-    double std = stdDevMat.Get<double>(0, 0);
-    
-    // Soglia adattiva: tutto ciò che è sotto media + 2 sigma viene azzerato
-    Cv2.Threshold(magnitude, magnitude, mean + (2.0 * std), 0, ThresholdTypes.Tozero);
-
-    return magnitude;
-}
-
-    // --- HELPER 2: MEDIANA GEOMETRICA ---
-    private Point2d ComputeGeometricMedian(List<Point2d> points)
+    private Mat ApplySobelFilter(Mat input)
     {
-        if (points.Count == 0) return new Point2d(0, 0);
+        // 1. Normalizzazione & Conversione (FITS friendly)
+        using var grayFloat = new Mat();
         
-        var sortedX = points.Select(p => p.X).OrderBy(x => x).ToList();
-        var sortedY = points.Select(p => p.Y).OrderBy(y => y).ToList();
+        if (input.Channels() > 1) 
+        {
+            using var tempGray = new Mat();
+            Cv2.CvtColor(input, tempGray, ColorConversionCodes.BGR2GRAY);
+            tempGray.ConvertTo(grayFloat, MatType.CV_32FC1);
+        }
+        else 
+        {
+            input.ConvertTo(grayFloat, MatType.CV_32FC1);
+        }
 
-        int mid = points.Count / 2;
-        double medianX = sortedX[mid];
-        double medianY = sortedY[mid];
+        // Normalizza tra 0 e 1 (fondamentale per MorphEx e Threshold)
+        Cv2.Normalize(grayFloat, grayFloat, 0, 1, NormTypes.MinMax);
+
+        // 2. Morphological Top-Hat 
+        // Creiamo il kernel localmente.
+        using var kernel = Cv2.GetStructuringElement(MorphShapes.Rect, new Size(15, 15));
+        using var topHat = new Mat();
+        Cv2.MorphologyEx(grayFloat, topHat, MorphTypes.TopHat, kernel);
+
+        // 3. Gaussian Blur (Riduzione rumore)
+        using var blurred = new Mat();
+        Cv2.GaussianBlur(topHat, blurred, new Size(0, 0), 1.5);
+
+        // 4. Sobel 
+        using var gradX = new Mat();
+        using var gradY = new Mat();
         
-        // Versione semplificata robusta
-        return new Point2d(medianX, medianY);
+        Cv2.Sobel(blurred, gradX, MatType.CV_32FC1, 1, 0, ksize: 3);
+        Cv2.Sobel(blurred, gradY, MatType.CV_32FC1, 0, 1, ksize: 3);
+
+        var magnitude = new Mat();
+        Cv2.Magnitude(gradX, gradY, magnitude);
+
+        // 5. Pulizia Finale (Thresholding Adattivo)
+        using var meanMat = new Mat();
+        using var stdDevMat = new Mat();
+        Cv2.MeanStdDev(magnitude, meanMat, stdDevMat);
+        
+        double mean = meanMat.Get<double>(0, 0);
+        double std = stdDevMat.Get<double>(0, 0);
+        
+        Cv2.Threshold(magnitude, magnitude, mean + (2.0 * std), 0, ThresholdTypes.Tozero);
+
+        return magnitude;
     }
-    
+
+    // --- HELPER 2: CONSENSUS CLUSTERING ---
     private Point2d ComputeConsensusShift(List<Point2d> points)
     {
-        // Se non abbiamo punti o ne abbiamo solo uno, ritorniamo quello che c'è.
         if (points.Count == 0) return new Point2d(0, 0);
         if (points.Count == 1) return points[0];
 
         List<Point2d> bestCluster = new List<Point2d>();
-    
-        // TOLLERANZA: Distanza massima in pixel per considerare due vettori "d'accordo".
-        // 2.0 è un valore sicuro per immagini astronomiche (gestisce lievi distorsioni o seeing).
-        // Se l'allineamento deve essere sub-pixel precisissimo, puoi scendere a 1.0 o 0.5, 
-        // ma con poche stelle meglio stare larghi.
-        double tolerance = 2.0; 
+        double tolerance = 2.0; // Pixel di tolleranza
 
-        // Algoritmo semplice O(N^2) - Per N=9 celle è istantaneo.
         foreach (var p1 in points)
         {
             var currentCluster = new List<Point2d>();
-        
+            
             foreach (var p2 in points)
             {
                 double dist = Math.Sqrt(Math.Pow(p1.X - p2.X, 2) + Math.Pow(p1.Y - p2.Y, 2));
-            
-                // Se i due vettori sono vicini, fanno parte dello stesso "movimento"
                 if (dist <= tolerance)
                 {
                     currentCluster.Add(p2);
                 }
             }
 
-            // Se troviamo un gruppo più numeroso del precedente, diventa il nuovo candidato
             if (currentCluster.Count > bestCluster.Count)
             {
                 bestCluster = currentCluster;
             }
-            // Se hanno lo stesso numero, potremmo valutare la "compattezza" (deviazione standard),
-            // ma per ora chi vince primo, vince.
         }
 
-        // Se il best cluster è vuoto (improbabile), fallback
         if (bestCluster.Count == 0) return points[0];
 
-        // Calcoliamo la media aritmetica SOLO del cluster vincente (Esclusione Outlier)
-        double sumX = 0;
-        double sumY = 0;
-    
+        double sumX = 0, sumY = 0;
         foreach (var p in bestCluster)
         {
             sumX += p.X;
@@ -453,5 +418,4 @@ private Mat ApplySobelFilter(Mat input)
 
         return new Point2d(sumX / bestCluster.Count, sumY / bestCluster.Count);
     }
-    
 }

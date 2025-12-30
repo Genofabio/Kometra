@@ -58,6 +58,98 @@ Allineamento rispetto a campo stellare:
 - Provate due modalità: sequenziale ($i$ vs $i-1$): Soffre di "Random Walk" (Deriva). Se c'è un errore di 1px nel frame 5, questo errore si propaga su tutti i frame successivi. Se hai un "salto" (un frame calcolato male), l'allineamento si rompe per tutto il resto della sequenza.Globale ($i$ vs $0$): Soffre di perdita di overlap. Se il campo si sposta troppo, la Phase Correlation fallisce perché le due immagini non si somigliano più.
 - Recap approcci utilizzati
     1. Approccio Sequenziale Base (L'originale)Logica: Confronto tra immagine $N$ e immagine $N-1$.Problema: "Salti" occasionali nell'allineamento dovuti a errori di calcolo su singole immagini e deriva accumulata ("Random Walk").2. Adaptive Keyframing (Riferimento Dinamico)Logica: Mantenere il Frame 0 come riferimento fisso finché la qualità (response) o lo spostamento non superano una certa soglia.Problema: I "salti" persistevano. Il cambio di riferimento basato su soglie di qualità era troppo "nervoso" a causa delle nuove stelle che entravano/uscivano dal campo.3. Filtro Inerziale (Velocity Check)Logica: Se l'algoritmo rileva uno spostamento brusco (accelerazione), lo ignora e usa lo spostamento del frame precedente.Esito: Scartato. Troppo approssimativo. Se il telescopio ha un vero sussulto (vento/dithering), l'inerzia lo nasconde e l'immagine finale viene sfocata.4. Raffinamento a Due Passaggi (ROI / Smart Intersection)Logica:Stima grezza dello spostamento.Ritaglio di una ROI (Region of Interest) nelle due immagini per simulare un allineamento perfetto.Ricalcolo fine sulla ROI.Problema: Complessità matematica elevata. Abbiamo riscontrato problemi di "doppio spostamento" (spostamenti eccessivi) dovuti all'inversione logica dei ritagli (ritagliare a destra invece che a sinistra).5. Approccio Ibrido (Anchor + Neighbor)Logica: Usare l'immagine $N-1$ per evitare scatti (fluidità) e verificare il risultato contro il Frame 0 (Ancora) per correggere la deriva.Esito: Scartato. Sebbene teoricamente il migliore, introduceva troppe variabili e instabilità se l'ancora non veniva agganciata correttamente.6. Reset Geometrico (Soglia 30%)Logica: Usare sempre il Frame 0. Cambiare Master solo se lo spostamento fisico supera il 30% delle dimensioni dell'immagine.Esito: Funzionale, ma meno fluido dell'approccio sequenziale puro per lunghe sequenze.7. Sequenziale Puro con Pre-Processing Avanzato (Soluzione Attuale)Logica: Ritorno al confronto $N$ vs $N-1$, ma potenziando la matematica per "vedere" solo le stelle.Innovazione: Applicazione della catena di filtri:Logaritmo: Per appiattire la luminosità accecante della cometa.Gaussian Blur: Per eliminare il rumore (hot pixels).Laplaciano: Filtro che cancella i gradienti dolci (cometa/sfondo) ed esalta solo i picchi netti (stelle).Vantaggi: Zero salti (perché $N$ e $N-1$ sono quasi identiche), massima robustezza anche con comete grandi. Accettiamo una minima deriva a lungo termine in cambio di una fluidità visiva perfetta.
+- Recap finale
+    Fase A: Approccio Geometrico (Feature Matching / RANSAC)
+    Tentativo: Identificare le singole stelle come "Keypoints" (usando ORB/AKAZE) e calcolare la matrice di trasformazione geometrica scartando gli outlier (RANSAC).
+    
+    Problemi riscontrati:
+    
+    Riconoscimento: Il rumore di fondo e la texture della chioma della cometa venivano scambiati per stelle (false positive).
+    
+    Scarsità: Con meno di 5 stelle reali, RANSAC falliva matematicamente o restituiva (0,0).
+    
+    Pre-Processing: Tentativi come CLAHE o Quantili aumentavano il contrasto ma anche il rumore.
+    
+    Esito: Scartato per instabilità su campi poveri.
+    
+    Fase B: Approccio Globale in Frequenza (FFT Intera)
+    Tentativo: Usare la Phase Correlation sull'intera immagine per trovare lo shift dominante.
+    
+    Problemi riscontrati:
+    
+    Dominanza Energetica: La cometa (oggetto grande e luminoso a bassa frequenza) dominava il calcolo della correlazione. L'algoritmo allineava la cometa, non le stelle.
+    
+    Esito: Scartato.
+    
+    Fase C: Approccio Ibrido (Grid FFT + Sobel Semplice)
+    Tentativo: Dividere l'immagine in griglia (3x3), applicare filtro Sobel (passa-alto) per evidenziare i bordi, e calcolare la Mediana Geometrica dei vettori.
+    
+    Problemi riscontrati:
+    
+    Rumore nelle celle vuote: Le celle senza stelle (o solo con fondo cielo) generavano vettori casuali che inquinavano la mediana.
+    
+    Statistiche Locali: Tentare di adattare la soglia cella per cella peggiorava le cose, amplificando il rumore nelle zone buie.
+    
+    Esito: Promettente ma impreciso su immagini povere.
+    
+    2. La Soluzione Finale (Lo Stato dell'Arte Attuale)
+    Abbiamo raggiunto la stabilità combinando la robustezza della FFT con una pulizia morfologica avanzata e una logica di consenso statistico.
+    
+    Ecco la pipeline definitiva vincente:
+    
+    A. Pre-Processing "Chirurgico" (Top-Hat + Blur)
+    Invece di affidarci solo al Sobel (che soffre il rumore) o al RANSAC (che soffre le poche stelle), abbiamo adottato la tecnica standard astrofotografica:
+    
+    Normalizzazione (0-1): Per gestire la dinamica dei FITS double.
+    
+    Morphological Top-Hat: Sottrae il background all'immagine.
+    
+    Risultato: La cometa (chioma diffusa) e i gradienti vengono cancellati. Restano solo i picchi (stelle + nucleo cometa piccolo).
+    
+    Gaussian Blur (leggero): Pulisce il rumore termico/digitale ad alta frequenza prima del rilevamento bordi.
+    
+    Sobel: Ora lavora su dati puliti, estraendo bordi netti solo dove esistono stelle reali.
+    
+    B. Smart Grid (Validazione Statistica)
+    Abbiamo risolto il problema delle "celle vuote" che generavano vettori casuali.
+    
+    Logica: Prima di eseguire la FFT su una cella della griglia 3x3, analizziamo Mean e StdDev della cella.
+    
+    Azione: Se la cella è "piatta" (varianza bassa, nessun picco sopra la soglia di rumore), viene scartata a priori. La FFT non viene nemmeno calcolata.
+    
+    C. Aggregazione per "Consensus" (Clustering)
+    Abbiamo abbandonato la Mediana Geometrica (che cercava un compromesso tra stelle e vettori spuri) a favore del Clustering.
+    
+    Logica: L'algoritmo cerca il gruppo più numeroso di vettori che sono "d'accordo" tra loro (entro una tolleranza di ~2 pixel).
+    
+    Risultato:
+    
+    Se 3 vettori puntano le stelle (giusti).
+    
+    E 2 vettori puntano la cometa (sbagliati).
+    
+    La logica vince per 3 a 2. I vettori cometa vengono ignorati del tutto, non mediati.
+    
+    Schema Riassuntivo della Pipeline
+    Plaintext
+    
+    [Input FITS Double] 
+          ⬇
+    1. NORMALIZZAZIONE (0.0 - 1.0)
+          ⬇
+    2. FILTRO MORFOLOGICO TOP-HAT (Rimuove chioma cometa e gradienti)
+          ⬇
+    3. GAUSSIAN BLUR (Riduce rumore pixel)
+          ⬇
+    4. SOBEL (Estrae contorni stelle pulite)
+          ⬇
+    5. GRID 3x3 "SMART" (Scarta celle vuote/rumorose)
+          ⬇
+    6. FFT PHASE CORRELATION (Calcola vettori su celle valide)
+          ⬇
+    7. CONSENSUS CLUSTERING (Identifica il gruppo dominante di vettori)
+          ⬇
+    [Output Shift Finale (X, Y)]
     
 Lettura header per time per ordinare caricamento immagini MultipleImageNode
 

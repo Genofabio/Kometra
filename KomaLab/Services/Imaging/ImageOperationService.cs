@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Runtime.InteropServices; 
 using System.Threading.Tasks;
 using KomaLab.Models;
 using KomaLab.Services.Data;
@@ -37,6 +38,7 @@ public class ImageOperationService : IImageOperationService
         
         Mat sourceDouble = source;
         bool disposeSource = false;
+        
         if (source.Type() != MatType.CV_64FC1)
         {
             sourceDouble = new Mat();
@@ -46,7 +48,7 @@ public class ImageOperationService : IImageOperationService
 
         try
         {
-            Cv2.WarpAffine(sourceDouble, result, m, cvSize, InterpolationFlags.Lanczos4, BorderTypes.Transparent, new Scalar(double.NaN));
+            Cv2.WarpAffine(sourceDouble, result, m, cvSize, InterpolationFlags.Lanczos4, BorderTypes.Constant, new Scalar(double.NaN));
         }
         finally
         {
@@ -131,36 +133,99 @@ public class ImageOperationService : IImageOperationService
                     using Mat onesMat = new Mat(height, width, MatType.CV_64FC1, new Scalar(1));
                     Cv2.Add(validCountMat, onesMat, validCountMat, mask: nonNanMask);
                 }
-                if (mode == StackingMode.Average) Cv2.Divide(resultMat, validCountMat, resultMat, scale: 1, dtype: MatType.CV_64FC1);
+                if (mode == StackingMode.Average)
+                {
+                    using Mat safeDivisor = validCountMat.Clone();
+                    Cv2.Max(safeDivisor, 1.0, safeDivisor);
+                    Cv2.Divide(resultMat, safeDivisor, resultMat, scale: 1, dtype: MatType.CV_64FC1);
+                }
             }
             else if (mode == StackingMode.Median)
             {
-                int stripHeight = 50;
+                // ==========================================================
+                // IMPLEMENTAZIONE SAFE (NO UNSAFE POINTERS)
+                // ==========================================================
+                int stripHeight = 50; 
+                
                 for (int yStart = 0; yStart < height; yStart += stripHeight)
                 {
                     int currentStripH = Math.Min(stripHeight, height - yStart);
                     Mat[] stripStack = new Mat[sources.Count];
+                    
                     try
                     {
                         var start = yStart;
+                        // Caricamento Parallelo Strisce
                         Parallel.For(0, sources.Count, i => stripStack[i] = _converter.RawToMatRect(sources[i], start, currentStripH));
-                        Parallel.For(0, currentStripH, yRel =>
-                        {
-                            var valuesToStack = new List<double>(sources.Count);
-                            for (int x = 0; x < width; x++)
+                        
+                        // Elaborazione Parallela Righe (SAFE)
+                        // Usiamo thread-local storage per allocare i buffer C# una volta sola per thread
+                        Parallel.For(0, currentStripH, 
+                            // Init: Alloca buffer riutilizzabili per ogni thread
+                            () => new 
+                            { 
+                                // Buffer per copiare le righe sorgenti (Array di Array)
+                                SrcRows = new double[sources.Count][], 
+                                // Buffer per scrivere la riga risultato
+                                DestRow = new double[width],
+                                // Buffer per calcolare la mediana del singolo pixel
+                                PixelValues = new double[sources.Count]
+                            },
+                            
+                            // Body
+                            (yRel, state, buffers) =>
                             {
-                                valuesToStack.Clear();
-                                for (int k = 0; k < sources.Count; k++)
+                                // 1. Copia i dati da OpenCV (Unmanaged) a C# (Managed) per questa riga Y
+                                for(int k = 0; k < sources.Count; k++)
                                 {
-                                    double val = stripStack[k].At<double>(yRel, x);
-                                    if (!double.IsNaN(val)) valuesToStack.Add(val);
+                                    // Lazy init: se il buffer non esiste o ha dimensione errata
+                                    if(buffers.SrcRows[k] == null || buffers.SrcRows[k].Length < width)
+                                        buffers.SrcRows[k] = new double[width];
+
+                                    // MARSHAL COPY: Il segreto della velocità in Safe Mode
+                                    IntPtr srcPtr = stripStack[k].Ptr(yRel);
+                                    Marshal.Copy(srcPtr, buffers.SrcRows[k], 0, width);
                                 }
-                                if (valuesToStack.Count == 0) continue;
-                                valuesToStack.Sort();
-                                double median = (valuesToStack.Count % 2 == 0) ? (valuesToStack[valuesToStack.Count / 2 - 1] + valuesToStack[valuesToStack.Count / 2]) / 2.0 : valuesToStack[valuesToStack.Count / 2];
-                                resultMat.Set(start + yRel, x, median);
-                            }
-                        });
+
+                                // 2. Calcolo Mediana (Tutto in memoria gestita velocissima)
+                                for (int x = 0; x < width; x++)
+                                {
+                                    int validCount = 0;
+                                    for (int k = 0; k < sources.Count; k++)
+                                    {
+                                        double val = buffers.SrcRows[k][x];
+                                        if (!double.IsNaN(val)) 
+                                        {
+                                            buffers.PixelValues[validCount++] = val;
+                                        }
+                                    }
+
+                                    if (validCount == 0) 
+                                    {
+                                        buffers.DestRow[x] = double.NaN;
+                                        continue;
+                                    }
+
+                                    Array.Sort(buffers.PixelValues, 0, validCount);
+
+                                    double median;
+                                    if (validCount % 2 == 0)
+                                        median = (buffers.PixelValues[validCount / 2 - 1] + buffers.PixelValues[validCount / 2]) / 2.0;
+                                    else
+                                        median = buffers.PixelValues[validCount / 2];
+
+                                    buffers.DestRow[x] = median;
+                                }
+
+                                // 3. Copia il risultato calcolato indietro in OpenCV
+                                IntPtr destPtr = resultMat.Ptr(start + yRel);
+                                Marshal.Copy(buffers.DestRow, 0, destPtr, width);
+
+                                return buffers;
+                            },
+                            // Finally (Nulla da fare, il GC raccoglie i buffer)
+                            (buffers) => { }
+                        );
                     }
                     finally { foreach (var m in stripStack) m?.Dispose(); }
                 }

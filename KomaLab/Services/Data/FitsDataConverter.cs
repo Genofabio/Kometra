@@ -22,15 +22,16 @@ public class FitsDataConverter : IFitsDataConverter
 
         var rawJaggedData = (Array[])fitsData.RawData;
         int width = fitsData.Width;
-        // L'altezza della matrice risultante sarà solo quella della striscia
         int bitpix = fitsData.FitsHeader.GetIntValue("BITPIX");
         double bscale = fitsData.FitsHeader.GetDoubleValue("BSCALE", 1.0);
         double bzero = fitsData.FitsHeader.GetDoubleValue("BZERO", 0.0);
 
+        // La matrice di destinazione (Double)
         Mat stripMat = new Mat(rowsToRead, width, MatType.CV_64FC1);
 
         try
         {
+            // Nota: Qui usiamo i tipi C# corrispondenti a BITPIX standard
             switch (bitpix)
             {
                 case 8:  CopyRegionToMat<byte>(rawJaggedData, stripMat, MatType.CV_8UC1, bscale, bzero, yStart); break;
@@ -38,6 +39,7 @@ public class FitsDataConverter : IFitsDataConverter
                 case 32: CopyRegionToMat<int>(rawJaggedData, stripMat, MatType.CV_32SC1, bscale, bzero, yStart); break;
                 case -32: CopyRegionToMat<float>(rawJaggedData, stripMat, MatType.CV_32FC1, bscale, bzero, yStart); break;
                 case -64: CopyRegionToMat<double>(rawJaggedData, stripMat, MatType.CV_64FC1, bscale, bzero, yStart); break;
+                default: throw new NotSupportedException($"BITPIX {bitpix} not supported.");
             }
         }
         catch
@@ -52,66 +54,84 @@ public class FitsDataConverter : IFitsDataConverter
     private void CopyRegionToMat<T>(Array[] source, Mat destDouble, MatType tempType, double bscale, double bzero, int ySourceStart) 
         where T : struct
     {
-        int h = destDouble.Rows; // Altezza della striscia
+        int h = destDouble.Rows; 
         int w = destDouble.Cols;
 
+        // 1. Crea una matrice temporanea del tipo nativo (es. Short)
         using Mat tempMat = new Mat(h, w, tempType);
 
+        // 2. Copia riga per riga da Array C# -> Mat Nativa (Veloce con Marshal)
         for (int y = 0; y < h; y++)
         {
-            // Leggiamo dall'array originale all'indice [y + offset]
-            // Scriviamo nella matrice temporanea all'indice [y] (locale)
             T[] row = (T[])source[y + ySourceStart];
-        
+            
+            // Ottieni puntatore alla riga Y della matrice OpenCV
             IntPtr rowPtr = tempMat.Ptr(y);
+            
+            // Copia brutale di memoria (Fulmineo)
             MarshalCopy(row, 0, rowPtr, w);
         }
 
+        // 3. Conversione finale ottimizzata da OpenCV (gestisce bscale/bzero con SIMD)
         tempMat.ConvertTo(destDouble, MatType.CV_64FC1, bscale, bzero);
     }
 
-    // Helper per gestire i diversi overload di Marshal.Copy tramite Generics (trucco C#)
-    private void MarshalCopy<T>(T[] source, int startIndex, IntPtr destination, int length)
-    {
-        if (source is byte[] b) Marshal.Copy(b, startIndex, destination, length);
-        else if (source is short[] s) Marshal.Copy(s, startIndex, destination, length);
-        else if (source is int[] i) Marshal.Copy(i, startIndex, destination, length);
-        else if (source is float[] f) Marshal.Copy(f, startIndex, destination, length);
-        else if (source is double[] d) Marshal.Copy(d, startIndex, destination, length);
-        else throw new NotSupportedException($"Type {typeof(T)} not supported for Marshal.Copy");
-    }
-
+    // --- OTTIMIZZAZIONE MASSIVA QUI ---
     public FitsImageData MatToFitsData(Mat mat, FitsImageData? originalTemplate)
     {
-        // Assicuriamoci che sia Double
-        using Mat tempDouble = new Mat();
+        // 1. Assicuriamo formato Double
         Mat source = mat;
+        bool weCreatedTemp = false;
 
         if (mat.Type() != MatType.CV_64FC1)
         {
-            mat.ConvertTo(tempDouble, MatType.CV_64FC1);
-            source = tempDouble;
+            source = new Mat();
+            mat.ConvertTo(source, MatType.CV_64FC1);
+            weCreatedTemp = true;
         }
 
-        int w = source.Width;
-        int h = source.Height;
-        
-        // Ricostruiamo il jagged array
-        double[][] jaggedData = new double[h][];
-        var indexer = source.GetGenericIndexer<double>();
-
-        // Qui la copia manuale è inevitabile per creare la struttura jagged di C#
-        // Parallelizzabile se necessario, ma di solito è veloce.
-        for (int y = 0; y < h; y++)
+        try
         {
-            jaggedData[y] = new double[w];
-            for (int x = 0; x < w; x++)
+            int w = source.Width;
+            int h = source.Height;
+            
+            // 2. Ricostruiamo il jagged array
+            double[][] jaggedData = new double[h][];
+
+            // 3. COPY MEMORY VELOCE (Rimossa logica GetGenericIndexer)
+            // Copiamo riga per riga usando Marshal.Copy al contrario (IntPtr -> Array)
+            for (int y = 0; y < h; y++)
             {
-                jaggedData[y][x] = indexer[y, x];
+                jaggedData[y] = new double[w];
+                IntPtr rowPtr = source.Ptr(y);
+                
+                // Copia diretta da Memoria Non Gestita (OpenCV) a Memoria Gestita (C# Array)
+                Marshal.Copy(rowPtr, jaggedData[y], 0, w);
+            }
+
+            // 4. Creazione Header (Codice originale preservato)
+            var newHeader = RebuildCleanHeader(originalTemplate);
+
+            return new FitsImageData
+            {
+                RawData = jaggedData,
+                FitsHeader = newHeader,
+                Width = w,
+                Height = h
+            };
+        }
+        finally
+        {
+            // Pulizia se abbiamo creato una matrice temporanea per la conversione
+            if (weCreatedTemp)
+            {
+                source.Dispose();
             }
         }
+    }
 
-        // Creazione Header pulito (logica conservata dal tuo codice originale)
+    private Header RebuildCleanHeader(FitsImageData? originalTemplate)
+    {
         var newHeader = new Header();
         var keysToNeutralize = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
@@ -123,52 +143,44 @@ public class FitsDataConverter : IFitsDataConverter
             var cursor = originalTemplate.FitsHeader.GetCursor();
             while (cursor.MoveNext())
             {
-                switch (cursor.Current)
-                {
-                    case DictionaryEntry { Value: HeaderCard hc }:
-                    {
-                        if (!keysToNeutralize.Contains(hc.Key)) newHeader.AddCard(hc);
-                        break;
-                    }
-                    case HeaderCard c:
-                    {
-                        if (!keysToNeutralize.Contains(c.Key)) newHeader.AddCard(c);
-                        break;
-                    }
-                }
+                if (cursor.Current is DictionaryEntry { Value: HeaderCard hc } && !keysToNeutralize.Contains(hc.Key))
+                    newHeader.AddCard(hc);
+                else if (cursor.Current is HeaderCard c && !keysToNeutralize.Contains(c.Key))
+                    newHeader.AddCard(c);
             }
         }
 
         newHeader.AddValue("BITPIX", -64, "Double Precision");
         newHeader.AddValue("BSCALE", 1.0, null);
         newHeader.AddValue("BZERO", 0.0, null);
+        return newHeader;
+    }
 
-        return new FitsImageData
-        {
-            RawData = jaggedData,
-            FitsHeader = newHeader,
-            Width = w,
-            Height = h
-        };
+    // Helper Generico per Marshal.Copy
+    private void MarshalCopy<T>(T[] source, int startIndex, IntPtr destination, int length)
+    {
+        if (source is byte[] b) Marshal.Copy(b, startIndex, destination, length);
+        else if (source is short[] s) Marshal.Copy(s, startIndex, destination, length);
+        else if (source is int[] i) Marshal.Copy(i, startIndex, destination, length);
+        else if (source is float[] f) Marshal.Copy(f, startIndex, destination, length);
+        else if (source is double[] d) Marshal.Copy(d, startIndex, destination, length);
+        else throw new NotSupportedException($"Type {typeof(T)} not supported for Marshal.Copy");
     }
 
     public (double Black, double White) CalculateDisplayThresholds(FitsImageData data)
     {
-        // Questo usa la TUA logica di sampling (eccellente per performance)
-        // Non richiede allocazione di Mat.
-        
         if (data.RawData is not Array[] jagged) return (0, 255);
         
         int bitpix = data.FitsHeader.GetIntValue("BITPIX");
         double bscale = data.FitsHeader.GetDoubleValue("BSCALE", 1.0);
         double bzero = data.FitsHeader.GetDoubleValue("BZERO", 0.0);
         
-        // Campionamento intelligente
         int maxSamples = 10000;
         var samples = new List<double>(maxSamples);
         long totalPixels = (long)data.Width * data.Height;
         double step = Math.Max(1.0, totalPixels / (double)maxSamples);
 
+        // Campionamento sparse per velocità
         for (int i = 0; i < maxSamples; i++)
         {
             long idx = (long)(i * step);
@@ -184,18 +196,14 @@ public class FitsDataConverter : IFitsDataConverter
                 if (!double.IsNaN(physVal) && !double.IsInfinity(physVal))
                     samples.Add(physVal);
             }
-            catch
-            {
-                // ignored
-            }
+            catch { /* Ignore bounds */ }
         }
 
         if (samples.Count == 0) return (0, 1);
 
-        double b = Statistics.Quantile(samples, 0.3); // Un po' più conservativo del 0.15
+        double b = Statistics.Quantile(samples, 0.3); 
         double w = Statistics.Quantile(samples, 0.995);
         
-        // Protezione contro immagini piatte
         if (Math.Abs(w - b) < 1e-6) w = b + 1.0;
         
         return (b, w);
