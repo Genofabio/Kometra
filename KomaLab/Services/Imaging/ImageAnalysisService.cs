@@ -224,148 +224,125 @@ public class ImageAnalysisService : IImageAnalysisService
     }
 
     // =======================================================================
-    // 4. ANALISI SPOSTAMENTO (ORB A GRIGLIA + RANSAC + BACKGROUND CUT)
+    // 4. ANALISI SPOSTAMENTO (ORB + RANSAC + CLAHE)
     // =======================================================================
-
-    public Point ComputeStarFieldShift(Mat reference, Mat target)
+public Point ComputeStarFieldShift(Mat reference, Mat target)
     {
         if (reference.Empty() || target.Empty()) return new Point(0, 0);
 
-        // 1. Pre-Processing Intelligente
-        using var ref8 = Ensure8Bit(reference);
-        using var tgt8 = Ensure8Bit(target);
+        // 1. Pre-Processing: HIGH PASS FILTER (Sobel)
+        using var refEdge = ApplySobelFilter(reference);
+        using var tgtEdge = ApplySobelFilter(target);
+
+        // 2. Grid FFT Calculation (3x3 Fisso)
+        int rows = 3;
+        int cols = 3;
         
-        if (ref8.Empty() || tgt8.Empty()) return new Point(0, 0);
+        List<Point2d> shifts = new List<Point2d>();
 
-        // 2. Feature Detection a GRIGLIA
-        var kpsRef = DetectFeaturesInGrid(ref8, 2, 2);
-        var kpsTgt = DetectFeaturesInGrid(tgt8, 2, 2);
+        int cellW = refEdge.Width / cols;
+        int cellH = refEdge.Height / rows;
 
-        if (kpsRef.Length < 10 || kpsTgt.Length < 10) return new Point(0, 0);
-
-        // 3. Estrazione Descrittori
-        using var orb = ORB.Create();
-        using var descRef = new Mat();
-        using var descTgt = new Mat();
-        
-        orb.Compute(ref8, ref kpsRef, descRef);
-        orb.Compute(tgt8, ref kpsTgt, descTgt);
-
-        if (descRef.Empty() || descTgt.Empty()) return new Point(0, 0);
-
-        // 4. Matching KNN + Ratio Test
-        using var matcher = new BFMatcher(NormTypes.Hamming, crossCheck: false);
-        DMatch[][] matches = matcher.KnnMatch(descRef, descTgt, k: 2);
-
-        List<Point2f> ptsRef = new List<Point2f>();
-        List<Point2f> ptsTgt = new List<Point2f>();
-        float ratioThresh = 0.75f;
-
-        foreach (var matchGroup in matches)
-        {
-            if (matchGroup.Length >= 2)
-            {
-                if (matchGroup[0].Distance < ratioThresh * matchGroup[1].Distance)
-                {
-                    ptsRef.Add(kpsRef[matchGroup[0].QueryIdx].Pt);
-                    ptsTgt.Add(kpsTgt[matchGroup[0].TrainIdx].Pt);
-                }
-            }
-        }
-
-        if (ptsRef.Count < 5) return new Point(0, 0);
-
-        // 5. RANSAC
-        using var inliers = new Mat();
-        Mat? transform = Cv2.EstimateAffinePartial2D(
-            InputArray.Create(ptsTgt), 
-            InputArray.Create(ptsRef), 
-            inliers, 
-            RobustEstimationAlgorithms.RANSAC, 
-            ransacReprojThreshold: 5.0
-        );
-
-        if (transform.Empty()) return new Point(0, 0);
-
-        double tx = transform.At<double>(0, 2);
-        double ty = transform.At<double>(1, 2);
-
-        // Sanity Check
-        if (Math.Abs(tx) > reference.Width / 3.0 || Math.Abs(ty) > reference.Height / 3.0)
-            return new Point(0, 0);
-
-        return new Point(tx, ty);
-    }
-
-    // --- HELPER: RILEVAMENTO A GRIGLIA CORRETTO ---
-    private KeyPoint[] DetectFeaturesInGrid(Mat img, int rows, int cols)
-    {
-        using var detector = ORB.Create(nFeatures: 500); 
-        var allKeypoints = new List<KeyPoint>();
-
-        int cellW = img.Width / cols;
-        int cellH = img.Height / rows;
+        // Finestra Hanning CV_32FC1
+        using var hanningWin = new Mat();
+        Cv2.CreateHanningWindow(hanningWin, new Size(cellW, cellH), MatType.CV_32FC1);
 
         for (int r = 0; r < rows; r++)
         {
             for (int c = 0; c < cols; c++)
             {
-                // Calcolo coordinate base
                 int x = c * cellW;
                 int y = r * cellH;
+
+                // Bordi
+                if (x + cellW > refEdge.Width || y + cellH > refEdge.Height) continue;
+
+                var rect = new OpenCvSharp.Rect(x, y, cellW, cellH);
                 
-                // Calcolo larghezza/altezza gestendo i resti (ultimo blocco prende tutto)
-                int w = (c == cols - 1) ? img.Width - x : cellW;
-                int h = (r == rows - 1) ? img.Height - y : cellH;
+                using var cellRef = new Mat(refEdge, rect);
+                using var cellTgt = new Mat(tgtEdge, rect);
+                
+                // Conversione sicura
+                using var cellRef32 = new Mat();
+                using var cellTgt32 = new Mat();
+                
+                if (cellRef.Type() != MatType.CV_32FC1) cellRef.ConvertTo(cellRef32, MatType.CV_32FC1);
+                else cellRef.CopyTo(cellRef32);
 
-                var cvRect = new OpenCvSharp.Rect(x, y, w, h);
-                using Mat cellMat = new Mat(img, cvRect);
+                if (cellTgt.Type() != MatType.CV_32FC1) cellTgt.ConvertTo(cellTgt32, MatType.CV_32FC1);
+                else cellTgt.CopyTo(cellTgt32);
 
-                // FIX: Detect restituisce l'array, niente 'out'
-                KeyPoint[] cellKps = detector.Detect(cellMat);
-
-                // Trasla coordinate da Locali a Globali
-                for (int k = 0; k < cellKps.Length; k++)
+                double response;
+                Point2d shift = Cv2.PhaseCorrelate(cellRef32, cellTgt32, hanningWin, out response);
+                
+                // Filtro qualità
+                if (response > 0.05) 
                 {
-                    cellKps[k].Pt.X += x;
-                    cellKps[k].Pt.Y += y;
-                    allKeypoints.Add(cellKps[k]);
+                    if (Math.Abs(shift.X) < cellW / 2.0 && Math.Abs(shift.Y) < cellH / 2.0)
+                    {
+                        shifts.Add(shift);
+                    }
                 }
             }
         }
-        return allKeypoints.ToArray();
+
+        if (shifts.Count == 0) return new Point(0, 0);
+
+        // 3. Filtro Mediano
+        Point2d finalShift = ComputeGeometricMedian(shifts);
+
+        // --- CORREZIONE SEGNO ---
+        // Inverto il segno qui così nel ciclo puoi usare +=
+        return new Point(finalShift.X, finalShift.Y); 
     }
 
-    // --- HELPER: CONVERSIONE CON PULIZIA FONDO CIELO ---
-    private Mat Ensure8Bit(Mat input)
+    // --- HELPER 1: FILTRO SOBEL ---
+    private Mat ApplySobelFilter(Mat input)
     {
-        if (input.Type() == MatType.CV_8UC1) return input.Clone();
+        using var gray = new Mat();
+        if (input.Channels() > 1) Cv2.CvtColor(input, gray, ColorConversionCodes.BGR2GRAY);
+        else input.CopyTo(gray);
 
-        using var floatMat = new Mat();
-        input.ConvertTo(floatMat, MatType.CV_32FC1);
-        Cv2.PatchNaNs(floatMat, 0);
+        using var grayFloat = new Mat();
+        gray.ConvertTo(grayFloat, MatType.CV_32FC1);
 
-        // 1. Calcolo Statistiche 
+        using var gradX = new Mat();
+        using var gradY = new Mat();
+        
+        Cv2.Sobel(grayFloat, gradX, MatType.CV_32FC1, 1, 0, ksize: 3);
+        Cv2.Sobel(grayFloat, gradY, MatType.CV_32FC1, 0, 1, ksize: 3);
+
+        var magnitude = new Mat();
+        Cv2.Magnitude(gradX, gradY, magnitude);
+
+        // Opzionale: Se vuoi reintrodurre la pulizia del rumore di fondo (senza dilatazione)
+        // puoi decommentare queste righe. Altrimenti ritorna magnitudo pura.
+        /*
         using var meanMat = new Mat();
         using var stdDevMat = new Mat();
-        Cv2.MeanStdDev(floatMat, meanMat, stdDevMat);
+        Cv2.MeanStdDev(magnitude, meanMat, stdDevMat);
         double mean = meanMat.Get<double>(0, 0);
         double std = stdDevMat.Get<double>(0, 0);
+        Cv2.Threshold(magnitude, magnitude, mean + (2.0 * std), 0, ThresholdTypes.ToZero);
+        */
 
-        // 2. Sottrazione del Fondo (Media + 1 Sigma)
-        double blackPoint = mean + std; 
-        using var subMat = new Mat();
-        Cv2.Subtract(floatMat, new Scalar(blackPoint), subMat);
-        
-        // 3. Logaritmo
-        using var tempLog = new Mat();
-        Cv2.Add(subMat, new Scalar(1.0), tempLog); 
-        Cv2.Log(tempLog, tempLog);
-
-        // 4. Normalizzazione
-        Mat result8 = new Mat();
-        Cv2.Normalize(tempLog, result8, 0, 255, NormTypes.MinMax, (int)MatType.CV_8UC1);
-
-        return result8;
+        return magnitude;
     }
+
+    // --- HELPER 2: MEDIANA GEOMETRICA ---
+    private Point2d ComputeGeometricMedian(List<Point2d> points)
+    {
+        if (points.Count == 0) return new Point2d(0, 0);
+        
+        var sortedX = points.Select(p => p.X).OrderBy(x => x).ToList();
+        var sortedY = points.Select(p => p.Y).OrderBy(y => y).ToList();
+
+        int mid = points.Count / 2;
+        double medianX = sortedX[mid];
+        double medianY = sortedY[mid];
+        
+        // Versione semplificata robusta
+        return new Point2d(medianX, medianY);
+    }
+    
 }

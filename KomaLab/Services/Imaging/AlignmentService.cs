@@ -192,6 +192,7 @@ public class AlignmentService : IAlignmentService
 
             Point masterCenter;
             Mat? prevMat = null;
+
             try
             {
                 var data0 = await _fitsService.LoadFitsFromFileAsync(sourcePaths[0]);
@@ -223,25 +224,22 @@ public class AlignmentService : IAlignmentService
                     if (dataTarget == null) { results[index] = null; continue; }
 
                     using Mat currentMat = _converter.RawToMat(dataTarget);
-                    
-                    // Calcolo Shift Sequenziale (i vs i-1)
+            
+                    // Qui ComputeStarFieldShift ritorna il valore grezzo (senza inversione)
                     Point stepShift = _analysis.ComputeStarFieldShift(prevMat, currentMat);
 
+                    // Accumulo con somma (+=)
                     totalShiftX += stepShift.X;
                     totalShiftY += stepShift.Y;
 
-                    // ComputeStarFieldShift ritorna il vettore negativo (-x, -y) per allineare.
-                    // Quindi CumulativeShift accumula valori negativi se l'immagine va a destra.
-                    // La formula corretta è Master - Shift.
                     Point newCenter = new Point(
-                        masterCenter.X - totalShiftX,
-                        masterCenter.Y - totalShiftY
+                        masterCenter.X + totalShiftX,
+                        masterCenter.Y + totalShiftY
                     );
 
                     results[index] = newCenter;
                     progress?.Report((index, newCenter));
 
-                    // Swap
                     prevMat.Dispose();
                     prevMat = currentMat.Clone();
                 }
