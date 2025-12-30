@@ -227,107 +227,161 @@ public class ImageAnalysisService : IImageAnalysisService
     // 4. ANALISI SPOSTAMENTO (ORB + RANSAC + CLAHE)
     // =======================================================================
 public Point ComputeStarFieldShift(Mat reference, Mat target)
+{
+    if (reference.Empty() || target.Empty()) return new Point(0, 0);
+
+    // 1. TORNATI AL SOBEL ORIGINALE (Senza threshold aggressivo)
+    using var refEdge = ApplySobelFilter(reference);
+    using var tgtEdge = ApplySobelFilter(target);
+
+    int rows = 3;
+    int cols = 3;
+    
+    List<Point2d> shifts = new List<Point2d>();
+
+    int cellW = refEdge.Width / cols;
+    int cellH = refEdge.Height / rows;
+
+    using var hanningWin = new Mat();
+    Cv2.CreateHanningWindow(hanningWin, new Size(cellW, cellH), MatType.CV_32FC1);
+
+    for (int r = 0; r < rows; r++)
     {
-        if (reference.Empty() || target.Empty()) return new Point(0, 0);
-
-        // 1. Pre-Processing: HIGH PASS FILTER (Sobel)
-        using var refEdge = ApplySobelFilter(reference);
-        using var tgtEdge = ApplySobelFilter(target);
-
-        // 2. Grid FFT Calculation (3x3 Fisso)
-        int rows = 3;
-        int cols = 3;
-        
-        List<Point2d> shifts = new List<Point2d>();
-
-        int cellW = refEdge.Width / cols;
-        int cellH = refEdge.Height / rows;
-
-        // Finestra Hanning CV_32FC1
-        using var hanningWin = new Mat();
-        Cv2.CreateHanningWindow(hanningWin, new Size(cellW, cellH), MatType.CV_32FC1);
-
-        for (int r = 0; r < rows; r++)
+        for (int c = 0; c < cols; c++)
         {
-            for (int c = 0; c < cols; c++)
+            int x = c * cellW;
+            int y = r * cellH;
+
+            if (x + cellW > refEdge.Width || y + cellH > refEdge.Height) continue;
+
+            var rect = new OpenCvSharp.Rect(x, y, cellW, cellH);
+            
+            // Estrazione Cella
+            using var cellRef = new Mat(refEdge, rect);
+            using var cellTgt = new Mat(tgtEdge, rect);
+            
+            using var cellRef32 = new Mat();
+            using var cellTgt32 = new Mat();
+            
+            if (cellRef.Type() != MatType.CV_32FC1) cellRef.ConvertTo(cellRef32, MatType.CV_32FC1);
+            else cellRef.CopyTo(cellRef32);
+
+            if (cellTgt.Type() != MatType.CV_32FC1) cellTgt.ConvertTo(cellTgt32, MatType.CV_32FC1);
+            else cellTgt.CopyTo(cellTgt32);
+
+            // ============================================================
+            // OTTIMIZZAZIONE 2: SMART GRID / VALIDAZIONE CONTENUTO
+            // ============================================================
+            
+            // Calcoliamo media e deviazione standard della cella
+            using var meanMat = new Mat();
+            using var stdDevMat = new Mat();
+            Cv2.MeanStdDev(cellRef32, meanMat, stdDevMat);
+            
+            double cellMean = meanMat.Get<double>(0, 0);
+            double cellStd = stdDevMat.Get<double>(0, 0);
+
+            // Troviamo il picco massimo di luminosità nella cella
+            double minVal, maxVal;
+            Cv2.MinMaxLoc(cellRef32, out minVal, out maxVal);
+
+            // LOGICA DI SCARTO:
+            // Se il pixel più luminoso non si stacca nettamente dal fondo (media),
+            // significa che in questa cella NON c'è una stella, ma solo rumore piatto.
+            // Usiamo un fattore "Sigma" conservativo (es. 3.0 o 4.0).
+            
+            double noiseThreshold = cellMean + (4.0 * cellStd);
+
+            if (maxVal < noiseThreshold)
             {
-                int x = c * cellW;
-                int y = r * cellH;
+                // Cella vuota o troppo rumorosa: SALTALA
+                continue;
+            }
+            // ============================================================
 
-                // Bordi
-                if (x + cellW > refEdge.Width || y + cellH > refEdge.Height) continue;
-
-                var rect = new OpenCvSharp.Rect(x, y, cellW, cellH);
-                
-                using var cellRef = new Mat(refEdge, rect);
-                using var cellTgt = new Mat(tgtEdge, rect);
-                
-                // Conversione sicura
-                using var cellRef32 = new Mat();
-                using var cellTgt32 = new Mat();
-                
-                if (cellRef.Type() != MatType.CV_32FC1) cellRef.ConvertTo(cellRef32, MatType.CV_32FC1);
-                else cellRef.CopyTo(cellRef32);
-
-                if (cellTgt.Type() != MatType.CV_32FC1) cellTgt.ConvertTo(cellTgt32, MatType.CV_32FC1);
-                else cellTgt.CopyTo(cellTgt32);
-
-                double response;
-                Point2d shift = Cv2.PhaseCorrelate(cellRef32, cellTgt32, hanningWin, out response);
-                
-                // Filtro qualità
-                if (response > 0.05) 
+            double response;
+            Point2d shift = Cv2.PhaseCorrelate(cellRef32, cellTgt32, hanningWin, out response);
+            
+            // Filtro qualità response (rimasto invariato)
+            if (response > 0.05) 
+            {
+                if (Math.Abs(shift.X) < cellW / 2.0 && Math.Abs(shift.Y) < cellH / 2.0)
                 {
-                    if (Math.Abs(shift.X) < cellW / 2.0 && Math.Abs(shift.Y) < cellH / 2.0)
-                    {
-                        shifts.Add(shift);
-                    }
+                    shifts.Add(shift);
                 }
             }
         }
-
-        if (shifts.Count == 0) return new Point(0, 0);
-
-        // 3. Filtro Mediano
-        Point2d finalShift = ComputeGeometricMedian(shifts);
-
-        // --- CORREZIONE SEGNO ---
-        // Inverto il segno qui così nel ciclo puoi usare +=
-        return new Point(finalShift.X, finalShift.Y); 
     }
+
+    if (shifts.Count == 0) return new Point(0, 0);
+
+    // Usa ancora la mediana geometrica per ora
+    Point2d finalShift = ComputeConsensusShift(shifts);     // NUOVO
+
+    return new Point(finalShift.X, finalShift.Y); 
+}
 
     // --- HELPER 1: FILTRO SOBEL ---
-    private Mat ApplySobelFilter(Mat input)
-    {
-        using var gray = new Mat();
-        if (input.Channels() > 1) Cv2.CvtColor(input, gray, ColorConversionCodes.BGR2GRAY);
-        else input.CopyTo(gray);
+    // --- HELPER 1: FILTRO MIGLIORATO (TOPHAT + SOBEL) ---
+private Mat ApplySobelFilter(Mat input)
+{
+    using var gray = new Mat();
+    // 1. Gestione canali
+    if (input.Channels() > 1) Cv2.CvtColor(input, gray, ColorConversionCodes.BGR2GRAY);
+    else input.CopyTo(gray);
 
-        using var grayFloat = new Mat();
-        gray.ConvertTo(grayFloat, MatType.CV_32FC1);
+    using var grayFloat = new Mat();
+    // Conversione in Float per precisione
+    gray.ConvertTo(grayFloat, MatType.CV_32FC1);
 
-        using var gradX = new Mat();
-        using var gradY = new Mat();
-        
-        Cv2.Sobel(grayFloat, gradX, MatType.CV_32FC1, 1, 0, ksize: 3);
-        Cv2.Sobel(grayFloat, gradY, MatType.CV_32FC1, 0, 1, ksize: 3);
+    // =========================================================
+    // OTTIMIZZAZIONE FONDO/RUMORE
+    // =========================================================
 
-        var magnitude = new Mat();
-        Cv2.Magnitude(gradX, gradY, magnitude);
+    // 2. Normalizzazione MinMax
+    // Fondamentale con FITS double: porta i valori tra 0.0 e 1.0 per far lavorare bene i filtri
+    Cv2.Normalize(grayFloat, grayFloat, 0, 1, NormTypes.MinMax);
 
-        // Opzionale: Se vuoi reintrodurre la pulizia del rumore di fondo (senza dilatazione)
-        // puoi decommentare queste righe. Altrimenti ritorna magnitudo pura.
-        /*
-        using var meanMat = new Mat();
-        using var stdDevMat = new Mat();
-        Cv2.MeanStdDev(magnitude, meanMat, stdDevMat);
-        double mean = meanMat.Get<double>(0, 0);
-        double std = stdDevMat.Get<double>(0, 0);
-        Cv2.Threshold(magnitude, magnitude, mean + (2.0 * std), 0, ThresholdTypes.ToZero);
-        */
+    // 3. Morphological Top-Hat (IL GAME CHANGER)
+    // Questo filtro estrae elementi piccoli (stelle) e rimuove sfondi e gradienti (cometa/inquinamento).
+    // Size(15, 15): Significa "tieni ciò che è più piccolo di 15px, butta il resto".
+    // Se le tue stelle sono molto grosse, aumenta a 21x21.
+    using var kernel = Cv2.GetStructuringElement(MorphShapes.Rect, new Size(15, 15));
+    using var topHat = new Mat();
+    Cv2.MorphologyEx(grayFloat, topHat, MorphTypes.TopHat, kernel);
 
-        return magnitude;
-    }
+    // 4. Gaussian Blur
+    // Riduce il rumore ad altissima frequenza prima di passare al Sobel.
+    // Una sigma bassa (1.5) ammorbidisce il grano senza cancellare le stelle.
+    using var blurred = new Mat();
+    Cv2.GaussianBlur(topHat, blurred, new Size(0, 0), 1.5);
+
+    // =========================================================
+
+    // 5. Sobel (ora lavora su un'immagine pulita!)
+    using var gradX = new Mat();
+    using var gradY = new Mat();
+    
+    // Usa blurred invece di grayFloat
+    Cv2.Sobel(blurred, gradX, MatType.CV_32FC1, 1, 0, ksize: 3);
+    Cv2.Sobel(blurred, gradY, MatType.CV_32FC1, 0, 1, ksize: 3);
+
+    var magnitude = new Mat();
+    Cv2.Magnitude(gradX, gradY, magnitude);
+
+    // 6. Sogliatura Finale (Opzionale ma consigliata)
+    // Taglia via i residui debolissimi rimasti dopo il TopHat
+    using var meanMat = new Mat();
+    using var stdDevMat = new Mat();
+    Cv2.MeanStdDev(magnitude, meanMat, stdDevMat);
+    double mean = meanMat.Get<double>(0, 0);
+    double std = stdDevMat.Get<double>(0, 0);
+    
+    // Soglia adattiva: tutto ciò che è sotto media + 2 sigma viene azzerato
+    Cv2.Threshold(magnitude, magnitude, mean + (2.0 * std), 0, ThresholdTypes.Tozero);
+
+    return magnitude;
+}
 
     // --- HELPER 2: MEDIANA GEOMETRICA ---
     private Point2d ComputeGeometricMedian(List<Point2d> points)
@@ -343,6 +397,61 @@ public Point ComputeStarFieldShift(Mat reference, Mat target)
         
         // Versione semplificata robusta
         return new Point2d(medianX, medianY);
+    }
+    
+    private Point2d ComputeConsensusShift(List<Point2d> points)
+    {
+        // Se non abbiamo punti o ne abbiamo solo uno, ritorniamo quello che c'è.
+        if (points.Count == 0) return new Point2d(0, 0);
+        if (points.Count == 1) return points[0];
+
+        List<Point2d> bestCluster = new List<Point2d>();
+    
+        // TOLLERANZA: Distanza massima in pixel per considerare due vettori "d'accordo".
+        // 2.0 è un valore sicuro per immagini astronomiche (gestisce lievi distorsioni o seeing).
+        // Se l'allineamento deve essere sub-pixel precisissimo, puoi scendere a 1.0 o 0.5, 
+        // ma con poche stelle meglio stare larghi.
+        double tolerance = 2.0; 
+
+        // Algoritmo semplice O(N^2) - Per N=9 celle è istantaneo.
+        foreach (var p1 in points)
+        {
+            var currentCluster = new List<Point2d>();
+        
+            foreach (var p2 in points)
+            {
+                double dist = Math.Sqrt(Math.Pow(p1.X - p2.X, 2) + Math.Pow(p1.Y - p2.Y, 2));
+            
+                // Se i due vettori sono vicini, fanno parte dello stesso "movimento"
+                if (dist <= tolerance)
+                {
+                    currentCluster.Add(p2);
+                }
+            }
+
+            // Se troviamo un gruppo più numeroso del precedente, diventa il nuovo candidato
+            if (currentCluster.Count > bestCluster.Count)
+            {
+                bestCluster = currentCluster;
+            }
+            // Se hanno lo stesso numero, potremmo valutare la "compattezza" (deviazione standard),
+            // ma per ora chi vince primo, vince.
+        }
+
+        // Se il best cluster è vuoto (improbabile), fallback
+        if (bestCluster.Count == 0) return points[0];
+
+        // Calcoliamo la media aritmetica SOLO del cluster vincente (Esclusione Outlier)
+        double sumX = 0;
+        double sumY = 0;
+    
+        foreach (var p in bestCluster)
+        {
+            sumX += p.X;
+            sumY += p.Y;
+        }
+
+        return new Point2d(sumX / bestCluster.Count, sumY / bestCluster.Count);
     }
     
 }
