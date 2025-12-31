@@ -51,12 +51,7 @@ public enum AlignmentMode
     /// <summary>
     /// L'utente deve cliccare manualmente il soggetto su ogni singola immagine.
     /// </summary>
-    Manual,
-    
-    /// <summary>
-    /// Allineamento globale basato sul riconoscimento del campo stellare (FFT/Pattern Matching).
-    /// </summary>
-    Stars
+    Manual
 }
 
 /// <summary>

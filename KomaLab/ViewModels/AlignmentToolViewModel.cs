@@ -31,7 +31,6 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
     private readonly int _totalStackCount;
     
     private Size _viewportSize;
-    
     private ContrastProfile? _lastContrastProfile;
 
     #endregion
@@ -54,14 +53,13 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
     
     [ObservableProperty] 
     [NotifyPropertyChangedFor(nameof(CorrectImageSize))]
-    [NotifyPropertyChangedFor(nameof(SafeImage))]       // Per Binding Safe
-    [NotifyPropertyChangedFor(nameof(SafeImageWidth))]  // Per Binding Safe
-    [NotifyPropertyChangedFor(nameof(SafeImageHeight))] // Per Binding Safe
+    [NotifyPropertyChangedFor(nameof(SafeImage))]       
+    [NotifyPropertyChangedFor(nameof(SafeImageWidth))]  
+    [NotifyPropertyChangedFor(nameof(SafeImageHeight))] 
     private FitsRenderer? _activeImage; 
     
     public Size CorrectImageSize => ActiveImage?.ImageSize ?? default;
     
-    // --- PROPRIETÀ SAFE (Per evitare errori Binding in chiusura) ---
     public Bitmap? SafeImage => ActiveImage?.Image;
     public double SafeImageWidth => ActiveImage?.ImageSize.Width ?? 100;
     public double SafeImageHeight => ActiveImage?.ImageSize.Height ?? 100;
@@ -81,6 +79,35 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
     [ObservableProperty] private bool _isStack;
     [ObservableProperty] private string _stackCounterText = "";
 
+    // --- TARGET E MODALITÀ ---
+
+    public IEnumerable<AlignmentTarget> AvailableTargets => Enum.GetValues<AlignmentTarget>();
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(AvailableAlignmentModes))]
+    [NotifyPropertyChangedFor(nameof(IsSearchRadiusVisible))]
+    [NotifyPropertyChangedFor(nameof(IsSearchRadiusControlsVisible))]
+    [NotifyPropertyChangedFor(nameof(IsRefinementMessageVisible))]
+    [NotifyPropertyChangedFor(nameof(IsNavigationVisible))]
+    private AlignmentTarget _selectedTarget = AlignmentTarget.Comet;
+
+    public IEnumerable<AlignmentMode> AvailableAlignmentModes 
+    {
+        get
+        {
+            if (SelectedTarget == AlignmentTarget.Comet)
+            {
+                if (IsStack) return new[] { AlignmentMode.Automatic, AlignmentMode.Guided, AlignmentMode.Manual };
+                return new[] { AlignmentMode.Automatic, AlignmentMode.Manual };
+            }
+            else // Stars
+            {
+                // Per le stelle usiamo solo l'algoritmo automatico (FFT)
+                return new[] { AlignmentMode.Automatic };
+            }
+        }
+    }
+
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(IsSearchRadiusVisible))]
     [NotifyPropertyChangedFor(nameof(IsSearchRadiusControlsVisible))]
@@ -89,12 +116,14 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
     private AlignmentMode _selectedMode = AlignmentMode.Automatic;
     
     public bool IsSearchRadiusVisible => 
-        SelectedMode != AlignmentMode.Automatic && 
-        SelectedMode != AlignmentMode.Stars;
+        SelectedTarget == AlignmentTarget.Comet && 
+        SelectedMode != AlignmentMode.Automatic;
 
     [ObservableProperty] private int _minSearchRadius;
     [ObservableProperty] private int _maxSearchRadius = 100;
     [ObservableProperty] private int _searchRadius = 100;
+
+    // --- STATO ---
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(IsCalculateButtonVisible))]
@@ -132,47 +161,19 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
     {
         get
         {
-            // Se non è uno stack (singola immagine), niente navigazione mai.
             if (!IsStack) return false;
-
-            // 1. Durante il calcolo nascondiamo tutto per pulizia
             if (CurrentState == AlignmentState.Calculating) return false;
-
-            // 2. Se i risultati sono pronti (ResultsReady), vogliamo SEMPRE 
-            // mostrare la navigazione per permettere all'utente di controllare il lavoro fatto.
             if (CurrentState == AlignmentState.ResultsReady || CurrentState == AlignmentState.Processing) 
                 return true;
 
-            // 3. Logica stato Initial (Prima del calcolo):
-            return SelectedMode != AlignmentMode.Automatic && 
-                   SelectedMode != AlignmentMode.Stars;
+            // In fase iniziale, mostriamo navigazione solo se dobbiamo selezionare punti (Cometa Manuale/Guidata)
+            return SelectedTarget == AlignmentTarget.Comet && 
+                   SelectedMode != AlignmentMode.Automatic;
         }
     }
     
     public bool IsCoordinateListVisible => CurrentState == AlignmentState.ResultsReady || CurrentState == AlignmentState.Processing;
-    public IEnumerable<AlignmentTarget> AvailableTargets => Enum.GetValues<AlignmentTarget>();
-
-    [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(AvailableAlignmentModes))]
-    private AlignmentTarget _selectedTarget = AlignmentTarget.Comet;
-
-    // La lista dei modi ora è dinamica in base al Target
-    public IEnumerable<AlignmentMode> AvailableAlignmentModes 
-    {
-        get
-        {
-            if (SelectedTarget == AlignmentTarget.Comet)
-            {
-                if (IsStack) return new[] { AlignmentMode.Automatic, AlignmentMode.Guided, AlignmentMode.Manual };
-                return new[] { AlignmentMode.Automatic, AlignmentMode.Manual };
-            }
-            else // Stars
-            {
-                // Per le stelle abbiamo attualmente solo un metodo, ma la struttura è pronta per aggiungerne altri
-                return new[] { AlignmentMode.Stars };
-            }
-        }
-    }
+    
     public TaskCompletionSource ImageLoadedTcs { get; } = new();
 
     #endregion
@@ -196,7 +197,7 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
         _currentStackIndex = 0;
         IsStack = _totalStackCount > 1;
 
-        // Impostiamo il default
+        // Default
         SelectedTarget = AlignmentTarget.Comet;
         SelectedMode = AlignmentMode.Automatic;
         
@@ -212,13 +213,12 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
             for (int i = 0; i < _totalStackCount; i++)
             {
                 string fileName = System.IO.Path.GetFileName(_sourcePaths[i]);
-            
                 CoordinateEntries.Add(new CoordinateEntry
                 {
                     Index = i,
                     DisplayName = fileName,
                     Coordinate = null,
-                    ImageHeight = 0 // Sarà aggiornato al load
+                    ImageHeight = 0 
                 });
             }
 
@@ -243,7 +243,6 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
         }
     }
 
-    // --- METODO CRITICO PER LA MEMORIA ---
     private async Task LoadStackImageAtIndexAsync(int index)
     {
         if (index < 0 || index >= _totalStackCount) return;
@@ -252,14 +251,12 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
         _currentStackIndex = index;
         UpdateStackCounterText();
 
-        // 1. CATTURA PROFILO CORRENTE (Se esiste un'immagine attiva)
         if (ActiveImage != null)
         {
             _lastContrastProfile = ActiveImage.CaptureContrastProfile();
-            ActiveImage.UnloadData(); // Liberiamo memoria subito
+            ActiveImage.UnloadData(); 
         }
 
-        // 2. CARICAMENTO NUOVA IMMAGINE
         FitsRenderer? newRenderer = null;
         try
         {
@@ -279,27 +276,18 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
 
         if (newRenderer == null) return;
 
-        // 3. APPLICAZIONE PROFILO (O DEFAULT)
         if (_lastContrastProfile != null)
         {
-            // Applica le stesse impostazioni relative (Sigma) dell'immagine precedente
             newRenderer.ApplyContrastProfile(_lastContrastProfile);
         }
         else
         {
-            // Primo avvio: il renderer ha già fatto l'auto-stretch in InitializeAsync
-            // Resettiamo la vista solo la prima volta
             Viewport.ImageSize = newRenderer.ImageSize;
             Viewport.ResetView();
             OnPropertyChanged(nameof(ZoomStatusText));
         }
 
-        // 4. SWAP E AGGIORNAMENTO UI
         ActiveImage = newRenderer;
-        
-        // Aggiorniamo gli slider della UI per riflettere i valori del nuovo renderer
-        // Nota: Usiamo SetProperty o assegnazione diretta. 
-        // SetProperty controlla l'uguaglianza, evitando loop infiniti se i valori sono identici.
         BlackPoint = newRenderer.BlackPoint;
         WhitePoint = newRenderer.WhitePoint;
 
@@ -313,7 +301,7 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
     public void Dispose()
     {
         ActiveImage?.UnloadData();
-        ActiveImage = null; // Notifica SafeImage -> View legge null -> Nessun errore
+        ActiveImage = null; 
         RequestClose = null;
         GC.SuppressFinalize(this);
     }
@@ -330,87 +318,38 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
 
     #region Comandi
 
-    // ... (Zoom, Pan, ResetView invariati) ...
-    [RelayCommand] private void ZoomIn() 
-    {
-        Viewport.ZoomIn();
-        OnPropertyChanged(nameof(ZoomStatusText));
-    }
-
-    [RelayCommand] private void ZoomOut() 
-    {
-        Viewport.ZoomOut();
-        OnPropertyChanged(nameof(ZoomStatusText));
-    }
-    
-    [RelayCommand] private void ResetView() 
-    {
-        Viewport.ResetView();
-        OnPropertyChanged(nameof(ZoomStatusText));
-    }
+    // ... (Zoom, Pan, ResetView) ...
+    [RelayCommand] private void ZoomIn() { Viewport.ZoomIn(); OnPropertyChanged(nameof(ZoomStatusText)); }
+    [RelayCommand] private void ZoomOut() { Viewport.ZoomOut(); OnPropertyChanged(nameof(ZoomStatusText)); }
+    [RelayCommand] private void ResetView() { Viewport.ResetView(); OnPropertyChanged(nameof(ZoomStatusText)); }
     
     [RelayCommand(CanExecute = nameof(CanResetThresholds))]
     private async Task ResetThresholds() 
     {
         if (ActiveImage == null) return;
-
-        // 1. Calcolo nel renderer
         await ActiveImage.ResetThresholdsAsync();
-        
-        // 2. Aggiornamento UI
         BlackPoint = ActiveImage.BlackPoint;
         WhitePoint = ActiveImage.WhitePoint;
-        
-        // RIMOSSO: Calcolo manuale _lockedKBlack...
     }
     private bool CanResetThresholds() => ActiveImage != null;
     
     // --- Navigazione ---
-    
     private async Task NavigateToImage(int newIndex)
     {
-        if (newIndex < 0 || newIndex >= _totalStackCount || newIndex == _currentStackIndex)
-            return;
+        if (newIndex < 0 || newIndex >= _totalStackCount || newIndex == _currentStackIndex) return;
         TargetCoordinate = null; 
         await LoadStackImageAtIndexAsync(newIndex);
     }
 
-    private int? GetPreviousAccessibleIndex()
-    {
-        for (int i = _currentStackIndex - 1; i >= 0; i--)
-            if (IsIndexAccessible(i)) return i;
-        return null;
-    }
-
-    private int? GetNextAccessibleIndex()
-    {
-        for (int i = _currentStackIndex + 1; i < _totalStackCount; i++)
-            if (IsIndexAccessible(i)) return i;
-        return null;
-    }
-
+    private int? GetPreviousAccessibleIndex() { for (int i = _currentStackIndex - 1; i >= 0; i--) if (IsIndexAccessible(i)) return i; return null; }
+    private int? GetNextAccessibleIndex() { for (int i = _currentStackIndex + 1; i < _totalStackCount; i++) if (IsIndexAccessible(i)) return i; return null; }
     private bool CanShowPrevious() => IsStack && GetPreviousAccessibleIndex().HasValue;
     private bool CanShowNext() => IsStack && GetNextAccessibleIndex().HasValue;
 
-    [RelayCommand(CanExecute = nameof(CanShowPrevious))]
-    private async Task PreviousImage()
-    {
-        var prevIndex = GetPreviousAccessibleIndex();
-        if (prevIndex.HasValue) await NavigateToImage(prevIndex.Value);
-    }
-
-    [RelayCommand(CanExecute = nameof(CanShowNext))]
-    private async Task NextImage()
-    {
-        var nextIndex = GetNextAccessibleIndex();
-        if (nextIndex.HasValue) await NavigateToImage(nextIndex.Value);
-    }
-    
-    [RelayCommand(CanExecute = nameof(CanShowPrevious))] 
-    private async Task GoToFirstImage() => await NavigateToImage(0);
-
-    [RelayCommand(CanExecute = nameof(CanShowNext))]
-    private async Task GoToLastImage() => await NavigateToImage(_totalStackCount - 1);
+    [RelayCommand(CanExecute = nameof(CanShowPrevious))] private async Task PreviousImage() { var prev = GetPreviousAccessibleIndex(); if (prev.HasValue) await NavigateToImage(prev.Value); }
+    [RelayCommand(CanExecute = nameof(CanShowNext))] private async Task NextImage() { var next = GetNextAccessibleIndex(); if (next.HasValue) await NavigateToImage(next.Value); }
+    [RelayCommand(CanExecute = nameof(CanShowPrevious))] private async Task GoToFirstImage() => await NavigateToImage(0);
+    [RelayCommand(CanExecute = nameof(CanShowNext))] private async Task GoToLastImage() => await NavigateToImage(_totalStackCount - 1);
     
     // --- Allineamento ---
 
@@ -418,36 +357,26 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
     private async Task CalculateCenters()
     {
         CurrentState = AlignmentState.Calculating; 
-
         try
         {
             var currentCoords = CoordinateEntries.Select(e => e.Coordinate);
-            
-            // 1. CREIAMO IL GESTORE DEL PROGRESSO
-            // Questo blocco di codice viene eseguito automaticamente sul thread della UI
-            // ogni volta che il service chiama 'progress.Report(...)'
             var progressHandler = new Progress<(int Index, Point? Center)>(update =>
             {
-                // Aggiornamento in tempo reale del singolo elemento
                 if (update.Index >= 0 && update.Index < CoordinateEntries.Count)
-                {
                     CoordinateEntries[update.Index].Coordinate = update.Center;
-                }
             });
 
-            // 2. CHIAMATA AL SERVICE
-            // Passiamo 'progressHandler' come ultimo argomento
+            // Passiamo sia Target che Mode al Service
             var newCoords = await _alignmentService.CalculateCentersAsync(
+                SelectedTarget,
                 SelectedMode, 
                 CenteringMethod.LocalRegion,
                 _sourcePaths, 
                 currentCoords, 
                 SearchRadius,
-                progressHandler // <--- PASSAGGIO FONDAMENTALE
+                progressHandler 
             );
 
-            // 3. SINCRONIZZAZIONE FINALE (per sicurezza)
-            // Sovrascriviamo tutto alla fine per essere certi al 100% che la lista sia coerente
             int i = 0;
             foreach (var coord in newCoords)
             {
@@ -456,7 +385,6 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
             }
 
             CurrentState = AlignmentState.ResultsReady;
-            
             UpdateReticleVisibilityForCurrentState();
             ApplyAlignmentCommand.NotifyCanExecuteChanged();
         }
@@ -470,7 +398,7 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
     private bool CanCalculateCenters()
     {
         var currentCoords = CoordinateEntries.Select(e => e.Coordinate).ToList();
-        return _alignmentService.CanCalculate(SelectedMode, currentCoords, _totalStackCount);
+        return _alignmentService.CanCalculate(SelectedTarget, SelectedMode, currentCoords, _totalStackCount);
     }
 
     [RelayCommand(CanExecute = nameof(CanApplyAlignment))]
@@ -480,18 +408,10 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
         try
         {
             var centers = CoordinateEntries.Select(e => e.Coordinate).ToList();
-            string tempFolder = System.IO.Path.Combine(
-                System.IO.Path.GetTempPath(), 
-                "Komalab", 
-                "Aligned"
-            );
-            Debug.WriteLine($"[TEMP PATH CHECK] Sto salvando in: {tempFolder}");
-
-            // Passiamo i PATHS
+            string tempFolder = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "Komalab", "Aligned");
+            
             FinalProcessedPaths = await _alignmentService.ApplyCenteringAndSaveAsync(
-                _sourcePaths, 
-                centers, 
-                tempFolder);
+                _sourcePaths, centers, tempFolder);
         
             DialogResult = true; 
             RequestClose?.Invoke();
@@ -510,108 +430,46 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
 
     #endregion
     
-    #region Metodi Pubblici
-
-    // ... (Public methods for Code-Behind) ...
-    public void ApplyZoomAtPoint(double scaleFactor, Point viewportZoomPoint)
-    {
-        Viewport.ApplyZoomAtPoint(scaleFactor, viewportZoomPoint);
-        OnPropertyChanged(nameof(ZoomStatusText));
-    }
-
+    #region Metodi Pubblici (Invariati)
+    public void ApplyZoomAtPoint(double scaleFactor, Point viewportZoomPoint) { Viewport.ApplyZoomAtPoint(scaleFactor, viewportZoomPoint); OnPropertyChanged(nameof(ZoomStatusText)); }
     public void ApplyPan(double deltaX, double deltaY) => Viewport.ApplyPan(deltaX, deltaY);
-
-    public void SetTargetCoordinate(Point imageCoordinate)
-    {
+    public void SetTargetCoordinate(Point imageCoordinate) 
+    { 
         if (CurrentState == AlignmentState.Processing) return;
-
-        if (CurrentState == AlignmentState.Initial) 
-        {
-            if (SelectedMode == AlignmentMode.Automatic) return; 
-            if (IsStack && SelectedMode == AlignmentMode.Guided)
-            {
-                if (_currentStackIndex != 0 && _currentStackIndex != (_totalStackCount - 1)) return;
-            }
-        }
-    
+        if (CurrentState == AlignmentState.Initial) { if (SelectedMode == AlignmentMode.Automatic) return; if (IsStack && SelectedMode == AlignmentMode.Guided) { if (_currentStackIndex != 0 && _currentStackIndex != (_totalStackCount - 1)) return; } }
         TargetCoordinate = imageCoordinate; 
-        if (_currentStackIndex >= 0 && _currentStackIndex < CoordinateEntries.Count)
-        {
-            CoordinateEntries[_currentStackIndex].Coordinate = imageCoordinate;
-        }
-    
-        ApplyAlignmentCommand.NotifyCanExecuteChanged();
-        CalculateCentersCommand.NotifyCanExecuteChanged();
+        if (_currentStackIndex >= 0 && _currentStackIndex < CoordinateEntries.Count) CoordinateEntries[_currentStackIndex].Coordinate = imageCoordinate;
+        ApplyAlignmentCommand.NotifyCanExecuteChanged(); CalculateCentersCommand.NotifyCanExecuteChanged(); 
     }
- 
-    public void ClearTarget()
-    {
-        if (CurrentState != AlignmentState.Initial)
-        {
-            ResetAlignmentState();
-            return;
-        }
-    
+    public void ClearTarget() 
+    { 
+        if (CurrentState != AlignmentState.Initial) { ResetAlignmentState(); return; }
         if (SelectedMode == AlignmentMode.Automatic) return;
-        if (IsStack && SelectedMode == AlignmentMode.Guided)
-        {
-            if (_currentStackIndex != 0 && _currentStackIndex != (_totalStackCount - 1)) return;
-        }
-    
+        if (IsStack && SelectedMode == AlignmentMode.Guided) { if (_currentStackIndex != 0 && _currentStackIndex != (_totalStackCount - 1)) return; }
         TargetCoordinate = null; 
-        if (_currentStackIndex >= 0 && _currentStackIndex < CoordinateEntries.Count)
-        {
-            CoordinateEntries[_currentStackIndex].Coordinate = null;
-        }
-    
-        ApplyAlignmentCommand.NotifyCanExecuteChanged();
-        CalculateCentersCommand.NotifyCanExecuteChanged();
+        if (_currentStackIndex >= 0 && _currentStackIndex < CoordinateEntries.Count) CoordinateEntries[_currentStackIndex].Coordinate = null;
+        ApplyAlignmentCommand.NotifyCanExecuteChanged(); CalculateCentersCommand.NotifyCanExecuteChanged(); 
     }
-    
     #endregion
     
     #region Helpers
     
-    partial void OnBlackPointChanged(double value)
-    {
-        if (ActiveImage != null)
-        {
-            ActiveImage.BlackPoint = value;
-            // RIMOSSO: UpdateLockedSigmaFactors()
-        }
-    }
-
-    partial void OnWhitePointChanged(double value)
-    {
-        if (ActiveImage != null)
-        {
-            ActiveImage.WhitePoint = value;
-            // RIMOSSO: UpdateLockedSigmaFactors()
-        }
-    }
-    
+    partial void OnBlackPointChanged(double value) { if (ActiveImage != null) ActiveImage.BlackPoint = value; }
+    partial void OnWhitePointChanged(double value) { if (ActiveImage != null) ActiveImage.WhitePoint = value; }
     partial void OnSearchRadiusChanged(int value) => Viewport.SearchRadius = value;
     partial void OnTargetCoordinateChanged(Point? value) => Viewport.TargetCoordinate = value;
     
+    // --- GESTIONE CAMBIO TARGET ---
     partial void OnSelectedTargetChanged(AlignmentTarget value)
     {
-        // 1. Prima impostiamo la modalità corretta per il nuovo target
-        if (value == AlignmentTarget.Comet) 
-        {
-            SelectedMode = AlignmentMode.Automatic;
-        }
-        else 
-        {
-            SelectedMode = AlignmentMode.Stars;
-        }
+        // Forziamo sempre Automatico al cambio target.
+        // Se siamo su Stelle -> è l'unica opzione (FFT).
+        // Se siamo su Cometa -> è il default sensato.
+        SelectedMode = AlignmentMode.Automatic;
 
-        // 2. Poi notifichiamo che la lista delle opzioni è cambiata (La ComboBox si svuota e si riempie)
+        // Notifiche cruciali per aggiornare la UI
         OnPropertyChanged(nameof(AvailableAlignmentModes));
-
-        // 3. CRITICO: Notifichiamo MANUALMENTE che SelectedMode è "cambiato" (anche se il valore è lo stesso di riga 1).
-        // Questo costringe la ComboBox a guardare il valore di SelectedMode 
-        // e a cercarlo dentro la NUOVA lista appena caricata.
-        OnPropertyChanged(nameof(SelectedMode));
+        OnPropertyChanged(nameof(SelectedMode)); 
     }
     
     partial void OnSelectedModeChanged(AlignmentMode value)
@@ -622,56 +480,23 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
         UpdateStackCounterText();
     }
     
-    partial void OnCurrentStateChanged(AlignmentState value)
-    {
-        RefreshNavigationCommands();
-        UpdateStackCounterText();
-    }
+    partial void OnCurrentStateChanged(AlignmentState value) { RefreshNavigationCommands(); UpdateStackCounterText(); }
     
-    private void ResetAlignmentState()
-    {
-        CurrentState = AlignmentState.Initial;
-        foreach (var entry in CoordinateEntries) entry.Coordinate = null;
-        TargetCoordinate = null;
-        CalculateCentersCommand.NotifyCanExecuteChanged();
-        ApplyAlignmentCommand.NotifyCanExecuteChanged();
-    }
-    
-    private void UpdateReticleVisibilityForCurrentState()
-    {
-        if (_currentStackIndex < 0 || _currentStackIndex >= CoordinateEntries.Count)
-        {
-            TargetCoordinate = null;
-            return;
-        }
-        var currentEntry = CoordinateEntries[_currentStackIndex];
-        TargetCoordinate = currentEntry.Coordinate;
-    }
-    
-    private void UpdateSearchRadiusRange()
-    {
-        if (ActiveImage == null || ActiveImage.ImageSize == default(Size))
-        {
-            MinSearchRadius = 0; MaxSearchRadius = 100;
-        }
-        else
-        {
-            double minDimension = Math.Min(ActiveImage.ImageSize.Width, ActiveImage.ImageSize.Height);
-            MinSearchRadius = 0; 
-            MaxSearchRadius = (int)Math.Floor(minDimension / 2.0);
-        }
-        SearchRadius = Math.Clamp(SearchRadius, MinSearchRadius, MaxSearchRadius);
-    }
+    private void ResetAlignmentState() { CurrentState = AlignmentState.Initial; foreach (var entry in CoordinateEntries) entry.Coordinate = null; TargetCoordinate = null; CalculateCentersCommand.NotifyCanExecuteChanged(); ApplyAlignmentCommand.NotifyCanExecuteChanged(); }
+    private void UpdateReticleVisibilityForCurrentState() { if (_currentStackIndex < 0 || _currentStackIndex >= CoordinateEntries.Count) { TargetCoordinate = null; return; } var currentEntry = CoordinateEntries[_currentStackIndex]; TargetCoordinate = currentEntry.Coordinate; }
+    private void UpdateSearchRadiusRange() { if (ActiveImage == null || ActiveImage.ImageSize == default(Size)) { MinSearchRadius = 0; MaxSearchRadius = 100; } else { double minDimension = Math.Min(ActiveImage.ImageSize.Width, ActiveImage.ImageSize.Height); MinSearchRadius = 0; MaxSearchRadius = (int)Math.Floor(minDimension / 2.0); } SearchRadius = Math.Clamp(SearchRadius, MinSearchRadius, MaxSearchRadius); }
     
     private bool IsIndexAccessible(int index)
     {
         if (CurrentState != AlignmentState.Initial) return true;
         if (index < 0 || index >= _totalStackCount) return false;
 
+        // Se siamo su Stelle, blocchiamo la navigazione (trattiamo come Automatico)
+        if (SelectedTarget == AlignmentTarget.Stars) return index == 0;
+
         return SelectedMode switch
         {
             AlignmentMode.Automatic => index == 0,
-            AlignmentMode.Stars => index == 0, // <--- AGGIUNTO: Blocca su img 0 in fase iniziale
             AlignmentMode.Guided => index == 0 || index == _totalStackCount - 1,
             _ => true
         };
@@ -685,9 +510,10 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
             return;
         }
         
-        if (SelectedMode == AlignmentMode.Automatic || SelectedMode == AlignmentMode.Stars)
+        // Per Stelle e Cometa Automatica
+        if (SelectedMode == AlignmentMode.Automatic || SelectedTarget == AlignmentTarget.Stars)
         {
-            StackCounterText = "1 / 1"; // Mostriamo che ne vedi solo 1
+            StackCounterText = "1 / 1"; 
             return;
         }
         

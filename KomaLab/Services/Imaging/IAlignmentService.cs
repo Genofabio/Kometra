@@ -9,17 +9,15 @@ namespace KomaLab.Services.Imaging;
 public interface IAlignmentService
 {
     Task<IEnumerable<Point?>> CalculateCentersAsync(
-        AlignmentMode mode, 
-        CenteringMethod method, 
-        List<string> sourcePaths, 
-        IEnumerable<Point?> currentCoordinates, 
+        AlignmentTarget target, 
+        AlignmentMode mode,
+        CenteringMethod method,
+        List<string> sourcePaths,
+        IEnumerable<Point?> currentCoordinates,
         int searchRadius,
         IProgress<(int Index, Point? Center)>? progress = null);
 
-    bool CanCalculate(
-        AlignmentMode mode, 
-        IEnumerable<Point?> currentCoordinates, 
-        int totalCount);
+    bool CanCalculate(AlignmentTarget target, AlignmentMode mode, IEnumerable<Point?> coords, int totalCount);
     
     Task<List<string>> ApplyCenteringAndSaveAsync(
         List<string> sourcePaths, 
