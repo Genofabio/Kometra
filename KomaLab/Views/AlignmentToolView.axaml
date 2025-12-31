@@ -6,12 +6,13 @@
         xmlns:avalonia="clr-namespace:Material.Icons.Avalonia;assembly=Material.Icons.Avalonia"
         xmlns:converters="clr-namespace:KomaLab.Converters"
         xmlns:helpers="clr-namespace:KomaLab.ViewModels.Helpers"
-        mc:Ignorable="d" d:DesignWidth="800" d:DesignHeight="500"
+        xmlns:models="clr-namespace:KomaLab.Models"
+        mc:Ignorable="d" d:DesignWidth="800" d:DesignHeight="600"
         x:Class="KomaLab.Views.AlignmentToolView"
         x:DataType="vm:AlignmentToolViewModel"
         Title="Allineamento"
-        Width="800" Height="500"
-        MinHeight="400" MinWidth="710"
+        Width="800" Height="600"
+        MinHeight="500" MinWidth="710"
         WindowStartupLocation="CenterScreen"
         Loaded="OnWindowLoaded"
         Focusable="True">
@@ -19,6 +20,7 @@
     <Window.Resources>
         <converters:EqualityConverter x:Key="EqualityConverter" />
         <converters:AlignmentModeNameConverter x:Key="AlignmentModeNameConverter" />
+        <converters:EnumToBoolConverter x:Key="EnumToBool" />
         
         <DataTemplate x:Key="CoordinateItemTemplate"
                       x:DataType="helpers:CoordinateEntry">
@@ -49,74 +51,99 @@
             <Grid RowDefinitions="Auto, *, Auto">
                 
                 <StackPanel Grid.Row="0" Spacing="12">
-                    <TextBlock Text="Metodologia di Allineamento" 
+                    
+                    <TextBlock Text="Oggetto dell'allineamento" 
                                FontSize="16" FontWeight="Bold" />
                     
-                    <ComboBox ItemsSource="{Binding AvailableAlignmentModes}"
-                              SelectedItem="{Binding SelectedMode}"
-                              HorizontalAlignment="Stretch">
-        
-                        <ComboBox.ItemTemplate>
-                            <DataTemplate>
-                                <TextBlock Text="{Binding ., Converter={StaticResource AlignmentModeNameConverter}}" />
-                            </DataTemplate>
-                        </ComboBox.ItemTemplate>
-        
-                    </ComboBox>
-                    
-                    <TextBlock TextWrapping="Wrap" Opacity="0.7" MinHeight="40">
-                        <TextBlock.IsVisible>
-                            <Binding Path="SelectedMode" Converter="{StaticResource EqualityConverter}" ConverterParameter="Automatic" />
-                        </TextBlock.IsVisible>
-                        <Run>Rilevamento automatico del nucleo. Premi 'Calcola Centri' per iniziare.</Run>
-                    </TextBlock>
-                    <TextBlock TextWrapping="Wrap" Opacity="0.7" MinHeight="40">
-                        <TextBlock.IsVisible>
-                            <Binding Path="SelectedMode" Converter="{StaticResource EqualityConverter}" ConverterParameter="Guided" />
-                        </TextBlock.IsVisible>
-                        <Run>Indica il nucleo sulla prima e ultima immagine, poi premi 'Calcola Centri'.</Run>
-                    </TextBlock>
-                    <TextBlock TextWrapping="Wrap" Opacity="0.7" MinHeight="40">
-                        <TextBlock.IsVisible>
-                            <Binding Path="SelectedMode" Converter="{StaticResource EqualityConverter}" ConverterParameter="Manual" />
-                        </TextBlock.IsVisible>
-                        <Run>Ispeziona e imposta manualmente il centro per ogni immagine.</Run>
-                    </TextBlock>
-                    
-                    <Separator Margin="0,-2 ,0,5"/>
-                    
-                    <StackPanel Spacing="5" IsVisible="{Binding IsSearchRadiusControlsVisible}">
-                         <TextBlock Text="Parametri di Ricerca"
-                                    FontSize="14" FontWeight="Bold" />
+                    <Grid ColumnDefinitions="*,*">
+                        <RadioButton Grid.Column="0" 
+                                     GroupName="TargetGroup"
+                                     Content="Cometa"
+                                     Classes="segmented"
+                                     CornerRadius="4,0,0,4"
+                                     BorderThickness="1,1,0,1"
+                                     HorizontalAlignment="Stretch"
+                                     IsChecked="{Binding SelectedTarget, Converter={StaticResource EnumToBool}, ConverterParameter={x:Static models:AlignmentTarget.Comet}}" />
                         
-                        <TextBlock TextWrapping="Wrap" Opacity="0.7">
-                            <Run>Definisce l'area (metà-lato del box) in cui cercare il centro.</Run>
-                        </TextBlock>
-
-                        <StackPanel Spacing="5" Margin="0,5,0,0">
-                            <TextBlock Text="Raggio di Ricerca (px):"/>
-                            <Grid ColumnDefinitions="Auto, *" ColumnSpacing="10">
-                                
-                                <TextBox Grid.Column="0"
-                                         Name="SearchRadiusTextBox"
-                                         Text="{Binding SearchRadius, Mode=OneWay}"
-                                         MinWidth="45"
-                                         VerticalAlignment="Center"
-                                         HorizontalContentAlignment="Right"
-                                         GotFocus="OnSearchRadiusTextBoxGotFocus"
-                                         LostFocus="OnSearchRadiusTextBoxLostFocus"/>
-                                
-                                <Slider Grid.Column="1"
-                                        Minimum="{Binding MinSearchRadius}"
-                                        Maximum="{Binding MaxSearchRadius}"
-                                        Value="{Binding SearchRadius}"
-                                        TickFrequency="1"
-                                        IsSnapToTickEnabled="True"
-                                        VerticalAlignment="Center"/>
-                            </Grid>
-                        </StackPanel>
-                    </StackPanel>
+                        <RadioButton Grid.Column="1" 
+                                     GroupName="TargetGroup"
+                                     Content="Stelle"
+                                     Classes="segmented"
+                                     CornerRadius="0,4,4,0"
+                                     BorderThickness="1"
+                                     HorizontalAlignment="Stretch"
+                                     IsChecked="{Binding SelectedTarget, Converter={StaticResource EnumToBool}, ConverterParameter={x:Static models:AlignmentTarget.Stars}}" />
+                    </Grid>
                     
+                    <Separator Margin="0,7,0,5"/>
+
+                    <StackPanel Spacing="12" IsVisible="{Binding SelectedTarget, Converter={StaticResource EnumToBool}, ConverterParameter={x:Static models:AlignmentTarget.Comet}}">
+
+                        <TextBlock Text="Metodologia" 
+                                   FontSize="16" FontWeight="Bold" Margin="0,0,0,0" />
+                        
+                        <ComboBox ItemsSource="{Binding AvailableAlignmentModes}"
+                                  SelectedItem="{Binding SelectedMode}"
+                                  HorizontalAlignment="Stretch">
+            
+                            <ComboBox.ItemTemplate>
+                                <DataTemplate>
+                                    <TextBlock Text="{Binding ., Converter={StaticResource AlignmentModeNameConverter}}" />
+                                </DataTemplate>
+                            </ComboBox.ItemTemplate>
+            
+                        </ComboBox>
+                        
+                        <Panel MinHeight="40">
+                            <TextBlock TextWrapping="Wrap" Opacity="0.7" 
+                                       IsVisible="{Binding SelectedMode, Converter={StaticResource EqualityConverter}, ConverterParameter=Automatic}">
+                                <Run>Rilevamento automatico del nucleo. </Run>
+                            </TextBlock>
+                            <TextBlock TextWrapping="Wrap" Opacity="0.7" 
+                                       IsVisible="{Binding SelectedMode, Converter={StaticResource EqualityConverter}, ConverterParameter=Guided}">
+                                <Run>Indica il nucleo sulla prima e ultima immagine.</Run>
+                            </TextBlock>
+                            <TextBlock TextWrapping="Wrap" Opacity="0.7" 
+                                       IsVisible="{Binding SelectedMode, Converter={StaticResource EqualityConverter}, ConverterParameter=Manual}">
+                                <Run>Ispeziona e imposta manualmente il centro per ogni immagine.</Run>
+                            </TextBlock>
+                        </Panel>
+                        
+                        <Separator Margin="0,-2 ,0,5"/>
+                        
+                        <StackPanel Spacing="5" IsVisible="{Binding IsSearchRadiusControlsVisible}">
+                             <TextBlock Text="Parametri di Ricerca"
+                                        FontSize="14" FontWeight="Bold" />
+                            
+                            <TextBlock TextWrapping="Wrap" Opacity="0.7">
+                                <Run>Definisce l'area (metà-lato del box) in cui cercare il centro.</Run>
+                            </TextBlock>
+
+                            <StackPanel Spacing="5" Margin="0,5,0,0">
+                                <TextBlock Text="Raggio di Ricerca (px):"/>
+                                <Grid ColumnDefinitions="Auto, *" ColumnSpacing="10">
+                                    
+                                    <TextBox Grid.Column="0"
+                                             Name="SearchRadiusTextBox"
+                                             Text="{Binding SearchRadius, Mode=OneWay}"
+                                             MinWidth="45"
+                                             VerticalAlignment="Center"
+                                             HorizontalContentAlignment="Right"
+                                             GotFocus="OnSearchRadiusTextBoxGotFocus"
+                                             LostFocus="OnSearchRadiusTextBoxLostFocus"/>
+                                    
+                                    <Slider Grid.Column="1"
+                                            Minimum="{Binding MinSearchRadius}"
+                                            Maximum="{Binding MaxSearchRadius}"
+                                            Value="{Binding SearchRadius}"
+                                            TickFrequency="1"
+                                            IsSnapToTickEnabled="True"
+                                            VerticalAlignment="Center"/>
+                                </Grid>
+                            </StackPanel>
+                        </StackPanel>
+                    
+                    </StackPanel>
                     <StackPanel Spacing="5" 
                                 IsVisible="{Binding IsCoordinateListVisible}">
                         

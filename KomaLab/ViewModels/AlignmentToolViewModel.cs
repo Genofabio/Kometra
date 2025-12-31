@@ -1,6 +1,5 @@
 ﻿using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
-using KomaLab.Services;
 using System.Diagnostics;
 using System.Threading.Tasks;
 using System;
@@ -151,7 +150,29 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
     }
     
     public bool IsCoordinateListVisible => CurrentState == AlignmentState.ResultsReady || CurrentState == AlignmentState.Processing;
-    public IEnumerable<AlignmentMode> AvailableAlignmentModes { get; private set; }
+    public IEnumerable<AlignmentTarget> AvailableTargets => Enum.GetValues<AlignmentTarget>();
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(AvailableAlignmentModes))]
+    private AlignmentTarget _selectedTarget = AlignmentTarget.Comet;
+
+    // La lista dei modi ora è dinamica in base al Target
+    public IEnumerable<AlignmentMode> AvailableAlignmentModes 
+    {
+        get
+        {
+            if (SelectedTarget == AlignmentTarget.Comet)
+            {
+                if (IsStack) return new[] { AlignmentMode.Automatic, AlignmentMode.Guided, AlignmentMode.Manual };
+                return new[] { AlignmentMode.Automatic, AlignmentMode.Manual };
+            }
+            else // Stars
+            {
+                // Per le stelle abbiamo attualmente solo un metodo, ma la struttura è pronta per aggiungerne altri
+                return new[] { AlignmentMode.Stars };
+            }
+        }
+    }
     public TaskCompletionSource ImageLoadedTcs { get; } = new();
 
     #endregion
@@ -175,19 +196,9 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
         _currentStackIndex = 0;
         IsStack = _totalStackCount > 1;
 
-        if (IsStack)
-        {
-            AvailableAlignmentModes = new[] { 
-                AlignmentMode.Automatic, 
-                AlignmentMode.Guided, 
-                AlignmentMode.Manual,
-                AlignmentMode.Stars
-            };
-        }
-        else
-        {
-            AvailableAlignmentModes = new[] { AlignmentMode.Automatic, AlignmentMode.Manual };
-        }
+        // Impostiamo il default
+        SelectedTarget = AlignmentTarget.Comet;
+        SelectedMode = AlignmentMode.Automatic;
         
         Viewport.SearchRadius = this.SearchRadius;
         _ = InitializeAsync();
@@ -560,8 +571,7 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
     #endregion
     
     #region Helpers
-
-    // ... (Partial methods e helpers Sigma Locking) ...
+    
     partial void OnBlackPointChanged(double value)
     {
         if (ActiveImage != null)
@@ -582,6 +592,27 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
     
     partial void OnSearchRadiusChanged(int value) => Viewport.SearchRadius = value;
     partial void OnTargetCoordinateChanged(Point? value) => Viewport.TargetCoordinate = value;
+    
+    partial void OnSelectedTargetChanged(AlignmentTarget value)
+    {
+        // 1. Prima impostiamo la modalità corretta per il nuovo target
+        if (value == AlignmentTarget.Comet) 
+        {
+            SelectedMode = AlignmentMode.Automatic;
+        }
+        else 
+        {
+            SelectedMode = AlignmentMode.Stars;
+        }
+
+        // 2. Poi notifichiamo che la lista delle opzioni è cambiata (La ComboBox si svuota e si riempie)
+        OnPropertyChanged(nameof(AvailableAlignmentModes));
+
+        // 3. CRITICO: Notifichiamo MANUALMENTE che SelectedMode è "cambiato" (anche se il valore è lo stesso di riga 1).
+        // Questo costringe la ComboBox a guardare il valore di SelectedMode 
+        // e a cercarlo dentro la NUOVA lista appena caricata.
+        OnPropertyChanged(nameof(SelectedMode));
+    }
     
     partial void OnSelectedModeChanged(AlignmentMode value)
     {

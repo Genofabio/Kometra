@@ -53,6 +53,9 @@ public enum AlignmentMode
     /// </summary>
     Manual,
     
+    /// <summary>
+    /// Allineamento globale basato sul riconoscimento del campo stellare (FFT/Pattern Matching).
+    /// </summary>
     Stars
 }
 
@@ -85,4 +88,21 @@ public enum AlignmentState
     /// Visibile: Barra di caricamento "Allineamento in corso...".
     /// </summary>
     Processing   
+}
+
+/// <summary>
+/// Definisce l'oggetto principale su cui basare l'allineamento.
+/// Determina quali modalità (AlignmentMode) sono disponibili.
+/// </summary>
+public enum AlignmentTarget
+{
+    /// <summary>
+    /// Allineamento sul nucleo della cometa (movimento non siderale).
+    /// </summary>
+    Comet,
+    
+    /// <summary>
+    /// Allineamento sulle stelle di fondo (movimento siderale).
+    /// </summary>
+    Stars
 }
