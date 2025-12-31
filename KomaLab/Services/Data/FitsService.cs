@@ -103,48 +103,43 @@ public class FitsService : IFitsService
             if (sourceFiles.Count == 0) return;
 
             VideoWriter? writer = null;
-            Mat? frame8Bit = null; // Buffer riutilizzabile per il frame finale
+            Mat? frame8Bit = null; 
+            
+            // Buffer per la maschera (riutilizzabile)
+            Mat? mask = null;
 
             try
             {
-                // 1. Setup Video Writer (usando dimensioni del primo file)
+                // 1. Setup
                 var firstData = ReadRawFitsData(sourceFiles[0]);
                 if (firstData == null) throw new Exception("Impossibile leggere il primo file.");
 
                 var size = new Size(firstData.Value.Width, firstData.Value.Height);
-                
-                // Codec MJPG = .avi (Alta compatibilità, qualità buona, file medio-grandi)
-                // Se vuoi MP4 compresso, usa FourCC('H','2','6','4') ma richiede openh264.dll o ffmpeg
                 int fourcc = VideoWriter.FourCC('M', 'J', 'P', 'G');
                 
-                writer = new VideoWriter(outputPath, fourcc, fps, size, isColor: false); // isColor=false per B/N
+                writer = new VideoWriter(outputPath, fourcc, fps, size, isColor: false);
 
-                if (!writer.IsOpened())
-                    throw new Exception("Impossibile inizializzare il VideoWriter.");
+                if (!writer.IsOpened()) throw new Exception("Impossibile inizializzare VideoWriter.");
 
-                // Alloca buffer per la conversione finale (Gray8)
                 frame8Bit = new Mat(size.Height, size.Width, MatType.CV_8UC1);
+                mask = new Mat(size.Height, size.Width, MatType.CV_8UC1);
 
-                // 2. Loop di elaborazione frame
+                // 2. Loop
                 foreach (string path in sourceFiles)
                 {
                     var dataTuple = ReadRawFitsData(path);
                     if (dataTuple == null) continue;
-
                     var (rawData, _, w, h) = dataTuple.Value;
-
-                    // Validazione dimensioni (devono essere tutte uguali per il video)
                     if (w != size.Width || h != size.Height) continue;
 
-                    // 2a. Conversione Raw Array -> Matrice OpenCV Scientifica (Double/Float/Short)
+                    // 2a. Ottieni la matrice (RawArrayToMat ora restituisce 0.0 al posto dei NaN)
                     using Mat scientificMat = RawArrayToMat(rawData, w, h);
                     if (scientificMat.Empty()) continue;
 
-                    // 2b. Flip Y (FITS -> Video Convention)
-                    // FITS è origine in basso-sx, Video in alto-sx.
+                    // 2b. Flip Y
                     Cv2.Flip(scientificMat, scientificMat, FlipMode.X);
 
-                    // 2c. Calcolo Soglie (Black/White Point)
+                    // 2c. Calcolo Soglie
                     double black = 0, white = 1;
 
                     if (profile.IsAbsolute)
@@ -154,17 +149,32 @@ public class FitsService : IFitsService
                     }
                     else
                     {
-                        // Calcolo Statistiche (Sigma Clipping dinamico per ogni frame)
-                        Cv2.MeanStdDev(scientificMat, out var meanScalar, out var stdDevScalar);
-                        double mean = meanScalar.Val0;
-                        double sigma = stdDevScalar.Val0;
+                        // --- CORREZIONE QUI ---
+                        // Creiamo una maschera che seleziona solo i pixel DIVERSI da 0.0
+                        // Assumiamo che 0.0 sia il valore di background/NaN che non vogliamo contare.
+                        Cv2.Compare(scientificMat, 0.0, mask, CmpType.NE);
 
-                        black = mean + (profile.KBlack * sigma);
-                        white = mean + (profile.KWhite * sigma);
+                        // Se l'immagine è tutta nera/NaN, evitiamo crash
+                        if (Cv2.CountNonZero(mask) == 0)
+                        {
+                             // Fallback se non ci sono dati validi
+                             black = 0; white = 1;
+                        }
+                        else
+                        {
+                            // Passiamo la maschera a MeanStdDev!
+                            // Ora calcola la media SOLO sui pixel validi.
+                            Cv2.MeanStdDev(scientificMat, out var meanScalar, out var stdDevScalar, mask);
+                            
+                            double mean = meanScalar.Val0;
+                            double sigma = stdDevScalar.Val0;
+
+                            black = mean + (profile.KBlack * sigma);
+                            white = mean + (profile.KWhite * sigma);
+                        }
                     }
 
-                    // 2d. Normalizzazione (Auto-Stretch) e scrittura nel buffer 8-bit
-                    // Formula: dst = (src * alpha) + beta
+                    // 2d. Normalizzazione
                     double range = white - black;
                     double alpha = (Math.Abs(range) < 1e-9) ? 0 : 255.0 / range;
                     double beta = (Math.Abs(range) < 1e-9) 
@@ -173,16 +183,14 @@ public class FitsService : IFitsService
 
                     scientificMat.ConvertTo(frame8Bit, MatType.CV_8UC1, alpha, beta);
 
-                    // 2e. Scrittura Frame
                     writer.Write(frame8Bit);
-                    
-                    // Il 'using scientificMat' libera la memoria raw di questo frame subito
                 }
             }
             finally
             {
                 writer?.Dispose();
                 frame8Bit?.Dispose();
+                mask?.Dispose();
             }
         });
     }
@@ -192,90 +200,77 @@ public class FitsService : IFitsService
     /// È molto più veloce di SetArray ed evita errori di ambiguità sui tipi.
     /// </summary>
     private Mat RawArrayToMat(Array rawData, int width, int height)
+{
+    // Caso 1: Array 1D
+    if (rawData.Rank == 1)
     {
-        // Caso 1: Array 1D (Appiattito)
-        if (rawData.Rank == 1)
+        if (rawData is short[] sData)
         {
-            // 1. Short (16-bit signed)
-            if (rawData is short[] sData)
-            {
-                var mat = new Mat(height, width, MatType.CV_16SC1);
-                Marshal.Copy(sData, 0, mat.Data, sData.Length);
-                return mat;
-            }
-            // 2. Float (32-bit float)
-            if (rawData is float[] fData)
-            {
-                var mat = new Mat(height, width, MatType.CV_32FC1);
-                Marshal.Copy(fData, 0, mat.Data, fData.Length);
-                return mat;
-            }
-            // 3. Double (64-bit float)
-            if (rawData is double[] dData)
-            {
-                var mat = new Mat(height, width, MatType.CV_64FC1);
-                Marshal.Copy(dData, 0, mat.Data, dData.Length);
-                return mat;
-            }
-            // 4. Int (32-bit signed)
-            if (rawData is int[] iData)
-            {
-                var mat = new Mat(height, width, MatType.CV_32SC1);
-                Marshal.Copy(iData, 0, mat.Data, iData.Length);
-                return mat;
-            }
-            // 5. Byte (8-bit unsigned)
-            if (rawData is byte[] bData)
-            {
-                var mat = new Mat(height, width, MatType.CV_8UC1);
-                Marshal.Copy(bData, 0, mat.Data, bData.Length);
-                return mat;
-            }
+            var mat = new Mat(height, width, MatType.CV_16SC1);
+            Marshal.Copy(sData, 0, mat.Data, sData.Length);
+            return mat;
         }
-        
-        // Caso 2: Jagged Array (short[][]) - Tipico di CSharpFITS
-        if (rawData is IEnumerable enumerable)
+        if (rawData is float[] fData)
         {
-            Mat? mat = null;
-            int row = 0;
-
-            foreach (var item in enumerable)
-            {
-                if (item is Array rowArray)
-                {
-                    // Inizializzazione Lazy al primo giro
-                    if (mat == null)
-                    {
-                        MatType type = MatType.CV_64FC1; // Default
-                        if (rowArray is short[]) type = MatType.CV_16SC1;
-                        else if (rowArray is float[]) type = MatType.CV_32FC1;
-                        else if (rowArray is double[]) type = MatType.CV_64FC1;
-                        else if (rowArray is int[]) type = MatType.CV_32SC1;
-                        else if (rowArray is byte[]) type = MatType.CV_8UC1;
-
-                        mat = new Mat(height, width, type);
-                    }
-
-                    if (row < height)
-                    {
-                        // Ottieniamo il puntatore all'inizio della riga corrente nella Matrice OpenCV
-                        IntPtr rowPtr = mat.Ptr(row);
-
-                        // Copiamo la riga C# direttamente in quella posizione di memoria
-                        if (rowArray is short[] s) Marshal.Copy(s, 0, rowPtr, s.Length);
-                        else if (rowArray is float[] f) Marshal.Copy(f, 0, rowPtr, f.Length);
-                        else if (rowArray is double[] d) Marshal.Copy(d, 0, rowPtr, d.Length);
-                        else if (rowArray is int[] i) Marshal.Copy(i, 0, rowPtr, i.Length);
-                        else if (rowArray is byte[] b) Marshal.Copy(b, 0, rowPtr, b.Length);
-                    }
-                    row++;
-                }
-            }
-            return mat ?? new Mat();
+            var mat = new Mat(height, width, MatType.CV_32FC1);
+            Marshal.Copy(fData, 0, mat.Data, fData.Length);
+            return mat;
         }
-
-        return new Mat();
+        if (rawData is double[] dData)
+        {
+            var mat = new Mat(height, width, MatType.CV_64FC1);
+            Marshal.Copy(dData, 0, mat.Data, dData.Length);
+            return mat;
+        }
+        if (rawData is int[] iData)
+        {
+            var mat = new Mat(height, width, MatType.CV_32SC1);
+            Marshal.Copy(iData, 0, mat.Data, iData.Length);
+            return mat;
+        }
+        if (rawData is byte[] bData)
+        {
+            var mat = new Mat(height, width, MatType.CV_8UC1);
+            Marshal.Copy(bData, 0, mat.Data, bData.Length);
+            return mat;
+        }
     }
+    
+    // Caso 2: Jagged Array
+    if (rawData is IEnumerable enumerable)
+    {
+        Mat? mat = null;
+        int row = 0;
+        foreach (var item in enumerable)
+        {
+            if (item is Array rowArray)
+            {
+                if (mat == null)
+                {
+                    MatType type = MatType.CV_64FC1; 
+                    if (rowArray is short[]) type = MatType.CV_16SC1;
+                    else if (rowArray is float[]) type = MatType.CV_32FC1;
+                    else if (rowArray is double[]) type = MatType.CV_64FC1;
+                    else if (rowArray is int[]) type = MatType.CV_32SC1;
+                    else if (rowArray is byte[]) type = MatType.CV_8UC1;
+                    mat = new Mat(height, width, type);
+                }
+                if (row < height)
+                {
+                    IntPtr rowPtr = mat.Ptr(row);
+                    if (rowArray is short[] s) Marshal.Copy(s, 0, rowPtr, s.Length);
+                    else if (rowArray is float[] f) Marshal.Copy(f, 0, rowPtr, f.Length);
+                    else if (rowArray is double[] d) Marshal.Copy(d, 0, rowPtr, d.Length);
+                    else if (rowArray is int[] i) Marshal.Copy(i, 0, rowPtr, i.Length);
+                    else if (rowArray is byte[] b) Marshal.Copy(b, 0, rowPtr, b.Length);
+                }
+                row++;
+            }
+        }
+        return mat ?? new Mat();
+    }
+    return new Mat();
+}
 
     // --- 3. METODI ESISTENTI (GetSize, Save, Normalize) ---
 

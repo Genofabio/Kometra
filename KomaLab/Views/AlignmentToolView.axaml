@@ -97,7 +97,7 @@
                         <Panel MinHeight="40">
                             <TextBlock TextWrapping="Wrap" Opacity="0.7" 
                                        IsVisible="{Binding SelectedMode, Converter={StaticResource EqualityConverter}, ConverterParameter=Automatic}">
-                                <Run>Rilevamento automatico del nucleo. </Run>
+                                <Run>Rilevamento automatico del nucleo della cometa. </Run>
                             </TextBlock>
                             <TextBlock TextWrapping="Wrap" Opacity="0.7" 
                                        IsVisible="{Binding SelectedMode, Converter={StaticResource EqualityConverter}, ConverterParameter=Guided}">
