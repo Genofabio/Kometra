@@ -7,6 +7,7 @@
         xmlns:converters="clr-namespace:KomaLab.Converters"
         xmlns:helpers="clr-namespace:KomaLab.ViewModels.Helpers"
         xmlns:models="clr-namespace:KomaLab.Models"
+        xmlns:av="clr-namespace:Avalonia.Data.Converters;assembly=Avalonia.Base"
         mc:Ignorable="d" d:DesignWidth="800" d:DesignHeight="600"
         x:Class="KomaLab.Views.AlignmentToolView"
         x:DataType="vm:AlignmentToolViewModel"
@@ -109,38 +110,83 @@
                             </TextBlock>
                         </Panel>
                         
-                        <Separator Margin="0,-2 ,0,5"/>
-                        
-                        <StackPanel Spacing="5" IsVisible="{Binding IsSearchRadiusControlsVisible}">
-                             <TextBlock Text="Parametri di Ricerca"
-                                        FontSize="14" FontWeight="Bold" />
-                            
-                            <TextBlock TextWrapping="Wrap" Opacity="0.7">
-                                <Run>Definisce l'area (metà-lato del box) in cui cercare il centro.</Run>
-                            </TextBlock>
+                        <StackPanel Spacing="10">
+                            <StackPanel.IsVisible>
+                                <MultiBinding Converter="{x:Static BoolConverters.Or}">
+                                    <Binding Path="IsSearchRadiusControlsVisible"/>
+                                    <Binding Path="IsJplOptionVisible"/>
+                                </MultiBinding>
+                            </StackPanel.IsVisible>
 
-                            <StackPanel Spacing="5" Margin="0,5,0,0">
-                                <TextBlock Text="Raggio di Ricerca (px):"/>
-                                <Grid ColumnDefinitions="Auto, *" ColumnSpacing="10">
+                            <Separator Margin="0,-2 ,0,5"/>
+                            
+                            <TextBlock Text="Opzioni di Ricerca"
+                                       FontSize="14" FontWeight="Bold" />
+
+                            <StackPanel Spacing="5" IsVisible="{Binding IsJplOptionVisible}">
+                                
+                                <CheckBox IsChecked="{Binding UseJplAstrometry}" 
+                                          Content="Usa riferimento NASA/JPL"
+                                          ToolTip.Tip="Scarica la posizione prevista della cometa per centrare la ricerca"/>
+                                
+                                <StackPanel Spacing="5" IsVisible="{Binding UseJplAstrometry}" Margin="0,5,0,5">
+                                    <Grid ColumnDefinitions="*, Auto">
+                                        <TextBox Grid.Column="0" 
+                                                 Text="{Binding TargetName}" 
+                                                 Watermark="Nome (es. 67P)" 
+                                                 Margin="0,0,5,0"/>
+                                        
+                                        <Button Grid.Column="1" 
+                                                Command="{Binding VerifyJplCommand}" 
+                                                ToolTip.Tip="Verifica connessione e disponibilità oggetto">
+                                            <StackPanel Orientation="Horizontal" Spacing="5">
+                                                <avalonia:MaterialIcon Kind="LinkVariant" Width="16" Height="16"/>
+                                                <TextBlock Text="Verifica"/>
+                                            </StackPanel>
+                                        </Button>
+                                    </Grid>
+
+                                    <ProgressBar IsIndeterminate="True" Height="2" 
+                                                 IsVisible="{Binding IsVerifyingJpl}"
+                                                 Foreground="{DynamicResource ActionPrimaryBackgroundBrush}"/>
                                     
-                                    <TextBox Grid.Column="0"
-                                             Name="SearchRadiusTextBox"
-                                             Text="{Binding SearchRadius, Mode=OneWay}"
-                                             MinWidth="45"
-                                             VerticalAlignment="Center"
-                                             HorizontalContentAlignment="Right"
-                                             GotFocus="OnSearchRadiusTextBoxGotFocus"
-                                             LostFocus="OnSearchRadiusTextBoxLostFocus"/>
-                                    
-                                    <Slider Grid.Column="1"
-                                            Minimum="{Binding MinSearchRadius}"
-                                            Maximum="{Binding MaxSearchRadius}"
-                                            Value="{Binding SearchRadius}"
-                                            TickFrequency="1"
-                                            IsSnapToTickEnabled="True"
-                                            VerticalAlignment="Center"/>
-                                </Grid>
+                                    <TextBlock Text="{Binding AstrometryStatusMessage}" 
+                                               FontSize="11" 
+                                               Foreground="{Binding AstrometryStatusBrush}"
+                                               TextWrapping="Wrap"
+                                               IsVisible="{Binding AstrometryStatusMessage, Converter={x:Static av:StringConverters.IsNotNullOrEmpty}}"/>
+                                </StackPanel>
                             </StackPanel>
+
+                            <StackPanel Spacing="5" IsVisible="{Binding IsSearchRadiusControlsVisible}">
+                                
+                                <StackPanel Spacing="5" Margin="0,5,0,0">
+                                    <TextBlock Text="Raggio di Ricerca (px):"
+                                               ToolTip.Tip="Definisce l'area (metà-lato del box) in cui cercare il centro."
+                                               Background="Transparent"/> 
+                                    
+                                    <Grid ColumnDefinitions="Auto, *" ColumnSpacing="10">
+                                        
+                                        <TextBox Grid.Column="0"
+                                                 Name="SearchRadiusTextBox"
+                                                 Text="{Binding SearchRadius, Mode=OneWay}"
+                                                 MinWidth="45"
+                                                 VerticalAlignment="Center"
+                                                 HorizontalContentAlignment="Right"
+                                                 GotFocus="OnSearchRadiusTextBoxGotFocus"
+                                                 LostFocus="OnSearchRadiusTextBoxLostFocus"/>
+                                        
+                                        <Slider Grid.Column="1"
+                                                Minimum="{Binding MinSearchRadius}"
+                                                Maximum="{Binding MaxSearchRadius}"
+                                                Value="{Binding SearchRadius}"
+                                                TickFrequency="1"
+                                                IsSnapToTickEnabled="True"
+                                                VerticalAlignment="Center"/>
+                                    </Grid>
+                                </StackPanel>
+                            </StackPanel>
+                            
                         </StackPanel>
                     
                     </StackPanel>

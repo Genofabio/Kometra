@@ -33,7 +33,7 @@ public class AlignmentService : IAlignmentService
     }
 
     public async Task<IEnumerable<Point?>> CalculateCentersAsync(
-    AlignmentTarget target, // <--- Nuovo parametro fondamentale
+    AlignmentTarget target, 
     AlignmentMode mode,
     CenteringMethod method,
     List<string> sourcePaths,
@@ -41,7 +41,7 @@ public class AlignmentService : IAlignmentService
     int searchRadius,
     IProgress<(int Index, Point? Center)>? progress = null)
 {
-    // Ottimizzazione preliminare: se raggio 0 e modalità manuale/guidata (solo per Cometa), inutile calcolare
+    // Ottimizzazione preliminare
     if (target == AlignmentTarget.Comet && searchRadius <= 0 && 
        (mode == AlignmentMode.Manual || mode == AlignmentMode.Guided))
     {
@@ -52,12 +52,11 @@ public class AlignmentService : IAlignmentService
     int n = sourcePaths.Count;
     Point?[] results = new Point?[n];
 
-    // Calcolo concorrenza basato sulla dimensione del primo file
     long firstFileSize = 0;
     try { if (sourcePaths.Count > 0) firstFileSize = new System.IO.FileInfo(sourcePaths[0]).Length; } catch { }
 
     int maxConcurrency;
-    if (firstFileSize > 100 * 1024 * 1024) maxConcurrency = 1; // File enormi (>100MB): Sequenziale
+    if (firstFileSize > 100 * 1024 * 1024) maxConcurrency = 1; 
     else if (firstFileSize > 20 * 1024 * 1024) maxConcurrency = Math.Clamp(Environment.ProcessorCount / 2, 2, 3);
     else maxConcurrency = Math.Clamp(Environment.ProcessorCount, 2, 4);
 
@@ -65,18 +64,17 @@ public class AlignmentService : IAlignmentService
     var processingTasks = new List<Task>();
 
     // ====================================================================
-    // CASO A: ALLINEAMENTO STELLE (Sempre Sequenziale e Automatico)
+    // CASO A: ALLINEAMENTO STELLE
     // ====================================================================
     if (target == AlignmentTarget.Stars)
     {
         if (n < 2) return guesses;
 
         Point masterCenter;
-        Mat? prevMat = null; // Mantiene il riferimento all'ultima immagine valida
+        Mat? prevMat = null;
 
         try
         {
-            // Carichiamo Frame 0 come master
             var data0 = await _fitsService.LoadFitsFromFileAsync(sourcePaths[0]);
             if (data0 == null) return results;
 
@@ -84,7 +82,6 @@ public class AlignmentService : IAlignmentService
             results[0] = masterCenter;
             progress?.Report((0, masterCenter));
 
-            // Convertiamo e teniamo in memoria (sarà il primo "Reference")
             prevMat = _converter.RawToMat(data0);
         }
         catch (Exception ex)
@@ -97,7 +94,6 @@ public class AlignmentService : IAlignmentService
         double totalShiftX = 0;
         double totalShiftY = 0;
 
-        // Sequenziale obbligato: ogni frame dipende dal precedente
         for (int i = 1; i < n; i++)
         {
             int index = i;
@@ -111,7 +107,6 @@ public class AlignmentService : IAlignmentService
 
                 currentMat = _converter.RawToMat(dataTarget);
     
-                // Offloading su ThreadPool per non bloccare la UI durante FFT
                 Point stepShift = await Task.Run(() => 
                     _analysis.ComputeStarFieldShift(prevMat, currentMat)
                 );
@@ -127,7 +122,6 @@ public class AlignmentService : IAlignmentService
                 results[index] = newCenter;
                 progress?.Report((index, newCenter)); 
 
-                // SWAP INTELLIGENTE (Zero-Copy)
                 prevMat?.Dispose(); 
                 prevMat = currentMat; 
                 currentMat = null; 
@@ -148,10 +142,10 @@ public class AlignmentService : IAlignmentService
     }
 
     // ====================================================================
-    // CASO B: ALLINEAMENTO COMETA (Gestito da 'mode')
+    // CASO B: ALLINEAMENTO COMETA
     // ====================================================================
     
-    // --- STRATEGIA 3: GUIDATA (Interpolazione Lineare) ---
+    // --- STRATEGIA: GUIDATA (Interpolazione Lineare) ---
     if (mode == AlignmentMode.Guided)
     {
         var p1Guess = guesses.FirstOrDefault();
@@ -162,24 +156,31 @@ public class AlignmentService : IAlignmentService
         Mat? templateMat = null;
         try
         {
-            // Frame 0
+            // 1. FRAME 0 (START)
             var data0 = await _fitsService.LoadFitsFromFileAsync(sourcePaths[0]);
             if (data0 == null) return guesses;
+
+            // --- MODIFICA 1: NON RICALCOLARE IL CENTRO INIZIALE ---
+            // Usiamo p1Guess.Value direttamente come centro preciso.
+            // Estraiamo il template *attorno* a quel punto fissato dall'utente/NASA.
             var t0 = _operations.ExtractRefinedTemplate(data0, p1Guess.Value, searchRadius);
-            templateMat = t0.template;
-            Point center1Precise = t0.preciseCenter;
+            templateMat = t0.template; 
+            Point center1Precise = p1Guess.Value; // <--- FIDUCIA CIECA
+                
             results[0] = center1Precise;
             progress?.Report((0, center1Precise));
 
-            // Frame N
+            // 2. FRAME N (END)
             var dataN = await _fitsService.LoadFitsFromFileAsync(sourcePaths[n - 1]);
             if (dataN == null) return guesses;
-            var tN = _operations.ExtractRefinedTemplate(dataN, pNGuess.Value, searchRadius);
-            Point centerNPrecise = tN.preciseCenter;
+                
+            // --- MODIFICA 2: NON RICALCOLARE IL CENTRO FINALE ---
+            Point centerNPrecise = pNGuess.Value; // <--- FIDUCIA CIECA
+                
             results[n - 1] = centerNPrecise;
             progress?.Report((n - 1, centerNPrecise));
-            tN.template.Dispose();
 
+            // Parametri per fallback lineare (se mancano dati intermedi)
             double stepX = (centerNPrecise.X - center1Precise.X) / (n - 1);
             double stepY = (centerNPrecise.Y - center1Precise.Y) / (n - 1);
 
@@ -188,9 +189,21 @@ public class AlignmentService : IAlignmentService
             {
                 int index = i;
                 string path = sourcePaths[index];
-                double guessX = center1Precise.X + (i * stepX);
-                double guessY = center1Precise.Y + (i * stepY);
-                Point expectedPoint = new Point(guessX, guessY);
+
+                // --- MODIFICA 3: USARE IL PUNTO "SMART" CALCOLATO NEL VIEWMODEL ---
+                Point expectedPoint;
+                if (index < guesses.Count && guesses[index].HasValue)
+                {
+                    // Se il ViewModel ci ha passato un punto (calcolato con la curva NASA), usiamo quello!
+                    expectedPoint = guesses[index]!.Value;
+                }
+                else
+                {
+                    // Altrimenti interpolazione lineare classica
+                    double linX = center1Precise.X + (i * stepX);
+                    double linY = center1Precise.Y + (i * stepY);
+                    expectedPoint = new Point(linX, linY);
+                }
 
                 intermediateTasks.Add(Task.Run(async () =>
                 {
@@ -202,14 +215,17 @@ public class AlignmentService : IAlignmentService
 
                         using Mat fullImage = _converter.RawToMat(fitsData);
 
+                        // FindTemplatePosition userà expectedPoint come centro della ROI.
+                        // Se expectedPoint segue la curva NASA, la ROI seguirà la cometa perfettamente!
                         Point? foundMatch = _operations.FindTemplatePosition(fullImage, templateMat, expectedPoint, searchRadius);
+                            
                         var finalPoint = foundMatch ?? expectedPoint;
                         results[index] = finalPoint;
                         progress?.Report((index, finalPoint));
                     }
                     catch (Exception ex)
                     {
-                        Debug.WriteLine($"[Guided] Crash Img {index}: {ex.Message}");
+                        Debug.WriteLine($"[Guided] Error Img {index}: {ex.Message}");
                         results[index] = expectedPoint;
                         progress?.Report((index, expectedPoint));
                     }
@@ -231,10 +247,8 @@ public class AlignmentService : IAlignmentService
             templateMat?.Dispose();
         }
         return results;
-    }
-
-    // --- STRATEGIA 1 & 2: MANUALE / AUTOMATICA (Parallelizzabile) ---
-    // (Questo else copre sia Automatic che Manual per Cometa)
+    }    
+    // --- STRATEGIA: AUTOMATICA (Con o Senza NASA) & MANUALE ---
     else 
     {
         for (int i = 0; i < n; i++)
@@ -286,22 +300,39 @@ public class AlignmentService : IAlignmentService
 
                 Point? calculatedCenter;
 
-                if (mode == AlignmentMode.Automatic)
+                // =========================================================
+                // MODIFICA CRUCIALE PER GESTIRE "AUTOMATICO + NASA"
+                // =========================================================
+                
+                // Definiamo se usare il "Search Box" ristretto.
+                // Succede in 2 casi:
+                // 1. Manuale (guessPoint è il click utente)
+                // 2. Automatico (guessPoint è la coordinata NASA)
+                bool useRestrictedSearch = guessPoint.HasValue && searchRadius > 0;
+
+                // Caso speciale: Automatico PURO (nessuna NASA, nessun click)
+                if (mode == AlignmentMode.Automatic && !useRestrictedSearch)
                 {
+                    // Vecchio comportamento: Cerca su tutta l'immagine
                     calculatedCenter = _analysis.FindCenterOfLocalRegion(fullImageMat);
                 }
-                else // Manual
+                else
                 {
+                    // Caso: Automatico+NASA oppure Manuale
+                    // Qui usiamo il guessPoint e il searchRadius per fare il crop
                     if (guessPoint == null) return null;
+
                     int size = searchRadius * 2;
                     int x = (int)(guessPoint.Value.X - searchRadius);
                     int y = (int)(guessPoint.Value.Y - searchRadius);
+                    
                     Rect imageBounds = new Rect(0, 0, fullImageMat.Width, fullImageMat.Height);
                     Rect targetRect = new Rect(x, y, size, size);
                     Rect roiRect = imageBounds.Intersect(targetRect);
 
                     if (roiRect.Width <= 0 || roiRect.Height <= 0)
                     {
+                        // Se la ROI è fuori immagine, restituiamo il punto originale (NASA o Manuale)
                         calculatedCenter = guessPoint;
                     }
                     else
@@ -310,22 +341,27 @@ public class AlignmentService : IAlignmentService
                         using Mat regionCrop = new Mat(fullImageMat, cvRoi);
                         Point localCenter;
 
+                        // Applichiamo l'algoritmo scelto SOLO sulla ROI
                         switch (method)
                         {
                             case CenteringMethod.Centroid: localCenter = _analysis.FindCentroid(regionCrop); break;
                             case CenteringMethod.GaussianFit: localCenter = _analysis.FindGaussianCenter(regionCrop); break;
                             case CenteringMethod.Peak: localCenter = _analysis.FindPeak(regionCrop); break;
+                            // Default per Automatico+NASA usiamo "LocalRegion" che è robusto per le comete
                             default: localCenter = _analysis.FindCenterOfLocalRegion(regionCrop); break;
                         }
+                        
+                        // Sommiamo l'offset della ROI per avere coordinate globali
                         calculatedCenter = new Point(localCenter.X + roiRect.X, localCenter.Y + roiRect.Y);
                     }
                 }
+
                 return calculatedCenter;
             }
             catch (Exception ex)
             {
                 Debug.WriteLine($"[Retry System] Fallito tentativo {attempts} su Img {index}: {ex.Message}");
-                if (attempts >= 3) return (mode == AlignmentMode.Manual) ? guessPoint : null;
+                if (attempts >= 3) return guessPoint; // Fallback al punto originale in caso di errore
                 await Task.Delay(200 * attempts);
             }
         }
@@ -452,28 +488,20 @@ public class AlignmentService : IAlignmentService
         var coordinateList = currentCoordinates.ToList();
         if (coordinateList.Count == 0) return false;
 
-        // Se stiamo allineando sulle stelle, non serve interazione utente (punti),
-        // basta che ci siano immagini caricate.
         if (target == AlignmentTarget.Stars) return true;
 
-        // Logica per Cometa (dipende dai punti inseriti)
         switch (mode)
         {
             case AlignmentMode.Automatic: 
-                return true; // L'automatico non richiede input pregressi
+                return true; 
             
             case AlignmentMode.Guided:
-                // Serve il primo e l'ultimo punto
                 if (totalCount <= 1) return coordinateList[0].HasValue;
                 var hasFirst = coordinateList.FirstOrDefault().HasValue;
                 var hasLast = coordinateList.LastOrDefault().HasValue;
-                // Accettiamo se ha primo+ultimo, OPPURE se tutti sono già valorizzati (caso raro ma valido)
                 return (hasFirst && hasLast) || coordinateList.All(e => e.HasValue);
             
             case AlignmentMode.Manual: 
-                // In manuale, "Calcola Centri" significa "Rifinisci selezione".
-                // Quindi devono essere tutti valorizzati (o quasi). 
-                // Se l'utente vuole solo impostarli a mano e basta, userà "Applica", non "Calcola".
                 return coordinateList.All(e => e.HasValue);
             
             default: return false;

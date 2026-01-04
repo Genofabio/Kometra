@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Threading.Tasks;
 using KomaLab.Models;
+using nom.tam.fits; // <--- AGGIUNGI QUESTO IMPORT
 
 namespace KomaLab.Services.Data;
 
@@ -13,4 +14,5 @@ public interface IFitsService
     void NormalizeData(OpenCvSharp.Mat sourceMat, int width, int height, double black, double white, IntPtr dest, long stride);
     Task ExportVideoAsync(List<string> sourceFiles, string outputPath, double fps, ContrastProfile profile);
     Task<List<string>> SortFilesByObservationTimeAsync(List<string> filePaths);
+    Task<Header?> ReadHeaderOnlyAsync(string path);
 }

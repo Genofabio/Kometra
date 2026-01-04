@@ -429,4 +429,34 @@ public class FitsService : IFitsService
             return null;
         }
     }
+
+    public async Task<Header?> ReadHeaderOnlyAsync(string path)
+    {
+        return await Task.Run(() =>
+        {
+            try
+            {
+                // CORREZIONE: Apriamo noi il FileStream.
+                // FileStream implementa IDisposable, quindi qui "using" funziona e chiuderà il file alla fine.
+                using var stream = new System.IO.FileStream(path, System.IO.FileMode.Open, System.IO.FileAccess.Read);
+                
+                // Passiamo lo stream al costruttore di Fits
+                var fits = new nom.tam.fits.Fits(stream);
+                
+                // Leggiamo la prima HDU
+                var hdu = fits.ReadHDU();
+                
+                if (hdu != null)
+                {
+                    return hdu.Header;
+                }
+                return null;
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[FitsService] Errore lettura header {path}: {ex.Message}");
+                return null;
+            }
+        });
+    }
 }
