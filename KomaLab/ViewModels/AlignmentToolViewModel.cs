@@ -35,11 +35,14 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
     
     private Size _viewportSize;
     private ContrastProfile? _lastContrastProfile;
+    
+    // NUOVO: Flag interno per sapere se i dati NASA/WCS sono validi
+    private bool _isAstrometryValid = false;
 
     private static readonly IBrush ColorNormal = Brushes.Cyan;
-    private static readonly IBrush ColorSuccess = new SolidColorBrush(Color.Parse("#03A077")); // Verde
-    private static readonly IBrush ColorError = new SolidColorBrush(Color.Parse("#E6606A"));   // Rosso
-    private static readonly IBrush ColorLoading = new SolidColorBrush(Color.Parse("#8058E8")); // Viola
+    private static readonly IBrush ColorSuccess = new SolidColorBrush(Color.Parse("#03A077")); 
+    private static readonly IBrush ColorError = new SolidColorBrush(Color.Parse("#E6606A"));   
+    private static readonly IBrush ColorLoading = new SolidColorBrush(Color.Parse("#8058E8")); 
 
     #endregion
 
@@ -120,8 +123,6 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
     [ObservableProperty] private int _maxSearchRadius = 100;
     [ObservableProperty] private int _searchRadius = 100;
 
-    // --- LOGICA ASTROMETRIA / JPL / WCS ---
-
     public bool IsJplOptionVisible => 
         CurrentState == AlignmentState.Initial &&
         (
@@ -144,11 +145,17 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
         {
             if (SetProperty(ref _useJplAstrometry, value))
             {
-                if (value) _ = RefreshAstrometryStateAsync();
+                if (value) 
+                {
+                    _ = RefreshAstrometryStateAsync();
+                }
                 else 
                 { 
                     AstrometryStatusMessage = ""; 
-                    AstrometryStatusBrush = ColorNormal; 
+                    AstrometryStatusBrush = ColorNormal;
+                    // Se disattivo l'opzione, il flag di validità non conta più, 
+                    // quindi ricalcolo lo stato del pulsante
+                    CalculateCentersCommand.NotifyCanExecuteChanged();
                 }
             }
         }
@@ -170,6 +177,9 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
             if (SetProperty(ref _isVerifyingJpl, value))
             {
                 ((RelayCommand)VerifyJplCommand).NotifyCanExecuteChanged();
+                // Notifica anche il pulsante principale: se sto verificando, non posso calcolare
+                CalculateCentersCommand.NotifyCanExecuteChanged();
+                
                 if (value) AstrometryStatusBrush = ColorLoading;
             }
         }
@@ -190,8 +200,6 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
     }
 
     public ICommand VerifyJplCommand { get; }
-
-    // --- STATO E FLUSSO ---
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(IsCalculateButtonVisible))]
@@ -449,13 +457,10 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
                 }
                 else startingPoints = CoordinateEntries.Select(e => e.Coordinate).ToList();
             }
-            // 4. STANDARD (O FALLBACK DOPO ANNULLA)
             else 
             {
                 startingPoints = CoordinateEntries.Select(e => e.Coordinate).ToList();
                 
-                // FIX BUG ANNULLA: Se tutti i punti sono nulli (perché abbiamo annullato i centri), 
-                // dobbiamo fornire un seed (centro immagine) altrimenti l'algoritmo non sa dove cercare.
                 if (startingPoints.All(p => p == null) && ActiveImage != null)
                 {
                     var centerImg = new Point(ActiveImage.ImageSize.Width / 2, ActiveImage.ImageSize.Height / 2);
@@ -499,8 +504,19 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
         }
     }
 
+    // METODO AGGIORNATO CON LA LOGICA DI SICUREZZA
     private bool CanCalculateCenters()
     {
+        // 1. Se l'opzione JPL è attiva, dobbiamo essere sicuri che:
+        //    a. Non stiamo caricando (IsVerifyingJpl == false)
+        //    b. I dati siano validi (_isAstrometryValid == true)
+        if (UseJplAstrometry)
+        {
+            if (IsVerifyingJpl) return false;
+            if (!_isAstrometryValid) return false;
+        }
+
+        // 2. Controllo standard (se ho abbastanza immagini, ecc.)
         var currentCoords = CoordinateEntries.Select(e => e.Coordinate).ToList();
         return _alignmentService.CanCalculate(SelectedTarget, SelectedMode, currentCoords, _totalStackCount);
     }
@@ -528,11 +544,14 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
     
     private bool CanApplyAlignment() => CurrentState == AlignmentState.ResultsReady;
 
-    // =========================================================================================
-    // METODO GESTIONE STATO ASTROMETRICO
-    // =========================================================================================
+    // METODO AGGIORNATO PER GESTIRE IL FLAG DI VALIDITÀ
     private async Task RefreshAstrometryStateAsync()
     {
+        // 1. Disabilita il pulsante all'inizio
+        IsVerifyingJpl = true;
+        _isAstrometryValid = false; 
+        CalculateCentersCommand.NotifyCanExecuteChanged(); // Disabilita subito il pulsante
+
         if (SelectedTarget == AlignmentTarget.Comet && SelectedMode == AlignmentMode.Manual)
         {
             AstrometryStatusMessage = "";
@@ -544,12 +563,11 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
         {
             AstrometryStatusMessage = "Errore: Nessuna immagine caricata.";
             AstrometryStatusBrush = ColorError;
+            IsVerifyingJpl = false;
             return;
         }
 
-        IsVerifyingJpl = true;
         AstrometryStatusBrush = ColorLoading;
-        
         bool isSuccess = false;
 
         try
@@ -587,7 +605,6 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
                         else if (_currentStackIndex == _totalStackCount - 1) TargetCoordinate = pEnd;
                         else TargetCoordinate = null; 
 
-                        CalculateCentersCommand.NotifyCanExecuteChanged();
                         isSuccess = true;
                     }
                 }
@@ -605,7 +622,11 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
                 else AstrometryStatusMessage = "Oggetto non trovato o fuori campo FOV.";
             }
 
-            if (isSuccess) AstrometryStatusBrush = ColorSuccess;
+            if (isSuccess)
+            {
+                AstrometryStatusBrush = ColorSuccess;
+                _isAstrometryValid = true; // VALIDAZIONE OK
+            }
             else
             {
                 if (!AstrometryStatusMessage.Contains("Errore") && !AstrometryStatusMessage.Contains("mancanti") && !AstrometryStatusMessage.Contains("fuori campo"))
@@ -613,21 +634,26 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
                      AstrometryStatusMessage = "Impossibile calcolare il riferimento.";
                 }
                 AstrometryStatusBrush = ColorError;
+                _isAstrometryValid = false; // VALIDAZIONE FALLITA
             }
         }
         catch (System.Net.Http.HttpRequestException)
         {
             AstrometryStatusMessage = "Errore di rete: Impossibile contattare NASA JPL.";
             AstrometryStatusBrush = ColorError;
+            _isAstrometryValid = false;
         }
         catch (Exception ex)
         {
             AstrometryStatusMessage = $"Errore: {ex.Message}";
             AstrometryStatusBrush = ColorError;
+            _isAstrometryValid = false;
         }
         finally
         {
             IsVerifyingJpl = false;
+            // 2. Aggiorna lo stato del pulsante alla fine
+            CalculateCentersCommand.NotifyCanExecuteChanged();
         }
     }
 

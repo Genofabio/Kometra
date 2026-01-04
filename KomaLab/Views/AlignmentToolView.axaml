@@ -32,9 +32,7 @@
                     BorderThickness="1"
                     CornerRadius="4"
                     ClipToBounds="True" 
-                    Margin="0,0,4,8">
-                
-                <Border.Styles>
+                    Margin="0,4"> <Border.Styles>
                     <Style Selector="Border.active">
                         <Setter Property="BorderBrush" Value="{DynamicResource ActionPrimaryBackgroundBrush}"/>
                         <Setter Property="BorderThickness" Value="2"/>
@@ -49,32 +47,29 @@
                     </Style>
                 </Border.Styles>
                 
-                <Grid ColumnDefinitions="60, *, *">
-                    
-                    <Border Grid.Column="0" 
+                <Grid ColumnDefinitions="40, *, *"> <Border Grid.Column="0" 
                             Background="{DynamicResource ActionPrimaryBackgroundBrush}"
                             VerticalAlignment="Stretch"
                             HorizontalAlignment="Stretch">
                         <TextBlock Text="{Binding DisplayIndex}" 
                                    Foreground="White"
-                                   FontSize="14" 
+                                   FontSize="12" 
                                    FontWeight="Bold"
                                    HorizontalAlignment="Center" 
                                    VerticalAlignment="Center"/>
                     </Border>
 
                     <Border Grid.Column="1" BorderBrush="{DynamicResource SystemControlForegroundBaseLowBrush}" BorderThickness="0,0,1,0">
-                        <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="5,8">
-                            <TextBlock Text="X" Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}" FontSize="12" VerticalAlignment="Bottom" Opacity="0.7"/>
-                            <TextBlock Text="{Binding FormattedX}" FontWeight="SemiBold" FontSize="14" />
+                        <StackPanel Orientation="Horizontal" Spacing="6" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="5,6">
+                            <TextBlock Text="X" Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}" FontSize="11" VerticalAlignment="Bottom" Opacity="0.7"/>
+                            <TextBlock Text="{Binding FormattedX}" FontWeight="SemiBold" FontSize="13" />
                         </StackPanel>
                     </Border>
 
-                    <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="5,8">
-                        <TextBlock Text="Y" Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}" FontSize="12" VerticalAlignment="Bottom" Opacity="0.7"/>
-                        <TextBlock Text="{Binding FormattedY}" FontWeight="SemiBold" FontSize="14" />
+                    <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="6" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="5,6">
+                        <TextBlock Text="Y" Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}" FontSize="11" VerticalAlignment="Bottom" Opacity="0.7"/>
+                        <TextBlock Text="{Binding FormattedY}" FontWeight="SemiBold" FontSize="13" />
                     </StackPanel>
-                    
                 </Grid>
             </Border>
         </DataTemplate>
@@ -92,19 +87,32 @@
                 IsEnabled="{Binding IsInteractionEnabled}">
             
             <Grid RowDefinitions="Auto, *, Auto">
+                
                 <StackPanel Grid.Row="0" Spacing="10">
-                     <StackPanel x:Name="SetupContainer" Spacing="10" IsVisible="{Binding !IsCoordinateListVisible}">
-                        <TextBlock Text="Oggetto dell'allineamento" FontSize="16" FontWeight="Bold" />
-                        <Grid ColumnDefinitions="*,*">
-                            <RadioButton Grid.Column="0" GroupName="TargetGroup" Content="Cometa" Classes="segmented" CornerRadius="4,0,0,4" BorderThickness="1,1,0,1" HorizontalAlignment="Stretch" IsChecked="{Binding SelectedTarget, Converter={StaticResource EnumToBool}, ConverterParameter={x:Static models:AlignmentTarget.Comet}}" />
-                            <RadioButton Grid.Column="1" GroupName="TargetGroup" Content="Stelle" Classes="segmented" CornerRadius="0,4,4,0" BorderThickness="1" HorizontalAlignment="Stretch" IsChecked="{Binding SelectedTarget, Converter={StaticResource EnumToBool}, ConverterParameter={x:Static models:AlignmentTarget.Stars}}" />
-                        </Grid>
-                        <Separator Margin="0,5,0,5"/>
+                    
+                    <StackPanel x:Name="SetupContainer" Spacing="10" IsVisible="{Binding !IsCoordinateListVisible}">
+                        
+                        <StackPanel Spacing="12">
+                            <TextBlock Text="Oggetto dell'allineamento" 
+                                       FontSize="16" FontWeight="Bold" />
+                            
+                            <Grid ColumnDefinitions="*,*">
+                                <RadioButton Grid.Column="0" GroupName="TargetGroup" Content="Cometa" Classes="segmented" CornerRadius="4,0,0,4" BorderThickness="1,1,0,1" HorizontalAlignment="Stretch"
+                                             IsChecked="{Binding SelectedTarget, Converter={StaticResource EnumToBool}, ConverterParameter={x:Static models:AlignmentTarget.Comet}}" />
+                                <RadioButton Grid.Column="1" GroupName="TargetGroup" Content="Stelle" Classes="segmented" CornerRadius="0,4,4,0" BorderThickness="1" HorizontalAlignment="Stretch"
+                                             IsChecked="{Binding SelectedTarget, Converter={StaticResource EnumToBool}, ConverterParameter={x:Static models:AlignmentTarget.Stars}}" />
+                            </Grid>
+                            <Separator Margin="0,5,0,5"/>
+                        </StackPanel>
+
                         <StackPanel Spacing="12" IsVisible="{Binding SelectedTarget, Converter={StaticResource EnumToBool}, ConverterParameter={x:Static models:AlignmentTarget.Comet}}">
                             <TextBlock Text="Metodologia" FontSize="16" FontWeight="Bold" />
                             <ComboBox ItemsSource="{Binding AvailableAlignmentModes}" SelectedItem="{Binding SelectedMode}" HorizontalAlignment="Stretch">
-                                <ComboBox.ItemTemplate><DataTemplate><TextBlock Text="{Binding ., Converter={StaticResource AlignmentModeNameConverter}}" /></DataTemplate></ComboBox.ItemTemplate>
+                                <ComboBox.ItemTemplate>
+                                    <DataTemplate><TextBlock Text="{Binding ., Converter={StaticResource AlignmentModeNameConverter}}" /></DataTemplate>
+                                </ComboBox.ItemTemplate>
                             </ComboBox>
+                            
                             <Panel MinHeight="40">
                                 <TextBlock TextWrapping="Wrap" Opacity="0.7" IsVisible="{Binding SelectedMode, Converter={StaticResource EqualityConverter}, ConverterParameter=Automatic}"><Run>Rilevamento automatico del nucleo della cometa. </Run></TextBlock>
                                 <TextBlock TextWrapping="Wrap" Opacity="0.7" IsVisible="{Binding SelectedMode, Converter={StaticResource EqualityConverter}, ConverterParameter=Guided}"><Run>Indica il nucleo sulla prima e ultima immagine.</Run></TextBlock>
@@ -112,11 +120,17 @@
                             </Panel>
                             <Separator Margin="0,5,0,0"/> 
                         </StackPanel>
+
                         <StackPanel Spacing="10">
                             <StackPanel.IsVisible>
-                                <MultiBinding Converter="{x:Static BoolConverters.Or}"><Binding Path="IsSearchRadiusControlsVisible"/><Binding Path="IsJplOptionVisible"/></MultiBinding>
+                                <MultiBinding Converter="{x:Static BoolConverters.Or}">
+                                    <Binding Path="IsSearchRadiusControlsVisible"/>
+                                    <Binding Path="IsJplOptionVisible"/>
+                                </MultiBinding>
                             </StackPanel.IsVisible>
+                        
                             <TextBlock Text="Opzioni di Ricerca" FontSize="14" FontWeight="Bold" />
+
                             <StackPanel IsVisible="{Binding IsJplOptionVisible}" Spacing="2">
                                 <CheckBox IsChecked="{Binding UseJplAstrometry}" Content="{Binding AstrometryOptionLabel}" Margin="0" ToolTip.Tip="Usa dati orbitali o astrometrici (WCS) per l'allineamento"/>
                                 <StackPanel IsVisible="{Binding UseJplAstrometry}">
@@ -132,6 +146,7 @@
                                     </StackPanel>
                                 </StackPanel>
                             </StackPanel>
+
                             <StackPanel Spacing="5" IsVisible="{Binding IsSearchRadiusControlsVisible}">
                                 <StackPanel Spacing="5" Margin="0,5,0,0">
                                     <TextBlock Text="Raggio di Ricerca (px):" Background="Transparent"/> 
@@ -142,8 +157,8 @@
                                 </StackPanel>
                             </StackPanel>
                         </StackPanel>
-                     </StackPanel>
-
+                    </StackPanel>
+                    
                     <StackPanel Spacing="5" IsVisible="{Binding IsCoordinateListVisible}">
                         <TextBlock Text="Rifinatura Manuale" FontSize="16" FontWeight="Bold"/>
                         <TextBlock TextWrapping="Wrap" Opacity="0.7" Margin="0,6,0,0"><Run>I centri sono stati calcolati. Clicca sull'immagine per modificare manualmente la posizione.</Run></TextBlock>
