@@ -22,5 +22,6 @@ public interface IAlignmentService
     Task<List<string>> ApplyCenteringAndSaveAsync(
         List<string> sourcePaths, 
         List<Point?> centers,
-        string tempFolderPath);
+        string tempFolderPath,
+        AlignmentTarget target);
 }

@@ -36,13 +36,13 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
     private Size _viewportSize;
     private ContrastProfile? _lastContrastProfile;
     
-    // NUOVO: Flag interno per sapere se i dati NASA/WCS sono validi
+    // NUOVO: Flag di sicurezza per la validazione
     private bool _isAstrometryValid = false;
 
     private static readonly IBrush ColorNormal = Brushes.Cyan;
-    private static readonly IBrush ColorSuccess = new SolidColorBrush(Color.Parse("#03A077")); 
-    private static readonly IBrush ColorError = new SolidColorBrush(Color.Parse("#E6606A"));   
-    private static readonly IBrush ColorLoading = new SolidColorBrush(Color.Parse("#8058E8")); 
+    private static readonly IBrush ColorSuccess = new SolidColorBrush(Color.Parse("#03A077")); // Verde
+    private static readonly IBrush ColorError = new SolidColorBrush(Color.Parse("#E6606A"));   // Rosso
+    private static readonly IBrush ColorLoading = new SolidColorBrush(Color.Parse("#8058E8")); // Viola
 
     #endregion
 
@@ -153,8 +153,7 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
                 { 
                     AstrometryStatusMessage = ""; 
                     AstrometryStatusBrush = ColorNormal;
-                    // Se disattivo l'opzione, il flag di validità non conta più, 
-                    // quindi ricalcolo lo stato del pulsante
+                    // Reset: se spengo l'opzione, non ho bisogno di validazione
                     CalculateCentersCommand.NotifyCanExecuteChanged();
                 }
             }
@@ -177,8 +176,7 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
             if (SetProperty(ref _isVerifyingJpl, value))
             {
                 ((RelayCommand)VerifyJplCommand).NotifyCanExecuteChanged();
-                // Notifica anche il pulsante principale: se sto verificando, non posso calcolare
-                CalculateCentersCommand.NotifyCanExecuteChanged();
+                CalculateCentersCommand.NotifyCanExecuteChanged(); // Aggiorna stato pulsante principale
                 
                 if (value) AstrometryStatusBrush = ColorLoading;
             }
@@ -409,6 +407,7 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
     [RelayCommand(CanExecute = nameof(CanCalculateCenters))]
     private async Task CalculateCenters()
     {
+        // 1. Cambio stato (che renderebbe IsJplOptionVisible = false)
         CurrentState = AlignmentState.Calculating; 
         OnPropertyChanged(nameof(ProcessingStatusText)); 
 
@@ -416,15 +415,17 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
         {
             List<Point?> startingPoints;
 
-            if (SelectedTarget == AlignmentTarget.Stars && UseJplAstrometry && IsJplOptionVisible)
+            // FIX: Rimosso "&& IsJplOptionVisible" perché CurrentState non è più Initial
+            if (SelectedTarget == AlignmentTarget.Stars && UseJplAstrometry)
             {
+                // Ora entrerà qui correttamente!
                 startingPoints = await PreCalculateSkyFixedPointsAsync();
             }
-            else if (SelectedTarget == AlignmentTarget.Comet && UseJplAstrometry && IsJplOptionVisible && SelectedMode == AlignmentMode.Automatic)
+            else if (SelectedTarget == AlignmentTarget.Comet && UseJplAstrometry && SelectedMode == AlignmentMode.Automatic)
             {
                 startingPoints = await PreCalculateJplCentersAsync();
             }
-            else if (SelectedTarget == AlignmentTarget.Comet && UseJplAstrometry && IsJplOptionVisible && SelectedMode == AlignmentMode.Guided)
+            else if (SelectedTarget == AlignmentTarget.Comet && UseJplAstrometry && SelectedMode == AlignmentMode.Guided)
             {
                 var nasaTrajectory = await PreCalculateJplCentersAsync();
                 var userStart = CoordinateEntries.First().Coordinate;
@@ -457,17 +458,30 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
                 }
                 else startingPoints = CoordinateEntries.Select(e => e.Coordinate).ToList();
             }
+            // 4. STANDARD (No JPL/WCS)
             else 
             {
-                startingPoints = CoordinateEntries.Select(e => e.Coordinate).ToList();
-                
-                if (startingPoints.All(p => p == null) && ActiveImage != null)
+                // Logica corretta per Stelle vs Comete discussa prima
+                if (SelectedTarget == AlignmentTarget.Stars)
                 {
-                    var centerImg = new Point(ActiveImage.ImageSize.Width / 2, ActiveImage.ImageSize.Height / 2);
-                    startingPoints = Enumerable.Repeat<Point?>(centerImg, _totalStackCount).ToList();
+                    // STELLE SENZA WCS -> Forza FFT (lista di null)
+                    startingPoints = Enumerable.Repeat<Point?>(null, _totalStackCount).ToList();
+                }
+                else
+                {
+                    // COMETE -> Preserva eventuali input manuali
+                    startingPoints = CoordinateEntries.Select(e => e.Coordinate).ToList();
+                    
+                    // Fallback solo se tutto vuoto (es. Annulla)
+                    if (startingPoints.All(p => p == null) && ActiveImage != null)
+                    {
+                        var centerImg = new Point(ActiveImage.ImageSize.Width / 2, ActiveImage.ImageSize.Height / 2);
+                        startingPoints = Enumerable.Repeat<Point?>(centerImg, _totalStackCount).ToList();
+                    }
                 }
             }
 
+            // Chiamata al Service
             var progressHandler = new Progress<(int Index, Point? Center)>(update =>
             {
                 if (update.Index >= 0 && update.Index < CoordinateEntries.Count)
@@ -484,6 +498,7 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
                 progressHandler 
             );
 
+            // Aggiornamento finale UI
             int resultIdx = 0;
             foreach (var coord in newCoords)
             {
@@ -504,19 +519,20 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
         }
     }
 
-    // METODO AGGIORNATO CON LA LOGICA DI SICUREZZA
+    // --- NUOVA LOGICA DI VALIDAZIONE ---
     private bool CanCalculateCenters()
     {
-        // 1. Se l'opzione JPL è attiva, dobbiamo essere sicuri che:
-        //    a. Non stiamo caricando (IsVerifyingJpl == false)
-        //    b. I dati siano validi (_isAstrometryValid == true)
+        // 1. Se l'opzione JPL/WCS è ATTIVA, applica controlli rigorosi
         if (UseJplAstrometry)
         {
+            // Non posso calcolare mentre sto ancora scaricando/verificando
             if (IsVerifyingJpl) return false;
+            
+            // Non posso calcolare se la verifica è fallita (dati mancanti o errore)
             if (!_isAstrometryValid) return false;
         }
 
-        // 2. Controllo standard (se ho abbastanza immagini, ecc.)
+        // 2. Controllo base
         var currentCoords = CoordinateEntries.Select(e => e.Coordinate).ToList();
         return _alignmentService.CanCalculate(SelectedTarget, SelectedMode, currentCoords, _totalStackCount);
     }
@@ -529,7 +545,7 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
         {
             var centers = CoordinateEntries.Select(e => e.Coordinate).ToList();
             string tempFolder = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "Komalab", "Aligned");
-            FinalProcessedPaths = await _alignmentService.ApplyCenteringAndSaveAsync(_sourcePaths, centers, tempFolder);
+            FinalProcessedPaths = await _alignmentService.ApplyCenteringAndSaveAsync(_sourcePaths, centers, tempFolder, SelectedTarget);
             DialogResult = true; RequestClose?.Invoke();
         }
         catch (Exception ex) { Debug.WriteLine($"Apply fallito: {ex.Message}"); DialogResult = false; CurrentState = AlignmentState.Initial; }
@@ -544,13 +560,13 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
     
     private bool CanApplyAlignment() => CurrentState == AlignmentState.ResultsReady;
 
-    // METODO AGGIORNATO PER GESTIRE IL FLAG DI VALIDITÀ
+    // --- AGGIORNAMENTO STATO ASTROMETRICO ---
     private async Task RefreshAstrometryStateAsync()
     {
-        // 1. Disabilita il pulsante all'inizio
+        // 1. Inizio processo: Invalida tutto e disabilita il pulsante
         IsVerifyingJpl = true;
-        _isAstrometryValid = false; 
-        CalculateCentersCommand.NotifyCanExecuteChanged(); // Disabilita subito il pulsante
+        _isAstrometryValid = false;
+        CalculateCentersCommand.NotifyCanExecuteChanged();
 
         if (SelectedTarget == AlignmentTarget.Comet && SelectedMode == AlignmentMode.Manual)
         {
@@ -622,10 +638,11 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
                 else AstrometryStatusMessage = "Oggetto non trovato o fuori campo FOV.";
             }
 
+            // 2. Esito Processo
             if (isSuccess)
             {
                 AstrometryStatusBrush = ColorSuccess;
-                _isAstrometryValid = true; // VALIDAZIONE OK
+                _isAstrometryValid = true; // OK!
             }
             else
             {
@@ -634,7 +651,7 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
                      AstrometryStatusMessage = "Impossibile calcolare il riferimento.";
                 }
                 AstrometryStatusBrush = ColorError;
-                _isAstrometryValid = false; // VALIDAZIONE FALLITA
+                _isAstrometryValid = false; // FAIL!
             }
         }
         catch (System.Net.Http.HttpRequestException)
@@ -652,7 +669,7 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
         finally
         {
             IsVerifyingJpl = false;
-            // 2. Aggiorna lo stato del pulsante alla fine
+            // 3. Fine processo: Aggiorna lo stato del pulsante in base a _isAstrometryValid
             CalculateCentersCommand.NotifyCanExecuteChanged();
         }
     }
@@ -704,36 +721,126 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
 
     private async Task<Point?> FetchSkyCoordinateForImage(int index)
     {
+        Debug.WriteLine($"[WCS-VM] Fetching Sky Coord for Index {index}...");
         try
         {
             if (_sourcePaths.Count == 0) return null;
 
+            // 1. Legge Header REF
             var refHeader = await _fitsService.ReadHeaderOnlyAsync(_sourcePaths[0]);
             var refWcs = WcsHeaderParser.Parse(refHeader);
-            if (!refWcs.IsValid) return null;
+            
+            if (!refWcs.IsValid) 
+            {
+                Debug.WriteLine($"[WCS-VM] Frame 0 WCS INVALID (IsValid=false)");
+                return null; 
+            }
 
+            // 2. Prende coordinate RA/DEC del centro immagine 0
             double anchorRa = refWcs.RefRaDeg; 
             double anchorDec = refWcs.RefDecDeg;
+            Debug.WriteLine($"[WCS-VM] Anchor (Frame 0): RA={anchorRa}, DEC={anchorDec}");
 
+            // 3. Legge Header TARGET
             var header = await _fitsService.ReadHeaderOnlyAsync(_sourcePaths[index]);
             int height = header?.GetIntValue("NAXIS2") ?? 0;
             var wcs = WcsHeaderParser.Parse(header);
             
             if (wcs.IsValid) 
             {
-                var pixel = new WcsTransformation(wcs).WorldToPixel(anchorRa, anchorDec);
-                if (pixel.HasValue) return new Point(pixel.Value.X, height - pixel.Value.Y);
+                // 4. Converte RA/DEC (di ref) -> Pixel (di target)
+                var transform = new WcsTransformation(wcs);
+                var pixel = transform.WorldToPixel(anchorRa, anchorDec);
+                
+                if (pixel.HasValue) 
+                {
+                    double finalY = height - pixel.Value.Y;
+                    Debug.WriteLine($"[WCS-VM] SUCCESS Frame {index}: ({pixel.Value.X}, {finalY})");
+                    return new Point(pixel.Value.X, finalY);
+                }
+                else
+                {
+                    Debug.WriteLine($"[WCS-VM] FAIL Frame {index}: WorldToPixel returned null (Out of bounds?)");
+                    return null;
+                }
             }
-            return null;
+            else
+            {
+                Debug.WriteLine($"[WCS-VM] FAIL Frame {index}: Target WCS Invalid");
+                return null;
+            }
         }
-        catch { return null; }
+        catch (Exception ex) 
+        { 
+            Debug.WriteLine($"[WCS-VM] EXCEPTION Frame {index}: {ex.Message}");
+            return null; 
+        }
     }
 
     private async Task<List<Point?>> PreCalculateSkyFixedPointsAsync()
     {
-        var results = new List<Point?>();
-        for (int i = 0; i < _sourcePaths.Count; i++) results.Add(await FetchSkyCoordinateForImage(i));
-        return results;
+        Debug.WriteLine("[WCS-VM] Starting PreCalculateSkyFixedPointsAsync (Smart Centering)...");
+        
+        // 1. Calcola i punti "grezzi" basati sull'ancora WCS (CRVAL)
+        // Questi punti potrebbero essere lontani dal centro visivo se CRVAL è periferico.
+        var rawPoints = new List<Point?>();
+        for (int i = 0; i < _sourcePaths.Count; i++) 
+        {
+            rawPoints.Add(await FetchSkyCoordinateForImage(i));
+        }
+
+        // 2. Normalizzazione sul Centro Geometrico (Solo se abbiamo un punto di partenza valido)
+        if (rawPoints.Count > 0 && rawPoints[0].HasValue)
+        {
+            try 
+            {
+                // Recupera le dimensioni della prima immagine per trovare il vero centro
+                var header0 = await _fitsService.ReadHeaderOnlyAsync(_sourcePaths[0]);
+                if (header0 != null)
+                {
+                    double w = header0.GetIntValue("NAXIS1");
+                    double h = header0.GetIntValue("NAXIS2");
+                    
+                    // Il centro ideale dove vogliamo che finisca l'immagine
+                    var geometricCenter = new Point(w / 2.0, h / 2.0);
+                    
+                    // Il punto WCS grezzo calcolato per la prima immagine
+                    var wcsPoint0 = rawPoints[0]!.Value;
+
+                    // Calcola il vettore di correzione: Quanto devo spostare il punto WCS 
+                    // affinché coincida col centro dell'immagine?
+                    var offsetVector = geometricCenter - wcsPoint0;
+
+                    Debug.WriteLine($"[WCS-VM] Re-centering offset calculated: {offsetVector}");
+
+                    // 3. Applica l'offset a TUTTI i punti
+                    // Mantenendo le distanze relative (WCS) ma spostando l'ancora al centro del canvas.
+                    var optimizedPoints = new List<Point?>();
+                    for (int i = 0; i < rawPoints.Count; i++)
+                    {
+                        if (rawPoints[i].HasValue)
+                        {
+                            optimizedPoints.Add(rawPoints[i]!.Value + offsetVector);
+                        }
+                        else
+                        {
+                            optimizedPoints.Add(null);
+                        }
+                    }
+                    
+                    Debug.WriteLine($"[WCS-VM] Smart centering applied. Frame 0 is now at {optimizedPoints[0]}");
+                    return optimizedPoints;
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[WCS-VM] Error applying smart centering: {ex.Message}");
+                // In caso di errore nel calcolo dell'offset, restituiamo i punti grezzi
+                return rawPoints;
+            }
+        }
+
+        return rawPoints;
     }
 
     #endregion
