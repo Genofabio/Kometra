@@ -22,7 +22,7 @@ namespace KomaLab.ViewModels;
 
 public partial class AlignmentToolViewModel : ObservableObject, IDisposable
 {
-    #region Campi
+    #region Campi e Costanti
     
     private readonly IFitsService _fitsService;
     private readonly IAlignmentService _alignmentService;
@@ -36,7 +36,6 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
     private Size _viewportSize;
     private ContrastProfile? _lastContrastProfile;
 
-    // --- COLORI DEFINITI ---
     private static readonly IBrush ColorNormal = Brushes.Cyan;
     private static readonly IBrush ColorSuccess = new SolidColorBrush(Color.Parse("#03A077")); // Verde
     private static readonly IBrush ColorError = new SolidColorBrush(Color.Parse("#E6606A"));   // Rosso
@@ -88,7 +87,10 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
     [NotifyPropertyChangedFor(nameof(IsSearchRadiusControlsVisible))]
     [NotifyPropertyChangedFor(nameof(IsRefinementMessageVisible))]
     [NotifyPropertyChangedFor(nameof(IsNavigationVisible))]
-    [NotifyPropertyChangedFor(nameof(IsJplOptionVisible))] 
+    [NotifyPropertyChangedFor(nameof(IsJplOptionVisible))]
+    [NotifyPropertyChangedFor(nameof(AstrometryOptionLabel))]      
+    [NotifyPropertyChangedFor(nameof(IsTargetNameInputVisible))]   
+    [NotifyPropertyChangedFor(nameof(IsVerifyButtonVisible))] 
     private AlignmentTarget _selectedTarget = AlignmentTarget.Comet;
 
     public IEnumerable<AlignmentMode> AvailableAlignmentModes 
@@ -118,12 +120,22 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
     [ObservableProperty] private int _maxSearchRadius = 100;
     [ObservableProperty] private int _searchRadius = 100;
 
+    // --- LOGICA ASTROMETRIA / JPL / WCS ---
+
     public bool IsJplOptionVisible => 
         CurrentState == AlignmentState.Initial &&
-        SelectedTarget == AlignmentTarget.Comet && 
-        (SelectedMode == AlignmentMode.Automatic || SelectedMode == AlignmentMode.Guided);
+        (
+            (SelectedTarget == AlignmentTarget.Comet && SelectedMode != AlignmentMode.Manual) || 
+            (SelectedTarget == AlignmentTarget.Stars) 
+        );
 
-    // --- LOGICA ATTIVAZIONE CHECKBOX ---
+    public string AstrometryOptionLabel => SelectedTarget == AlignmentTarget.Stars 
+        ? "Usa allineamento WCS (Header)" 
+        : "Usa riferimento NASA/JPL";
+
+    public bool IsTargetNameInputVisible => SelectedTarget == AlignmentTarget.Comet;
+    public bool IsVerifyButtonVisible => SelectedTarget == AlignmentTarget.Comet;
+
     private bool _useJplAstrometry;
     public bool UseJplAstrometry
     {
@@ -132,16 +144,11 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
         {
             if (SetProperty(ref _useJplAstrometry, value))
             {
-                if (value)
-                {
-                    if (SelectedMode == AlignmentMode.Guided)
-                    {
-                        _ = PrefillGuidedModeAsync();
-                    }
-                }
-                else
-                {
-                    AstrometryStatusMessage = "";
+                if (value) _ = RefreshAstrometryStateAsync();
+                else 
+                { 
+                    AstrometryStatusMessage = ""; 
+                    AstrometryStatusBrush = ColorNormal; 
                 }
             }
         }
@@ -184,7 +191,8 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
 
     public ICommand VerifyJplCommand { get; }
 
-    // ... [Stato e altre proprietà] ...
+    // --- STATO E FLUSSO ---
+
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(IsCalculateButtonVisible))]
     [NotifyPropertyChangedFor(nameof(IsApplyCancelButtonsVisible))]
@@ -213,7 +221,9 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
     
     public string ProcessingStatusText => CurrentState switch
     {
-        AlignmentState.Calculating => UseJplAstrometry ? "Scaricamento dati NASA e calcolo centri..." : "Calcolo centri in corso...",
+        AlignmentState.Calculating => UseJplAstrometry 
+            ? (SelectedTarget == AlignmentTarget.Stars ? "Analisi coordinate WCS..." : "Scaricamento dati e calcolo centri...") 
+            : "Calcolo centri in corso...",
         AlignmentState.Processing => "Allineamento in corso...",
         _ => "Elaborazione..."
     };
@@ -261,8 +271,7 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
         
         Viewport.SearchRadius = this.SearchRadius;
         
-        // Questo comando è SOLO manuale (pulsante Verifica)
-        VerifyJplCommand = new RelayCommand(async () => await VerifyJplConnectionAsync(true), () => !IsVerifyingJpl && ActiveImage != null);
+        VerifyJplCommand = new RelayCommand(async () => await RefreshAstrometryStateAsync(), () => !IsVerifyingJpl && ActiveImage != null);
 
         _ = InitializeAsync();
     }
@@ -284,7 +293,7 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
                 foreach (var entry in CoordinateEntries) entry.ImageHeight = h;
             }
         }
-        catch (Exception ex) { Debug.WriteLine($"--- CRASH IN AlgnVM.InitializeAsync --- {ex}"); }
+        catch (Exception ex) { Debug.WriteLine($"AlgnVM.InitializeAsync: {ex}"); }
         finally
         {
             ImageLoadedTcs.TrySetResult();
@@ -294,13 +303,18 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
         }
     }
 
-    // --- CARICAMENTO IMMAGINE (PULITO) ---
     private async Task LoadStackImageAtIndexAsync(int index)
     {
         if (index < 0 || index >= _totalStackCount) return;
         if (index == _currentStackIndex && ActiveImage != null) return;
 
         _currentStackIndex = index;
+        
+        for (int i = 0; i < CoordinateEntries.Count; i++)
+        {
+            CoordinateEntries[i].IsActive = (i == _currentStackIndex);
+        }
+        
         UpdateStackCounterText();
 
         if (ActiveImage != null)
@@ -343,14 +357,12 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(CorrectImageSize));
         ResetThresholdsCommand.NotifyCanExecuteChanged();
         
-        // Auto-popolazione nome (se vuoto)
-        if (ActiveImage?.Data?.FitsHeader != null && string.IsNullOrWhiteSpace(TargetName))
+        if (SelectedTarget == AlignmentTarget.Comet && string.IsNullOrWhiteSpace(TargetName) && ActiveImage?.Data?.FitsHeader != null)
         {
             string headerObj = ActiveImage.Data.FitsHeader.GetStringValue("OBJECT");
             if (!string.IsNullOrWhiteSpace(headerObj)) TargetName = headerObj.Replace("'", "").Trim();
         }
 
-        // --- SOLO AGGIORNAMENTO VISIVO (Niente chiamate JPL) ---
         UpdateReticleVisibilityForCurrentState();
         UpdateSearchRadiusRange();
         
@@ -369,7 +381,6 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
 
     #region Comandi
 
-    // ... [Zoom, Pan, ResetView, ResetThresholds, Navigazione invariati] ...
     [RelayCommand] private void ZoomIn() { Viewport.ZoomIn(); OnPropertyChanged(nameof(ZoomStatusText)); }
     [RelayCommand] private void ZoomOut() { Viewport.ZoomOut(); OnPropertyChanged(nameof(ZoomStatusText)); }
     [RelayCommand] private void ResetView() { Viewport.ResetView(); OnPropertyChanged(nameof(ZoomStatusText)); }
@@ -385,8 +396,8 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
     [RelayCommand(CanExecute = nameof(CanShowPrevious))] private async Task GoToFirstImage() => await NavigateToImage(0);
     [RelayCommand(CanExecute = nameof(CanShowNext))] private async Task GoToLastImage() => await NavigateToImage(_totalStackCount - 1);
     
-    // --- Allineamento (Logica Principale) ---
-    
+    // --- Allineamento ---
+
     [RelayCommand(CanExecute = nameof(CanCalculateCenters))]
     private async Task CalculateCenters()
     {
@@ -397,116 +408,82 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
         {
             List<Point?> startingPoints;
 
-            // ---------------------------------------------------------
-            // CASO 1: AUTOMATICA + NASA
-            // Scarichiamo tutto fresco da JPL per ogni frame.
-            // ---------------------------------------------------------
-            if (UseJplAstrometry && IsJplOptionVisible && SelectedMode == AlignmentMode.Automatic)
+            if (SelectedTarget == AlignmentTarget.Stars && UseJplAstrometry && IsJplOptionVisible)
+            {
+                startingPoints = await PreCalculateSkyFixedPointsAsync();
+            }
+            else if (SelectedTarget == AlignmentTarget.Comet && UseJplAstrometry && IsJplOptionVisible && SelectedMode == AlignmentMode.Automatic)
             {
                 startingPoints = await PreCalculateJplCentersAsync();
             }
-            // ---------------------------------------------------------
-            // CASO 2: GUIDATA + NASA (Logica "Path Blending")
-            // Usiamo la curva NASA ma ancorata ai TUOI punti manuali.
-            // ---------------------------------------------------------
-            else if (UseJplAstrometry && IsJplOptionVisible && SelectedMode == AlignmentMode.Guided)
+            else if (SelectedTarget == AlignmentTarget.Comet && UseJplAstrometry && IsJplOptionVisible && SelectedMode == AlignmentMode.Guided)
             {
-                // 1. Scarica la traiettoria NASA completa (la "forma" del movimento)
                 var nasaTrajectory = await PreCalculateJplCentersAsync();
-                
-                // 2. Recupera le ancore manuali attuali (Start e End)
                 var userStart = CoordinateEntries.First().Coordinate;
                 var userEnd = CoordinateEntries.Last().Coordinate;
 
-                // Verifica di avere tutti i dati necessari per il calcolo intelligente
                 if (nasaTrajectory.Count == _totalStackCount && 
                     userStart.HasValue && userEnd.HasValue &&
                     nasaTrajectory[0].HasValue && nasaTrajectory[^1].HasValue)
                 {
                     startingPoints = new List<Point?>();
-                    
-                    // Calcola il vettore di correzione (Offset) iniziale e finale
-                    // "Di quanto l'utente ha corretto la NASA?"
                     Point startOffset = userStart.Value - nasaTrajectory[0].Value;
                     Point endOffset = userEnd.Value - nasaTrajectory[^1].Value;
 
-                    for (int i = 0; i < _totalStackCount; i++)
+                    for (int frameIndex = 0; frameIndex < _totalStackCount; frameIndex++)
                     {
-                        // Forziamo Start e End ad essere ESATTAMENTE quelli utente
-                        if (i == 0)
-                        {
-                            startingPoints.Add(userStart);
-                        }
-                        else if (i == _totalStackCount - 1)
-                        {
-                            startingPoints.Add(userEnd);
-                        }
+                        if (frameIndex == 0) startingPoints.Add(userStart);
+                        else if (frameIndex == _totalStackCount - 1) startingPoints.Add(userEnd);
                         else
                         {
-                            // Per i frame intermedi:
-                            if (nasaTrajectory[i].HasValue)
+                            if (nasaTrajectory[frameIndex].HasValue)
                             {
-                                // Calcola progresso (da 0.0 a 1.0)
-                                double t = (double)i / (_totalStackCount - 1);
-                                
-                                // Interpola l'errore linearmente tra inizio e fine
-                                double currentOffsetX = startOffset.X + (endOffset.X - startOffset.X) * t;
-                                double currentOffsetY = startOffset.Y + (endOffset.Y - startOffset.Y) * t;
-
-                                // PUNTO CALCOLATO = Punto NASA (forma) + Offset Interpolato (ancoraggio)
-                                Point smartPoint = new Point(
-                                    nasaTrajectory[i]!.Value.X + currentOffsetX,
-                                    nasaTrajectory[i]!.Value.Y + currentOffsetY
-                                );
-                                
-                                startingPoints.Add(smartPoint);
+                                double t = (double)frameIndex / (_totalStackCount - 1);
+                                double ox = startOffset.X + (endOffset.X - startOffset.X) * t;
+                                double oy = startOffset.Y + (endOffset.Y - startOffset.Y) * t;
+                                startingPoints.Add(new Point(nasaTrajectory[frameIndex]!.Value.X + ox, nasaTrajectory[frameIndex]!.Value.Y + oy));
                             }
-                            else
-                            {
-                                startingPoints.Add(null); // Buco nei dati NASA
-                            }
+                            else startingPoints.Add(null);
                         }
                     }
                 }
-                else
-                {
-                    // Fallback: se la NASA fallisce o mancano punti, usa l'interpolazione lineare standard
-                    startingPoints = CoordinateEntries.Select(e => e.Coordinate).ToList();
-                }
+                else startingPoints = CoordinateEntries.Select(e => e.Coordinate).ToList();
             }
-            // ---------------------------------------------------------
-            // CASO 3: STANDARD (Manuale o Automatica senza NASA)
-            // Usa semplicemente i punti presenti nella lista.
-            // ---------------------------------------------------------
-            else
+            // 4. STANDARD (O FALLBACK DOPO ANNULLA)
+            else 
             {
                 startingPoints = CoordinateEntries.Select(e => e.Coordinate).ToList();
+                
+                // FIX BUG ANNULLA: Se tutti i punti sono nulli (perché abbiamo annullato i centri), 
+                // dobbiamo fornire un seed (centro immagine) altrimenti l'algoritmo non sa dove cercare.
+                if (startingPoints.All(p => p == null) && ActiveImage != null)
+                {
+                    var centerImg = new Point(ActiveImage.ImageSize.Width / 2, ActiveImage.ImageSize.Height / 2);
+                    startingPoints = Enumerable.Repeat<Point?>(centerImg, _totalStackCount).ToList();
+                }
             }
 
-            // Setup per aggiornamento live della UI durante il calcolo
             var progressHandler = new Progress<(int Index, Point? Center)>(update =>
             {
                 if (update.Index >= 0 && update.Index < CoordinateEntries.Count)
                     CoordinateEntries[update.Index].Coordinate = update.Center;
             });
 
-            // Chiamata al servizio di allineamento
             var newCoords = await _alignmentService.CalculateCentersAsync(
                 SelectedTarget,
                 SelectedMode, 
                 CenteringMethod.LocalRegion,
                 _sourcePaths, 
-                startingPoints, // Passiamo la lista "Smart" calcolata sopra
+                startingPoints, 
                 SearchRadius,
                 progressHandler 
             );
 
-            // Aggiornamento finale della lista
-            int idx = 0;
+            int resultIdx = 0;
             foreach (var coord in newCoords)
             {
-                if (idx < CoordinateEntries.Count) CoordinateEntries[idx].Coordinate = coord;
-                idx++;
+                if (resultIdx < CoordinateEntries.Count) CoordinateEntries[resultIdx].Coordinate = coord;
+                resultIdx++;
             }
 
             CurrentState = AlignmentState.ResultsReady;
@@ -522,48 +499,6 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
         }
     }
 
-    private async Task<List<Point?>> PreCalculateJplCentersAsync()
-    {
-        var results = new List<Point?>();
-        var jplService = new JplHorizonsService();
-        
-        for (int i = 0; i < _sourcePaths.Count; i++)
-        {
-            try 
-            {
-                var header = await _fitsService.ReadHeaderOnlyAsync(_sourcePaths[i]);
-                if (header == null) { results.Add(null); continue; }
-
-                int height = header.GetIntValue("NAXIS2"); // Per Flip Y
-                var wcsData = WcsHeaderParser.Parse(header);
-                string dateObsStr = header.GetStringValue("DATE-OBS");
-                DateTime.TryParse(dateObsStr, out DateTime obsDate);
-                var location = FitsMetadataReader.ReadObservatoryLocation(header);
-
-                if (!wcsData.IsValid) { results.Add(null); continue; }
-
-                var ephem = await jplService.GetEphemerisAsync(TargetName, obsDate, location);
-                
-                if (ephem.HasValue)
-                {
-                    var transform = new WcsTransformation(wcsData);
-                    var pixel = transform.WorldToPixel(ephem.Value.Ra, ephem.Value.Dec);
-                    
-                    if (pixel.HasValue)
-                    {
-                        // FLIP Y
-                        double visualY = height - pixel.Value.Y;
-                        results.Add(new Point(pixel.Value.X, visualY));
-                    }
-                    else results.Add(null);
-                }
-                else results.Add(null);
-            }
-            catch { results.Add(null); }
-        }
-        return results;
-    }
-    
     private bool CanCalculateCenters()
     {
         var currentCoords = CoordinateEntries.Select(e => e.Coordinate).ToList();
@@ -587,96 +522,103 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
     [RelayCommand] 
     private void CancelCalculation() 
     {
-        // 1. Resetta tutto (pulisce coordinate e torna allo stato iniziale)
         ResetAlignmentState();
-
-        // 2. LOGICA AGGIUNTA: Se siamo in Guidata + NASA, ricalcola subito i suggerimenti
-        if (SelectedMode == AlignmentMode.Guided && UseJplAstrometry)
-        {
-            _ = PrefillGuidedModeAsync();
-        }
+        if (UseJplAstrometry) _ = RefreshAstrometryStateAsync();
     }
     
     private bool CanApplyAlignment() => CurrentState == AlignmentState.ResultsReady;
 
-    // --- NUOVA FUNZIONE: PRE-FILL GUIDATA (Start & End) ---
-    private async Task PrefillGuidedModeAsync()
+    // =========================================================================================
+    // METODO GESTIONE STATO ASTROMETRICO
+    // =========================================================================================
+    private async Task RefreshAstrometryStateAsync()
     {
-        if (string.IsNullOrWhiteSpace(TargetName)) return;
-
-        IsVerifyingJpl = true;
-        // TESTO RICHIESTO
-        AstrometryStatusMessage = "Calcolo coordinate ...";
-        AstrometryStatusBrush = ColorLoading;
-
-        // Lista indici da calcolare (0 e Ultimo)
-        var indicesToCalc = new List<int> { 0 };
-        if (_totalStackCount > 1) indicesToCalc.Add(_totalStackCount - 1);
-
-        try
+        if (SelectedTarget == AlignmentTarget.Comet && SelectedMode == AlignmentMode.Manual)
         {
-            foreach (int i in indicesToCalc)
-            {
-                var result = await FetchJplCoordinateForImage(i);
-                if (result.HasValue)
-                {
-                    CoordinateEntries[i].Coordinate = result.Value;
-                    // Se l'utente sta guardando questa immagine, aggiorna il mirino
-                    if (i == _currentStackIndex) TargetCoordinate = result.Value;
-                }
-            }
-            // TESTO RICHIESTO
-            AstrometryStatusMessage = "Posizioni acquisite da NASA JPL.";
-            AstrometryStatusBrush = ColorSuccess;
-            CalculateCentersCommand.NotifyCanExecuteChanged();
-        }
-        catch
-        {
-            AstrometryStatusMessage = "Errore nel recupero coordinate.";
-            AstrometryStatusBrush = ColorError;
-        }
-        finally
-        {
+            AstrometryStatusMessage = "";
             IsVerifyingJpl = false;
+            return; 
         }
-    }
 
-    // --- FUNZIONE VERIFICA MANUALE (Solo immagine corrente) ---
-    private async Task VerifyJplConnectionAsync(bool updateReticle = true)
-    {
-        if (ActiveImage?.Data?.FitsHeader == null || string.IsNullOrWhiteSpace(TargetName))
+        if (ActiveImage?.Data?.FitsHeader == null)
         {
-            AstrometryStatusMessage = "Attenzione: Immagine o nome mancante.";
-            AstrometryStatusBrush = ColorNormal;
+            AstrometryStatusMessage = "Errore: Nessuna immagine caricata.";
+            AstrometryStatusBrush = ColorError;
             return;
         }
 
         IsVerifyingJpl = true;
-        AstrometryStatusMessage = "Connessione a NASA JPL in corso...";
         AstrometryStatusBrush = ColorLoading;
+        
+        bool isSuccess = false;
 
         try
         {
-            var result = await FetchJplCoordinateForImage(_currentStackIndex);
-            
-            if (result.HasValue)
+            if (SelectedTarget == AlignmentTarget.Stars)
             {
-                if (updateReticle)
+                AstrometryStatusMessage = "Verifica dati WCS (Header)...";
+                var p = await FetchSkyCoordinateForImage(_currentStackIndex);
+                if (p.HasValue)
                 {
-                    TargetCoordinate = result.Value;
-                    CoordinateEntries[_currentStackIndex].Coordinate = result.Value;
-                    ApplyAlignmentCommand.NotifyCanExecuteChanged();
-                    CalculateCentersCommand.NotifyCanExecuteChanged();
+                    if (IsTargetMarkerVisible) TargetCoordinate = null; 
+                    isSuccess = true;
+                    AstrometryStatusMessage = "WCS valido. Allineamento possibile.";
                 }
-                
-                AstrometryStatusMessage = $"Oggetto agganciato a ({result.Value.X:F2}, {result.Value.Y:F2})";
-                AstrometryStatusBrush = ColorSuccess;
+                else
+                {
+                    AstrometryStatusMessage = "Dati WCS mancanti o incoerenti tra le immagini.";
+                }
             }
+            else if (SelectedTarget == AlignmentTarget.Comet)
+            {
+                AstrometryStatusMessage = "Connessione a NASA JPL in corso...";
+
+                if (SelectedMode == AlignmentMode.Guided)
+                {
+                    var pStart = await FetchJplCoordinateForImage(0);
+                    var pEnd = await FetchJplCoordinateForImage(_totalStackCount - 1);
+
+                    if (pStart.HasValue && pEnd.HasValue)
+                    {
+                        CoordinateEntries[0].Coordinate = pStart;
+                        CoordinateEntries[_totalStackCount - 1].Coordinate = pEnd;
+                        
+                        if (_currentStackIndex == 0) TargetCoordinate = pStart;
+                        else if (_currentStackIndex == _totalStackCount - 1) TargetCoordinate = pEnd;
+                        else TargetCoordinate = null; 
+
+                        CalculateCentersCommand.NotifyCanExecuteChanged();
+                        isSuccess = true;
+                    }
+                }
+                else if (SelectedMode == AlignmentMode.Automatic)
+                {
+                    var p = await FetchJplCoordinateForImage(_currentStackIndex);
+                    if (p.HasValue)
+                    {
+                        if (IsTargetMarkerVisible) TargetCoordinate = null;
+                        isSuccess = true;
+                    }
+                }
+
+                if (isSuccess) AstrometryStatusMessage = "Dati NASA/JPL acquisiti correttamente.";
+                else AstrometryStatusMessage = "Oggetto non trovato o fuori campo FOV.";
+            }
+
+            if (isSuccess) AstrometryStatusBrush = ColorSuccess;
             else
             {
-                AstrometryStatusMessage = "Errore: Oggetto non trovato o errore WCS.";
+                if (!AstrometryStatusMessage.Contains("Errore") && !AstrometryStatusMessage.Contains("mancanti") && !AstrometryStatusMessage.Contains("fuori campo"))
+                {
+                     AstrometryStatusMessage = "Impossibile calcolare il riferimento.";
+                }
                 AstrometryStatusBrush = ColorError;
             }
+        }
+        catch (System.Net.Http.HttpRequestException)
+        {
+            AstrometryStatusMessage = "Errore di rete: Impossibile contattare NASA JPL.";
+            AstrometryStatusBrush = ColorError;
         }
         catch (Exception ex)
         {
@@ -689,50 +631,94 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
         }
     }
 
-    // --- HELPER COMUNE PER IL CALCOLO JPL SINGOLO ---
+    private void UpdateReticle(Point point)
+    {
+        TargetCoordinate = point;
+        CoordinateEntries[_currentStackIndex].Coordinate = point;
+        ApplyAlignmentCommand.NotifyCanExecuteChanged();
+        CalculateCentersCommand.NotifyCanExecuteChanged();
+    }
+
+    private async Task<List<Point?>> PreCalculateJplCentersAsync()
+    {
+        var results = new List<Point?>();
+        for (int i = 0; i < _sourcePaths.Count; i++) results.Add(await FetchJplCoordinateForImage(i));
+        return results;
+    }
+
     private async Task<Point?> FetchJplCoordinateForImage(int index)
     {
-        string path = _sourcePaths[index];
-        var header = await _fitsService.ReadHeaderOnlyAsync(path);
-        if (header == null) return null;
-
-        // IMPORTANTE: Leggi altezza per FLIP Y
-        int height = header.GetIntValue("NAXIS2");
-        string dateObsStr = header.GetStringValue("DATE-OBS");
-        if (!DateTime.TryParse(dateObsStr, out DateTime obsDate)) return null;
-        
-        var location = FitsMetadataReader.ReadObservatoryLocation(header);
-        var wcsData = WcsHeaderParser.Parse(header);
-        if (!wcsData.IsValid) return null;
-
-        var jplService = new JplHorizonsService();
-        var ephem = await jplService.GetEphemerisAsync(TargetName, obsDate, location);
-
-        if (ephem.HasValue)
+        try 
         {
-            var transform = new WcsTransformation(wcsData);
-            var pixel = transform.WorldToPixel(ephem.Value.Ra, ephem.Value.Dec);
+            string path = _sourcePaths[index];
+            var header = await _fitsService.ReadHeaderOnlyAsync(path);
+            if (header == null) return null;
+
+            int height = header.GetIntValue("NAXIS2");
+            string dateObsStr = header.GetStringValue("DATE-OBS");
+            if (!DateTime.TryParse(dateObsStr, out DateTime obsDate)) return null;
             
-            if (pixel.HasValue)
+            var location = FitsMetadataReader.ReadObservatoryLocation(header);
+            var wcsData = WcsHeaderParser.Parse(header);
+            if (!wcsData.IsValid) return null;
+
+            var jplService = new JplHorizonsService();
+            var ephem = await jplService.GetEphemerisAsync(TargetName, obsDate, location);
+
+            if (ephem.HasValue)
             {
-                // *** CORREZIONE FLIP Y ***
-                double visualY = height - pixel.Value.Y;
-                return new Point(pixel.Value.X, visualY);
+                var transform = new WcsTransformation(wcsData);
+                var pixel = transform.WorldToPixel(ephem.Value.Ra, ephem.Value.Dec);
+                if (pixel.HasValue) return new Point(pixel.Value.X, height - pixel.Value.Y);
             }
+            return null;
         }
-        return null;
+        catch { return null; }
+    }
+
+    private async Task<Point?> FetchSkyCoordinateForImage(int index)
+    {
+        try
+        {
+            if (_sourcePaths.Count == 0) return null;
+
+            var refHeader = await _fitsService.ReadHeaderOnlyAsync(_sourcePaths[0]);
+            var refWcs = WcsHeaderParser.Parse(refHeader);
+            if (!refWcs.IsValid) return null;
+
+            double anchorRa = refWcs.RefRaDeg; 
+            double anchorDec = refWcs.RefDecDeg;
+
+            var header = await _fitsService.ReadHeaderOnlyAsync(_sourcePaths[index]);
+            int height = header?.GetIntValue("NAXIS2") ?? 0;
+            var wcs = WcsHeaderParser.Parse(header);
+            
+            if (wcs.IsValid) 
+            {
+                var pixel = new WcsTransformation(wcs).WorldToPixel(anchorRa, anchorDec);
+                if (pixel.HasValue) return new Point(pixel.Value.X, height - pixel.Value.Y);
+            }
+            return null;
+        }
+        catch { return null; }
+    }
+
+    private async Task<List<Point?>> PreCalculateSkyFixedPointsAsync()
+    {
+        var results = new List<Point?>();
+        for (int i = 0; i < _sourcePaths.Count; i++) results.Add(await FetchSkyCoordinateForImage(i));
+        return results;
     }
 
     #endregion
     
-    // ... [Metodi Pubblici e Helpers finali invariati] ...
-    #region Metodi Pubblici (Invariati)
+    #region Metodi Pubblici
     public void ApplyZoomAtPoint(double scaleFactor, Point viewportZoomPoint) { Viewport.ApplyZoomAtPoint(scaleFactor, viewportZoomPoint); OnPropertyChanged(nameof(ZoomStatusText)); }
     public void ApplyPan(double deltaX, double deltaY) => Viewport.ApplyPan(deltaX, deltaY);
     public void SetTargetCoordinate(Point imageCoordinate) 
     { 
         if (CurrentState == AlignmentState.Processing) return;
-        if (CurrentState == AlignmentState.Initial && IsStack && SelectedMode == AlignmentMode.Guided) 
+        if (CurrentState == AlignmentState.Initial && IsStack && SelectedMode == AlignmentMode.Guided && SelectedTarget == AlignmentTarget.Comet) 
         { 
             if (_currentStackIndex != 0 && _currentStackIndex != (_totalStackCount - 1)) return; 
         }
@@ -743,8 +729,8 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
     public void ClearTarget() 
     { 
         if (CurrentState != AlignmentState.Initial) { ResetAlignmentState(); return; }
-        if (SelectedMode == AlignmentMode.Automatic) return;
-        if (IsStack && SelectedMode == AlignmentMode.Guided) { if (_currentStackIndex != 0 && _currentStackIndex != (_totalStackCount - 1)) return; }
+        if (SelectedMode == AlignmentMode.Automatic && SelectedTarget == AlignmentTarget.Comet) return;
+        if (IsStack && SelectedMode == AlignmentMode.Guided && SelectedTarget == AlignmentTarget.Comet) { if (_currentStackIndex != 0 && _currentStackIndex != (_totalStackCount - 1)) return; }
         TargetCoordinate = null; 
         if (_currentStackIndex >= 0 && _currentStackIndex < CoordinateEntries.Count) CoordinateEntries[_currentStackIndex].Coordinate = null;
         ApplyAlignmentCommand.NotifyCanExecuteChanged(); CalculateCentersCommand.NotifyCanExecuteChanged(); 
@@ -760,12 +746,17 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
     partial void OnSelectedTargetChanged(AlignmentTarget value)
     {
         SelectedMode = AlignmentMode.Automatic;
+        UseJplAstrometry = false; 
+
         OnPropertyChanged(nameof(AvailableAlignmentModes));
         OnPropertyChanged(nameof(SelectedMode)); 
         OnPropertyChanged(nameof(IsJplOptionVisible));
+        
+        OnPropertyChanged(nameof(AstrometryOptionLabel));
+        OnPropertyChanged(nameof(IsTargetNameInputVisible));
+        OnPropertyChanged(nameof(IsVerifyButtonVisible)); 
     }
     
-    // --- LOGICA CAMBIO MODALITÀ ---
     partial void OnSelectedModeChanged(AlignmentMode value)
     {
         ResetAlignmentState();
@@ -774,10 +765,9 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
         UpdateStackCounterText();
         OnPropertyChanged(nameof(IsJplOptionVisible)); 
 
-        // SE PASSI A GUIDATA E HAI GIÀ ATTIVATO NASA -> CALCOLA SUBITO START/END
-        if (value == AlignmentMode.Guided && UseJplAstrometry)
+        if (UseJplAstrometry)
         {
-            _ = PrefillGuidedModeAsync();
+            _ = RefreshAstrometryStateAsync();
         }
     }
     

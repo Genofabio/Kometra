@@ -68,8 +68,22 @@ public class AlignmentService : IAlignmentService
     // ====================================================================
     if (target == AlignmentTarget.Stars)
     {
-        if (n < 2) return guesses;
+        // MODIFICA QUI: Se abbiamo punti in input (dal WCS), usiamo quelli!
+        // Controlliamo se la lista guesses è valida e piena
+        if (guesses != null && guesses.Count == n && guesses.All(g => g.HasValue))
+        {
+            // Copia diretta. L'astrometria ha già calcolato tutto.
+            for(int i=0; i<n; i++) 
+            {
+                results[i] = guesses[i];
+                progress?.Report((i, guesses[i]));
+            }
+            return results;
+        }
 
+        // --- FALLBACK: ALLINEAMENTO VISUALE (FFT) ---
+        // (Tutto il codice vecchio con ComputeStarFieldShift rimane qui come else)
+        if (n < 2) return guesses;
         Point masterCenter;
         Mat? prevMat = null;
 
