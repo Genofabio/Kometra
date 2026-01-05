@@ -1,6 +1,7 @@
 ﻿using System.Collections.Generic;
 using System.Threading.Tasks;
 using Avalonia.Controls;
+using KomaLab.ViewModels;
 
 namespace KomaLab.Services.UI;
 
@@ -19,4 +20,6 @@ public interface IWindowService
     /// Apre la finestra di allineamento per il nodo specificato.
     /// </summary>
     Task<List<string>?> ShowAlignmentWindowAsync(List<string> sourcePaths);
+    
+    Task<nom.tam.fits.Header?> ShowHeaderEditorAsync(ImageNodeViewModel node);
 }

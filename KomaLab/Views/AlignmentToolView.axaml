@@ -160,7 +160,7 @@
                     </StackPanel>
                     
                     <StackPanel Spacing="5" IsVisible="{Binding IsCoordinateListVisible}">
-                        <TextBlock Text="Rifinatura Manuale" FontSize="16" FontWeight="Bold"/>
+                        <TextBlock Text="Rifinitura Manuale" FontSize="16" FontWeight="Bold"/>
                         <TextBlock TextWrapping="Wrap" Opacity="0.7" Margin="0,6,0,0"><Run>I centri sono stati calcolati. Clicca sull'immagine per modificare manualmente la posizione.</Run></TextBlock>
                         
                         <Separator Margin="0,9, 0, 8"/>

@@ -15,6 +15,7 @@ using KomaLab.Services.Factories;
 using KomaLab.Services.Imaging;
 using KomaLab.Services.UI;
 using KomaLab.Services.Undo;
+using KomaLab.ViewModels.Helpers;
 
 namespace KomaLab.ViewModels;
 
@@ -33,7 +34,18 @@ public partial class BoardViewModel : ObservableObject
     [ObservableProperty] private double _offsetY;
     [ObservableProperty] private double _scale = 0.46;
     [ObservableProperty] private Rect _viewBounds;
-    [ObservableProperty] private BaseNodeViewModel? _selectedNode;
+    
+    [ObservableProperty] 
+    [NotifyCanExecuteChangedFor(nameof(ResetNormalizationCommand))]
+    [NotifyCanExecuteChangedFor(nameof(ResetNodeViewCommand))]
+    [NotifyCanExecuteChangedFor(nameof(ShowAlignmentWindowCommand))]
+    [NotifyCanExecuteChangedFor(nameof(StackImagesCommand))]
+    [NotifyCanExecuteChangedFor(nameof(SaveSelectedNodeCommand))]
+    [NotifyCanExecuteChangedFor(nameof(SaveVideoCommand))]
+    [NotifyCanExecuteChangedFor(nameof(ToggleNodeAnimationCommand))]
+    [NotifyCanExecuteChangedFor(nameof(EditSelectedNodeHeaderCommand))] // <-- NUOVO: Aggiorna lo stato del comando Header
+    private BaseNodeViewModel? _selectedNode;
+    
     public bool IsGlobalAnimationRunning => 
         Nodes.OfType<MultipleImagesNodeViewModel>().Any(n => n.IsAnimating);
     
@@ -261,6 +273,31 @@ public partial class BoardViewModel : ObservableObject
         }
     }
     private bool CanResetNodeView() => SelectedNode is ImageNodeViewModel;
+
+    // --- NUOVO COMANDO: EDITOR HEADER ---
+    [RelayCommand(CanExecute = nameof(CanEditHeader))]
+    private async Task EditSelectedNodeHeader()
+    {
+        if (SelectedNode is ImageNodeViewModel imgNode)
+        {
+            // Passiamo l'intero nodo al servizio finestra
+            var updatedHeader = await _windowService.ShowHeaderEditorAsync(imgNode);
+
+            if (updatedHeader != null && imgNode.ActiveRenderer != null)
+            {
+                imgNode.ActiveRenderer.Data.FitsHeader = updatedHeader;
+                Debug.WriteLine("Header aggiornato.");
+            }
+        }
+    }
+
+    private bool CanEditHeader()
+    {
+        // Abilitato solo se è selezionato un nodo immagine valido
+        if (SelectedNode is ImageNodeViewModel) return true;
+        if (SelectedNode is MultipleImagesNodeViewModel m) return m.ImagePaths.Count > 0;
+        return false;
+    }
 
     // --- LOGICA ALLINEAMENTO ---
     [RelayCommand(CanExecute = nameof(CanShowAlignmentWindow))]

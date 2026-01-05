@@ -2,78 +2,78 @@
 using System.Globalization;
 using nom.tam.fits;
 using System.Diagnostics;
-using KomaLab.Models;
+using KomaLab.Models; // Assicurati che GeographicLocation sia qui
 
 namespace KomaLab.Services.Astrometry;
 
 public static class FitsMetadataReader
 {
-    private static readonly string[] LatKeys = { "SITELAT", "LATITUDE", "LAT-OBS", "TELESCOP_LAT", "OBSGEO-B", "GEOLAT", "GEO_LAT" };
-    private static readonly string[] LonKeys = { "SITELONG", "LONGITUD", "LONG-OBS", "TELESCOP_LON", "SITELON", "OBSGEO-L", "GEOLON", "GEO_LON" };
+    // Definiamo i token da cercare (non le chiavi esatte, ma parti uniche)
+    private static readonly string[] LatTokens = { "SITELAT", "LATITUDE", "LAT-OBS", "GEOLAT", "GEO_LAT", "OBSGEO-B" };
+    private static readonly string[] LonTokens = { "SITELONG", "LONGITUD", "LONG-OBS", "GEOLON", "GEO_LON", "OBSGEO-L" };
 
     public static GeographicLocation? ReadObservatoryLocation(Header header)
     {
-        double? lat = ScanHeaderByIndex(header, LatKeys);
-        double? lon = ScanHeaderByIndex(header, LonKeys);
+        // Usiamo la ricerca "Smart" che gestisce HIERARCH e chiavi strane
+        double? lat = FindFuzzyValue(header, LatTokens);
+        double? lon = FindFuzzyValue(header, LonTokens);
 
         if (!lat.HasValue || !lon.HasValue) 
         {
-            Debug.WriteLine("[FitsMetadata] ❌ GPS non trovato (scan completo).");
             return null;
         }
 
+        // Cerchiamo l'altitudine (opzionale)
         double altKm = 0.5;
-        double? altMeters = GetDoubleOrNull(header, "ALTI-OBS") ?? 
-                            GetDoubleOrNull(header, "SITEELEV") ?? 
-                            GetDoubleOrNull(header, "ELEVATIO") ??
-                            ScanHeaderByIndex(header, new[] { "GEOELEV", "ELEVATION" });
-
+        double? altMeters = FindFuzzyValue(header, new[] { "ALTI-OBS", "SITEELEV", "ELEVATIO", "GEOELEV", "ELEVATION" });
+        
         if (altMeters.HasValue) altKm = altMeters.Value / 1000.0;
 
         return new GeographicLocation(lat.Value, lon.Value, altKm);
     }
 
-    private static double? ScanHeaderByIndex(Header header, string[] searchTokens)
+    /// <summary>
+    /// Cerca nell'header un valore numerico associato a una chiave che CONTIENE uno dei token.
+    /// Risolve il problema delle chiavi "HIERARCH CAHA TEL GEOLAT".
+    /// </summary>
+    public static double? FindFuzzyValue(Header header, string[] searchTokens)
     {
-        // Iterazione sicura per indice
-        int cardCount = header.NumberOfCards;
-        
-        for (int i = 0; i < cardCount; i++)
+        var cursor = header.GetCursor();
+        while (cursor.MoveNext())
         {
-            var card = header.GetCard(i);
-            if (card == null) continue;
+            // Otteniamo la chiave e il valore in modo sicuro
+            string key = "";
+            string value = "";
 
-            string rawCard = card.ToString().ToUpper();
+            if (cursor.Current is HeaderCard hc) 
+            { 
+                key = hc.Key; value = hc.Value; 
+            }
+            else if (cursor.Current is System.Collections.DictionaryEntry de && de.Value is HeaderCard hcd) 
+            { 
+                key = hcd.Key; value = hcd.Value; 
+            }
 
+            if (string.IsNullOrEmpty(key)) continue;
+
+            // Normalizziamo la chiave
+            string keyUpper = key.ToUpper();
+
+            // Controlliamo se la chiave contiene uno dei nostri token (es. "HIERARCH...GEOLAT" contiene "GEOLAT")
             foreach (var token in searchTokens)
             {
-                if (rawCard.Contains(token))
+                if (keyUpper.Contains(token))
                 {
-                    return ExtractNumberFromRawCard(rawCard);
+                    // Proviamo a parsare il valore
+                    double? result = ParseCoordinateString(value);
+                    if (result.HasValue) return result;
                 }
             }
         }
         return null;
     }
 
-    private static double? ExtractNumberFromRawCard(string rawCard)
-    {
-        int eqIndex = rawCard.IndexOf('=');
-        if (eqIndex == -1) return null;
-
-        string valuePart = rawCard.Substring(eqIndex + 1);
-        int slashIndex = valuePart.IndexOf('/');
-        if (slashIndex > -1) valuePart = valuePart.Substring(0, slashIndex);
-
-        return ParseCoordinateString(valuePart.Trim());
-    }
-
-    private static double? GetDoubleOrNull(Header header, string key)
-    {
-        string val = header.GetStringValue(key);
-        return ParseCoordinateString(val);
-    }
-
+    // --- Metodi di parsing esistenti (invariati) ---
     public static double? ParseCoordinateString(string input)
     {
         if (string.IsNullOrWhiteSpace(input)) return null;

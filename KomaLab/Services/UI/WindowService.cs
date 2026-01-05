@@ -67,4 +67,27 @@ public class WindowService : IWindowService
     
         return null; 
     }
+    
+    public async Task<nom.tam.fits.Header?> ShowHeaderEditorAsync(ImageNodeViewModel node)
+    {
+        if (_mainWindow == null) return null;
+        var editorVm = new HeaderEditorViewModel(node);
+        
+        // 2. Crea la View
+        var editorView = new KomaLab.Views.HeaderEditorView
+        {
+            DataContext = editorVm
+        };
+
+        // 3. Mostra Dialog
+        await editorView.ShowDialog(_mainWindow);
+
+        // 4. Se salvato, restituisci l'header aggiornato
+        if (editorView.IsSaved)
+        {
+            return editorVm.GetUpdatedHeader();
+        }
+        
+        return null; // Annullato
+    }
 }

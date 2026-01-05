@@ -68,6 +68,14 @@
         </MenuItem>
         
         <MenuItem Header="_Modifica">
+            <MenuItem Header="Editor Header / Metadati..."
+                      Classes="innerMenuItem"
+                      Command="{Binding BoardVm.EditSelectedNodeHeaderCommand}">
+                <MenuItem.Icon>
+                    <avalonia:MaterialIcon Kind="FileDocumentEdit" />
+                </MenuItem.Icon>
+            </MenuItem>
+            
             <MenuItem Header="Allinea..."
                       Classes="innerMenuItem"
                       Command="{Binding BoardVm.ShowAlignmentWindowCommand}">
