@@ -307,6 +307,8 @@ public partial class BoardViewModel : ObservableObject
     
     // --- CAMBIO MODALITÀ VISUALIZZAZIONE ---
     
+    // --- CAMBIO MODALITÀ VISUALIZZAZIONE ---
+    
     [RelayCommand(CanExecute = nameof(CanSetVisualizationMode))]
     private void SetVisualizationMode(VisualizationMode mode)
     {
@@ -314,13 +316,23 @@ public partial class BoardViewModel : ObservableObject
         {
             // Applica la modalità al nodo selezionato
             imgNode.VisualizationMode = mode;
+            
+            // IMPORTANTE:
+            // Anche se il RelayCommand lancia automaticamente CanExecuteChanged dopo l'esecuzione,
+            // forziamolo per sicurezza per aggiornare istantaneamente lo stato dei menu.
+            SetVisualizationModeCommand.NotifyCanExecuteChanged();
         }
     }
 
     private bool CanSetVisualizationMode(VisualizationMode mode)
     {
-        // Abilitato solo se è selezionato un nodo di tipo immagine
-        return SelectedNode is ImageNodeViewModel;
+        // 1. Deve esserci un nodo immagine selezionato
+        if (SelectedNode is not ImageNodeViewModel imgNode) return false;
+
+        // 2. Il menu è abilitato SOLO se la modalità richiesta è DIVERSA da quella attuale.
+        // Esempio: Se sono in "Linear", il tasto "Linear" restituisce false (disabilitato),
+        // mentre "Logarithmic" restituisce true (abilitato).
+        return imgNode.VisualizationMode != mode;
     }
 
     // --- LOGICA ALLINEAMENTO ---

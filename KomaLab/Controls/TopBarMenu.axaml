@@ -133,7 +133,7 @@
                     <avalonia:MaterialIcon Kind="EyeSettings" />
                 </MenuItem.Icon>
 
-                <MenuItem Header="Lineare (Standard)"
+                <MenuItem Header="Lineare"
                           Command="{Binding BoardVm.SetVisualizationModeCommand}"
                           CommandParameter="{x:Static models:VisualizationMode.Linear}">
                     <MenuItem.Icon>
