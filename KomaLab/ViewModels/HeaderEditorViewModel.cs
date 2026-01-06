@@ -1,70 +1,65 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.Diagnostics;
 using System.Linq;
-using System.Threading;       // Necessario per CancellationToken
-using System.Threading.Tasks; // Necessario per Task.Run
+using System.Threading;
+using System.Threading.Tasks;
 using Avalonia.Media;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using nom.tam.fits;
 using KomaLab.Models;
-using KomaLab.Services.Astrometry; // FONDAMENTALE: Usa i servizi esistenti
+using KomaLab.Services.Astrometry;
 
 namespace KomaLab.ViewModels;
 
 public partial class HeaderEditorViewModel : ObservableObject
 {
     private readonly ImageNodeViewModel _sourceNode;
-    
-    // Lista master di tutti gli elementi (non filtrata)
     private readonly List<FitsHeaderItem> _allItems = new();
-
-    // Token per gestire l'annullamento dei calcoli semaforici (Race Condition Fix)
     private CancellationTokenSource? _healthCheckCts;
 
-    // Collezione visualizzata nella DataGrid
-    public ObservableCollection<FitsHeaderItem> FilteredItems { get; } = new();
+    // --- COLORI SPECIFICI RICHIESTI ---
+    private static readonly IBrush SuccessBrush = new SolidColorBrush(Color.Parse("#03A077")); // Verde
+    private static readonly IBrush ErrorBrush = new SolidColorBrush(Color.Parse("#E6606A"));   // Rosso
+    private static readonly IBrush PendingBrush = new SolidColorBrush(Color.Parse("#808080")); // Grigio
 
-    // Selezione corrente (per scroll automatico ed eliminazione)
+    [ObservableProperty] 
+    private ObservableCollection<FitsHeaderItem> _filteredItems = new();
+
     [ObservableProperty] private FitsHeaderItem? _selectedItem;
 
-    // --- INFO FILE E NAVIGAZIONE ---
     [ObservableProperty] private string _currentFileName = "N/A";
     [ObservableProperty] private string _imageCounterText = "";
     [ObservableProperty] private bool _isMultipleImages;
-    
-    // --- RICERCA ---
     [ObservableProperty] private string _searchText = "";
     partial void OnSearchTextChanged(string value) => ApplyFilter();
 
-    // --- SEMAFORI (Stato Metadati) ---
-    [ObservableProperty] private IBrush _dateStatusColor = Brushes.Gray;
-    [ObservableProperty] private string _dateStatusText = "Verifica in corso...";
+    // --- STATO SEMAFORI ---
+    [ObservableProperty] private bool _isChecking = false; // Gestisce la visibilità dello stato "in corso"
+
+    [ObservableProperty] private IBrush _dateStatusColor = PendingBrush;
+    [ObservableProperty] private string _dateStatusText = "In attesa...";
     
-    [ObservableProperty] private IBrush _locationStatusColor = Brushes.Gray;
-    [ObservableProperty] private string _locationStatusText = "Verifica in corso...";
+    [ObservableProperty] private IBrush _locationStatusColor = PendingBrush;
+    [ObservableProperty] private string _locationStatusText = "In attesa...";
     
-    [ObservableProperty] private IBrush _wcsStatusColor = Brushes.Gray;
-    [ObservableProperty] private string _wcsStatusText = "Verifica in corso...";
+    [ObservableProperty] private IBrush _wcsStatusColor = PendingBrush;
+    [ObservableProperty] private string _wcsStatusText = "In attesa...";
 
     public HeaderEditorViewModel(ImageNodeViewModel sourceNode)
     {
         _sourceNode = sourceNode;
         IsMultipleImages = _sourceNode is MultipleImagesNodeViewModel;
-        
-        // Attiva supporto per chiavi lunghe (es. HIERARCH CAHA TEL GEOLAT)
         FitsFactory.UseHierarch = true; 
-
-        // Sottoscrizione eventi per cambio immagine
-        _sourceNode.PropertyChanged += OnSourceNodePropertyChanged;
         
+        _sourceNode.PropertyChanged += OnSourceNodePropertyChanged;
         LoadCurrentHeader();
     }
 
     private void OnSourceNodePropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
     {
-        // Se cambia l'immagine attiva o l'indice dello stack, ricarichiamo tutto
         if (e.PropertyName == nameof(ImageNodeViewModel.ActiveRenderer) || 
             e.PropertyName == "CurrentIndex" || 
             e.PropertyName == "CurrentImageText")
@@ -73,298 +68,206 @@ public partial class HeaderEditorViewModel : ObservableObject
         }
     }
 
-    /// <summary>
-    /// Legge l'header FITS dall'immagine corrente e popola la lista.
-    /// </summary>
-    private void LoadCurrentHeader()
+    private async void LoadCurrentHeader()
     {
+        // 1. Reset visuale immediato
+        IsChecking = true;
+        ResetStatusToWaiting(); 
+
+        FitsFactory.UseHierarch = true;
         var renderer = _sourceNode.ActiveRenderer;
         var header = renderer?.Data?.FitsHeader;
 
-        // 1. Aggiorna Info File UI
-        if (_sourceNode is SingleImageNodeViewModel single)
-        {
-            CurrentFileName = single.Title ?? "N/A";
-            ImageCounterText = "1 / 1";
-        }
-        else if (_sourceNode is MultipleImagesNodeViewModel multi)
-        {
+        // Gestione Info File
+        if (_sourceNode is SingleImageNodeViewModel single) { CurrentFileName = single.Title ?? "N/A"; ImageCounterText = "1 / 1"; }
+        else if (_sourceNode is MultipleImagesNodeViewModel multi) 
+        { 
             int idx = multi.CurrentIndex;
-            if (idx >= 0 && idx < multi.ImagePaths.Count)
-                CurrentFileName = System.IO.Path.GetFileName(multi.ImagePaths[idx]);
-            ImageCounterText = multi.CurrentImageText;
+            if (idx >= 0 && idx < multi.ImagePaths.Count) CurrentFileName = System.IO.Path.GetFileName(multi.ImagePaths[idx]);
+            ImageCounterText = multi.CurrentImageText; 
         }
 
-        // 2. Caricamento Dati in Lista
-        _allItems.Clear();
-        if (header != null)
+        if (header == null)
         {
+            _allItems.Clear();
+            ApplyFilter();
+            IsChecking = false;
+            return; 
+        }
+
+        // 2. Caricamento e pulizia dati in Background
+        var parsedItems = await Task.Run(() => 
+        {
+            var tempList = new List<FitsHeaderItem>();
             var cursor = header.GetCursor();
+            
             while (cursor.MoveNext())
             {
                 nom.tam.fits.HeaderCard? card = null;
-                
-                // Gestione robusta del cursore (può essere HeaderCard o DictionaryEntry)
                 if (cursor.Current is nom.tam.fits.HeaderCard hc) card = hc;
                 else if (cursor.Current is System.Collections.DictionaryEntry de && de.Value is nom.tam.fits.HeaderCard hcd) card = hcd;
 
                 if (card != null && !string.IsNullOrWhiteSpace(card.Key))
                 {
-                    _allItems.Add(new FitsHeaderItem
+                    // FIX HIERARCH: Gestisce chiavi malformate o senza spazi
+                    if (card.Key.Trim().ToUpper() == "HIERARCH")
                     {
-                        Key = card.Key,
-                        Value = card.Value ?? "",
-                        Comment = card.Comment ?? "",
-                        IsReadOnly = IsSystemKey(card.Key),
-                        IsModified = false
-                    });
+                        string raw = card.ToString();
+                        int eqIndex = raw.IndexOf('=');
+                        if (eqIndex > 8)
+                        {
+                            string realKey = raw.Substring(0, eqIndex).Trim();
+                            // Inserisce spazio se manca (HIERARCHCAHA -> HIERARCH CAHA)
+                            if (realKey.Length > 8 && !char.IsWhiteSpace(realKey[8])) 
+                                realKey = realKey.Insert(8, " ");
+
+                            string valPart = raw.Substring(eqIndex + 1).Trim();
+                            string realValue = valPart;
+                            string realComment = "";
+
+                            int slashIndex = valPart.IndexOf('/');
+                            if (slashIndex >= 0)
+                            {
+                                realValue = valPart.Substring(0, slashIndex).Trim();
+                                realComment = valPart.Substring(slashIndex + 1).Trim();
+                            }
+                            realValue = realValue.Replace("'", "");
+
+                            tempList.Add(new FitsHeaderItem { Key = realKey, Value = realValue, Comment = realComment, IsModified = false });
+                            continue;
+                        }
+                    }
+
+                    // FIX PUNTI: Sostituisce i punti con spazi nelle chiavi HIERARCH
+                    string displayKey = card.Key;
+                    if (displayKey.Contains(".")) displayKey = displayKey.Replace(".", " ");
+
+                    tempList.Add(new FitsHeaderItem { Key = displayKey, Value = card.Value ?? "", Comment = card.Comment ?? "", IsReadOnly = IsSystemKey(displayKey), IsModified = false });
                 }
             }
-        }
+            return tempList;
+        });
 
-        // 3. Aggiorna Vista e Stato
+        // 3. Aggiornamento UI
+        _allItems.Clear();
+        _allItems.AddRange(parsedItems);
         ApplyFilter();
-        
-        // Avvia il check asincrono dei semafori
+
+        // 4. Analisi semafori
         RefreshHealthCheck();
     }
 
-    /// <summary>
-    /// Analizza l'header per verificare la presenza di dati critici (Data, Luogo, WCS).
-    /// Eseguito in ASINCRONO per non bloccare la UI e prevenire Race Conditions.
-    /// </summary>
-    /// <summary>
-    /// Analizza l'header per verificare la presenza di dati critici.
-    /// Resetta lo stato visivo PRIMA di iniziare il calcolo per evitare confusione.
-    /// </summary>
     public async void RefreshHealthCheck()
     {
-        // 1. STOP AI CALCOLI VECCHI
         _healthCheckCts?.Cancel();
         _healthCheckCts = new CancellationTokenSource();
         var token = _healthCheckCts.Token;
 
-        // 2. RESET VISIVO IMMEDIATO (Fix del problema "Rosso che diventa Verde")
-        // Appena inizia il check, impostiamo tutto a "Grigio/Verifica..."
-        // Così l'utente non vede mai i risultati dell'immagine precedente su quella nuova.
-        DateStatusColor = Brushes.Gray;
-        DateStatusText = "Verifica in corso...";
-        
-        LocationStatusColor = Brushes.Gray;
-        LocationStatusText = "Verifica in corso...";
-        
-        WcsStatusColor = Brushes.Gray;
-        WcsStatusText = "Verifica in corso...";
+        IsChecking = true;
 
         try
         {
-            // 3. SNAPSHOT DATI (Veloce, sul thread UI)
-            var headerSnapshot = GetUpdatedHeader();
+            await Task.Delay(100, token); // Debounce
 
-            // 4. CALCOLO BACKGROUND (Pesante, non blocca la UI)
+            if (_allItems.Count == 0) 
+            {
+                IsChecking = false;
+                ResetStatusToWaiting();
+                return;
+            }
+
+            // Snapshot sicuro per thread secondario
+            var itemsSnapshot = _allItems.Select(x => new { x.Key, x.Value, x.Comment }).ToList();
+
             var result = await Task.Run(() => 
             {
                 token.ThrowIfCancellationRequested();
                 var status = new HealthCheckResult();
 
-                // --- A. DATA ---
-                string? dateVal = headerSnapshot.GetStringValue("DATE-OBS");
-                if (string.IsNullOrWhiteSpace(dateVal)) dateVal = headerSnapshot.GetStringValue("DATE");
+                // Helper locale robusto che usa la stessa logica "Fuzzy" del Service
+                // ma applicata alla lista visuale (per vedere le modifiche in tempo reale)
+                string? FindValue(string[] tokens)
+                {
+                    foreach (var item in itemsSnapshot)
+                    {
+                        string k = item.Key.ToUpper().Trim();
+                        // Ignora chiavi commento per evitare falsi positivi
+                        if (k == "COMMENT" || k == "HISTORY" || k == "HIERARCH") continue;
+
+                        foreach (var t in tokens)
+                        {
+                            // "HIERARCH CAHA TEL GEOLAT" contiene "GEOLAT" -> TROVATO
+                            if (k.Contains(t)) 
+                            {
+                                if (!string.IsNullOrWhiteSpace(item.Value)) return item.Value;
+                            }
+                        }
+                    }
+                    return null;
+                }
+
+                // 1. DATA
+                string? dateVal = FindValue(new[] { "DATE-OBS", "DATE" });
+                if (DateTime.TryParse(dateVal, out DateTime dt)) status.DateMsg = $"Acquisizione: {dt:yyyy-MM-dd HH:mm:ss}";
+                else status.DateError = "Timestamp mancante (DATE-OBS/DATE).";
+
+                token.ThrowIfCancellationRequested();
+
+                // 2. LUOGO
+                string? latStr = FindValue(new[] { "SITELAT", "LATITUDE", "LAT-OBS", "GEOLAT", "GEO_LAT", "OBSGEO-B" });
+                string? lonStr = FindValue(new[] { "SITELONG", "LONGITUD", "LONG-OBS", "GEOLON", "GEO_LON", "OBSGEO-L" });
                 
-                if (DateTime.TryParse(dateVal, out DateTime dt))
-                    status.DateMsg = $"Acquisizione: {dt:yyyy-MM-dd HH:mm:ss}";
-                else
-                    status.DateError = "Timestamp mancante (DATE-OBS/DATE).";
+                // Usiamo il parser robusto del servizio
+                double? lat = FitsMetadataReader.ParseCoordinateString(latStr);
+                double? lon = FitsMetadataReader.ParseCoordinateString(lonStr);
+
+                if (lat.HasValue && lon.HasValue) status.LocMsg = $"Lat: {lat:F4}, Lon: {lon:F4}";
+                else if (latStr != null && lonStr != null) status.LocMsg = $"Trovati (Raw): {latStr} / {lonStr}";
+                else status.LocError = "Coordinate geografiche non trovate.";
 
                 token.ThrowIfCancellationRequested();
 
-                // --- B. LUOGO ---
-                var loc = FitsMetadataReader.ReadObservatoryLocation(headerSnapshot);
-                if (loc != null)
-                    status.LocMsg = $"Lat: {loc.Latitude:F4}, Lon: {loc.Longitude:F4}";
-                else
-                    status.LocError = "Coordinate geografiche non trovate.";
-
-                token.ThrowIfCancellationRequested();
-
-                // --- C. WCS ---
-                var wcs = WcsHeaderParser.Parse(headerSnapshot);
-                if (wcs.IsValid)
-                    status.WcsMsg = $"Soluzione valida ({wcs.ProjectionType}).";
-                else
-                    status.WcsError = "Soluzione astrometrica incompleta.";
+                // 3. WCS
+                bool hasCrval = FindValue(new[] { "CRVAL1" }) != null;
+                bool hasCtype = FindValue(new[] { "CTYPE1" }) != null;
+                if (hasCrval && hasCtype) status.WcsMsg = "Soluzione valida (WCS rilevato).";
+                else status.WcsError = "Soluzione astrometrica incompleta.";
 
                 return status;
 
             }, token);
 
-            // 5. APPLICAZIONE RISULTATI
-            // Se nel frattempo l'utente ha cambiato ancora immagine, 'token' sarà cancellato
-            // e noi non aggiorneremo la UI con dati vecchi.
             if (token.IsCancellationRequested) return;
 
-            // Applica Data
-            if (result.DateError == null) 
-            { 
-                DateStatusColor = Brushes.LightGreen; 
-                DateStatusText = result.DateMsg!; 
-            }
-            else 
-            { 
-                DateStatusColor = Brushes.IndianRed; 
-                DateStatusText = result.DateError; 
-            }
+            IsChecking = false;
 
-            // Applica Luogo
-            if (result.LocError == null) 
-            { 
-                LocationStatusColor = Brushes.LightGreen; 
-                LocationStatusText = result.LocMsg!; 
-            }
-            else 
-            { 
-                LocationStatusColor = Brushes.IndianRed; 
-                LocationStatusText = result.LocError; 
-            }
+            // --- APPLICAZIONE COLORI ---
+            if (result.DateError == null) { DateStatusColor = SuccessBrush; DateStatusText = result.DateMsg!; }
+            else { DateStatusColor = ErrorBrush; DateStatusText = result.DateError; }
 
-            // Applica WCS
-            if (result.WcsError == null) 
-            { 
-                WcsStatusColor = Brushes.LightGreen; 
-                WcsStatusText = result.WcsMsg!; 
-            }
-            else 
-            { 
-                WcsStatusColor = Brushes.IndianRed; 
-                WcsStatusText = result.WcsError; 
-            }
+            if (result.LocError == null) { LocationStatusColor = SuccessBrush; LocationStatusText = result.LocMsg!; }
+            else { LocationStatusColor = ErrorBrush; LocationStatusText = result.LocError; }
 
+            if (result.WcsError == null) { WcsStatusColor = SuccessBrush; WcsStatusText = result.WcsMsg!; }
+            else { WcsStatusColor = ErrorBrush; WcsStatusText = result.WcsError; }
         }
-        catch (OperationCanceledException)
-        {
-            // Normale: un nuovo calcolo ha interrotto questo.
-            // L'interfaccia rimarrà "Grigia" finché il nuovo calcolo non finisce.
-        }
+        catch (OperationCanceledException) { }
         catch (Exception ex)
         {
-            // Errore imprevisto
-            System.Diagnostics.Debug.WriteLine($"[HealthCheck] Error: {ex.Message}");
-            DateStatusColor = Brushes.IndianRed;
-            DateStatusText = "Errore durante la verifica.";
+            IsChecking = false;
+            Debug.WriteLine($"[HealthCheck] Error: {ex.Message}");
         }
     }
 
-    /// <summary>
-    /// Rigenera un oggetto Header FITS valido a partire dai dati nella griglia.
-    /// Include protezione contro crash per dati malformati.
-    /// </summary>
-    public Header GetUpdatedHeader()
+    private void ResetStatusToWaiting()
     {
-        FitsFactory.UseHierarch = true;
-        var newHeader = new Header();
-        
-        // Copia le chiavi di sistema originali (SIMPLE, BITPIX, NAXIS...)
-        var activeHeader = _sourceNode.ActiveRenderer?.Data?.FitsHeader;
-        if (activeHeader != null)
-        {
-            var cursor = activeHeader.GetCursor();
-            while (cursor.MoveNext())
-            {
-                if (cursor.Current is HeaderCard hc && IsSystemKey(hc.Key))
-                    newHeader.AddCard(hc);
-            }
-        }
-
-        // Aggiungi le righe utente
-        foreach (var item in _allItems)
-        {
-            // Salta chiavi sistema o vuote
-            if (IsSystemKey(item.Key) || string.IsNullOrWhiteSpace(item.Key)) continue;
-
-            try
-            {
-                // Tenta di salvare come numero (per precisione)
-                if (double.TryParse(item.Value, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out double dVal))
-                {
-                    newHeader.AddValue(item.Key, dVal, item.Comment);
-                }
-                else
-                {
-                    // Altrimenti salva come stringa
-                    newHeader.AddValue(item.Key, item.Value ?? "", item.Comment);
-                }
-            }
-            catch (Exception)
-            {
-                // Fallback di emergenza: se la riga è corrotta, salvala come testo semplice o saltala
-                // Questo previene il crash dell'intera applicazione
-                try { newHeader.AddValue(item.Key, item.Value ?? "ERR", "Error saving row"); } catch { }
-            }
-        }
-        return newHeader;
+        DateStatusColor = PendingBrush; DateStatusText = "Analisi in corso...";
+        LocationStatusColor = PendingBrush; LocationStatusText = "Analisi in corso...";
+        WcsStatusColor = PendingBrush; WcsStatusText = "Analisi in corso...";
     }
-
-    // --- COMANDI UI ---
-
-    [RelayCommand]
-    private void AddNewKey()
-    {
-        // Usa il testo di ricerca come nome chiave, se presente
-        string newKeyName = !string.IsNullOrWhiteSpace(SearchText) ? SearchText.Trim().ToUpper() : "NEW_KEY";
-
-        var newItem = new FitsHeaderItem 
-        { 
-            Key = newKeyName, 
-            Value = "0", 
-            Comment = "Manuale", 
-            IsModified = true 
-        };
-        
-        SearchText = ""; // Pulisce la ricerca per mostrare tutto
-
-        // Inserimento "Intelligente": Prima della chiave END
-        var endItem = _allItems.FirstOrDefault(x => x.Key.Trim().ToUpper() == "END");
-        if (endItem != null) 
-            _allItems.Insert(_allItems.IndexOf(endItem), newItem);
-        else 
-            _allItems.Add(newItem);
-        
-        ApplyFilter(); 
-        SelectedItem = newItem; // Scroll automatico
-        RefreshHealthCheck();   // Aggiorna semafori
-    }
-    
-    [RelayCommand]
-    private void DeleteRow()
-    {
-        var item = SelectedItem;
-        if (item == null || item.IsReadOnly) return;
-
-        if (_allItems.Contains(item)) _allItems.Remove(item);
-        if (FilteredItems.Contains(item)) FilteredItems.Remove(item);
-        
-        RefreshHealthCheck(); // Aggiorna semafori
-    }
-
-    [RelayCommand]
-    private void NextImage()
-    {
-        if (_sourceNode is MultipleImagesNodeViewModel m && m.NextImageCommand.CanExecute(null)) 
-            m.NextImageCommand.Execute(null);
-    }
-
-    [RelayCommand]
-    private void PreviousImage()
-    {
-        if (_sourceNode is MultipleImagesNodeViewModel m && m.PreviousImageCommand.CanExecute(null)) 
-            m.PreviousImageCommand.Execute(null);
-    }
-
-    // --- LOGICA FILTRO E UTILS ---
 
     private void ApplyFilter()
     {
-        FilteredItems.Clear();
         var query = SearchText?.Trim();
         IEnumerable<FitsHeaderItem> results;
 
@@ -378,13 +281,61 @@ public partial class HeaderEditorViewModel : ObservableObject
                     (item.Comment?.Contains(query, StringComparison.OrdinalIgnoreCase) ?? false))
                 .OrderBy(item => 
                 {
-                    // Ordinamento rilevanza: Chiave > Valore > Commento
                     if (item.Key?.Contains(query, StringComparison.OrdinalIgnoreCase) == true) return 0;
-                    if (item.Value?.Contains(query, StringComparison.OrdinalIgnoreCase) == true) return 1;
                     return 2;
                 });
         }
-        foreach (var item in results) FilteredItems.Add(item);
+        FilteredItems = new ObservableCollection<FitsHeaderItem>(results);
+    }
+
+    public Header GetUpdatedHeader()
+    {
+        FitsFactory.UseHierarch = true;
+        var newHeader = new Header();
+        
+        var activeHeader = _sourceNode.ActiveRenderer?.Data?.FitsHeader;
+        if (activeHeader != null)
+        {
+            var cursor = activeHeader.GetCursor();
+            while (cursor.MoveNext())
+            {
+                if (cursor.Current is HeaderCard hc && IsSystemKey(hc.Key))
+                    newHeader.AddCard(hc);
+            }
+        }
+
+        foreach (var item in _allItems)
+        {
+            if (IsSystemKey(item.Key) || string.IsNullOrWhiteSpace(item.Key)) continue;
+            if (item.Key.Trim().ToUpper() == "END") continue;
+
+            try
+            {
+                string keyUpper = item.Key.Trim().ToUpper();
+
+                // COMMENT/HISTORY
+                if (keyUpper == "COMMENT" || keyUpper == "HISTORY")
+                {
+                    string text = $"{item.Value} {item.Comment}".Trim();
+                    newHeader.AddCard(new HeaderCard(keyUpper, null, text));
+                    continue;
+                }
+
+                // HIERARCH
+                string effectiveKey = item.Key;
+                if (keyUpper.StartsWith("HIERARCH ")) effectiveKey = item.Key.Substring(9).Trim();
+
+                // Inserimento Valore
+                if (double.TryParse(item.Value, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out double dVal))
+                    newHeader.AddValue(effectiveKey, dVal, item.Comment);
+                else if (bool.TryParse(item.Value, out bool bVal))
+                    newHeader.AddValue(effectiveKey, bVal, item.Comment);
+                else
+                    newHeader.AddValue(effectiveKey, item.Value ?? "", item.Comment);
+            }
+            catch (Exception ex) { Debug.WriteLine($"[Save] Skip: {ex.Message}"); }
+        }
+        return newHeader;
     }
 
     private bool IsSystemKey(string key)
@@ -392,15 +343,36 @@ public partial class HeaderEditorViewModel : ObservableObject
         var sysKeys = new[] { "SIMPLE", "BITPIX", "NAXIS", "NAXIS1", "NAXIS2", "EXTEND", "BSCALE", "BZERO" };
         return sysKeys.Contains(key.ToUpper());
     }
+
+    [RelayCommand]
+    private void AddNewKey()
+    {
+        string newKeyName = !string.IsNullOrWhiteSpace(SearchText) ? SearchText.Trim().ToUpper() : "NEW_KEY";
+        var newItem = new FitsHeaderItem { Key = newKeyName, Value = "0", Comment = "Manuale", IsModified = true };
+        SearchText = ""; 
+        _allItems.Add(newItem);
+        ApplyFilter(); 
+        SelectedItem = newItem;
+        RefreshHealthCheck();
+    }
     
-    // DTO privato per passaggio dati thread-safe
+    [RelayCommand]
+    private void DeleteRow()
+    {
+        var item = SelectedItem;
+        if (item == null || item.IsReadOnly) return;
+        _allItems.Remove(item);
+        ApplyFilter();
+        RefreshHealthCheck();
+    }
+
+    [RelayCommand] private void NextImage() { if (_sourceNode is MultipleImagesNodeViewModel m && m.NextImageCommand.CanExecute(null)) m.NextImageCommand.Execute(null); }
+    [RelayCommand] private void PreviousImage() { if (_sourceNode is MultipleImagesNodeViewModel m && m.PreviousImageCommand.CanExecute(null)) m.PreviousImageCommand.Execute(null); }
+
     private class HealthCheckResult
     {
-        public string? DateMsg;
-        public string? DateError;
-        public string? LocMsg;
-        public string? LocError;
-        public string? WcsMsg;
-        public string? WcsError;
+        public string? DateMsg; public string? DateError;
+        public string? LocMsg; public string? LocError;
+        public string? WcsMsg; public string? WcsError;
     }
 }

@@ -133,7 +133,11 @@
                                     <Ellipse Width="10" Height="10" Fill="{Binding DateStatusColor}" VerticalAlignment="Center"/>
                                     <TextBlock Text="Riferimento Temporale" FontWeight="SemiBold" FontSize="13" Foreground="White"/>
                                 </StackPanel>
-                                <TextBlock Text="{Binding DateStatusText}" FontSize="11" Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}" TextWrapping="Wrap" Margin="20,0,0,0"/>
+                                <TextBlock Text="{Binding DateStatusText}" 
+                                           FontSize="11" 
+                                           Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}" 
+                                           TextWrapping="Wrap" 
+                                           Margin="20,0,0,0"/>
                             </StackPanel>
                         </Border>
 
@@ -144,7 +148,11 @@
                                     <Ellipse Width="10" Height="10" Fill="{Binding LocationStatusColor}" VerticalAlignment="Center"/>
                                     <TextBlock Text="Geolocalizzazione Sito" FontWeight="SemiBold" FontSize="13" Foreground="White"/>
                                 </StackPanel>
-                                <TextBlock Text="{Binding LocationStatusText}" FontSize="11" Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}" TextWrapping="Wrap" Margin="20,0,0,0"/>
+                                <TextBlock Text="{Binding LocationStatusText}" 
+                                           FontSize="11" 
+                                           Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}" 
+                                           TextWrapping="Wrap" 
+                                           Margin="20,0,0,0"/>
                             </StackPanel>
                         </Border>
 
@@ -155,7 +163,11 @@
                                     <Ellipse Width="10" Height="10" Fill="{Binding WcsStatusColor}" VerticalAlignment="Center"/>
                                     <TextBlock Text="Soluzione Astrometrica" FontWeight="SemiBold" FontSize="13" Foreground="White"/>
                                 </StackPanel>
-                                <TextBlock Text="{Binding WcsStatusText}" FontSize="11" Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}" TextWrapping="Wrap" Margin="20,0,0,0"/>
+                                <TextBlock Text="{Binding WcsStatusText}" 
+                                           FontSize="11" 
+                                           Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}" 
+                                           TextWrapping="Wrap" 
+                                           Margin="20,0,0,0"/>
                             </StackPanel>
                         </Border>
                     </StackPanel>

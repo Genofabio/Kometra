@@ -153,6 +153,11 @@ Allineamento rispetto a campo stellare:
     
 Lettura header per time per ordinare caricamento immagini MultipleImageNode
 
+- Aggiunto HeaderEditor
+    Gestite chiavi con spazi
+    
+- Necessità di plate solving per inserire dati wcs
+    - 2 soluzioni: ASTAP (Locale), Astrometry.net (Online)
 
 
 
