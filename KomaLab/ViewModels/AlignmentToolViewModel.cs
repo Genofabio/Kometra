@@ -71,6 +71,17 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
 
     [ObservableProperty] private double _blackPoint;
     [ObservableProperty] private double _whitePoint;
+    
+    // --- NUOVO: Stato Visualizzazione ---
+    [ObservableProperty]
+    private VisualizationMode _visualizationMode = VisualizationMode.Linear;
+
+    // Se cambia (es. se mettessimo una combo anche qui), aggiorniamo l'immagine attiva
+    partial void OnVisualizationModeChanged(VisualizationMode value)
+    {
+        if (ActiveImage != null) ActiveImage.VisualizationMode = value;
+    }
+
     public string ZoomStatusText => $"{Viewport.Scale:P0}";
     public bool IsTargetMarkerVisible => TargetCoordinate.HasValue;
     
@@ -257,7 +268,8 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
         IFitsService fitsService,
         IAlignmentService alignmentService,
         IFitsDataConverter converter,      
-        IImageAnalysisService analysis)    
+        IImageAnalysisService analysis,
+        VisualizationMode initialMode = VisualizationMode.Linear) // <-- NUOVO PARAMETRO
     {
         _fitsService = fitsService;
         _alignmentService = alignmentService;
@@ -268,6 +280,9 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
         _totalStackCount = sourcePaths.Count;
         _currentStackIndex = 0;
         IsStack = _totalStackCount > 1;
+
+        // Impostiamo il modo ereditato dal nodo
+        _visualizationMode = initialMode;
 
         SelectedTarget = AlignmentTarget.Comet;
         SelectedMode = AlignmentMode.Automatic;
@@ -346,7 +361,16 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
 
         if (newRenderer == null) return;
 
-        if (_lastContrastProfile != null) newRenderer.ApplyContrastProfile(_lastContrastProfile);
+        // --- APPLICAZIONE STATO VISIVO ---
+        
+        // 1. Applica il modo di visualizzazione (Log, Sqrt, ecc.) ereditato o corrente
+        newRenderer.VisualizationMode = this.VisualizationMode;
+
+        // 2. Applica il profilo di contrasto (Slider)
+        if (_lastContrastProfile != null) 
+        {
+            newRenderer.ApplyContrastProfile(_lastContrastProfile);
+        }
         else
         {
             Viewport.ImageSize = newRenderer.ImageSize;
@@ -355,6 +379,8 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
         }
 
         ActiveImage = newRenderer;
+        
+        // Aggiorna slider UI
         BlackPoint = newRenderer.BlackPoint;
         WhitePoint = newRenderer.WhitePoint;
 
@@ -385,6 +411,7 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
 
     #region Comandi
 
+    // ... (Il resto dei comandi rimane invariato) ...
     [RelayCommand] private void ZoomIn() { Viewport.ZoomIn(); OnPropertyChanged(nameof(ZoomStatusText)); }
     [RelayCommand] private void ZoomOut() { Viewport.ZoomOut(); OnPropertyChanged(nameof(ZoomStatusText)); }
     [RelayCommand] private void ResetView() { Viewport.ResetView(); OnPropertyChanged(nameof(ZoomStatusText)); }
@@ -400,8 +427,7 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
     [RelayCommand(CanExecute = nameof(CanShowPrevious))] private async Task GoToFirstImage() => await NavigateToImage(0);
     [RelayCommand(CanExecute = nameof(CanShowNext))] private async Task GoToLastImage() => await NavigateToImage(_totalStackCount - 1);
     
-    // --- Allineamento ---
-    
+    // ... (Alignment Logic) ...
     [RelayCommand(CanExecute = nameof(CanCalculateCenters))]
     private async Task CalculateCenters()
     {

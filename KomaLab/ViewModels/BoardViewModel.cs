@@ -7,7 +7,6 @@ using System.Linq;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using Avalonia;
-using Avalonia.Controls.ApplicationLifetimes;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using KomaLab.Models;
@@ -16,8 +15,6 @@ using KomaLab.Services.Factories;
 using KomaLab.Services.Imaging;
 using KomaLab.Services.UI;
 using KomaLab.Services.Undo;
-using KomaLab.ViewModels.Helpers;
-using KomaLab.Views;
 
 namespace KomaLab.ViewModels;
 
@@ -45,9 +42,9 @@ public partial class BoardViewModel : ObservableObject
     [NotifyCanExecuteChangedFor(nameof(SaveSelectedNodeCommand))]
     [NotifyCanExecuteChangedFor(nameof(SaveVideoCommand))]
     [NotifyCanExecuteChangedFor(nameof(ToggleNodeAnimationCommand))]
-    [NotifyCanExecuteChangedFor(nameof(EditSelectedNodeHeaderCommand))] // <-- NUOVO: Aggiorna lo stato del comando Header
+    [NotifyCanExecuteChangedFor(nameof(EditSelectedNodeHeaderCommand))]
     [NotifyCanExecuteChangedFor(nameof(ShowPlateSolvingWindowCommand))]
-    [NotifyCanExecuteChangedFor(nameof(SetVisualizationModeCommand))]
+    [NotifyCanExecuteChangedFor(nameof(SetVisualizationModeCommand))] // <-- AGGIORNATO: Abilita il menu View -> Modalità
     private BaseNodeViewModel? _selectedNode;
     
     public bool IsGlobalAnimationRunning => 
@@ -140,12 +137,10 @@ public partial class BoardViewModel : ObservableObject
             "Rimuovi Nodo",
             execute: () =>
             {
-                // --- FIX 1: FERMARE L'ANIMAZIONE ---
-                // Se stiamo rimuovendo un nodo che sta riproducendo il video,
-                // dobbiamo fermarlo esplicitamente.
+                // FIX 1: FERMARE L'ANIMAZIONE
                 if (node is MultipleImagesNodeViewModel multiNode && multiNode.IsAnimating)
                 {
-                    multiNode.ToggleAnimation(); // Questo imposta IsAnimating = false e ferma il loop
+                    multiNode.ToggleAnimation(); 
                 }
 
                 if (SelectedNode == node) DeselectAllNodes();
@@ -156,9 +151,7 @@ public partial class BoardViewModel : ObservableObject
                 }
                 Nodes.Remove(node);
 
-                // --- FIX 2: AGGIORNARE LO STATO GLOBALE ---
-                // Notifichiamo alla UI che la lista dei nodi è cambiata e bisogna
-                // ricontrollare se c'è ancora qualcuno che sta animando.
+                // FIX 2: AGGIORNARE LO STATO GLOBALE
                 OnPropertyChanged(nameof(IsGlobalAnimationRunning));
                 ToggleNodeAnimationCommand.NotifyCanExecuteChanged();
             },
@@ -177,7 +170,6 @@ public partial class BoardViewModel : ObservableObject
                     }
                     SetSelectedNode(node);
                     
-                    // Anche quando facciamo UNDO (il nodo torna), aggiorniamo lo stato
                     OnPropertyChanged(nameof(IsGlobalAnimationRunning));
                     ToggleNodeAnimationCommand.NotifyCanExecuteChanged();
                 }
@@ -278,13 +270,12 @@ public partial class BoardViewModel : ObservableObject
     }
     private bool CanResetNodeView() => SelectedNode is ImageNodeViewModel;
 
-    // --- NUOVO COMANDO: EDITOR HEADER ---
+    // --- EDITOR HEADER ---
     [RelayCommand(CanExecute = nameof(CanEditHeader))]
     private async Task EditSelectedNodeHeader()
     {
         if (SelectedNode is ImageNodeViewModel imgNode)
         {
-            // Passiamo l'intero nodo al servizio finestra
             var updatedHeader = await _windowService.ShowHeaderEditorAsync(imgNode);
 
             if (updatedHeader != null && imgNode.ActiveRenderer != null)
@@ -297,33 +288,22 @@ public partial class BoardViewModel : ObservableObject
 
     private bool CanEditHeader()
     {
-        // Abilitato solo se è selezionato un nodo immagine valido
         if (SelectedNode is ImageNodeViewModel) return true;
         if (SelectedNode is MultipleImagesNodeViewModel m) return m.ImagePaths.Count > 0;
         return false;
     }
     
+    // --- PLATE SOLVING ---
     [RelayCommand(CanExecute = nameof(CanShowPlateSolving))]
     private async Task ShowPlateSolvingWindow()
     {
-        // 1. Verifica di sicurezza (anche se il CanExecute protegge già)
         if (SelectedNode is ImageNodeViewModel imgNode)
         {
-            // 2. Usiamo il WindowService per aprire la finestra
-            // Questo mantiene il ViewModel pulito da riferimenti alla View (Window)
             await _windowService.ShowPlateSolvingWindowAsync(imgNode);
-            
-            // Nota: Non serve fare altro qui. 
-            // Se il plate solving ha successo, ASTAP modifica il file su disco
-            // e il PlateSolvingViewModel notifica il reload dei dati.
         }
     }
 
-    private bool CanShowPlateSolving()
-    {
-        // Abilitato solo se è selezionato un nodo immagine (Singolo o Multiplo)
-        return SelectedNode is ImageNodeViewModel;
-    }
+    private bool CanShowPlateSolving() => SelectedNode is ImageNodeViewModel;
     
     // --- CAMBIO MODALITÀ VISUALIZZAZIONE ---
     
@@ -354,7 +334,12 @@ public partial class BoardViewModel : ObservableObject
             var inputPaths = await imgNode.PrepareInputPathsAsync(_fitsService);
             if (inputPaths.Count == 0) return;
 
-            var newPaths = await _windowService.ShowAlignmentWindowAsync(inputPaths);
+            // FIX ARCHITETTURALE: Passiamo il modo di visualizzazione corrente del Nodo
+            // in modo che la finestra di allineamento si apra coerente con ciò che vede l'utente.
+            var newPaths = await _windowService.ShowAlignmentWindowAsync(
+                inputPaths, 
+                imgNode.VisualizationMode 
+            );
 
             if (newPaths != null && newPaths.Count > 0)
             {
@@ -377,6 +362,12 @@ public partial class BoardViewModel : ObservableObject
                     var multiNode = await _nodeFactory.CreateMultipleImagesNodeAsync(newPaths, newX, newY, centerOnPosition: false);
                     if (isTemp) multiNode.TemporaryFolderPath = dirPath;
                     newNode = multiNode;
+                }
+
+                // Ereditiamo il modo anche per il nuovo nodo risultato
+                if (newNode is ImageNodeViewModel newImgNode)
+                {
+                    newImgNode.VisualizationMode = imgNode.VisualizationMode;
                 }
 
                 newNode.Title = newTitle;
@@ -452,6 +443,12 @@ public partial class BoardViewModel : ObservableObject
                 resultData, newTitle, newX, newY
             );
 
+            // Eredita la visualizzazione
+            if (newNode is ImageNodeViewModel newImgNode)
+            {
+                newImgNode.VisualizationMode = multiNode.VisualizationMode;
+            }
+
             var action = new DelegateAction(
                 "Stacking Immagini",
                 execute: () =>
@@ -489,12 +486,11 @@ public partial class BoardViewModel : ObservableObject
     }
     private bool CanStackImages(StackingMode mode) => SelectedNode is MultipleImagesNodeViewModel;
     
-    // --- LOGICA ANIMAZIONE: Play/Pause ---
+    // --- LOGICA ANIMAZIONE ---
     
     [RelayCommand(CanExecute = nameof(CanToggleAnimation))]
     private void ToggleNodeAnimation()
     {
-        // (Tutta la tua logica esistente rimane identica)
         var runningNode = Nodes.OfType<MultipleImagesNodeViewModel>()
             .FirstOrDefault(n => n.IsAnimating);
 
@@ -511,18 +507,12 @@ public partial class BoardViewModel : ObservableObject
         }
         
         OnPropertyChanged(nameof(IsGlobalAnimationRunning)); 
-        
         ToggleNodeAnimationCommand.NotifyCanExecuteChanged();
     }
 
     private bool CanToggleAnimation()
     {
-        // Il pulsante è abilitato se:
-        // 1. C'è un'animazione in corso (per poterla fermare)
-        // 2. OPPURE c'è un nodo valido selezionato (per poterla avviare)
-        
         bool isAnyAnimating = Nodes.OfType<MultipleImagesNodeViewModel>().Any(n => n.IsAnimating);
-        
         bool isSelectionValid = SelectedNode is MultipleImagesNodeViewModel multi && 
                                 multi.ImagePaths.Count > 1;
 
@@ -561,6 +551,7 @@ public partial class BoardViewModel : ObservableObject
         ResetNodeViewCommand.NotifyCanExecuteChanged();
         ToggleNodeAnimationCommand.NotifyCanExecuteChanged();
         SaveVideoCommand.NotifyCanExecuteChanged();
+        SetVisualizationModeCommand.NotifyCanExecuteChanged(); // Notifica Menu
     }
     
     public void DeselectAllNodes()
@@ -574,6 +565,7 @@ public partial class BoardViewModel : ObservableObject
         SaveSelectedNodeCommand.NotifyCanExecuteChanged();
         ResetNodeViewCommand.NotifyCanExecuteChanged();
         SaveVideoCommand.NotifyCanExecuteChanged();
+        SetVisualizationModeCommand.NotifyCanExecuteChanged(); // Notifica Menu
     }
 
     [RelayCommand(CanExecute = nameof(CanSaveNode))]
@@ -609,7 +601,6 @@ public partial class BoardViewModel : ObservableObject
     [RelayCommand(CanExecute = nameof(CanSaveVideo))]
     private async Task SaveVideo()
     {
-        // 1. Verifica preliminare
         if (SelectedNode is not MultipleImagesNodeViewModel multiNode) return;
         if (multiNode.ActiveRenderer == null) return;
 
@@ -626,10 +617,8 @@ public partial class BoardViewModel : ObservableObject
 
         try
         {
-            // 3. Cattura le impostazioni visive correnti (Stretch/Contrasto)
             var contrastProfile = multiNode.ActiveRenderer.CaptureContrastProfile();
 
-            // 4. Esegui l'export (10 FPS di default, potresti volerlo parametrico)
             await _fitsService.ExportVideoAsync(
                 multiNode.ImagePaths, 
                 savePath, 
@@ -640,13 +629,11 @@ public partial class BoardViewModel : ObservableObject
         catch (Exception ex)
         {
             Debug.WriteLine($"Errore esportazione video: {ex.Message}");
-            // Qui potresti mostrare un messaggio di errore all'utente
         }
     }
 
     private bool CanSaveVideo()
     {
-        // Abilitato solo se è un nodo multiplo con più immagini
         return SelectedNode is MultipleImagesNodeViewModel vm && vm.ImagePaths.Count > 1;
     }
     
@@ -655,10 +642,7 @@ public partial class BoardViewModel : ObservableObject
     [RelayCommand]
     private void PanBoard(string direction)
     {
-        // Definiamo di quanto spostarci (es. 50 pixel)
         double step = 50.0;
-        
-        // NOTA: Se voglio vedere a Destra, devo spostare il contenuto a Sinistra (negativo)
         switch (direction.ToLower())
         {
             case "left":
@@ -679,12 +663,8 @@ public partial class BoardViewModel : ObservableObject
     [RelayCommand]
     private void ZoomBoard(string mode)
     {
-        // Per lo zoom da tastiera, usiamo il CENTRO della vista corrente come pivot
         var center = new Point(ViewBounds.Width / 2.0, ViewBounds.Height / 2.0);
-        
-        // Simuliamo un delta simile alla rotella del mouse (120 è standard)
         double delta = mode.ToLower() == "in" ? 120 : -120;
-        
         Zoom(delta, center);
     }
 }

@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Threading.Tasks;
 using Avalonia.Controls;
+using KomaLab.Models; // <--- NECESSARIO PER VisualizationMode
 using KomaLab.Services.Data;
 using KomaLab.Services.Imaging;
 using KomaLab.ViewModels;
@@ -25,9 +26,10 @@ public class WindowService : IWindowService
         _mainWindow = window;
     }
 
-    // MODIFICA: Accettiamo List<string> invece di ImageNodeViewModel
-    // Questo ci permette di passare solo i percorsi leggeri
-    public async Task<List<string>?> ShowAlignmentWindowAsync(List<string> sourcePaths)
+    // MODIFICA: Aggiunto parametro opzionale 'initialMode'
+    public async Task<List<string>?> ShowAlignmentWindowAsync(
+        List<string> sourcePaths, 
+        VisualizationMode initialMode = VisualizationMode.Linear) 
     {
         if (_mainWindow == null) throw new InvalidOperationException("Finestra principale non registrata.");
 
@@ -37,14 +39,15 @@ public class WindowService : IWindowService
         var converter = _serviceProvider.GetRequiredService<IFitsDataConverter>();
         var analysis = _serviceProvider.GetRequiredService<IImageAnalysisService>();
     
-        // CREAZIONE VIEWMODEL (Versione Low RAM)
-        // Passiamo i percorsi, non i dati in memoria
+        // CREAZIONE VIEWMODEL
+        // Passiamo il modo di visualizzazione ricevuto dal BoardViewModel
         using var viewModel = new AlignmentToolViewModel(
             sourcePaths,
             fitsService, 
             alignmentService,
             converter,
-            analysis
+            analysis,
+            initialMode // <--- PASSAGGIO DEL PARAMETRO
         );
     
         var alignmentWindow = new AlignmentToolView
@@ -73,43 +76,32 @@ public class WindowService : IWindowService
         if (_mainWindow == null) return null;
         var editorVm = new HeaderEditorViewModel(node);
         
-        // 2. Crea la View
         var editorView = new KomaLab.Views.HeaderEditorView
         {
             DataContext = editorVm
         };
 
-        // 3. Mostra Dialog
         await editorView.ShowDialog(_mainWindow);
 
-        // 4. Se salvato, restituisci l'header aggiornato
         if (editorView.IsSaved)
         {
             return editorVm.GetUpdatedHeader();
         }
         
-        return null; // Annullato
+        return null;
     }
     
     public async Task ShowPlateSolvingWindowAsync(ImageNodeViewModel node)
     {
         if (_mainWindow == null) return;
 
-        // 1. Crea il ViewModel
-        // Nota: PlateSolvingViewModel istanzia internamente il suo servizio,
-        // quindi non serve il serviceProvider qui, a meno che tu non voglia usare DI pure lì.
         var plateVm = new PlateSolvingViewModel(node);
 
-        // 2. Crea la View
         var plateView = new KomaLab.Views.PlateSolvingView
         {
             DataContext = plateVm
         };
 
-        // 3. Mostra la finestra come Dialog (blocca l'interazione sotto finché aperta)
         await plateView.ShowDialog(_mainWindow);
-        
-        // Non serve ritornare nulla perché ASTAP modifica direttamente il file su disco
-        // e il ViewModel si occupa di ricaricare i dati.
     }
 }
