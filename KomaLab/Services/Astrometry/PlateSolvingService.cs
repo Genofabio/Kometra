@@ -1,7 +1,9 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace KomaLab.Services.Astrometry;
@@ -9,18 +11,33 @@ namespace KomaLab.Services.Astrometry;
 public class PlateSolvingResult
 {
     public bool Success { get; set; }
-    public string LogOutput { get; set; } = string.Empty;
+    public string Message { get; set; } = string.Empty;
+    public string FullLog { get; set; } = string.Empty;
 }
 
 public class PlateSolvingService
 {
-    /// <summary>
-    /// Tenta di trovare il percorso dell'eseguibile di ASTAP automaticamente.
-    /// </summary>
-    private string? FindAstapExecutable()
+    private string? _selectedExePath;
+    private bool _isCliVersion;
+
+    private void FindBestExecutable()
     {
-        // Lista dei percorsi comuni dove ASTAP potrebbe essere installato
-        var possiblePaths = new[]
+        var cliPaths = new List<string>
+        {
+            @"C:\Program Files\astap\astap_cli.exe",
+            @"C:\Program Files (x86)\astap\astap_cli.exe",
+            @"C:\astap\astap_cli.exe",
+            @"D:\Program Files\astap\astap_cli.exe",
+            @"D:\Program Files (x86)\astap\astap_cli.exe",
+            @"D:\astap\astap_cli.exe",
+        };
+
+        foreach (var path in cliPaths)
+        {
+            if (File.Exists(path)) { _selectedExePath = path; _isCliVersion = true; return; }
+        }
+
+        var guiPaths = new List<string>
         {
             @"C:\Program Files\astap\astap.exe",
             @"C:\Program Files (x86)\astap\astap.exe",
@@ -28,116 +45,138 @@ public class PlateSolvingService
             @"D:\Program Files\astap\astap.exe",
             @"D:\Program Files (x86)\astap\astap.exe",
             @"D:\astap\astap.exe",
-            // Se l'hai installato altrove, AGGIUNGI QUI IL TUO PERCORSO:
-            // @"D:\Astronomia\astap\astap.exe" 
         };
 
-        foreach (var path in possiblePaths)
+        foreach (var path in guiPaths)
         {
-            if (File.Exists(path)) return path;
+            if (File.Exists(path)) { _selectedExePath = path; _isCliVersion = false; return; }
         }
-
-        return null; // Non trovato
+        _selectedExePath = null;
     }
 
-    /// <summary>
-    /// Lancia ASTAP per risolvere l'immagine.
-    /// Ritorna TRUE se ha avuto successo (e ha scritto il WCS nel file).
-    /// </summary>
-    public async Task<PlateSolvingResult> SolveAsync(string fitsFilePath)
+    // Aggiunto parametro 'onLogReceived' per lo streaming in tempo reale
+    public async Task<PlateSolvingResult> SolveAsync(string fitsFilePath, CancellationToken token = default, Action<string>? onLogReceived = null)
     {
         var result = new PlateSolvingResult();
+        FindBestExecutable();
+
+        if (string.IsNullOrEmpty(_selectedExePath)) 
+        {
+            result.Message = "ERRORE: ASTAP non trovato.";
+            result.Success = false;
+            return result;
+        }
+
+        var args = $"-f \"{fitsFilePath}\" -r 180 -update -z 0";
+        
+        var startInfo = new ProcessStartInfo
+        {
+            FileName = _selectedExePath,
+            Arguments = args,
+            CreateNoWindow = true,
+        };
+
+        if (_isCliVersion)
+        {
+            startInfo.UseShellExecute = false; 
+            startInfo.RedirectStandardOutput = true;
+            startInfo.RedirectStandardError = true;
+            startInfo.WindowStyle = ProcessWindowStyle.Hidden;
+        }
+        else
+        {
+            startInfo.UseShellExecute = true;
+            startInfo.WindowStyle = ProcessWindowStyle.Hidden;
+            startInfo.RedirectStandardOutput = false;
+            startInfo.RedirectStandardError = false;
+        }
+
+        using var process = new Process { StartInfo = startInfo, EnableRaisingEvents = true };
+        var tcs = new TaskCompletionSource<bool>();
         var logBuilder = new StringBuilder();
 
-        var astapPath = FindAstapExecutable();
-        if (string.IsNullOrEmpty(astapPath)) 
+        // LOGICA STREAMING
+        if (_isCliVersion)
         {
-            result.LogOutput = "ERRORE: Eseguibile ASTAP non trovato.";
-            result.Success = false;
-            return result;
+            process.OutputDataReceived += (s, e) => 
+            { 
+                if (e.Data != null) 
+                {
+                    // 1. Salviamo nel buffer interno per l'analisi finale
+                    logBuilder.AppendLine(e.Data); 
+                    // 2. SPEDIAMO ALLA UI SUBITO
+                    onLogReceived?.Invoke(e.Data);
+                } 
+            };
+            
+            process.ErrorDataReceived += (s, e) => 
+            { 
+                if (e.Data != null) 
+                {
+                    string err = $"ERR: {e.Data}";
+                    logBuilder.AppendLine(err);
+                    onLogReceived?.Invoke(err);
+                } 
+            };
         }
 
-        if (!File.Exists(fitsFilePath))
-        {
-            result.LogOutput = $"ERRORE: File non trovato: {fitsFilePath}";
-            result.Success = false;
-            return result;
-        }
-
-        // Parametri: -r 180 (Blind) -update (Scrivi Header) -z 0 (Auto downsample)
-        var args = $"-f \"{fitsFilePath}\" -r 180 -update -z 0";
-
-        logBuilder.AppendLine($"Avvio ASTAP su: {Path.GetFileName(fitsFilePath)}");
-        
-        var process = new Process
-        {
-            StartInfo = new ProcessStartInfo
-            {
-                FileName = astapPath,
-                Arguments = args,
-                
-                // --- CONFIGURAZIONE PER NASCONDERE IL PIÙ POSSIBILE ---
-                
-                // Fondamentale per leggere i log
-                UseShellExecute = false, 
-                
-                // Mettiamo FALSE qui. Sembra controintuitivo, ma per le app GUI (non Console)
-                // a volte "True" interferisce con il WindowStyle.
-                CreateNoWindow = false, 
-                
-                // Forziamo lo stato "Nascosto"
-                WindowStyle = ProcessWindowStyle.Hidden,
-                
-                // Opzionale: impedisce la creazione di finestre di errore di Windows
-                ErrorDialog = false,
-                // ------------------------------------------------------
-
-                RedirectStandardOutput = true,
-                RedirectStandardError = true
-            },
-            EnableRaisingEvents = true
-        };
-
-        // Cattura output in tempo reale
-        process.OutputDataReceived += (s, e) => { if (e.Data != null) logBuilder.AppendLine(e.Data); };
-        process.ErrorDataReceived += (s, e) => { if (e.Data != null) logBuilder.AppendLine($"ERR: {e.Data}"); };
-
-        var tcs = new TaskCompletionSource<bool>();
-
-        process.Exited += (sender, args) =>
-        {
-            tcs.TrySetResult(process.ExitCode == 0);
-            process.Dispose();
-        };
+        process.Exited += (sender, args) => tcs.TrySetResult(true);
 
         try
         {
             process.Start();
-            process.BeginOutputReadLine();
-            process.BeginErrorReadLine();
-
-            var completedTask = await Task.WhenAny(tcs.Task, Task.Delay(60000)); // 60 sec timeout
-
-            if (completedTask == tcs.Task)
+            
+            if (_isCliVersion)
             {
-                result.Success = await tcs.Task;
-                if (result.Success) logBuilder.AppendLine(">> SUCCESSO: Soluzione WCS scritta nel file.");
-                else logBuilder.AppendLine(">> FALLITO: ASTAP non ha trovato una soluzione.");
+                process.BeginOutputReadLine();
+                process.BeginErrorReadLine();
+            }
+
+            var cancelTask = Task.Delay(-1, token);
+            var timeoutTask = Task.Delay(90000, token); 
+            var processTask = tcs.Task;
+
+            var completedTask = await Task.WhenAny(processTask, timeoutTask, cancelTask);
+
+            if (token.IsCancellationRequested)
+            {
+                result.Message = "Annullato dall'utente.";
+                try { process.Kill(); } catch { }
+                result.Success = false;
+            }
+            else if (completedTask == processTask)
+            {
+                // Analisi Successo
+                string fullOutput = logBuilder.ToString();
+                
+                if (_isCliVersion)
+                {
+                    bool logSaysSuccess = fullOutput.Contains("Solution found", StringComparison.InvariantCultureIgnoreCase) 
+                                       || fullOutput.Contains("PLTSOLVD=T", StringComparison.InvariantCultureIgnoreCase)
+                                       || fullOutput.Contains("created wcs", StringComparison.InvariantCultureIgnoreCase);
+                    
+                    result.Success = logSaysSuccess;
+                }
+                else
+                {
+                    result.Success = process.ExitCode == 0;
+                }
+                result.Message = result.Success ? "OK" : "Nessuna soluzione trovata.";
             }
             else
             {
-                logBuilder.AppendLine(">> TIMEOUT: Processo interrotto.");
+                result.Message = "Timeout";
                 try { process.Kill(); } catch { }
                 result.Success = false;
             }
         }
         catch (Exception ex)
         {
-            logBuilder.AppendLine($">> ECCEZIONE: {ex.Message}");
+            result.Message = ex.Message;
             result.Success = false;
         }
 
-        result.LogOutput = logBuilder.ToString();
+        result.FullLog = logBuilder.ToString();
         return result;
     }
 }

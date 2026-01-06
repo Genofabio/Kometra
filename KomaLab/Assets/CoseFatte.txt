@@ -158,6 +158,8 @@ Lettura header per time per ordinare caricamento immagini MultipleImageNode
     
 - Necessità di plate solving per inserire dati wcs
     - 2 soluzioni: ASTAP (Locale), Astrometry.net (Online)
+    - Andiamo di astap che sembra ottima e facilmente ilmplementabile
+    - usiamo la versione da riga di comando per non aprire nuove finestre durante l'esecuzione
 
 
 

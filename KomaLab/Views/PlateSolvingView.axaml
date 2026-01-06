@@ -7,7 +7,8 @@
         mc:Ignorable="d" d:DesignWidth="600" d:DesignHeight="500"
         x:Class="KomaLab.Views.PlateSolvingView"
         x:DataType="vm:PlateSolvingViewModel"
-        Title="Risoluzione Astrometrica (ASTAP)"
+        x:Name="RootWindow"
+        Title="Risoluzione Astrometrica"
         Width="650" Height="550"
         WindowStartupLocation="CenterOwner"
         CanResize="False"
@@ -15,133 +16,110 @@
         Focusable="True">
 
     <Window.Styles>
-        <Style Selector="Button.actionBtn">
-            <Setter Property="Background" Value="#8058E8"/>
+        <Style Selector="Button.baseBtn">
             <Setter Property="Foreground" Value="White"/>
             <Setter Property="CornerRadius" Value="6"/>
-            <Setter Property="Padding" Value="20,10"/>
+            <Setter Property="Padding" Value="25,8"/>
             <Setter Property="FontSize" Value="14"/>
             <Setter Property="FontWeight" Value="SemiBold"/>
             <Setter Property="HorizontalAlignment" Value="Right"/>
             <Setter Property="VerticalContentAlignment" Value="Center"/>
             <Setter Property="Cursor" Value="Hand"/>
         </Style>
-        <Style Selector="Button.actionBtn:pointerover /template/ ContentPresenter">
-            <Setter Property="Background" Value="#9570F0"/> </Style>
-        <Style Selector="Button.actionBtn:disabled /template/ ContentPresenter">
-            <Setter Property="Background" Value="#333"/>
-            <Setter Property="Foreground" Value="#777"/>
+        <Style Selector="Button.greenBtn">
+            <Setter Property="Background" Value="#03A077"/>
+        </Style>
+        <Style Selector="Button.greenBtn:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="#04B889"/>
+        </Style>
+        <Style Selector="Button.purpleBtn">
+            <Setter Property="Background" Value="#8058E8"/>
+        </Style>
+        <Style Selector="Button.purpleBtn:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="#9570F0"/>
+        </Style>
+        <Style Selector="Button.cancelBtn">
+            <Setter Property="Background" Value="#D9534F"/>
+        </Style>
+        <Style Selector="Button.cancelBtn:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="#E0706D"/>
         </Style>
     </Window.Styles>
 
-    <Border Padding="20" 
-            Background="Transparent" 
-            PointerPressed="OnBackgroundClicked">
-        
+    <Border Padding="20" Background="Transparent">
         <Grid RowDefinitions="Auto, Auto, *, Auto" RowSpacing="15">
 
             <StackPanel Grid.Row="0" Spacing="10">
-                
                 <TextBlock Text="{Binding Title}" FontSize="22" FontWeight="Bold" Foreground="White"/>
                 
-                <TextBlock Text="Analizza la disposizione delle stelle per calcolare le coordinate celesti reali (WCS). Questa operazione è necessaria per l'allineamento preciso, lo stacking e l'annotazione degli oggetti."
-                           TextWrapping="Wrap"
-                           FontSize="12"
-                           Foreground="#AAA"
-                           LineHeight="18"/>
+                <TextBlock Text="Analizza la disposizione delle stelle per calcolare le coordinate celesti reali (WCS). Questa operazione è necessaria per l'allineamento preciso."
+                           TextWrapping="Wrap" FontSize="12" Foreground="#AAA" LineHeight="18"/>
 
                 <Border Height="1" Background="#444" Margin="0,5"/>
 
                 <StackPanel Orientation="Horizontal" Spacing="5">
                     <TextBlock Text="Target:" FontWeight="Bold" Foreground="#888"/>
-                    <TextBlock Text="{Binding TargetFileName}" 
-                               TextTrimming="CharacterEllipsis" 
-                               Foreground="#CCC"
-                               ToolTip.Tip="{Binding TargetFileName}"/>
+                    <TextBlock Text="{Binding TargetFileName}" Foreground="#CCC"/>
                 </StackPanel>
             </StackPanel>
 
             <StackPanel Grid.Row="1" Spacing="8">
                 <Grid ColumnDefinitions="*, Auto">
-                    <TextBlock Text="{Binding StatusText}" 
-                               Foreground="{Binding StatusColor}" 
-                               FontWeight="SemiBold"
-                               FontSize="14"/>
-                    
+                    <TextBlock Text="{Binding StatusText}" Foreground="{Binding StatusColor}" FontWeight="SemiBold" FontSize="14"/>
                     <TextBlock Text="{Binding ProgressValue, StringFormat='Processati: {0}'}" 
-                               Foreground="#888" 
-                               FontSize="12" 
-                               IsVisible="{Binding IsBusy}"
-                               Grid.Column="1"/>
+                               Foreground="#888" FontSize="12" IsVisible="{Binding IsBusy}" Grid.Column="1"/>
                 </Grid>
-
-                <ProgressBar Height="6"
-                             Minimum="0" 
-                             Maximum="{Binding ProgressMax}" 
-                             Value="{Binding ProgressValue}"
+                <ProgressBar Height="6" Minimum="0" Maximum="{Binding ProgressMax}" Value="{Binding ProgressValue}"
                              IsIndeterminate="{Binding ProgressMax, Converter={x:Static ObjectConverters.IsNull}}"
-                             IsVisible="{Binding IsBusy}"
-                             Foreground="#8058E8" 
-                             Background="#333"/>
+                             IsVisible="{Binding IsBusy}" Foreground="#8058E8" Background="#333"/>
             </StackPanel>
 
-            <Border Grid.Row="2" 
-                    Background="#1E1E1E" 
-                    BorderBrush="#444" 
-                    BorderThickness="1" 
-                    CornerRadius="4">
-                
-                <Grid>
-                    <TextBlock Text="Log Output ASTAP" 
-                               Foreground="#444" 
-                               FontSize="10" 
-                               FontWeight="Bold"
-                               VerticalAlignment="Top" 
-                               HorizontalAlignment="Right" 
-                               Margin="10,5"
-                               IsHitTestVisible="False"/>
-
-                    <TextBox Name="LogTextBox"
-                             Text="{Binding FullLog}"
-                             IsReadOnly="True"
-                             FontFamily="Consolas, Monospace"
-                             FontSize="12"
-                             Foreground="#DDD"
-                             Background="Transparent"
-                             BorderThickness="0"
-                             Padding="10"
-                             TextWrapping="Wrap"
-                             AcceptsReturn="True"
-                             ScrollViewer.VerticalScrollBarVisibility="Auto"
-                             CaretIndex="{Binding FullLog.Length}"/>
-                </Grid>
+            <Border Grid.Row="2" Background="#1E1E1E" BorderBrush="#444" BorderThickness="1" CornerRadius="4">
+                <TextBox Text="{Binding FullLog}" IsReadOnly="True" FontFamily="Consolas, Monospace" FontSize="12"
+                         Foreground="#DDD" Background="Transparent" BorderThickness="0" Padding="10"
+                         TextWrapping="Wrap" AcceptsReturn="True" CaretIndex="{Binding FullLog.Length}"/>
             </Border>
 
             <Grid Grid.Row="3" ColumnDefinitions="*, Auto">
                 
-                <StackPanel Grid.Column="0" VerticalAlignment="Center">
-                    <StackPanel Orientation="Horizontal" Spacing="5">
-                        <avalonia:MaterialIcon Kind="AlertCircleOutline" Width="14" Height="14" Foreground="#E6606A"/>
-                        <TextBlock Text="Attenzione:" FontWeight="Bold" Foreground="#888" FontSize="11"/>
+                <StackPanel Grid.Column="0" VerticalAlignment="Center" Spacing="2">
+                    
+                    <StackPanel Orientation="Horizontal" Spacing="5" VerticalAlignment="Center">
+                        <avalonia:MaterialIcon Kind="AlertCircleOutline" Width="16" Height="16" Foreground="#FEC530"/>
+                        <TextBlock Text="Attenzione:" FontWeight="Bold" Foreground="#888" FontSize="12"/>
                     </StackPanel>
-                    <TextBlock Text="L'header del file originale verrà sovrascritto." 
-                               Foreground="#666" 
-                               FontSize="11" 
-                               FontStyle="Italic" 
-                               Margin="19,0,0,0"/>
+                    
+                    <TextBlock Text="L'header originale verrà aggiornato." 
+                               Foreground="#666" FontSize="12" FontStyle="Italic"
+                               Margin="21,0,0,0"/>
                 </StackPanel>
 
-                <Button Grid.Column="1" 
-                        Classes="actionBtn" 
-                        Command="{Binding StartSolvingCommand}"
-                        IsEnabled="{Binding !IsBusy}">
-                    <StackPanel Orientation="Horizontal" Spacing="8">
-                        <avalonia:MaterialIcon Kind="Play" Width="16" Height="16"/>
-                        <TextBlock Text="AVVIA RISOLUZIONE"/>
-                    </StackPanel>
-                </Button>
-            </Grid>
+                <StackPanel Grid.Column="1" Orientation="Horizontal">
 
+                    <Button Classes="baseBtn greenBtn" 
+                            Command="{Binding StartSolvingCommand}"
+                            Content="Avvia risoluzione">
+                        <Button.IsVisible>
+                            <MultiBinding Converter="{x:Static BoolConverters.And}">
+                                <Binding Path="!IsBusy"/>
+                                <Binding Path="!IsFinished"/>
+                            </MultiBinding>
+                        </Button.IsVisible>
+                    </Button>
+
+                    <Button Classes="baseBtn cancelBtn" 
+                            Command="{Binding CancelOperationCommand}"
+                            IsVisible="{Binding IsBusy}"
+                            Content="Annulla"/>
+
+                    <Button Classes="baseBtn purpleBtn" 
+                            Command="{Binding CloseWindowCommand}"
+                            CommandParameter="{Binding ElementName=RootWindow}"
+                            IsVisible="{Binding IsFinished}"
+                            Content="Chiudi finestra"/>
+
+                </StackPanel>
+            </Grid>
         </Grid>
     </Border>
 </Window>
