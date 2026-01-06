@@ -104,4 +104,39 @@ public class WindowService : IWindowService
 
         await plateView.ShowDialog(_mainWindow);
     }
+    
+    public async Task<List<string>?> ShowPosterizationWindowAsync(
+        List<string> sourcePaths, 
+        VisualizationMode initialMode) // <---
+    {
+        if (_mainWindow == null) throw new InvalidOperationException("Main window not registered");
+
+        var fitsService = _serviceProvider.GetRequiredService<IFitsService>();
+        var postService = _serviceProvider.GetRequiredService<IPosterizationService>();
+        var converter = _serviceProvider.GetRequiredService<IFitsDataConverter>();
+        var analysis = _serviceProvider.GetRequiredService<IImageAnalysisService>();
+
+        // Passiamo 'initialMode' al costruttore
+        using var vm = new PosterizationToolViewModel(
+            sourcePaths, fitsService, postService, converter, analysis, initialMode);
+            
+        var view = new KomaLab.Views.PosterizationToolView
+        {
+            DataContext = vm
+        };
+
+        // Gestione chiusura (pattern standard)
+        Action closeHandler = () => view.Close();
+        vm.RequestClose += closeHandler;
+
+        await view.ShowDialog(_mainWindow);
+
+        vm.RequestClose -= closeHandler;
+
+        if (vm.DialogResult)
+        {
+            return vm.ResultPaths;
+        }
+        return null;
+    }
 }

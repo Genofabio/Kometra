@@ -61,6 +61,7 @@ public class App : Application
         services.AddSingleton<IDialogService, DialogService>(); 
         services.AddSingleton<IWindowService, WindowService>();
         services.AddSingleton<IUndoService, UndoService>();
+        services.AddSingleton<IPosterizationService, PosterizationService>();
         
         services.AddSingleton<BoardViewModel>();
         services.AddSingleton<MainWindowViewModel>();

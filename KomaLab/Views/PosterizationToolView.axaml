@@ -1,0 +1,213 @@
+﻿<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:vm="clr-namespace:KomaLab.ViewModels"
+        xmlns:avalonia="clr-namespace:Material.Icons.Avalonia;assembly=Material.Icons.Avalonia"
+        xmlns:models="clr-namespace:KomaLab.Models"
+        mc:Ignorable="d" d:DesignWidth="950" d:DesignHeight="650"
+        x:Class="KomaLab.Views.PosterizationToolView"
+        x:DataType="vm:PosterizationToolViewModel"
+        Title="Analisi Morfologica / Posterizzazione"
+        Width="1000" Height="700"
+        MinHeight="500" MinWidth="850"
+        WindowStartupLocation="CenterScreen"
+        Focusable="True">
+
+    <Window.Styles>
+        <Style Selector="Button.actionBtn">
+            <Setter Property="HorizontalAlignment" Value="Stretch"/>
+            <Setter Property="HorizontalContentAlignment" Value="Center"/>
+            <Setter Property="Padding" Value="10,8"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="CornerRadius" Value="4"/>
+        </Style>
+        <Style Selector="Button.apply">
+            <Setter Property="Background" Value="#03A077"/>
+            <Setter Property="Foreground" Value="White"/>
+        </Style>
+        <Style Selector="Button.apply:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="#04B889"/>
+        </Style>
+        <Style Selector="Button.cancel">
+            <Setter Property="Background" Value="#333333"/>
+            <Setter Property="Foreground" Value="#DDDDDD"/>
+        </Style>
+
+        <Style Selector="Button.iconBtn">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="Padding" Value="5"/>
+            <Setter Property="Width" Value="30"/>
+            <Setter Property="Height" Value="30"/>
+            <Setter Property="CornerRadius" Value="15"/>
+        </Style>
+        <Style Selector="Button.iconBtn:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="#44FFFFFF"/>
+        </Style>
+    </Window.Styles>
+    
+    <Grid ColumnDefinitions="320, *">
+        
+        <Border Grid.Column="0" Background="{DynamicResource ToolPanelBackgroundBrush}" Padding="20">
+            <Grid RowDefinitions="Auto, *, Auto">
+                
+                <StackPanel Grid.Row="0" Spacing="15">
+                    
+                    <TextBlock Text="Parametri Quantizzazione" FontSize="18" FontWeight="Bold" Margin="0,0,0,10"/>
+
+                    <StackPanel Spacing="8">
+                        <Grid ColumnDefinitions="*, Auto">
+                            <TextBlock Text="Numero Livelli" FontWeight="SemiBold"/>
+                            <TextBlock Text="{Binding Levels}" FontWeight="Bold" Foreground="{DynamicResource ActionPrimaryBackgroundBrush}"/>
+                        </Grid>
+                        <Slider Minimum="2" Maximum="64" Value="{Binding Levels}" 
+                                TickFrequency="1" IsSnapToTickEnabled="True"/>
+                    </StackPanel>
+                    
+                    <Separator Background="#333" Height="1" Margin="0,5"/>
+
+                    <StackPanel Spacing="8">
+                        <TextBlock Text="Metodo Distribuzione" FontWeight="SemiBold"/>
+                        <ComboBox ItemsSource="{Binding AvailableModes}" 
+                                  SelectedItem="{Binding SelectedMode}" 
+                                  HorizontalAlignment="Stretch"/>
+                        
+                        <Panel Height="40">
+                            <TextBlock Text="Lineare: Divisione uniforme. Utile per pianeti o luna." 
+                                       FontSize="11" Opacity="0.6" TextWrapping="Wrap"
+                                       IsVisible="{Binding SelectedMode, Converter={x:Static ObjectConverters.Equal}, ConverterParameter={x:Static models:VisualizationMode.Linear}}"/>
+                            <TextBlock Text="Logaritmico: Dettagli nelle basse luci. Ideale per chioma e code cometarie." 
+                                       FontSize="11" Opacity="0.6" TextWrapping="Wrap"
+                                       IsVisible="{Binding SelectedMode, Converter={x:Static ObjectConverters.Equal}, ConverterParameter={x:Static models:VisualizationMode.Logarithmic}}"/>
+                            <TextBlock Text="Radice Quadrata: Via di mezzo. Buono per nebulose brillanti." 
+                                       FontSize="11" Opacity="0.6" TextWrapping="Wrap"
+                                       IsVisible="{Binding SelectedMode, Converter={x:Static ObjectConverters.Equal}, ConverterParameter={x:Static models:VisualizationMode.SquareRoot}}"/>
+                        </Panel>
+                    </StackPanel>
+
+                    <Separator Background="#333" Height="1" Margin="0,5"/>
+
+                    <CheckBox IsChecked="{Binding AutoAdaptThresholds}" 
+                              Content="Adatta luminosità al cambio immagine"
+                              ToolTip.Tip="Se attivo, ricalcola le soglie per mantenere costante la luminosità percepita. Se disattivo, mantiene i valori ADU fissi."/>
+
+                    <Separator Background="#333" Height="1" Margin="0,5"/>
+
+                    <StackPanel Spacing="8">
+                        <TextBlock Text="Range Dinamico (Clip)" FontWeight="SemiBold"/>
+                        
+                        <Grid ColumnDefinitions="50, *, 65"> 
+                            <TextBlock Grid.Column="0" Text="Nero:" VerticalAlignment="Center" Opacity="0.7"/>
+                            <Slider Grid.Column="1" 
+                                    Minimum="{Binding SliderMin}" 
+                                    Maximum="{Binding SliderMax}" 
+                                    Value="{Binding BlackPoint}"/>
+                            <TextBlock Grid.Column="2" Text="{Binding BlackPoint, StringFormat='N0'}" 
+                                       VerticalAlignment="Center" HorizontalAlignment="Right" FontFamily="Monospace" FontSize="12"/>
+                        </Grid>
+                        
+                        <Grid ColumnDefinitions="50, *, 65">
+                            <TextBlock Grid.Column="0" Text="Bianco:" VerticalAlignment="Center" Opacity="0.7"/>
+                            <Slider Grid.Column="1" 
+                                    Minimum="{Binding SliderMin}" 
+                                    Maximum="{Binding SliderMax}" 
+                                    Value="{Binding WhitePoint}"/>
+                            <TextBlock Grid.Column="2" Text="{Binding WhitePoint, StringFormat='N0'}" 
+                                       VerticalAlignment="Center" HorizontalAlignment="Right" FontFamily="Monospace" FontSize="12"/>
+                        </Grid>
+                        
+                        <TextBlock Text="Tip: Shift + Rotella sull'immagine per regolare il Nero." 
+                                   FontSize="11" FontStyle="Italic" Opacity="0.5" Margin="0,5,0,0"/>
+                    </StackPanel>
+
+                </StackPanel>
+
+                <StackPanel Grid.Row="2" Spacing="10">
+                    <StackPanel Spacing="5" IsVisible="{Binding IsProcessing}">
+                        <TextBlock Text="{Binding StatusText}" HorizontalAlignment="Center" FontSize="12" FontStyle="Italic"/>
+                        <ProgressBar IsIndeterminate="True" Height="4"/>
+                    </StackPanel>
+
+                    <Grid ColumnDefinitions="*, 10, *" IsEnabled="{Binding !IsProcessing}">
+                        <Button Grid.Column="0" Content="Annulla" Command="{Binding CancelCommand}" Classes="actionBtn cancel"/>
+                        <Button Grid.Column="2" Content="Salva FITS" Command="{Binding ApplyCommand}" Classes="actionBtn apply"/>
+                    </Grid>
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <Border Grid.Column="1" Background="#111" Padding="10">
+            <Border Name="PreviewBorder" Background="#000" ClipToBounds="True"
+                    PointerPressed="OnPreviewPointerPressed"
+                    PointerReleased="OnPreviewPointerReleased"
+                    PointerMoved="OnPreviewPointerMoved"
+                    PointerWheelChanged="OnPreviewPointerWheelChanged">
+                
+                <Grid>
+                    <Canvas Name="Viewport" RenderTransformOrigin="0,0">
+                        <Canvas.RenderTransform>
+                            <TransformGroup>
+                                <ScaleTransform ScaleX="{Binding Viewport.Scale}" ScaleY="{Binding Viewport.Scale}"/>
+                                <TranslateTransform X="{Binding Viewport.OffsetX}" Y="{Binding Viewport.OffsetY}"/>
+                            </TransformGroup>
+                        </Canvas.RenderTransform>
+                        
+                        <Image Source="{Binding PreviewBitmap}" 
+                               Stretch="None"
+                               RenderOptions.BitmapInterpolationMode="None"/>
+                    </Canvas>
+                    
+                    <Border HorizontalAlignment="Left" VerticalAlignment="Top" Margin="10" Padding="8,4" 
+                            Background="#80000000" CornerRadius="4" IsHitTestVisible="False">
+                        <TextBlock Text="{Binding Viewport.Scale, StringFormat='Zoom: {0:P0}'}" Foreground="White" FontSize="12"/>
+                    </Border>
+
+                    <Border HorizontalAlignment="Left" VerticalAlignment="Bottom" 
+                            Margin="10" Padding="6,4" 
+                            Background="#99000000" CornerRadius="6">
+                        
+                        <StackPanel Orientation="Horizontal" Spacing="4">
+                            <Button Command="{Binding PreviousImageCommand}" Classes="iconBtn">
+                                <avalonia:MaterialIcon Kind="ChevronLeft"/>
+                            </Button>
+                            
+                            <TextBlock Text="{Binding CurrentImageText}" 
+                                       Foreground="White" VerticalAlignment="Center" 
+                                       Margin="8,0" FontWeight="Bold" FontSize="13"/>
+                            
+                            <Button Command="{Binding NextImageCommand}" Classes="iconBtn">
+                                <avalonia:MaterialIcon Kind="ChevronRight"/>
+                            </Button>
+                        </StackPanel>
+                    </Border>
+
+                    <Border HorizontalAlignment="Right" VerticalAlignment="Bottom" 
+                            Margin="10" Padding="6,4"
+                            Background="#99000000" CornerRadius="6">
+                        
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <Button Click="OnZoomOutClicked" Classes="iconBtn" ToolTip.Tip="Zoom Out">
+                                <avalonia:MaterialIcon Kind="Minus"/>
+                            </Button>
+                            <Button Click="OnZoomInClicked" Classes="iconBtn" ToolTip.Tip="Zoom In">
+                                <avalonia:MaterialIcon Kind="Plus"/>
+                            </Button>
+                            
+                            <Rectangle Width="1" Fill="#666" Margin="2,4"/>
+                            
+                            <Button Click="OnResetViewClicked" Classes="iconBtn" ToolTip.Tip="Adatta allo schermo">
+                                <avalonia:MaterialIcon Kind="FitToScreen"/>
+                            </Button>
+                            
+                            <Button Command="{Binding ResetThresholdsCommand}" Classes="iconBtn" ToolTip.Tip="Auto-Stretch (Reset Soglie)">
+                                <avalonia:MaterialIcon Kind="Contrast"/>
+                            </Button>
+                        </StackPanel>
+                    </Border>
+
+                </Grid>
+            </Border>
+        </Border>
+    </Grid>
+</Window>

@@ -26,4 +26,6 @@ public interface IWindowService
     
     Task<nom.tam.fits.Header?> ShowHeaderEditorAsync(ImageNodeViewModel node);
     Task ShowPlateSolvingWindowAsync(ImageNodeViewModel node);
+    Task<List<string>?> ShowPosterizationWindowAsync(List<string> sourcePaths, 
+        VisualizationMode initialMode);
 }
