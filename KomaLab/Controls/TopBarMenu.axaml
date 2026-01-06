@@ -42,7 +42,7 @@
 
             <Separator />
 
-            <MenuItem Header="Salva Immagine..." 
+            <MenuItem Header="Salva Immagine" 
                       Classes="innerMenuItem"
                       Command="{Binding BoardVm.SaveSelectedNodeCommand}">
                 <MenuItem.Icon>
@@ -50,7 +50,7 @@
                 </MenuItem.Icon>
             </MenuItem>
 
-            <MenuItem Header="Salva Video..." 
+            <MenuItem Header="Salva Video" 
                       Classes="innerMenuItem"
                       Command="{Binding BoardVm.SaveVideoCommand}">
                 <MenuItem.Icon>
@@ -68,7 +68,7 @@
         </MenuItem>
         
         <MenuItem Header="_Modifica">
-            <MenuItem Header="Allinea..."
+            <MenuItem Header="Allinea"
                       Classes="innerMenuItem"
                       Command="{Binding BoardVm.ShowAlignmentWindowCommand}">
                 <MenuItem.Icon>
@@ -78,7 +78,7 @@
             
             <Separator />
             
-            <MenuItem Header="Editor Header / Metadati..."
+            <MenuItem Header="Editor Header / Metadati"
                       Classes="innerMenuItem"
                       Command="{Binding BoardVm.EditSelectedNodeHeaderCommand}">
                 <MenuItem.Icon>
@@ -86,7 +86,7 @@
                 </MenuItem.Icon>
             </MenuItem>
             
-            <MenuItem Header="Risoluzione Astrometrica (ASTAP)..."
+            <MenuItem Header="Risoluzione Astrometrica (ASTAP)"
                       Classes="innerMenuItem"
                       Command="{Binding BoardVm.ShowPlateSolvingWindowCommand}">
                 <MenuItem.Icon>
@@ -128,6 +128,38 @@
         </MenuItem>
 
         <MenuItem Header="_View">
+            <MenuItem Header="Modalità Visualizzazione">
+                <MenuItem.Icon>
+                    <avalonia:MaterialIcon Kind="EyeSettings" />
+                </MenuItem.Icon>
+
+                <MenuItem Header="Lineare (Standard)"
+                          Command="{Binding BoardVm.SetVisualizationModeCommand}"
+                          CommandParameter="{x:Static models:VisualizationMode.Linear}">
+                    <MenuItem.Icon>
+                        <avalonia:MaterialIcon Kind="ChartLineVariant" /> 
+                    </MenuItem.Icon>
+                </MenuItem>
+
+                <MenuItem Header="Radice Quadrata"
+                          Command="{Binding BoardVm.SetVisualizationModeCommand}"
+                          CommandParameter="{x:Static models:VisualizationMode.SquareRoot}">
+                    <MenuItem.Icon>
+                        <avalonia:MaterialIcon Kind="SquareRoot" /> 
+                    </MenuItem.Icon>
+                </MenuItem>
+
+                <MenuItem Header="Logaritmica"
+                          Command="{Binding BoardVm.SetVisualizationModeCommand}"
+                          CommandParameter="{x:Static models:VisualizationMode.Logarithmic}">
+                    <MenuItem.Icon>
+                        <avalonia:MaterialIcon Kind="MathLog" /> 
+                    </MenuItem.Icon>
+                </MenuItem>
+            </MenuItem>
+
+            <Separator />
+            
             <MenuItem Header="Reset Board" 
                       Classes="innerMenuItem"
                       Command="{Binding BoardVm.ResetBoardCommand}">

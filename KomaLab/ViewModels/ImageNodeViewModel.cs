@@ -1,4 +1,5 @@
-﻿using System.Collections.Generic;
+﻿using System; // Necessario per Enum.GetValues
+using System.Collections.Generic;
 using System.Threading.Tasks;
 using Avalonia;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -13,7 +14,7 @@ namespace KomaLab.ViewModels;
 /// Classe base per tutti i nodi che visualizzano o manipolano immagini FITS.
 /// Gestisce la logica comune di:
 /// 1. Geometria (Viewport, Zoom, Pan)
-/// 2. Radiometria (Black/White Point, Reset Soglie)
+/// 2. Radiometria (Black/White Point, Reset Soglie, Visualization Mode)
 /// 3. Interfaccia con il Renderer attivo
 /// </summary>
 public abstract partial class ImageNodeViewModel : BaseNodeViewModel
@@ -24,11 +25,6 @@ public abstract partial class ImageNodeViewModel : BaseNodeViewModel
     // --- Proprietà Gestione Vista ---
     public ImageViewport Viewport { get; } = new();
 
-    /// <summary>
-    /// Proprietà "Ponte": riceve le dimensioni reali del controllo grafico (View)
-    /// tramite Binding OneWayToSource e le passa al Viewport logico.
-    /// Fondamentale per far funzionare correttamente Zoom e Pan.
-    /// </summary>
     public Size ViewportSize
     {
         get => _viewportSize;
@@ -44,11 +40,6 @@ public abstract partial class ImageNodeViewModel : BaseNodeViewModel
 
     // --- Proprietà Gestione Immagine ---
     
-    /// <summary>
-    /// Riferimento astratto al renderer attualmente visibile.
-    /// Le sottoclassi devono implementarlo per restituire l'immagine attiva 
-    /// (es. l'unica immagine per SingleNode, o quella selezionata per MultipleNode).
-    /// </summary>
     public abstract FitsRenderer? ActiveRenderer { get; }
 
     [ObservableProperty] 
@@ -56,6 +47,31 @@ public abstract partial class ImageNodeViewModel : BaseNodeViewModel
 
     [ObservableProperty] 
     private double _whitePoint;
+
+    // --- NUOVO: Gestione Modo di Visualizzazione (Proxy verso Renderer) ---
+
+    /// <summary>
+    /// Proprietà Proxy: Legge e scrive direttamente sul Renderer attivo.
+    /// Questo permette alla ComboBox nella UI di pilotare il renderer.
+    /// </summary>
+    public VisualizationMode VisualizationMode
+    {
+        get => ActiveRenderer?.VisualizationMode ?? VisualizationMode.Linear;
+        set
+        {
+            if (ActiveRenderer != null && ActiveRenderer.VisualizationMode != value)
+            {
+                ActiveRenderer.VisualizationMode = value;
+                // Notifichiamo la UI che il valore è cambiato
+                OnPropertyChanged(); 
+            }
+        }
+    }
+
+    /// <summary>
+    /// Lista dei modi disponibili per popolare la ComboBox.
+    /// </summary>
+    public VisualizationMode[] AvailableVisualizationModes => Enum.GetValues<VisualizationMode>();
 
     // --- Override BaseNodeViewModel ---
 
@@ -66,14 +82,10 @@ public abstract partial class ImageNodeViewModel : BaseNodeViewModel
         get
         {
             var contentSize = this.NodeContentSize;
-            // Aggiungiamo un minimo di padding logico se necessario
             return new Size(contentSize.Width, contentSize.Height);
         }
     }
 
-    /// <summary>
-    /// Dimensione del contenuto (immagine) per il calcolo del layout del nodo.
-    /// </summary>
     protected abstract Size NodeContentSize { get; }
 
     // --- Costruttore ---
@@ -84,50 +96,46 @@ public abstract partial class ImageNodeViewModel : BaseNodeViewModel
 
     // --- Gestione Soglie (Condivisa) ---
 
-    /// <summary>
-    /// Esegue l'Auto-Stretch sull'immagine attiva e aggiorna gli slider.
-    /// </summary>
     [RelayCommand]
     public async Task ResetThresholdsAsync()
     {
         if (ActiveRenderer == null) return;
 
-        // 1. Calcola le nuove soglie ideali nel renderer
         await ActiveRenderer.ResetThresholdsAsync();
 
-        // 2. Aggiorna le proprietà del ViewModel (che aggiorneranno la UI)
-        // Usiamo SetProperty o assegnazione diretta, ma dobbiamo evitare loop infiniti
-        // se i Partial OnChanged richiamano logica pesante.
-        // Qui ci limitiamo ad allineare i valori.
         BlackPoint = ActiveRenderer.BlackPoint;
         WhitePoint = ActiveRenderer.WhitePoint;
+        // Nota: Il VisualizationMode solitamente non si resetta con l'auto-stretch, 
+        // ma se volessi forzarlo a Linear, lo faresti qui.
     }
 
-    // Quando l'utente muove lo slider BlackPoint
     partial void OnBlackPointChanged(double value)
     {
-        if (ActiveRenderer != null)
-        {
-            ActiveRenderer.BlackPoint = value;
-        }
+        if (ActiveRenderer != null) ActiveRenderer.BlackPoint = value;
     }
 
-    // Quando l'utente muove lo slider WhitePoint
     partial void OnWhitePointChanged(double value)
     {
-        if (ActiveRenderer != null)
-        {
-            ActiveRenderer.WhitePoint = value;
-        }
+        if (ActiveRenderer != null) ActiveRenderer.WhitePoint = value;
+    }
+
+    // --- Helper per le Sottoclassi (Sync UI) ---
+
+    /// <summary>
+    /// Da chiamare nelle classi derivate (es. MultipleImagesNode) quando
+    /// cambia l'immagine visualizzata (ActiveRenderer cambia).
+    /// Forza la UI a rileggere tutte le proprietà visive dal nuovo renderer.
+    /// </summary>
+    protected void NotifyActiveRendererChanged()
+    {
+        OnPropertyChanged(nameof(ActiveRenderer));
+        OnPropertyChanged(nameof(BlackPoint));
+        OnPropertyChanged(nameof(WhitePoint));
+        OnPropertyChanged(nameof(VisualizationMode)); // Aggiorna la ComboBox col valore della nuova immagine
     }
 
     // --- Gestione Zoom/Pan ---
 
-    /// <summary>
-    /// Resetta la vista per i Nodi della Board.
-    /// Poiché i nodi si adattano alla dimensione dell'immagine (100%),
-    /// il reset imposta Scala 1.0 e Offset 0.
-    /// </summary>
     public void ResetView()
     {
         Viewport.Scale = 1.0;
@@ -137,27 +145,9 @@ public abstract partial class ImageNodeViewModel : BaseNodeViewModel
 
     // --- Metodi Astratti (Contratto Dati) ---
 
-    /// <summary>
-    /// Recupera la lista completa dei dati gestiti da questo nodo 
-    /// (es. per passarli al tool di allineamento o stacking).
-    /// </summary>
     public abstract Task<List<FitsImageData?>> GetCurrentDataAsync();
-
-    /// <summary>
-    /// Restituisce l'immagine singola attualmente visualizzata 
-    /// (es. per il salvataggio file).
-    /// </summary>
     public abstract FitsImageData? GetActiveImageData();
-
-    /// <summary>
-    /// Inietta dati processati direttamente in memoria (es. risultato di uno stack).
-    /// </summary>
     public abstract Task ApplyProcessedDataAsync(List<FitsImageData> newProcessedData);
-
-    /// <summary>
-    /// Restituisce i percorsi file (esistenti o temporanei) da passare ai tool esterni.
-    /// </summary>
     public abstract Task<List<string>> PrepareInputPathsAsync(IFitsService fitsService);
-    
     public abstract Task RefreshDataFromDiskAsync();
 }

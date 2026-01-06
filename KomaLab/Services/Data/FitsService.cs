@@ -293,15 +293,86 @@ public class FitsService : IFitsService
         }
     }
 
-    public void NormalizeData(Mat sourceMat, int width, int height, double blackPoint, double whitePoint, IntPtr destinationBuffer, long stride)
+    public void NormalizeData(
+        Mat sourceMat, 
+        int width, 
+        int height, 
+        double blackPoint, 
+        double whitePoint, 
+        IntPtr destinationBuffer, 
+        long stride,
+        VisualizationMode mode) // <--- NUOVO PARAMETRO
     {
         if (sourceMat.Empty()) return; 
-        double range = whitePoint - blackPoint;
-        double alpha = (Math.Abs(range) < 1e-9) ? 0 : 255.0 / range;
-        double beta = (Math.Abs(range) < 1e-9) ? (blackPoint >= whitePoint ? 0 : 128) : -blackPoint * alpha;
 
+        // 1. Preparazione Buffer Destinazione
+        // Creiamo una Mat che punta direttamente alla memoria della Bitmap di Avalonia (zero-copy)
         using Mat dstMat = Mat.FromPixelData(height, width, MatType.CV_8UC1, destinationBuffer, stride);
-        sourceMat.ConvertTo(dstMat, MatType.CV_8UC1, alpha, beta);
+
+        // 2. Calcoli preliminari
+        double range = whitePoint - blackPoint;
+        if (Math.Abs(range) < 1e-9) range = 1e-5; // Evita divisione per zero
+
+        // 3. SWITCH SULLA MODALITÀ
+        if (mode == VisualizationMode.Linear)
+        {
+            // --- MODO LINEARE (Veloce) ---
+            // Formula: Out = In * alpha + beta
+            // Alpha e Beta scalano i valori direttamente nel range 0-255
+            double alpha = 255.0 / range;
+            double beta = -blackPoint * alpha;
+
+            sourceMat.ConvertTo(dstMat, MatType.CV_8UC1, alpha, beta);
+        }
+        else
+        {
+            // --- MODO NON LINEARE (Log / Sqrt) ---
+            // OpenCV ConvertTo è solo lineare. Dobbiamo fare un passaggio intermedio in Float.
+            
+            // A. Normalizziamo in Float nel range 0.0 - 1.0
+            // Formula: Temp = (In - Black) / Range
+            double scale = 1.0 / range;
+            double offset = -blackPoint * scale;
+
+            using Mat tempMat = new Mat();
+            sourceMat.ConvertTo(tempMat, MatType.CV_32FC1, scale, offset);
+
+            // B. Clipping (Clamp): Assicuriamoci che i valori stiano tra 0 e 1
+            // (Altrimenti Sqrt di numeri negativi dà NaN, e numeri > 1 sfalsano il Log)
+            Cv2.Threshold(tempMat, tempMat, 0, 0, ThresholdTypes.Tozero); // Se < 0 -> 0
+            Cv2.Threshold(tempMat, tempMat, 1, 1, ThresholdTypes.Trunc);  // Se > 1 -> 1
+
+            // C. Applicazione Funzione Matematica
+            if (mode == VisualizationMode.SquareRoot)
+            {
+                // Out = Sqrt(In)
+                Cv2.Sqrt(tempMat, tempMat);
+            }
+            else if (mode == VisualizationMode.Logarithmic)
+            {
+                // Out = Log(1 + In * Factor) / Log(1 + Factor)
+                // Usiamo un fattore di compressione (es. 100) per rendere il logaritmo efficace
+                // Senza fattore, log(0..1) mappa a valori negativi o poco utili.
+                
+                // Formula approssimata veloce per visualizzazione: ln(1 + val)
+                // OpenCV Log calcola ln naturale.
+                
+                // 1. Aggiungiamo 1 a tutti i pixel per evitare log(0)
+                //    tempMat = tempMat + 1
+                Cv2.Add(tempMat, 1.0, tempMat); 
+                
+                // 2. Calcoliamo Log
+                Cv2.Log(tempMat, tempMat); 
+                
+                // 3. Normalizziamo di nuovo (ln(2) è il massimo teorico dato che input max era 1+1=2)
+                //    Moltiplichiamo per 1.0 / ln(2) ~= 1.4427 per tornare a 0..1
+                //    (Questa è una versione base del logaritmo, sufficiente per l'uso visuale)
+                Cv2.Multiply(tempMat, 1.442695, tempMat);
+            }
+
+            // D. Conversione finale a 8-bit (0-255)
+            tempMat.ConvertTo(dstMat, MatType.CV_8UC1, 255.0, 0);
+        }
     }
     
     public async Task SaveFitsFileAsync(FitsImageData data, string destinationPath)

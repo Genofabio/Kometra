@@ -47,6 +47,7 @@ public partial class BoardViewModel : ObservableObject
     [NotifyCanExecuteChangedFor(nameof(ToggleNodeAnimationCommand))]
     [NotifyCanExecuteChangedFor(nameof(EditSelectedNodeHeaderCommand))] // <-- NUOVO: Aggiorna lo stato del comando Header
     [NotifyCanExecuteChangedFor(nameof(ShowPlateSolvingWindowCommand))]
+    [NotifyCanExecuteChangedFor(nameof(SetVisualizationModeCommand))]
     private BaseNodeViewModel? _selectedNode;
     
     public bool IsGlobalAnimationRunning => 
@@ -321,6 +322,24 @@ public partial class BoardViewModel : ObservableObject
     private bool CanShowPlateSolving()
     {
         // Abilitato solo se è selezionato un nodo immagine (Singolo o Multiplo)
+        return SelectedNode is ImageNodeViewModel;
+    }
+    
+    // --- CAMBIO MODALITÀ VISUALIZZAZIONE ---
+    
+    [RelayCommand(CanExecute = nameof(CanSetVisualizationMode))]
+    private void SetVisualizationMode(VisualizationMode mode)
+    {
+        if (SelectedNode is ImageNodeViewModel imgNode)
+        {
+            // Applica la modalità al nodo selezionato
+            imgNode.VisualizationMode = mode;
+        }
+    }
+
+    private bool CanSetVisualizationMode(VisualizationMode mode)
+    {
+        // Abilitato solo se è selezionato un nodo di tipo immagine
         return SelectedNode is ImageNodeViewModel;
     }
 

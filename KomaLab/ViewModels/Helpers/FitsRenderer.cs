@@ -34,6 +34,9 @@ public partial class FitsRenderer : ObservableObject, IDisposable
     [ObservableProperty] private Bitmap? _image;
     [ObservableProperty] private double _blackPoint;
     [ObservableProperty] private double _whitePoint;
+
+    // NUOVO: Modalità di visualizzazione (Lineare, Log, ecc.)
+    [ObservableProperty] private VisualizationMode _visualizationMode = VisualizationMode.Linear;
     
     public bool IsDisposed => _disposedValue; 
 
@@ -103,6 +106,9 @@ public partial class FitsRenderer : ObservableObject, IDisposable
 
     partial void OnBlackPointChanged(double value) => _ = TriggerRegeneration();
     partial void OnWhitePointChanged(double value) => _ = TriggerRegeneration();
+    
+    // NUOVO: Se cambia il modo, rigeneriamo l'immagine
+    partial void OnVisualizationModeChanged(VisualizationMode value) => _ = TriggerRegeneration();
 
     private async Task TriggerRegeneration()
     {
@@ -150,11 +156,15 @@ public partial class FitsRenderer : ObservableObject, IDisposable
                 var addr = lockedBuffer.Address;
                 var rowBytes = lockedBuffer.RowBytes;
                 var mat = _cachedScientificMat;
+                
+                // Catturiamo il modo corrente per passarlo al thread background
+                var mode = VisualizationMode; 
 
                 await Task.Run(() =>
                 {
                     token.ThrowIfCancellationRequested();
-                    _fitsService.NormalizeData(mat, w, h, bp, wp, addr, rowBytes);
+                    // Modifica qui: Passiamo 'mode' al servizio
+                    _fitsService.NormalizeData(mat, w, h, bp, wp, addr, rowBytes, mode);
                 }, token);
             }
 
