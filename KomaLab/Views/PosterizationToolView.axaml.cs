@@ -3,139 +3,142 @@ using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using KomaLab.ViewModels;
+using System;
+using System.Globalization;
 using System.Threading.Tasks;
 
-namespace KomaLab.Views;
-
-public partial class PosterizationToolView : Window
+namespace KomaLab.Views
 {
-    private bool _isPanning;
-    private Point? _lastPointerPos;
-
-    public PosterizationToolView()
+    public partial class PosterizationToolView : Window
     {
-        InitializeComponent();
-        this.Loaded += OnLoaded;
-    }
+        private bool _isPanning;
+        private Point? _lastPointerPos;
 
-    private async void OnLoaded(object? sender, RoutedEventArgs e)
-    {
-        await Task.Delay(100); // Hack per layout
-        if (DataContext is PosterizationToolViewModel vm)
+        public PosterizationToolView()
         {
-            var border = this.FindControl<Border>("PreviewBorder");
-            if (border != null) vm.Viewport.ViewportSize = border.Bounds.Size;
-            vm.ResetView();
+            InitializeComponent();
+            this.Loaded += OnLoaded;
         }
-    }
 
-    // --- LOGICA IDENTICA AD ALIGNMENT TOOL ---
-
-    private void OnPreviewPointerPressed(object? sender, PointerPressedEventArgs e)
-    {
-        if (sender is not Border border) return;
-        var props = e.GetCurrentPoint(border).Properties;
-        
-        // Pan con tasto centrale
-        if (props.IsMiddleButtonPressed)
+        private async void OnLoaded(object? sender, RoutedEventArgs e)
         {
-            _isPanning = true;
-            _lastPointerPos = e.GetPosition(border);
-            e.Pointer.Capture(border);
-            this.Cursor = new Cursor(StandardCursorType.SizeAll);
+            await Task.Delay(100);
+            if (DataContext is PosterizationToolViewModel vm)
+            {
+                var border = this.FindControl<Border>("PreviewBorder");
+                if (border != null) vm.Viewport.ViewportSize = border.Bounds.Size;
+                vm.ResetView();
+            }
         }
-    }
 
-    private void OnPreviewPointerReleased(object? sender, PointerReleasedEventArgs e)
-    {
-        if (_isPanning)
+        private void OnValueInputLostFocus(object? sender, RoutedEventArgs e)
         {
-            _isPanning = false;
-            e.Pointer.Capture(null);
-            this.Cursor = Cursor.Default;
+            if (sender is not TextBox textBox || DataContext is not PosterizationToolViewModel vm) return;
+
+            string input = (textBox.Text ?? "").Replace(',', '.');
+            var culture = CultureInfo.InvariantCulture;
+
+            if (textBox.Name == "LevelsInput")
+            {
+                if (int.TryParse(input, out int levels))
+                    vm.Levels = Math.Clamp(levels, 2, 64);
+                else
+                    vm.Levels = 64;
+                textBox.Text = vm.Levels.ToString();
+            }
+            else if (textBox.Name == "BlackInput")
+            {
+                if (double.TryParse(input, NumberStyles.Any, culture, out double black))
+                    vm.BlackPoint = Math.Clamp(black, vm.SliderMin, vm.SliderMax);
+                else
+                    vm.BlackPoint = vm.SliderMin;
+                textBox.Text = vm.BlackPoint.ToString("F1", culture);
+            }
+            else if (textBox.Name == "WhiteInput")
+            {
+                if (double.TryParse(input, NumberStyles.Any, culture, out double white))
+                    vm.WhitePoint = Math.Clamp(white, vm.SliderMin, vm.SliderMax);
+                else
+                    vm.WhitePoint = vm.SliderMax;
+                textBox.Text = vm.WhitePoint.ToString("F1", culture);
+            }
         }
-    }
 
-    private void OnPreviewPointerMoved(object? sender, PointerEventArgs e)
-    {
-        if (!_isPanning || _lastPointerPos == null || sender is not Border border) return;
-        if (DataContext is not PosterizationToolViewModel vm) return;
-
-        var currentPos = e.GetPosition(border);
-        var delta = currentPos - _lastPointerPos.Value;
-        
-        vm.ApplyPan(delta.X, delta.Y);
-        _lastPointerPos = currentPos;
-    }
-
-    private void OnPreviewPointerWheelChanged(object? sender, PointerWheelEventArgs e)
-    {
-        if (DataContext is not PosterizationToolViewModel vm) return;
-        if (sender is not Border border) return;
-
-        // --- 1. ZOOM (CTRL + WHEEL) ---
-        // Priorità allo Zoom se si preme Control
-        if (e.KeyModifiers.HasFlag(KeyModifiers.Control))
+        private void OnPreviewPointerPressed(object? sender, PointerPressedEventArgs e)
         {
-            var mousePos = e.GetPosition(border);
-            // Rotella Su = Zoom In, Rotella Giù = Zoom Out
-            double factor = e.Delta.Y > 0 ? 1.1 : (1.0 / 1.1);
-            vm.ApplyZoomAtPoint(factor, mousePos);
+            if (sender is not Border border) return;
+            var props = e.GetCurrentPoint(border).Properties;
+            if (props.IsMiddleButtonPressed)
+            {
+                _isPanning = true;
+                _lastPointerPos = e.GetPosition(border);
+                e.Pointer.Capture(border);
+                this.Cursor = new Cursor(StandardCursorType.SizeAll);
+            }
+        }
+
+        private void OnPreviewPointerReleased(object? sender, PointerReleasedEventArgs e)
+        {
+            if (_isPanning)
+            {
+                _isPanning = false;
+                e.Pointer.Capture(null);
+                this.Cursor = Cursor.Default;
+            }
+        }
+
+        private void OnPreviewPointerMoved(object? sender, PointerEventArgs e)
+        {
+            if (!_isPanning || _lastPointerPos == null || sender is not Border border) return;
+            if (DataContext is not PosterizationToolViewModel vm) return;
+            var currentPos = e.GetPosition(border);
+            var delta = currentPos - _lastPointerPos.Value;
+            vm.ApplyPan(delta.X, delta.Y);
+            _lastPointerPos = currentPos;
+        }
+
+        private void OnPreviewPointerWheelChanged(object? sender, PointerWheelEventArgs e)
+        {
+            if (DataContext is not PosterizationToolViewModel vm) return;
+            if (sender is not Border border) return;
+
+            if (e.KeyModifiers.HasFlag(KeyModifiers.Control))
+            {
+                var mousePos = e.GetPosition(border);
+                double factor = e.Delta.Y > 0 ? 1.1 : (1.0 / 1.1);
+                vm.ApplyZoomAtPoint(factor, mousePos);
+                e.Handled = true;
+                return;
+            }
+
+            double currentRange = Math.Max(100, vm.WhitePoint - vm.BlackPoint);
+            double step = currentRange * 0.05;
+            if (e.Delta.Y < 0) step = -step;
+
+            if (e.KeyModifiers.HasFlag(KeyModifiers.Shift))
+            {
+                double newBlack = vm.BlackPoint + step;
+                vm.BlackPoint = Math.Clamp(newBlack, vm.SliderMin, vm.WhitePoint - 1);
+            }
+            else
+            {
+                double newWhite = vm.WhitePoint + step;
+                vm.WhitePoint = Math.Clamp(newWhite, vm.BlackPoint + 1, vm.SliderMax);
+            }
             e.Handled = true;
-            return;
         }
 
-        // --- 2. GESTIONE SOGLIE (STRETCHING) ---
+        private void OnZoomInClicked(object? sender, RoutedEventArgs e) => (DataContext as PosterizationToolViewModel)?.ZoomIn();
+        private void OnZoomOutClicked(object? sender, RoutedEventArgs e) => (DataContext as PosterizationToolViewModel)?.ZoomOut();
         
-        // Calcoliamo uno step proporzionale al range attuale (es. 5%)
-        // Questo rende la regolazione precisa sia su range ampi che stretti
-        double currentRange = vm.WhitePoint - vm.BlackPoint;
-        if (currentRange < 1) currentRange = 100; // Fallback di sicurezza
-        
-        double step = currentRange * 0.05; 
-
-        // Se ruotiamo verso il basso (Delta < 0), sottraiamo il valore
-        if (e.Delta.Y < 0) step = -step;
-
-        // LOGICA RICHIESTA:
-        // Shift -> Modifica NERO (Black Point)
-        // Default -> Modifica BIANCO (White Point)
-
-        if (e.KeyModifiers.HasFlag(KeyModifiers.Shift))
+        private void OnResetViewClicked(object? sender, RoutedEventArgs e)
         {
-             // Modifica Punto di Nero
-             double newBlack = vm.BlackPoint + step;
-             
-             // Vincolo: Il Nero non può superare il Bianco (meno un margine di sicurezza)
-             if (newBlack < vm.WhitePoint - 1) 
-             {
-                 vm.BlackPoint = newBlack;
-             }
-        }
-        else
-        {
-             // Modifica Punto di Bianco (Comportamento Standard)
-             double newWhite = vm.WhitePoint + step;
-             
-             // Vincolo: Il Bianco non può scendere sotto il Nero
-             if (newWhite > vm.BlackPoint + 1)
-             {
-                 vm.WhitePoint = newWhite;
-             }
-        }
-
-        e.Handled = true;
-    }
-
-    private void OnZoomInClicked(object? sender, RoutedEventArgs e) { if (DataContext is PosterizationToolViewModel vm) vm.ZoomIn(); }
-    private void OnZoomOutClicked(object? sender, RoutedEventArgs e) { if (DataContext is PosterizationToolViewModel vm) vm.ZoomOut(); }
-    private void OnResetViewClicked(object? sender, RoutedEventArgs e)
-    {
-        if (DataContext is PosterizationToolViewModel vm)
-        {
-            var border = this.FindControl<Border>("PreviewBorder");
-            if (border != null) vm.Viewport.ViewportSize = border.Bounds.Size;
-            vm.ResetView();
+            if (DataContext is PosterizationToolViewModel vm)
+            {
+                var border = this.FindControl<Border>("PreviewBorder");
+                if (border != null) vm.Viewport.ViewportSize = border.Bounds.Size;
+                vm.ResetView();
+            }
         }
     }
 }

@@ -5,6 +5,7 @@
         xmlns:vm="clr-namespace:KomaLab.ViewModels"
         xmlns:avalonia="clr-namespace:Material.Icons.Avalonia;assembly=Material.Icons.Avalonia"
         xmlns:models="clr-namespace:KomaLab.Models"
+        xmlns:conv="clr-namespace:KomaLab.Converters"
         mc:Ignorable="d" d:DesignWidth="950" d:DesignHeight="650"
         x:Class="KomaLab.Views.PosterizationToolView"
         x:DataType="vm:PosterizationToolViewModel"
@@ -12,15 +13,21 @@
         Width="1000" Height="700"
         MinHeight="500" MinWidth="850"
         WindowStartupLocation="CenterScreen"
+        Background="{DynamicResource ToolWindowBackgroundBrush}"
         Focusable="True">
+
+    <Window.Resources>
+        <conv:PosterizationModeConverter x:Key="ModeConverter"/>
+    </Window.Resources>
 
     <Window.Styles>
         <Style Selector="Button.actionBtn">
             <Setter Property="HorizontalAlignment" Value="Stretch"/>
             <Setter Property="HorizontalContentAlignment" Value="Center"/>
             <Setter Property="Padding" Value="10,8"/>
+            <Setter Property="FontSize" Value="14"/>
             <Setter Property="FontWeight" Value="SemiBold"/>
-            <Setter Property="CornerRadius" Value="4"/>
+            <Setter Property="CornerRadius" Value="6"/>
         </Style>
         <Style Selector="Button.apply">
             <Setter Property="Background" Value="#03A077"/>
@@ -29,18 +36,32 @@
         <Style Selector="Button.apply:pointerover /template/ ContentPresenter">
             <Setter Property="Background" Value="#04B889"/>
         </Style>
-        <Style Selector="Button.cancel">
-            <Setter Property="Background" Value="#333333"/>
-            <Setter Property="Foreground" Value="#DDDDDD"/>
+        
+        <Style Selector="TextBlock.description">
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="Foreground" Value="#AAA"/>
+            <Setter Property="TextWrapping" Value="Wrap"/>
+        </Style>
+
+        <Style Selector="TextBox.valueInput">
+            <Setter Property="Width" Value="85"/>
+            <Setter Property="Height" Value="30"/>
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="VerticalContentAlignment" Value="Center"/>
+            <Setter Property="HorizontalContentAlignment" Value="Center"/>
+            <Setter Property="Background" Value="#1E1E1E"/>
+            <Setter Property="Foreground" Value="#DDD"/>
+            <Setter Property="BorderBrush" Value="#444"/>
+            <Setter Property="Padding" Value="5,0"/>
+            <Setter Property="Margin" Value="10,0,0,0"/>
         </Style>
 
         <Style Selector="Button.iconBtn">
             <Setter Property="Background" Value="Transparent"/>
             <Setter Property="Foreground" Value="White"/>
-            <Setter Property="Padding" Value="5"/>
-            <Setter Property="Width" Value="30"/>
-            <Setter Property="Height" Value="30"/>
-            <Setter Property="CornerRadius" Value="15"/>
+            <Setter Property="Width" Value="32"/>
+            <Setter Property="Height" Value="32"/>
+            <Setter Property="CornerRadius" Value="16"/>
         </Style>
         <Style Selector="Button.iconBtn:pointerover /template/ ContentPresenter">
             <Setter Property="Background" Value="#44FFFFFF"/>
@@ -48,91 +69,86 @@
     </Window.Styles>
     
     <Grid ColumnDefinitions="320, *">
-        
-        <Border Grid.Column="0" Background="{DynamicResource ToolPanelBackgroundBrush}" Padding="20">
+        <Border Grid.Column="0" Background="{DynamicResource ToolPanelBackgroundBrush}" Padding="10,20,10,20">
             <Grid RowDefinitions="Auto, *, Auto">
                 
-                <StackPanel Grid.Row="0" Spacing="15">
-                    
-                    <TextBlock Text="Parametri Quantizzazione" FontSize="18" FontWeight="Bold" Margin="0,0,0,10"/>
+                <TextBlock Grid.Row="0" Text="Parametri Quantizzazione" FontSize="22" FontWeight="Bold" Foreground="White" Margin="5,0,0,15"/>
 
-                    <StackPanel Spacing="8">
-                        <Grid ColumnDefinitions="*, Auto">
-                            <TextBlock Text="Numero Livelli" FontWeight="SemiBold"/>
-                            <TextBlock Text="{Binding Levels}" FontWeight="Bold" Foreground="{DynamicResource ActionPrimaryBackgroundBrush}"/>
-                        </Grid>
-                        <Slider Minimum="2" Maximum="64" Value="{Binding Levels}" 
-                                TickFrequency="1" IsSnapToTickEnabled="True"/>
-                    </StackPanel>
-                    
-                    <Separator Background="#333" Height="1" Margin="0,5"/>
-
-                    <StackPanel Spacing="8">
-                        <TextBlock Text="Metodo Distribuzione" FontWeight="SemiBold"/>
-                        <ComboBox ItemsSource="{Binding AvailableModes}" 
-                                  SelectedItem="{Binding SelectedMode}" 
-                                  HorizontalAlignment="Stretch"/>
+                <ScrollViewer Grid.Row="1" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
+                    <StackPanel Spacing="15" Margin="5,0,14,0">
                         
-                        <Panel Height="40">
-                            <TextBlock Text="Lineare: Divisione uniforme. Utile per pianeti o luna." 
-                                       FontSize="11" Opacity="0.6" TextWrapping="Wrap"
-                                       IsVisible="{Binding SelectedMode, Converter={x:Static ObjectConverters.Equal}, ConverterParameter={x:Static models:VisualizationMode.Linear}}"/>
-                            <TextBlock Text="Logaritmico: Dettagli nelle basse luci. Ideale per chioma e code cometarie." 
-                                       FontSize="11" Opacity="0.6" TextWrapping="Wrap"
-                                       IsVisible="{Binding SelectedMode, Converter={x:Static ObjectConverters.Equal}, ConverterParameter={x:Static models:VisualizationMode.Logarithmic}}"/>
-                            <TextBlock Text="Radice Quadrata: Via di mezzo. Buono per nebulose brillanti." 
-                                       FontSize="11" Opacity="0.6" TextWrapping="Wrap"
-                                       IsVisible="{Binding SelectedMode, Converter={x:Static ObjectConverters.Equal}, ConverterParameter={x:Static models:VisualizationMode.SquareRoot}}"/>
-                        </Panel>
-                    </StackPanel>
-
-                    <Separator Background="#333" Height="1" Margin="0,5"/>
-
-                    <CheckBox IsChecked="{Binding AutoAdaptThresholds}" 
-                              Content="Adatta luminosità al cambio immagine"
-                              ToolTip.Tip="Se attivo, ricalcola le soglie per mantenere costante la luminosità percepita. Se disattivo, mantiene i valori ADU fissi."/>
-
-                    <Separator Background="#333" Height="1" Margin="0,5"/>
-
-                    <StackPanel Spacing="8">
-                        <TextBlock Text="Range Dinamico (Clip)" FontWeight="SemiBold"/>
+                        <StackPanel Spacing="6">
+                            <TextBlock Text="Numero Livelli" FontWeight="SemiBold" FontSize="14" Foreground="#CCC"/>
+                            <TextBlock Classes="description" Text="Divide l'immagine in toni discreti per isolare le isofote."/>
+                            <Grid ColumnDefinitions="*, Auto">
+                                <Slider Grid.Column="0" Minimum="2" Maximum="64" Value="{Binding Levels}" 
+                                        IsSnapToTickEnabled="True" TickFrequency="1" VerticalAlignment="Center"/>
+                                <TextBox Name="LevelsInput" Grid.Column="1" Text="{Binding Levels, Mode=OneWay}" 
+                                         LostFocus="OnValueInputLostFocus" Classes="valueInput"/>
+                            </Grid>
+                        </StackPanel>
                         
-                        <Grid ColumnDefinitions="50, *, 65"> 
-                            <TextBlock Grid.Column="0" Text="Nero:" VerticalAlignment="Center" Opacity="0.7"/>
-                            <Slider Grid.Column="1" 
-                                    Minimum="{Binding SliderMin}" 
-                                    Maximum="{Binding SliderMax}" 
-                                    Value="{Binding BlackPoint}"/>
-                            <TextBlock Grid.Column="2" Text="{Binding BlackPoint, StringFormat='N0'}" 
-                                       VerticalAlignment="Center" HorizontalAlignment="Right" FontFamily="Monospace" FontSize="12"/>
-                        </Grid>
-                        
-                        <Grid ColumnDefinitions="50, *, 65">
-                            <TextBlock Grid.Column="0" Text="Bianco:" VerticalAlignment="Center" Opacity="0.7"/>
-                            <Slider Grid.Column="1" 
-                                    Minimum="{Binding SliderMin}" 
-                                    Maximum="{Binding SliderMax}" 
-                                    Value="{Binding WhitePoint}"/>
-                            <TextBlock Grid.Column="2" Text="{Binding WhitePoint, StringFormat='N0'}" 
-                                       VerticalAlignment="Center" HorizontalAlignment="Right" FontFamily="Monospace" FontSize="12"/>
-                        </Grid>
-                        
-                        <TextBlock Text="Tip: Shift + Rotella sull'immagine per regolare il Nero." 
-                                   FontSize="11" FontStyle="Italic" Opacity="0.5" Margin="0,5,0,0"/>
+                        <Border Height="1" Background="#444" Margin="0,0,0,2"/>
+
+                        <StackPanel Spacing="6">
+                            <TextBlock Text="Metodo Distribuzione" FontWeight="SemiBold" FontSize="14" Foreground="#CCC"/>
+                            <TextBlock Classes="description" Text="Scegli come ripartire i toni per enfatizzare dettagli deboli."/>
+                            <ComboBox ItemsSource="{Binding AvailableModes}" 
+                                      SelectedItem="{Binding SelectedMode}" 
+                                      HorizontalAlignment="Stretch" 
+                                      Margin="0,8,0,0">
+                                <ComboBox.ItemTemplate>
+                                    <DataTemplate>
+                                        <TextBlock Text="{Binding Converter={StaticResource ModeConverter}}"/>
+                                    </DataTemplate>
+                                </ComboBox.ItemTemplate>
+                            </ComboBox>
+                        </StackPanel>
+
+                        <Border Height="1" Background="#444" Margin="0,6,0,2"/>
+
+                        <StackPanel Spacing="10">
+                            <TextBlock Text="Range Dinamico (Clip)" FontWeight="SemiBold" FontSize="14" Foreground="#CCC"/>
+                            <TextBlock Classes="description" Text="Definisce l'intervallo di segnale ADU. I valori esterni verranno tagliati."/>
+                            
+                            <StackPanel Spacing="2" Margin="0,2,0,0">
+                                <TextBlock Text="Soglia Nero" FontSize="12" Foreground="#999" FontWeight="SemiBold" FontStyle="Italic"/>
+                                <Grid ColumnDefinitions="*, Auto">
+                                    <Slider Grid.Column="0" Minimum="{Binding SliderMin}" Maximum="{Binding SliderMax}" Value="{Binding BlackPoint}"/>
+                                    <TextBox Name="BlackInput" Grid.Column="1" Text="{Binding BlackPoint, Mode=OneWay, StringFormat={}{0:0.0}}" 
+                                             LostFocus="OnValueInputLostFocus" Classes="valueInput"/>
+                                </Grid>
+                            </StackPanel>
+                            
+                            <StackPanel Spacing="2" Margin="0,2,0,0">
+                                <TextBlock Text="Soglia Bianco" FontSize="12" Foreground="#999" FontWeight="SemiBold" FontStyle="Italic"/>
+                                <Grid ColumnDefinitions="*, Auto">
+                                    <Slider Grid.Column="0" Minimum="{Binding SliderMin}" Maximum="{Binding SliderMax}" Value="{Binding WhitePoint}"/>
+                                    <TextBox Name="WhiteInput" Grid.Column="1" Text="{Binding WhitePoint, Mode=OneWay, StringFormat={}{0:0.0}}" 
+                                             LostFocus="OnValueInputLostFocus" Classes="valueInput"/>
+                                </Grid>
+                            </StackPanel>
+                        </StackPanel>
+
+                        <Border Height="1" Background="#444" Margin="0,0,0,2"/>
+
+                        <StackPanel Spacing="8">
+                            <TextBlock Text="Opzioni aggiuntive" FontWeight="SemiBold" FontSize="14" Foreground="#CCC"/>
+                            <CheckBox IsChecked="{Binding AutoAdaptThresholds}" Padding="8,0,0,0" FontSize="12"
+                                      Content="Adatta luminosità al cambio immagine" Margin="0,0,0,6"/>
+                        </StackPanel>
                     </StackPanel>
+                </ScrollViewer>
 
-                </StackPanel>
-
-                <StackPanel Grid.Row="2" Spacing="10">
-                    <StackPanel Spacing="5" IsVisible="{Binding IsProcessing}">
-                        <TextBlock Text="{Binding StatusText}" HorizontalAlignment="Center" FontSize="12" FontStyle="Italic"/>
-                        <ProgressBar IsIndeterminate="True" Height="4"/>
+                <StackPanel Grid.Row="2" Margin="5,0,5,0">
+                    <Border Height="1" Background="#444" Margin="0,10"/>
+                    <StackPanel Spacing="10">
+                        <StackPanel Spacing="5" IsVisible="{Binding IsProcessing}">
+                            <TextBlock Text="{Binding StatusText}" HorizontalAlignment="Center" FontSize="12" FontStyle="Italic" Foreground="#AAA"/>
+                            <ProgressBar IsIndeterminate="True" Height="4" Foreground="#03A077"/>
+                        </StackPanel>
+                        <Button Content="Applica" Command="{Binding ApplyCommand}" Classes="actionBtn apply" IsEnabled="{Binding !IsProcessing}" Margin="0,0,0,10"/>
                     </StackPanel>
-
-                    <Grid ColumnDefinitions="*, 10, *" IsEnabled="{Binding !IsProcessing}">
-                        <Button Grid.Column="0" Content="Annulla" Command="{Binding CancelCommand}" Classes="actionBtn cancel"/>
-                        <Button Grid.Column="2" Content="Salva FITS" Command="{Binding ApplyCommand}" Classes="actionBtn apply"/>
-                    </Grid>
                 </StackPanel>
             </Grid>
         </Border>
@@ -143,7 +159,6 @@
                     PointerReleased="OnPreviewPointerReleased"
                     PointerMoved="OnPreviewPointerMoved"
                     PointerWheelChanged="OnPreviewPointerWheelChanged">
-                
                 <Grid>
                     <Canvas Name="Viewport" RenderTransformOrigin="0,0">
                         <Canvas.RenderTransform>
@@ -152,60 +167,30 @@
                                 <TranslateTransform X="{Binding Viewport.OffsetX}" Y="{Binding Viewport.OffsetY}"/>
                             </TransformGroup>
                         </Canvas.RenderTransform>
-                        
-                        <Image Source="{Binding PreviewBitmap}" 
-                               Stretch="None"
-                               RenderOptions.BitmapInterpolationMode="None"/>
+                        <Image Source="{Binding PreviewBitmap}" Stretch="None" RenderOptions.BitmapInterpolationMode="None"/>
                     </Canvas>
                     
-                    <Border HorizontalAlignment="Left" VerticalAlignment="Top" Margin="10" Padding="8,4" 
-                            Background="#80000000" CornerRadius="4" IsHitTestVisible="False">
-                        <TextBlock Text="{Binding Viewport.Scale, StringFormat='Zoom: {0:P0}'}" Foreground="White" FontSize="12"/>
-                    </Border>
-
-                    <Border HorizontalAlignment="Left" VerticalAlignment="Bottom" 
-                            Margin="10" Padding="6,4" 
-                            Background="#99000000" CornerRadius="6">
-                        
+                    <Border HorizontalAlignment="Left" VerticalAlignment="Bottom" Margin="10" Padding="6,4" Background="#CC000000" CornerRadius="6">
                         <StackPanel Orientation="Horizontal" Spacing="4">
                             <Button Command="{Binding PreviousImageCommand}" Classes="iconBtn">
                                 <avalonia:MaterialIcon Kind="ChevronLeft"/>
                             </Button>
-                            
-                            <TextBlock Text="{Binding CurrentImageText}" 
-                                       Foreground="White" VerticalAlignment="Center" 
-                                       Margin="8,0" FontWeight="Bold" FontSize="13"/>
-                            
+                            <TextBlock Text="{Binding CurrentImageText}" Foreground="White" VerticalAlignment="Center" Margin="8,0" FontWeight="Bold" FontSize="13"/>
                             <Button Command="{Binding NextImageCommand}" Classes="iconBtn">
                                 <avalonia:MaterialIcon Kind="ChevronRight"/>
                             </Button>
                         </StackPanel>
                     </Border>
 
-                    <Border HorizontalAlignment="Right" VerticalAlignment="Bottom" 
-                            Margin="10" Padding="6,4"
-                            Background="#99000000" CornerRadius="6">
-                        
+                    <Border HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="10" Padding="6,4" Background="#CC000000" CornerRadius="6">
                         <StackPanel Orientation="Horizontal" Spacing="6">
-                            <Button Click="OnZoomOutClicked" Classes="iconBtn" ToolTip.Tip="Zoom Out">
-                                <avalonia:MaterialIcon Kind="Minus"/>
-                            </Button>
-                            <Button Click="OnZoomInClicked" Classes="iconBtn" ToolTip.Tip="Zoom In">
-                                <avalonia:MaterialIcon Kind="Plus"/>
-                            </Button>
-                            
-                            <Rectangle Width="1" Fill="#666" Margin="2,4"/>
-                            
-                            <Button Click="OnResetViewClicked" Classes="iconBtn" ToolTip.Tip="Adatta allo schermo">
-                                <avalonia:MaterialIcon Kind="FitToScreen"/>
-                            </Button>
-                            
-                            <Button Command="{Binding ResetThresholdsCommand}" Classes="iconBtn" ToolTip.Tip="Auto-Stretch (Reset Soglie)">
-                                <avalonia:MaterialIcon Kind="Contrast"/>
-                            </Button>
+                            <Button Click="OnZoomOutClicked" Classes="iconBtn"><avalonia:MaterialIcon Kind="Minus"/></Button>
+                            <Button Click="OnZoomInClicked" Classes="iconBtn"><avalonia:MaterialIcon Kind="Plus"/></Button>
+                            <Rectangle Width="1" Fill="#444" Margin="2,4"/>
+                            <Button Click="OnResetViewClicked" Classes="iconBtn"><avalonia:MaterialIcon Kind="FitToScreen"/></Button>
+                            <Button Command="{Binding ResetThresholdsCommand}" Classes="iconBtn"><avalonia:MaterialIcon Kind="Contrast"/></Button>
                         </StackPanel>
                     </Border>
-
                 </Grid>
             </Border>
         </Border>
