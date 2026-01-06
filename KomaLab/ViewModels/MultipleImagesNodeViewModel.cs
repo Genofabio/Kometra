@@ -114,6 +114,9 @@ public partial class MultipleImagesNodeViewModel : ImageNodeViewModel
         ActiveFitsImage = new FitsRenderer(initialData, _fitsService, _converter, _analysis);
         await ActiveFitsImage.InitializeAsync();
         
+        // ARCHITECTURE FIX: Applichiamo subito il modo visualizzazione corrente del Nodo
+        ActiveFitsImage.VisualizationMode = this.VisualizationMode;
+
         // Setup iniziale Viewport
         Viewport.ImageSize = ActiveFitsImage.ImageSize;
         Viewport.ResetView(); // 1:1
@@ -142,8 +145,6 @@ public partial class MultipleImagesNodeViewModel : ImageNodeViewModel
         if (index < 0 || index >= _imageCount) return;
 
         // --- FIX 1: ANNULLAMENTO PRECEDENTE ---
-        // Se c'è un caricamento in corso, lo annulliamo.
-        // Questo previene che 10 click lancino 10 processi paralleli.
         _loadingCts?.Cancel();
         _loadingCts = new CancellationTokenSource();
         var token = _loadingCts.Token;
@@ -152,42 +153,38 @@ public partial class MultipleImagesNodeViewModel : ImageNodeViewModel
         {
             var cachedData = await GetOrLoadDataAtIndex(index);
             
-            // Se siamo stati annullati nel frattempo (nuovo click), usciamo subito
             if (token.IsCancellationRequested) return;
 
-            // Se l'immagine è la stessa (es. click veloci avanti/indietro), non fare nulla
             if (ActiveFitsImage != null && ActiveFitsImage.Data == cachedData) return;
             if (cachedData == null) return;
 
             ContrastProfile? profileToApply = _lastContrastProfile;
 
             // --- FIX 2: CATTURA SICURA ---
-            // Catturiamo il profilo dall'immagine attuale MA NON LA SCARICHIAMO ANCORA.
-            // Se la scaricassimo ora, la UI rimarrebbe nera o crasherebbe durante il caricamento della nuova.
-            if (ActiveFitsImage != null && !ActiveFitsImage.IsDisposed) // Controllo sicurezza
+            if (ActiveFitsImage != null && !ActiveFitsImage.IsDisposed) 
             {
                 profileToApply = ActiveFitsImage.CaptureContrastProfile();
                 _lastContrastProfile = profileToApply;
             }
 
-            // Creazione nuovo renderer (Operazione pesante)
+            // Creazione nuovo renderer
             var newFitsImage = new FitsRenderer(cachedData, _fitsService, _converter, _analysis);
             
-            // Inizializza (qui dentro avviene il lavoro pesante su thread separato)
-            // Nota: Se FitsRenderer.InitializeAsync supportasse un CancellationToken sarebbe meglio,
-            // ma per ora controlliamo il token subito dopo.
+            // Inizializza
             await newFitsImage.InitializeAsync();
 
+            // --- ARCHITECTURE FIX: APPLICAZIONE STATO DEL NODO ---
+            // Imponiamo al nuovo renderer di usare la modalità scelta nel Nodo (es. Logaritmica)
+            newFitsImage.VisualizationMode = this.VisualizationMode;
+
             // --- FIX 3: PUNTO DI NON RITORNO ---
-            // Se l'utente ha cliccato un'altra volta mentre caricavamo, 
-            // BUTTIAMO VIA il lavoro fatto (Dispose del nuovo) e non tocchiamo la UI.
             if (token.IsCancellationRequested)
             {
                 newFitsImage.UnloadData();
                 return;
             }
 
-            // Applicazione Profilo
+            // Applicazione Profilo Contrasto
             if (profileToApply != null)
             {
                 newFitsImage.ApplyContrastProfile(profileToApply);
@@ -197,11 +194,9 @@ public partial class MultipleImagesNodeViewModel : ImageNodeViewModel
             Viewport.ImageSize = newFitsImage.ImageSize;
 
             // --- FIX 4: SWAP ATOMICO E PULIZIA ---
-            // Solo ora che siamo pronti e sicuri, scambiamo i renderer
             var oldImage = ActiveFitsImage;
-            ActiveFitsImage = newFitsImage; // La UI si aggiorna qui
+            ActiveFitsImage = newFitsImage; 
 
-            // Ora possiamo distruggere quello vecchio in sicurezza
             oldImage?.UnloadData();
 
             // Aggiorna UI valori
@@ -211,12 +206,11 @@ public partial class MultipleImagesNodeViewModel : ImageNodeViewModel
             PreviousImageCommand.NotifyCanExecuteChanged();
             NextImageCommand.NotifyCanExecuteChanged();
 
-            // Prefetch senza await (fire and forget sicuro)
             _ = PrefetchImageAsync(index + 1);
         }
         catch (OperationCanceledException)
         {
-            // Normale durante click rapidi, ignoriamo
+            // Normale
         }
         catch (Exception ex)
         {
@@ -266,7 +260,6 @@ public partial class MultipleImagesNodeViewModel : ImageNodeViewModel
             {
                 _maxImageSize = new Size(first.Width, first.Height);
                 
-                // Se i dati cambiano radicalmente (es. dopo uno stack), resettiamo la vista 1:1
                 Viewport.ImageSize = _maxImageSize;
                 Viewport.ResetView();
 
@@ -276,7 +269,6 @@ public partial class MultipleImagesNodeViewModel : ImageNodeViewModel
             }
         }
         
-        // Reset profilo contrasto per i nuovi dati
         _lastContrastProfile = null;
 
         // Ricarica la vista corrente
@@ -357,7 +349,6 @@ public partial class MultipleImagesNodeViewModel : ImageNodeViewModel
     private void StopAnimation()
     {
         IsAnimating = false;
-        // Il loop controlla questa variabile a ogni giro e si fermerà da solo
     }
 
     private async Task AnimationLoopAsync()
@@ -366,17 +357,12 @@ public partial class MultipleImagesNodeViewModel : ImageNodeViewModel
         {
             while (IsAnimating)
             {
-                // 1. Calcola prossimo indice (Loop circolare)
                 int nextIndex = (_currentIndex + 1) % _imageCount;
-
-                // 2. Carica l'immagine (questo metodo gestisce già il rendering e l'SRP)
-                // Usiamo await: il prossimo frame non parte finché questo non è finito!
                 await LoadImageAtIndexAsync(nextIndex);
                 
                 SetProperty(ref _currentIndex, nextIndex, nameof(CurrentIndex));
-                OnPropertyChanged(nameof(CurrentImageText)); // Aggiorna "1/10"
+                OnPropertyChanged(nameof(CurrentImageText));
 
-                // 3. Attesa per il frame rate
                 await Task.Delay(AnimationDelayMs);
             }
         }
@@ -387,10 +373,7 @@ public partial class MultipleImagesNodeViewModel : ImageNodeViewModel
         }
         finally
         {
-            // Assicuriamoci che lo stato sia coerente quando usciamo
             IsAnimating = false; 
-            
-            // Ripristina i pulsanti freccia
             OnPropertyChanged(nameof(CanShowPrevious));
             OnPropertyChanged(nameof(CanShowNext));
         }
@@ -398,10 +381,7 @@ public partial class MultipleImagesNodeViewModel : ImageNodeViewModel
     
     public override async Task RefreshDataFromDiskAsync()
     {
-        // 1. Svuota la cache interna (fondamentale!)
         _dataCache.Clear();
-
-        // 2. Ricarica l'immagine attualmente visualizzata
         await LoadImageAtIndexAsync(CurrentIndex);
     }
 

@@ -40,6 +40,19 @@ public abstract partial class ImageNodeViewModel : BaseNodeViewModel
 
     // --- Proprietà Gestione Immagine ---
     
+    [ObservableProperty]
+    private VisualizationMode _visualizationMode = Models.VisualizationMode.Linear;
+
+    // Quando l'utente cambia la modalià dal menu/UI:
+    partial void OnVisualizationModeChanged(VisualizationMode value)
+    {
+        // Imponiamo subito la scelta al renderer attivo (se esiste)
+        if (ActiveRenderer != null)
+        {
+            ActiveRenderer.VisualizationMode = value;
+        }
+    }
+    
     public abstract FitsRenderer? ActiveRenderer { get; }
 
     [ObservableProperty] 
@@ -47,26 +60,6 @@ public abstract partial class ImageNodeViewModel : BaseNodeViewModel
 
     [ObservableProperty] 
     private double _whitePoint;
-
-    // --- NUOVO: Gestione Modo di Visualizzazione (Proxy verso Renderer) ---
-
-    /// <summary>
-    /// Proprietà Proxy: Legge e scrive direttamente sul Renderer attivo.
-    /// Questo permette alla ComboBox nella UI di pilotare il renderer.
-    /// </summary>
-    public VisualizationMode VisualizationMode
-    {
-        get => ActiveRenderer?.VisualizationMode ?? VisualizationMode.Linear;
-        set
-        {
-            if (ActiveRenderer != null && ActiveRenderer.VisualizationMode != value)
-            {
-                ActiveRenderer.VisualizationMode = value;
-                // Notifichiamo la UI che il valore è cambiato
-                OnPropertyChanged(); 
-            }
-        }
-    }
 
     /// <summary>
     /// Lista dei modi disponibili per popolare la ComboBox.

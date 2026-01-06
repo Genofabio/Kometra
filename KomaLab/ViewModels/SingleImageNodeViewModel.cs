@@ -103,7 +103,7 @@ public partial class SingleImageNodeViewModel : ImageNodeViewModel
     private async Task SetFitsData(FitsImageData newData)
     {
         // 1. Salvataggio stato precedente (Contrasto)
-        // FIX: Catturiamo il profilo SOLO se l'immagine precedente era valida (non placeholder)
+        // Catturiamo il profilo SOLO se l'immagine precedente era valida (non placeholder)
         if (FitsImage != null && FitsImage.Data.Width > 0) 
         {
             _lastContrastProfile = FitsImage.CaptureContrastProfile();
@@ -118,7 +118,13 @@ public partial class SingleImageNodeViewModel : ImageNodeViewModel
             _converter,
             _analysis);
         
-        await newFitsImage.InitializeAsync(); // Qui calcola l'Auto-Stretch corretto
+        // Inizializzazione (Calcola istogramma e Auto-Stretch iniziale Lineare)
+        await newFitsImage.InitializeAsync(); 
+
+        // --- ARCHITECTURE FIX: APPLICAZIONE STATO DEL NODO ---
+        // Il renderer nasce di default "Linear", ma noi gli imponiamo 
+        // la modalità di visualizzazione attualmente attiva nel Nodo (es. Logaritmica).
+        newFitsImage.VisualizationMode = this.VisualizationMode;
 
         // 3. Ripristino stato visualizzazione (Contrasto)
         // Se è la prima volta (dal placeholder), _lastContrastProfile sarà null, 
@@ -131,6 +137,7 @@ public partial class SingleImageNodeViewModel : ImageNodeViewModel
         // 4. Aggiornamento Viewport
         Viewport.ImageSize = newFitsImage.ImageSize;
         
+        // Se è il primo caricamento o veniamo da un placeholder, resettiamo zoom/pan
         if (FitsImage == null || FitsImage.Data.Width == 0)
         {
             Viewport.ResetView();
@@ -141,13 +148,16 @@ public partial class SingleImageNodeViewModel : ImageNodeViewModel
         FitsImage = newFitsImage;
 
         // 6. Sincronizzazione UI (Slider Base)
-        // Ora qui leggerà i valori corretti calcolati da InitializeAsync
+        // Aggiorniamo le proprietà del ViewModel (a cui sono collegati gli slider)
+        // con i nuovi valori calcolati dal Renderer.
         BlackPoint = newFitsImage.BlackPoint;
         WhitePoint = newFitsImage.WhitePoint;
 
         // 7. Notifiche Layout e Cleanup
         OnPropertyChanged(nameof(NodeContentSize));
         OnPropertyChanged(nameof(EstimatedTotalSize));
+        
+        // Liberiamo la memoria della vecchia immagine (texture GPU e array)
         oldFitsImage?.UnloadData();
     }
 
