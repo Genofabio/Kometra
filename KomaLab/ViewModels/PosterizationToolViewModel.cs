@@ -12,6 +12,7 @@ using System.Threading.Tasks;
 using System.IO;
 using Avalonia;
 using Avalonia.Platform;
+using Point = Avalonia.Point;
 using Size = Avalonia.Size;
 
 namespace KomaLab.ViewModels;
@@ -40,18 +41,19 @@ public partial class PosterizationToolViewModel : ObservableObject, IDisposable
     // --- Navigazione ---
     [ObservableProperty] 
     [NotifyPropertyChangedFor(nameof(CurrentImageText))]
+    [NotifyPropertyChangedFor(nameof(IsNavigationVisible))]
     [NotifyCanExecuteChangedFor(nameof(NextImageCommand))]
     [NotifyCanExecuteChangedFor(nameof(PreviousImageCommand))]
+    [NotifyCanExecuteChangedFor(nameof(GoToFirstImageCommand))]
+    [NotifyCanExecuteChangedFor(nameof(GoToLastImageCommand))]
     private int _currentIndex = 0;
 
     public string CurrentImageText => $"{CurrentIndex + 1} / {_sourcePaths.Count}";
+    public bool IsNavigationVisible => _sourcePaths.Count > 1;
 
     // --- Parametri di Quantizzazione ---
     [ObservableProperty] 
-    [NotifyPropertyChangedFor(nameof(LevelsText))] 
     private int _levels = 64; 
-    
-    public string LevelsText => $"{Levels} Livelli";
 
     [ObservableProperty] private VisualizationMode _selectedMode;
 
@@ -111,16 +113,13 @@ public partial class PosterizationToolViewModel : ObservableObject, IDisposable
                 _currentData = data;
                 _sourceMat = _converter.RawToMat(data);
 
-                // 1. Limiti Fisici Assoluti
                 double minVal, maxVal;
                 Cv2.MinMaxLoc(_sourceMat, out minVal, out maxVal);
                 SliderMin = minVal;
                 SliderMax = maxVal;
 
-                // 2. Statistiche Ottimali Correnti (Auto-Stretch)
                 var (currentAutoBlack, currentAutoWhite) = await Task.Run(() => _converter.CalculateDisplayThresholds(data));
 
-                // 3. Applicazione Soglie (Smart vs Fixed)
                 if (!_hasLoadedFirstImage)
                 {
                     BlackPoint = currentAutoBlack;
@@ -131,34 +130,19 @@ public partial class PosterizationToolViewModel : ObservableObject, IDisposable
                 {
                     if (AutoAdaptThresholds)
                     {
-                        // MODO SMART: Mantiene l'offset relativo all'auto-stretch precedente
                         double userOffsetBlack = BlackPoint - _lastAutoBlack;
                         double userOffsetWhite = WhitePoint - _lastAutoWhite;
-
-                        double newBlack = currentAutoBlack + userOffsetBlack;
-                        double newWhite = currentAutoWhite + userOffsetWhite;
-
-                        BlackPoint = Math.Clamp(newBlack, SliderMin, SliderMax);
-                        WhitePoint = Math.Clamp(newWhite, SliderMin, SliderMax);
+                        BlackPoint = Math.Clamp(currentAutoBlack + userOffsetBlack, SliderMin, SliderMax);
+                        WhitePoint = Math.Clamp(currentAutoWhite + userOffsetWhite, SliderMin, SliderMax);
                     }
                     else
                     {
-                        // MODO FISSO: Mantiene i valori ADU correnti
-                        double currentBlack = BlackPoint;
-                        double currentWhite = WhitePoint;
-
-                        currentBlack = Math.Clamp(currentBlack, SliderMin, SliderMax);
-                        currentWhite = Math.Clamp(currentWhite, SliderMin, SliderMax);
-
-                        if (currentWhite <= currentBlack + 1)
+                        BlackPoint = Math.Clamp(BlackPoint, SliderMin, SliderMax);
+                        WhitePoint = Math.Clamp(WhitePoint, SliderMin, SliderMax);
+                        if (WhitePoint <= BlackPoint + 1)
                         {
                             BlackPoint = currentAutoBlack;
                             WhitePoint = currentAutoWhite;
-                        }
-                        else
-                        {
-                            BlackPoint = currentBlack;
-                            WhitePoint = currentWhite;
                         }
                     }
                 }
@@ -174,7 +158,6 @@ public partial class PosterizationToolViewModel : ObservableObject, IDisposable
 
                 UpdatePreview();
                 StatusText = "Pronto";
-                OnPropertyChanged(nameof(CurrentImageText));
             }
         }
         catch (Exception ex)
@@ -183,7 +166,6 @@ public partial class PosterizationToolViewModel : ObservableObject, IDisposable
         }
     }
 
-    // --- Reset Soglie ---
     [RelayCommand]
     public async Task ResetThresholdsAsync()
     {
@@ -195,11 +177,11 @@ public partial class PosterizationToolViewModel : ObservableObject, IDisposable
         UpdatePreview();
     }
 
-    // --- Trigger Aggiornamento Anteprima ---
+    // --- Aggiornamento Anteprima ---
     partial void OnLevelsChanged(int value) => UpdatePreview();
     partial void OnSelectedModeChanged(VisualizationMode value) => UpdatePreview();
-    partial void OnBlackPointChanged(double value) { if (value >= WhitePoint) WhitePoint = value + 1; UpdatePreview(); }
-    partial void OnWhitePointChanged(double value) { if (value <= BlackPoint) BlackPoint = value - 1; UpdatePreview(); }
+    partial void OnBlackPointChanged(double value) => UpdatePreview();
+    partial void OnWhitePointChanged(double value) => UpdatePreview();
 
     private void UpdatePreview()
     {
@@ -209,7 +191,7 @@ public partial class PosterizationToolViewModel : ObservableObject, IDisposable
             var writeableBmp = new WriteableBitmap(
                 new PixelSize(_sourceMat.Width, _sourceMat.Height),
                 new Vector(96, 96),
-                PixelFormats.Gray8, 
+                PixelFormats.Gray8, // Corretto: plurale
                 AlphaFormat.Opaque);
 
             using (var lockedBuffer = writeableBmp.Lock())
@@ -221,7 +203,7 @@ public partial class PosterizationToolViewModel : ObservableObject, IDisposable
                 PosterizationService.ComputePosterization(_sourceMat, dstMat, Levels, SelectedMode, BlackPoint, WhitePoint);
             }
 
-            var old = PreviewBitmap;
+            var old = PreviewBitmap; // Risolve warning MVVMTK0034
             PreviewBitmap = writeableBmp;
             old?.Dispose();
         }
@@ -237,7 +219,13 @@ public partial class PosterizationToolViewModel : ObservableObject, IDisposable
     private async Task PreviousImage() { CurrentIndex--; await LoadImageAtIndexAsync(CurrentIndex); }
     private bool CanGoPrevious() => CurrentIndex > 0;
 
-    // --- Applicazione Finale ---
+    [RelayCommand(CanExecute = nameof(CanGoPrevious))]
+    private async Task GoToFirstImage() { CurrentIndex = 0; await LoadImageAtIndexAsync(CurrentIndex); }
+
+    [RelayCommand(CanExecute = nameof(CanGoNext))]
+    private async Task GoToLastImage() { CurrentIndex = _sourcePaths.Count - 1; await LoadImageAtIndexAsync(CurrentIndex); }
+
+    // --- Applicazione ---
     [RelayCommand]
     private async Task Apply()
     {
@@ -264,12 +252,11 @@ public partial class PosterizationToolViewModel : ObservableObject, IDisposable
 
     [RelayCommand] private void Cancel() { DialogResult = false; RequestClose?.Invoke(); }
 
-    // --- Proxy Viewport ---
     public void ZoomIn() => Viewport.ZoomIn();
     public void ZoomOut() => Viewport.ZoomOut();
     public void ResetView() => Viewport.ResetView();
     public void ApplyPan(double dx, double dy) => Viewport.ApplyPan(dx, dy);
-    public void ApplyZoomAtPoint(double f, Avalonia.Point c) => Viewport.ApplyZoomAtPoint(f, c);
+    public void ApplyZoomAtPoint(double f, Point c) => Viewport.ApplyZoomAtPoint(f, c);
 
     public void Dispose() { _sourceMat?.Dispose(); _previewBitmap?.Dispose(); }
 }

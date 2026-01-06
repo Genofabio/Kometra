@@ -22,15 +22,34 @@ namespace KomaLab.Views
 
         private async void OnLoaded(object? sender, RoutedEventArgs e)
         {
+            // Piccolo ritardo per assicurarsi che il layout sia renderizzato
             await Task.Delay(100);
             if (DataContext is PosterizationToolViewModel vm)
             {
                 var border = this.FindControl<Border>("PreviewBorder");
-                if (border != null) vm.Viewport.ViewportSize = border.Bounds.Size;
+                if (border != null)
+                {
+                    vm.Viewport.ViewportSize = border.Bounds.Size;
+                }
                 vm.ResetView();
             }
         }
 
+        /// <summary>
+        /// Gestisce il ridimensionamento della finestra per adattare il viewport.
+        /// Collegato all'evento SizeChanged="OnPreviewSizeChanged" nello XAML.
+        /// </summary>
+        private void OnPreviewSizeChanged(object? sender, SizeChangedEventArgs e)
+        {
+            if (DataContext is PosterizationToolViewModel vm)
+            {
+                vm.Viewport.ViewportSize = e.NewSize;
+            }
+        }
+
+        /// <summary>
+        /// Validazione input manuale con logica di Clamp per i limiti.
+        /// </summary>
         private void OnValueInputLostFocus(object? sender, RoutedEventArgs e)
         {
             if (sender is not TextBox textBox || DataContext is not PosterizationToolViewModel vm) return;
@@ -64,10 +83,13 @@ namespace KomaLab.Views
             }
         }
 
+        // --- GESTIONE INTERAZIONE MOUSE (PAN & ZOOM) ---
+
         private void OnPreviewPointerPressed(object? sender, PointerPressedEventArgs e)
         {
             if (sender is not Border border) return;
             var props = e.GetCurrentPoint(border).Properties;
+            
             if (props.IsMiddleButtonPressed)
             {
                 _isPanning = true;
@@ -91,6 +113,7 @@ namespace KomaLab.Views
         {
             if (!_isPanning || _lastPointerPos == null || sender is not Border border) return;
             if (DataContext is not PosterizationToolViewModel vm) return;
+            
             var currentPos = e.GetPosition(border);
             var delta = currentPos - _lastPointerPos.Value;
             vm.ApplyPan(delta.X, delta.Y);
@@ -128,7 +151,10 @@ namespace KomaLab.Views
             e.Handled = true;
         }
 
+        // --- GESTIONE CLICK PULSANTI HUD ---
+
         private void OnZoomInClicked(object? sender, RoutedEventArgs e) => (DataContext as PosterizationToolViewModel)?.ZoomIn();
+        
         private void OnZoomOutClicked(object? sender, RoutedEventArgs e) => (DataContext as PosterizationToolViewModel)?.ZoomOut();
         
         private void OnResetViewClicked(object? sender, RoutedEventArgs e)
@@ -136,8 +162,11 @@ namespace KomaLab.Views
             if (DataContext is PosterizationToolViewModel vm)
             {
                 var border = this.FindControl<Border>("PreviewBorder");
-                if (border != null) vm.Viewport.ViewportSize = border.Bounds.Size;
-                vm.ResetView();
+                if (border != null)
+                {
+                    vm.Viewport.ViewportSize = border.Bounds.Size;
+                    vm.ResetView();
+                }
             }
         }
     }
