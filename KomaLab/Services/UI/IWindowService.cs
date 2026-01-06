@@ -22,4 +22,5 @@ public interface IWindowService
     Task<List<string>?> ShowAlignmentWindowAsync(List<string> sourcePaths);
     
     Task<nom.tam.fits.Header?> ShowHeaderEditorAsync(ImageNodeViewModel node);
+    Task ShowPlateSolvingWindowAsync(ImageNodeViewModel node);
 }

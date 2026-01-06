@@ -68,6 +68,16 @@
         </MenuItem>
         
         <MenuItem Header="_Modifica">
+            <MenuItem Header="Allinea..."
+                      Classes="innerMenuItem"
+                      Command="{Binding BoardVm.ShowAlignmentWindowCommand}">
+                <MenuItem.Icon>
+                    <avalonia:MaterialIcon Kind="ImageFilterCenterFocus" />
+                </MenuItem.Icon>
+            </MenuItem>
+            
+            <Separator />
+            
             <MenuItem Header="Editor Header / Metadati..."
                       Classes="innerMenuItem"
                       Command="{Binding BoardVm.EditSelectedNodeHeaderCommand}">
@@ -76,11 +86,11 @@
                 </MenuItem.Icon>
             </MenuItem>
             
-            <MenuItem Header="Allinea..."
+            <MenuItem Header="Risoluzione Astrometrica (ASTAP)..."
                       Classes="innerMenuItem"
-                      Command="{Binding BoardVm.ShowAlignmentWindowCommand}">
+                      Command="{Binding BoardVm.ShowPlateSolvingWindowCommand}">
                 <MenuItem.Icon>
-                    <avalonia:MaterialIcon Kind="ImageFilterCenterFocus" />
+                    <avalonia:MaterialIcon Kind="Telescope" />
                 </MenuItem.Icon>
             </MenuItem>
             

@@ -158,4 +158,6 @@ public abstract partial class ImageNodeViewModel : BaseNodeViewModel
     /// Restituisce i percorsi file (esistenti o temporanei) da passare ai tool esterni.
     /// </summary>
     public abstract Task<List<string>> PrepareInputPathsAsync(IFitsService fitsService);
+    
+    public abstract Task RefreshDataFromDiskAsync();
 }

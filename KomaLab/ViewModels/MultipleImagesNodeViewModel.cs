@@ -395,6 +395,15 @@ public partial class MultipleImagesNodeViewModel : ImageNodeViewModel
             OnPropertyChanged(nameof(CanShowNext));
         }
     }
+    
+    public override async Task RefreshDataFromDiskAsync()
+    {
+        // 1. Svuota la cache interna (fondamentale!)
+        _dataCache.Clear();
+
+        // 2. Ricarica l'immagine attualmente visualizzata
+        await LoadImageAtIndexAsync(CurrentIndex);
+    }
 
     // --- Dispose ---
     protected override void Dispose(bool disposing)

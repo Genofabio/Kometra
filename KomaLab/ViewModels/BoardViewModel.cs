@@ -7,6 +7,7 @@ using System.Linq;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using Avalonia;
+using Avalonia.Controls.ApplicationLifetimes;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using KomaLab.Models;
@@ -16,6 +17,7 @@ using KomaLab.Services.Imaging;
 using KomaLab.Services.UI;
 using KomaLab.Services.Undo;
 using KomaLab.ViewModels.Helpers;
+using KomaLab.Views;
 
 namespace KomaLab.ViewModels;
 
@@ -44,6 +46,7 @@ public partial class BoardViewModel : ObservableObject
     [NotifyCanExecuteChangedFor(nameof(SaveVideoCommand))]
     [NotifyCanExecuteChangedFor(nameof(ToggleNodeAnimationCommand))]
     [NotifyCanExecuteChangedFor(nameof(EditSelectedNodeHeaderCommand))] // <-- NUOVO: Aggiorna lo stato del comando Header
+    [NotifyCanExecuteChangedFor(nameof(ShowPlateSolvingWindowCommand))]
     private BaseNodeViewModel? _selectedNode;
     
     public bool IsGlobalAnimationRunning => 
@@ -297,6 +300,28 @@ public partial class BoardViewModel : ObservableObject
         if (SelectedNode is ImageNodeViewModel) return true;
         if (SelectedNode is MultipleImagesNodeViewModel m) return m.ImagePaths.Count > 0;
         return false;
+    }
+    
+    [RelayCommand(CanExecute = nameof(CanShowPlateSolving))]
+    private async Task ShowPlateSolvingWindow()
+    {
+        // 1. Verifica di sicurezza (anche se il CanExecute protegge già)
+        if (SelectedNode is ImageNodeViewModel imgNode)
+        {
+            // 2. Usiamo il WindowService per aprire la finestra
+            // Questo mantiene il ViewModel pulito da riferimenti alla View (Window)
+            await _windowService.ShowPlateSolvingWindowAsync(imgNode);
+            
+            // Nota: Non serve fare altro qui. 
+            // Se il plate solving ha successo, ASTAP modifica il file su disco
+            // e il PlateSolvingViewModel notifica il reload dei dati.
+        }
+    }
+
+    private bool CanShowPlateSolving()
+    {
+        // Abilitato solo se è selezionato un nodo immagine (Singolo o Multiplo)
+        return SelectedNode is ImageNodeViewModel;
     }
 
     // --- LOGICA ALLINEAMENTO ---

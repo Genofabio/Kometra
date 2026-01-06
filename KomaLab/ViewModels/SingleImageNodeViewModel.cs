@@ -29,6 +29,7 @@ public partial class SingleImageNodeViewModel : ImageNodeViewModel
     // --- Stato Interno ---
     private FitsImageData? _currentData;
     private ContrastProfile? _lastContrastProfile;
+    public string ImagePath => _imageModel.ImagePath;
 
     // --- Proprietà Observable ---
     [ObservableProperty]
@@ -207,6 +208,12 @@ public partial class SingleImageNodeViewModel : ImageNodeViewModel
         }
 
         return new List<string>();
+    }
+    
+    public override async Task RefreshDataFromDiskAsync()
+    {
+        // Semplicemente ricarichiamo i dati
+        await LoadDataAsync(); 
     }
     
     // --- Gestione Memoria (IDisposable) ---

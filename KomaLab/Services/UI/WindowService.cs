@@ -90,4 +90,26 @@ public class WindowService : IWindowService
         
         return null; // Annullato
     }
+    
+    public async Task ShowPlateSolvingWindowAsync(ImageNodeViewModel node)
+    {
+        if (_mainWindow == null) return;
+
+        // 1. Crea il ViewModel
+        // Nota: PlateSolvingViewModel istanzia internamente il suo servizio,
+        // quindi non serve il serviceProvider qui, a meno che tu non voglia usare DI pure lì.
+        var plateVm = new PlateSolvingViewModel(node);
+
+        // 2. Crea la View
+        var plateView = new KomaLab.Views.PlateSolvingView
+        {
+            DataContext = plateVm
+        };
+
+        // 3. Mostra la finestra come Dialog (blocca l'interazione sotto finché aperta)
+        await plateView.ShowDialog(_mainWindow);
+        
+        // Non serve ritornare nulla perché ASTAP modifica direttamente il file su disco
+        // e il ViewModel si occupa di ricaricare i dati.
+    }
 }
