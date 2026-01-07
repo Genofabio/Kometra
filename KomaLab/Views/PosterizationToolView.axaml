@@ -74,7 +74,7 @@
                             <TextBlock Classes="description" Text="Divide l'immagine in toni discreti per isolare le isofote."/>
                             <Grid ColumnDefinitions="*, Auto">
                                 <Slider Grid.Column="0" Minimum="2" Maximum="64" Value="{Binding Levels}" IsSnapToTickEnabled="True" TickFrequency="1" VerticalAlignment="Center"/>
-                                <TextBox Name="LevelsInput" Grid.Column="1" Text="{Binding Levels, Mode=OneWay}" LostFocus="OnValueInputLostFocus" Classes="valueInput"/>
+                                <TextBox Name="LevelsInput" Grid.Column="1" Text="{Binding Levels, Mode=OneWay}" LostFocus="OnValueInputLostFocus" KeyDown="OnInputKeyDown" Classes="valueInput"/>
                             </Grid>
                         </StackPanel>
                         <Border Height="1" Background="#444" Margin="0,0,0,2"/>
@@ -95,14 +95,14 @@
                                 <TextBlock Text="Soglia Nero" FontSize="12" Foreground="#999" FontWeight="SemiBold" FontStyle="Italic"/>
                                 <Grid ColumnDefinitions="*, Auto">
                                     <Slider Grid.Column="0" Minimum="{Binding SliderMin}" Maximum="{Binding SliderMax}" Value="{Binding BlackPoint}"/>
-                                    <TextBox Name="BlackInput" Grid.Column="1" Text="{Binding BlackPoint, Mode=OneWay, StringFormat={}{0:0.0}}" LostFocus="OnValueInputLostFocus" Classes="valueInput"/>
+                                    <TextBox Name="BlackInput" Grid.Column="1" Text="{Binding BlackPoint, Mode=OneWay, StringFormat={}{0:0.0}}" LostFocus="OnValueInputLostFocus" KeyDown="OnInputKeyDown" Classes="valueInput"/>
                                 </Grid>
                             </StackPanel>
                             <StackPanel Spacing="2" Margin="0,2,0,0">
                                 <TextBlock Text="Soglia Bianco" FontSize="12" Foreground="#999" FontWeight="SemiBold" FontStyle="Italic"/>
                                 <Grid ColumnDefinitions="*, Auto">
                                     <Slider Grid.Column="0" Minimum="{Binding SliderMin}" Maximum="{Binding SliderMax}" Value="{Binding WhitePoint}"/>
-                                    <TextBox Name="WhiteInput" Grid.Column="1" Text="{Binding WhitePoint, Mode=OneWay, StringFormat={}{0:0.0}}" LostFocus="OnValueInputLostFocus" Classes="valueInput"/>
+                                    <TextBox Name="WhiteInput" Grid.Column="1" Text="{Binding WhitePoint, Mode=OneWay, StringFormat={}{0:0.0}}" LostFocus="OnValueInputLostFocus" KeyDown="OnInputKeyDown" Classes="valueInput"/>
                                 </Grid>
                             </StackPanel>
                         </StackPanel>
@@ -119,7 +119,7 @@
                     <StackPanel Spacing="10">
                         <StackPanel Spacing="5" IsVisible="{Binding IsProcessing}">
                             <TextBlock Text="{Binding StatusText}" HorizontalAlignment="Center" FontSize="12" FontStyle="Italic" Foreground="#AAA"/>
-                            <ProgressBar IsIndeterminate="True" Height="4" Foreground="{DynamicResource ActionSuccessBackgroundBrush}"/>
+                            <ProgressBar IsIndeterminate="True" Height="4" Foreground="{DynamicResource SystemControlHighlightAccentBrush}"/>
                         </StackPanel>
                         <Button Content="Applica" Command="{Binding ApplyCommand}" Classes="actionBtn apply" IsEnabled="{Binding !IsProcessing}" Margin="0,8,0,10"/>
                     </StackPanel>

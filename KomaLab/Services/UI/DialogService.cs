@@ -5,7 +5,7 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Platform.Storage;
-// Necessario per FilePickerFileType
+using System.IO; 
 
 namespace KomaLab.Services.UI;
 
@@ -30,8 +30,6 @@ public class DialogService : IDialogService
 
         if (files.Count >= 1)
         {
-            // Nota: TryGetLocalPath restituisce null se il file è in cloud/virtuale.
-            // Per un'app desktop classica va bene, ma tienilo a mente.
             return files
                 .Select(f => f.TryGetLocalPath())
                 .Where(p => !string.IsNullOrEmpty(p))
@@ -46,6 +44,21 @@ public class DialogService : IDialogService
         var storage = GetStorageProvider();
         if (storage == null) return null;
 
+        // --- FIX NOME FILE ---
+        // Se il nome suggerito ha già un'estensione, la rimuoviamo.
+        // Il FilePicker aggiungerà automaticamente l'estensione scelta dall'utente (DefaultExtension).
+        // Questo evita "immagine.fit.fits".
+        string cleanName = Path.GetFileNameWithoutExtension(defaultFileName);
+        
+        // Sicurezza extra: se c'era doppia estensione (es. .tar.fits), Path.GetFileNameWithoutExtension ne toglie solo una.
+        // Controlliamo se finisce ancora con .fit o .fits e puliamo ancora se necessario.
+        while (cleanName.EndsWith(".fit", System.StringComparison.OrdinalIgnoreCase) || 
+               cleanName.EndsWith(".fits", System.StringComparison.OrdinalIgnoreCase))
+        {
+            cleanName = Path.GetFileNameWithoutExtension(cleanName);
+        }
+        // ---------------------
+
         var fitsFilter = new FilePickerFileType("File FITS")
         {
             Patterns = new[] { "*.fits", "*.fit", "*.fts" }
@@ -54,7 +67,7 @@ public class DialogService : IDialogService
         var file = await storage.SaveFilePickerAsync(new FilePickerSaveOptions
         {
             Title = "Salva Immagine FITS",
-            SuggestedFileName = defaultFileName,
+            SuggestedFileName = cleanName, // Usiamo il nome pulito
             FileTypeChoices = new[] { fitsFilter },
             DefaultExtension = "fits"
         });
@@ -67,19 +80,20 @@ public class DialogService : IDialogService
         var storage = GetStorageProvider();
         if (storage == null) return null;
 
-        // Creiamo il filtro dinamico basato sui parametri
         var fileType = new FilePickerFileType(filterName)
         {
             Patterns = new[] { pattern }
         };
 
-        // Estraiamo l'estensione pulita (da "*.avi" a "avi") per il default
         var defaultExt = pattern.TrimStart('*', '.');
+        
+        // Applichiamo la stessa logica di pulizia anche qui per sicurezza
+        string cleanName = Path.GetFileNameWithoutExtension(defaultFileName);
 
         var file = await storage.SaveFilePickerAsync(new FilePickerSaveOptions
         {
             Title = $"Salva {filterName}",
-            SuggestedFileName = defaultFileName,
+            SuggestedFileName = cleanName,
             FileTypeChoices = new[] { fileType },
             DefaultExtension = defaultExt
         });
@@ -87,7 +101,6 @@ public class DialogService : IDialogService
         return file?.TryGetLocalPath();
     }
 
-    // --- Helper Privato per ridurre duplicazione ---
     private IStorageProvider? GetStorageProvider()
     {
         if (Application.Current?.ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)

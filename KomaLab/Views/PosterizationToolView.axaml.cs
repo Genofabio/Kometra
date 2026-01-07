@@ -49,6 +49,7 @@ namespace KomaLab.Views
 
         /// <summary>
         /// Validazione input manuale con logica di Clamp per i limiti.
+        /// Scatta quando si clicca fuori o quando viene chiamato this.Focus()
         /// </summary>
         private void OnValueInputLostFocus(object? sender, RoutedEventArgs e)
         {
@@ -80,6 +81,19 @@ namespace KomaLab.Views
                 else
                     vm.WhitePoint = vm.SliderMax;
                 textBox.Text = vm.WhitePoint.ToString("F1", culture);
+            }
+        }
+
+        /// <summary>
+        /// NUOVO: Gestisce la pressione di INVIO.
+        /// Toglie il focus dal TextBox spostandolo sulla Finestra.
+        /// Questo fa scattare automaticamente OnValueInputLostFocus.
+        /// </summary>
+        private void OnInputKeyDown(object? sender, KeyEventArgs e)
+        {
+            if (e.Key == Key.Enter)
+            {
+                this.Focus(); 
             }
         }
 
