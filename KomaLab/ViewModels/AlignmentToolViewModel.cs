@@ -580,114 +580,174 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
 
     // --- AGGIORNAMENTO STATO ASTROMETRICO ---
     private async Task RefreshAstrometryStateAsync()
+{
+    // 1. Reset Stato UI
+    IsVerifyingJpl = true;
+    _isAstrometryValid = false;
+    CalculateCentersCommand.NotifyCanExecuteChanged();
+
+    // Caso speciale: Manuale non richiede verifiche esterne
+    if (SelectedTarget == AlignmentTarget.Comet && SelectedMode == AlignmentMode.Manual)
     {
-        IsVerifyingJpl = true;
-        _isAstrometryValid = false;
-        CalculateCentersCommand.NotifyCanExecuteChanged();
+        AstrometryStatusMessage = "";
+        IsVerifyingJpl = false;
+        return; 
+    }
 
-        if (SelectedTarget == AlignmentTarget.Comet && SelectedMode == AlignmentMode.Manual)
+    // Controllo base: deve esserci almeno un'immagine
+    if (ActiveImage?.Data?.FitsHeader == null || _sourcePaths.Count == 0)
+    {
+        AstrometryStatusMessage = "Nessuna immagine caricata.";
+        AstrometryStatusBrush = ColorError;
+        IsVerifyingJpl = false;
+        return;
+    }
+
+    AstrometryStatusBrush = ColorLoading;
+    
+    try
+    {
+        // =========================================================
+        // CASO 1: STELLE (Solo WCS)
+        // =========================================================
+        if (SelectedTarget == AlignmentTarget.Stars)
         {
-            AstrometryStatusMessage = "";
-            IsVerifyingJpl = false;
-            return; 
-        }
-
-        if (ActiveImage?.Data?.FitsHeader == null)
-        {
-            AstrometryStatusMessage = "Errore: Nessuna immagine caricata.";
-            AstrometryStatusBrush = ColorError;
-            IsVerifyingJpl = false;
-            return;
-        }
-
-        AstrometryStatusBrush = ColorLoading;
-        bool isSuccess = false;
-
-        try
-        {
-            if (SelectedTarget == AlignmentTarget.Stars)
+            AstrometryStatusMessage = "Verifica dati WCS (Header)...";
+            
+            // Per le stelle verifichiamo l'immagine corrente (o la reference)
+            var p = await FetchSkyCoordinateForImage(_currentStackIndex);
+            
+            if (p.HasValue)
             {
-                AstrometryStatusMessage = "Verifica dati WCS (Header)...";
-                var p = await FetchSkyCoordinateForImage(_currentStackIndex);
-                if (p.HasValue)
-                {
-                    if (IsTargetMarkerVisible) TargetCoordinate = null; 
-                    isSuccess = true;
-                    AstrometryStatusMessage = "WCS valido. Allineamento possibile.";
-                }
-                else
-                {
-                    AstrometryStatusMessage = "Dati WCS mancanti o incoerenti.";
-                }
-            }
-            else if (SelectedTarget == AlignmentTarget.Comet)
-            {
-                AstrometryStatusMessage = "Connessione a NASA JPL in corso...";
-
-                if (SelectedMode == AlignmentMode.Guided)
-                {
-                    var pStart = await FetchJplCoordinateForImage(0);
-                    var pEnd = await FetchJplCoordinateForImage(_totalStackCount - 1);
-
-                    if (pStart.HasValue && pEnd.HasValue)
-                    {
-                        CoordinateEntries[0].Coordinate = pStart;
-                        CoordinateEntries[_totalStackCount - 1].Coordinate = pEnd;
-                        
-                        if (_currentStackIndex == 0) TargetCoordinate = pStart;
-                        else if (_currentStackIndex == _totalStackCount - 1) TargetCoordinate = pEnd;
-                        else TargetCoordinate = null; 
-
-                        isSuccess = true;
-                    }
-                }
-                else if (SelectedMode == AlignmentMode.Automatic)
-                {
-                    var p = await FetchJplCoordinateForImage(_currentStackIndex);
-                    if (p.HasValue)
-                    {
-                        if (IsTargetMarkerVisible) TargetCoordinate = null;
-                        isSuccess = true;
-                    }
-                }
-
-                if (isSuccess) AstrometryStatusMessage = "Dati NASA/JPL acquisiti correttamente.";
-                else AstrometryStatusMessage = "Oggetto non trovato o fuori campo FOV.";
-            }
-
-            if (isSuccess)
-            {
+                if (IsTargetMarkerVisible) TargetCoordinate = null; 
+                AstrometryStatusMessage = "WCS valido. Allineamento possibile.";
                 AstrometryStatusBrush = ColorSuccess;
                 _isAstrometryValid = true;
             }
             else
             {
-                if (!AstrometryStatusMessage.Contains("Errore") && !AstrometryStatusMessage.Contains("mancanti") && !AstrometryStatusMessage.Contains("fuori campo"))
-                {
-                     AstrometryStatusMessage = "Impossibile calcolare il riferimento.";
-                }
-                AstrometryStatusBrush = ColorError;
-                _isAstrometryValid = false;
+                throw new InvalidOperationException("Dati WCS mancanti o incoerenti nell'header.");
             }
         }
-        catch (System.Net.Http.HttpRequestException)
+        // =========================================================
+        // CASO 2: COMETA (JPL Horizons + WCS + DATE-OBS)
+        // =========================================================
+        else if (SelectedTarget == AlignmentTarget.Comet)
         {
-            AstrometryStatusMessage = "Errore di rete: Impossibile contattare NASA JPL.";
-            AstrometryStatusBrush = ColorError;
-            _isAstrometryValid = false;
-        }
-        catch (Exception ex)
-        {
-            AstrometryStatusMessage = $"Errore: {ex.Message}";
-            AstrometryStatusBrush = ColorError;
-            _isAstrometryValid = false;
-        }
-        finally
-        {
-            IsVerifyingJpl = false;
-            CalculateCentersCommand.NotifyCanExecuteChanged();
+            AstrometryStatusMessage = "Verifica integrità stack...";
+
+            // -------------------------------------------------------------
+            // FASE A: VALIDAZIONE DI TUTTI GLI HEADER (Comune a Guidata e Automatica)
+            // -------------------------------------------------------------
+            // Controlliamo subito che TUTTE le immagini abbiano i requisiti tecnici.
+            // Questo previene crash a metà calcolo se l'immagine 5 su 10 è corrotta.
+            for (int i = 0; i < _sourcePaths.Count; i++)
+            {
+                // Lettura rapida solo header (molto veloce)
+                var h = await _fitsService.ReadHeaderOnlyAsync(_sourcePaths[i]);
+                string fName = System.IO.Path.GetFileName(_sourcePaths[i]);
+
+                if (h == null) 
+                    throw new InvalidOperationException($"Il file '{fName}' non ha un header valido.");
+                    
+                // Verifica Data
+                if (string.IsNullOrWhiteSpace(h.GetStringValue("DATE-OBS")))
+                    throw new InvalidOperationException($"Il file '{fName}' (frame {i+1}) non ha la data (DATE-OBS).");
+                    
+                // Verifica WCS
+                var w = KomaLab.Services.Astrometry.WcsHeaderParser.Parse(h);
+                if (!w.IsValid)
+                    throw new InvalidOperationException($"Il file '{fName}' (frame {i+1}) non ha dati WCS validi (Esegui Plate Solving).");
+            }
+
+            // Se arriviamo qui, i file sono tecnicamente perfetti.
+            // Possiamo procedere a contattare la NASA.
+            AstrometryStatusMessage = "Connessione a NASA JPL in corso...";
+
+            // -------------------------------------------------------------
+            // FASE B: LOGICA SPECIFICA PER MODALITÀ
+            // -------------------------------------------------------------
+            if (SelectedMode == AlignmentMode.Guided)
+            {
+                // Verifica Start e End per interpolazione
+                var pStart = await FetchJplCoordinateForImage(0);
+                var pEnd = await FetchJplCoordinateForImage(_totalStackCount - 1);
+
+                if (pStart.HasValue && pEnd.HasValue)
+                {
+                    CoordinateEntries[0].Coordinate = pStart;
+                    CoordinateEntries[_totalStackCount - 1].Coordinate = pEnd;
+                    
+                    // Posizioniamo il reticolo se l'utente guarda Start o End
+                    if (_currentStackIndex == 0) TargetCoordinate = pStart;
+                    else if (_currentStackIndex == _totalStackCount - 1) TargetCoordinate = pEnd;
+                    else TargetCoordinate = null; 
+
+                    AstrometryStatusMessage = $"Traiettoria confermata su {_totalStackCount} immagini.";
+                    AstrometryStatusBrush = ColorSuccess;
+                    _isAstrometryValid = true;
+                }
+                else
+                {
+                    // Dati tecnici OK, ma coordinate JPL fuori immagine
+                    AstrometryStatusMessage = "Oggetto fuori dal campo visivo (FOV) nel primo o ultimo frame.";
+                    AstrometryStatusBrush = ColorError;
+                    _isAstrometryValid = false;
+                }
+            }
+            else if (SelectedMode == AlignmentMode.Automatic)
+            {
+                // Verifica immagine corrente per feedback visivo
+                var p = await FetchJplCoordinateForImage(_currentStackIndex);
+                
+                if (p.HasValue)
+                {
+                    if (IsTargetMarkerVisible) TargetCoordinate = null;
+                    
+                    AstrometryStatusMessage = $"Dati validi per tutte le {_totalStackCount} immagini. Oggetto in campo.";
+                    AstrometryStatusBrush = ColorSuccess;
+                    _isAstrometryValid = true;
+                }
+                else
+                {
+                    // Dati tecnici OK, ma coordinate JPL fuori immagine
+                    AstrometryStatusMessage = "Oggetto non trovato nel campo visivo (FOV) dell'immagine corrente.";
+                    AstrometryStatusBrush = ColorError;
+                    _isAstrometryValid = false;
+                }
+            }
         }
     }
+    // =========================================================
+    // GESTIONE ERRORI UNIFICATA
+    // =========================================================
+    catch (InvalidOperationException ex)
+    {
+        // Errori sui Dati (Header mancanti, WCS errato, Date mancanti)
+        AstrometryStatusMessage = $"Dati mancanti: {ex.Message}";
+        AstrometryStatusBrush = ColorError;
+        _isAstrometryValid = false;
+    }
+    catch (System.Net.Http.HttpRequestException)
+    {
+        // Errori di Rete
+        AstrometryStatusMessage = "Errore di rete: Impossibile contattare NASA JPL.";
+        AstrometryStatusBrush = ColorError;
+        _isAstrometryValid = false;
+    }
+    catch (Exception ex)
+    {
+        // Errori Generici
+        AstrometryStatusMessage = $"Errore imprevisto: {ex.Message}";
+        AstrometryStatusBrush = ColorError;
+        _isAstrometryValid = false;
+    }
+    finally
+    {
+        IsVerifyingJpl = false;
+        CalculateCentersCommand.NotifyCanExecuteChanged();
+    }
+}
 
     private void UpdateReticle(Point point)
     {
@@ -706,32 +766,52 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
 
     private async Task<Point?> FetchJplCoordinateForImage(int index)
     {
+        // Rimuoviamo il try-catch generico per permettere agli errori di validazione di risalire
+        // oppure usiamo try-catch solo per la logica di rete, non per la validazione header.
+        
+        string path = _sourcePaths[index];
+        var header = await _fitsService.ReadHeaderOnlyAsync(path);
+        if (header == null) 
+            throw new InvalidOperationException($"Impossibile leggere l'header del file {System.IO.Path.GetFileName(path)}");
+
+        // VALIDAZIONE DATE-OBS
+        string dateObsStr = header.GetStringValue("DATE-OBS");
+        if (string.IsNullOrWhiteSpace(dateObsStr) || !DateTime.TryParse(dateObsStr, out DateTime obsDate)) 
+            throw new InvalidOperationException("Header 'DATE-OBS' mancante o non valido.");
+
+        // VALIDAZIONE WCS
+        var wcsData = WcsHeaderParser.Parse(header);
+        if (!wcsData.IsValid) 
+            throw new InvalidOperationException("Dati WCS (calibrazione astrometrica) mancanti o incompleti.");
+
         try 
         {
-            string path = _sourcePaths[index];
-            var header = await _fitsService.ReadHeaderOnlyAsync(path);
-            if (header == null) return null;
-
-            int height = header.GetIntValue("NAXIS2");
-            string dateObsStr = header.GetStringValue("DATE-OBS");
-            if (!DateTime.TryParse(dateObsStr, out DateTime obsDate)) return null;
-            
+            // LOGICA DI RETE / CALCOLO (Questa parte può legittimamente restituire null se l'oggetto è fuori campo)
             var location = FitsMetadataReader.ReadObservatoryLocation(header);
-            var wcsData = WcsHeaderParser.Parse(header);
-            if (!wcsData.IsValid) return null;
-
             var jplService = new JplHorizonsService();
+            
+            // Qui potresti voler gestire l'HttpRequestException separatamente se vuoi messaggi di rete specifici
             var ephem = await jplService.GetEphemerisAsync(TargetName, obsDate, location);
 
             if (ephem.HasValue)
             {
+                int height = header.GetIntValue("NAXIS2");
                 var transform = new WcsTransformation(wcsData);
                 var pixel = transform.WorldToPixel(ephem.Value.Ra, ephem.Value.Dec);
+                
                 if (pixel.HasValue) return new Point(pixel.Value.X, height - pixel.Value.Y);
             }
-            return null;
+            
+            // Se arriviamo qui, i dati c'erano e la rete ha funzionato, 
+            // ma l'oggetto non è stato trovato o non è proiettabile sui pixel.
+            return null; 
         }
-        catch { return null; }
+        catch (Exception ex) when (ex is not InvalidOperationException)
+        {
+            // Rilancia l'errore se è qualcosa di inaspettato durante la chiamata API
+            // o gestiscilo come errore di connessione
+            throw new Exception($"Errore durante il calcolo JPL: {ex.Message}");
+        }
     }
 
     private async Task<Point?> FetchSkyCoordinateForImage(int index)
