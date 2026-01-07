@@ -341,35 +341,28 @@ public partial class BoardViewModel : ObservableObject
     [RelayCommand(CanExecute = nameof(CanShowPosterization))]
     private async Task ShowPosterizationWindow()
     {
-        // 1. Verifica che il nodo sia del tipo giusto
         if (SelectedNode is not ImageNodeViewModel imgNode) return;
 
         try
         {
-            // 2. Prepara i percorsi dei file (gestisce file su disco o in memoria)
             var inputPaths = await imgNode.PrepareInputPathsAsync(_fitsService);
             if (inputPaths.Count == 0) return;
 
-            // 3. RECUPERA IL MODO DI VISUALIZZAZIONE CORRENTE
-            // Questo è il passaggio che mancava: leggiamo come l'utente sta guardando l'immagine ora
-            // e lo passiamo alla finestra come default.
-            VisualizationMode currentMode = VisualizationMode.Logarithmic; // Default fallback
+            VisualizationMode currentMode = imgNode.VisualizationMode;
 
-            currentMode = imgNode.VisualizationMode;
-
-            // 4. Apre la finestra passando paths e il modo iniziale
             var newPaths = await _windowService.ShowPosterizationWindowAsync(inputPaths, currentMode);
 
-            // 5. Se l'utente ha confermato e salvato (newPaths != null)
             if (newPaths != null && newPaths.Count > 0)
             {
-                // Calcolo posizione del nuovo nodo (a destra dell'originale)
                 double gap = 300;
                 double newX = imgNode.X + imgNode.EstimatedTotalSize.Width + gap;
                 double newY = imgNode.Y;
-                string newTitle = $"{imgNode.Title} (Morfologia)";
+                
+                // --- MODIFICA QUI ---
+                // Prima: string newTitle = $"{imgNode.Title} (Morfologia)";
+                string newTitle = $"{imgNode.Title} (Posterizzata)"; 
+                // --------------------
 
-                // Creazione del nodo (Singolo o Multiplo)
                 BaseNodeViewModel newNode;
                 if (newPaths.Count == 1)
                 {
@@ -378,32 +371,24 @@ public partial class BoardViewModel : ObservableObject
                 else
                 {
                     var multiNode = await _nodeFactory.CreateMultipleImagesNodeAsync(newPaths, newX, newY, centerOnPosition: false);
-                    
-                    // Imposta la cartella temporanea per permettere la pulizia alla chiusura
                     string? dirPath = System.IO.Path.GetDirectoryName(newPaths[0]);
                     multiNode.TemporaryFolderPath = dirPath;
-                    
                     newNode = multiNode;
                 }
 
                 newNode.Title = newTitle;
                 
-                // Se possibile, impostiamo il nodo risultante nello stesso modo visuale scelto (es. Bande piatte)
-                // Nota: I nodi immagine creati caricheranno il FITS posterizzato. 
-                // Essendo a 8-bit, la visualizzazione lineare è spesso la più corretta per il risultato finale,
-                // ma se l'utente vuole mantenere coerenza, potremmo settare newNode.Renderer.VisualizationMode qui.
+                // Opzionale: Impostiamo Lineare perché l'immagine è già processata
+                if (newNode is ImageNodeViewModel resNode) resNode.VisualizationMode = VisualizationMode.Linear;
 
-                // 6. Registrazione Undo/Redo e collegamento al grafo
                 var action = new DelegateAction(
-                    "Analisi Morfologica",
+                    "Analisi Morfologica", // Questo è il nome per l'Undo, puoi lasciarlo così o cambiarlo in "Posterizzazione"
                     execute: () =>
                     {
                         if (!Nodes.Contains(newNode))
                         {
                             Nodes.Add(newNode);
                             RegisterNodeEvents(newNode);
-                            
-                            // Porta in primo piano e connetti
                             OnNodeRequestBringToFront(newNode);
                             CreateConnection(imgNode, newNode);
                         }
@@ -412,11 +397,8 @@ public partial class BoardViewModel : ObservableObject
                     {
                         if (Nodes.Contains(newNode))
                         {
-                            // Rimuovi connessione specifica
                             var link = Connections.FirstOrDefault(c => c.Source == imgNode && c.Target == newNode);
                             if (link != null) Connections.Remove(link);
-
-                            // Rimuovi nodo
                             if (SelectedNode == newNode) DeselectAllNodes();
                             UnregisterNodeEvents(newNode);
                             Nodes.Remove(newNode);
@@ -424,18 +406,14 @@ public partial class BoardViewModel : ObservableObject
                     }
                 );
 
-                // Esegui e registra nello stack
                 action.Execute();
                 _undoService.RecordAction(action);
-                
-                // Seleziona il nuovo nodo
                 SetSelectedNode(newNode);
             }
         }
         catch (Exception ex)
         {
             Debug.WriteLine($"Posterization process failed: {ex}");
-            // Qui potresti mostrare un avviso utente tramite un DialogService se ne hai uno
         }
     }
 

@@ -238,11 +238,51 @@ public partial class PosterizationToolViewModel : ObservableObject, IDisposable
             string tempFolder = Path.Combine(Path.GetTempPath(), "KomaLab", "Posterized");
             if (!Directory.Exists(tempFolder)) Directory.CreateDirectory(tempFolder);
 
-            foreach (var path in _sourcePaths)
+            // Calcoliamo l'offset (la "volontà dell'utente") rispetto all'auto-stretch dell'immagine corrente
+            double userOffsetBlack = 0;
+            double userOffsetWhite = 0;
+
+            if (_autoAdaptThresholds)
             {
-                var outPath = await _postService.PosterizeAndSaveAsync(path, tempFolder, Levels, SelectedMode, BlackPoint, WhitePoint);
+                // _lastAutoBlack è il valore calcolato automaticamente per l'immagine che stiamo guardando ORA.
+                // BlackPoint è dove l'utente ha spostato lo slider.
+                userOffsetBlack = BlackPoint - _lastAutoBlack;
+                userOffsetWhite = WhitePoint - _lastAutoWhite;
+            }
+
+            for (int i = 0; i < _sourcePaths.Count; i++)
+            {
+                string path = _sourcePaths[i];
+                double targetBlack = BlackPoint;
+                double targetWhite = WhitePoint;
+
+                // Se l'adattamento è attivo e NON è l'immagine che stiamo già guardando (per cui le soglie sono già giuste)
+                // dobbiamo ricalcolare le soglie specifiche per quel file.
+                if (_autoAdaptThresholds && i != _currentIndex)
+                {
+                    StatusText = $"Calcolo soglie {i + 1}/{_sourcePaths.Count}...";
+                    
+                    // Nota: Dobbiamo caricare l'header/data per calcolare le statistiche.
+                    // È un po' più lento ma garantisce il risultato corretto.
+                    var tempData = await _fitsService.LoadFitsFromFileAsync(path);
+                    if (tempData != null)
+                    {
+                        var (autoB, autoW) = await Task.Run(() => _converter.CalculateDisplayThresholds(tempData));
+                        
+                        // Applichiamo l'offset utente alle statistiche di QUESTA immagine
+                        targetBlack = Math.Clamp(autoB + userOffsetBlack, _sliderMin, _sliderMax);
+                        targetWhite = Math.Clamp(autoW + userOffsetWhite, _sliderMin, _sliderMax);
+                    }
+                }
+
+                StatusText = $"Posterizzazione {i + 1}/{_sourcePaths.Count}...";
+                
+                var outPath = await _postService.PosterizeAndSaveAsync(
+                    path, tempFolder, Levels, SelectedMode, targetBlack, targetWhite);
+                
                 results.Add(outPath);
             }
+
             ResultPaths = results;
             DialogResult = true;
             RequestClose?.Invoke();

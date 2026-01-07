@@ -37,18 +37,30 @@ public class PosterizationService : IPosterizationService
             using Mat srcMat = _converter.RawToMat(fitsData);
             using Mat resultMat = new Mat();
 
-            // 3. Calcolo (Stessa logica usata nell'anteprima)
+            // 3. Calcolo
             ComputePosterization(srcMat, resultMat, levels, mode, blackPoint, whitePoint);
 
-            // 4. Conversione Output (Mat -> Byte Array per FITS)
+            // 4. Conversione Output: Mat -> Jagged Array 2D (byte[][])
+            // CRUCIALE: CSharpFITS ha bisogno di un array di array (byte[][]) per capire 
+            // che deve creare un'immagine 2D (NAXIS=2).
+            // Se passiamo un byte[] piatto, crea un FITS 1D che poi fallisce il caricamento.
+            
             int w = resultMat.Width;
             int h = resultMat.Height;
-            byte[] pixelBytes = new byte[w * h];
-            System.Runtime.InteropServices.Marshal.Copy(resultMat.Data, pixelBytes, 0, pixelBytes.Length);
+            byte[][] jaggedPixels = new byte[h][];
 
-            // 5. Gestione Header
+            for (int y = 0; y < h; y++)
+            {
+                jaggedPixels[y] = new byte[w];
+                // Copia efficiente riga per riga da OpenCV (Unmanaged) a C# (Managed)
+                var srcPtr = resultMat.Ptr(y);
+                System.Runtime.InteropServices.Marshal.Copy(srcPtr, jaggedPixels[y], 0, w);
+            }
+
+            // 5. Header
+            // Non serve aggiungere BITPIX o NAXIS qui: FitsService.SaveFitsFileAsync li genera
+            // automaticamente basandosi sul tipo di dati (jaggedPixels è byte[][] -> BITPIX=8, NAXIS=2).
             var newHeader = CloneHeader(fitsData.FitsHeader);
-            newHeader.AddCard(new HeaderCard("BITPIX", 8, "8-bit unsigned integer"));
             newHeader.AddCard(new HeaderCard("HISTORY", $"Posterized: {levels} levels, Mode: {mode}", null));
 
             // 6. Salvataggio
@@ -57,7 +69,7 @@ public class PosterizationService : IPosterizationService
 
             var resultData = new FitsImageData
             {
-                RawData = pixelBytes,
+                RawData = jaggedPixels, // Passiamo la struttura 2D!
                 FitsHeader = newHeader,
                 Width = w,
                 Height = h
@@ -69,7 +81,6 @@ public class PosterizationService : IPosterizationService
         });
     }
 
-    // Logica matematica condivisa
     public static void ComputePosterization(Mat src, Mat dst, int levels, VisualizationMode mode, double bp, double wp)
     {
         double range = wp - bp;
@@ -108,15 +119,45 @@ public class PosterizationService : IPosterizationService
 
     private Header CloneHeader(Header original)
     {
-        var cursor = original.GetCursor();
         var newHeader = new Header();
+        var cursor = original.GetCursor();
+
         while (cursor.MoveNext())
         {
-            if (cursor.Current is HeaderCard c)
+            var card = cursor.Current as HeaderCard;
+            if (card == null) continue;
+
+            string key = card.Key?.ToUpper() ?? "";
+
+            // --- BLACKLIST ---
+            // Queste keyword vengono gestite automaticamente dalla libreria quando salviamo l'array
+            // o non sono più valide per il nuovo formato a 8-bit.
+            if (key == "SIMPLE" || 
+                key == "BITPIX" || 
+                key == "NAXIS" || 
+                key == "NAXIS1" || 
+                key == "NAXIS2" || 
+                key == "PCOUNT" || 
+                key == "GCOUNT" || 
+                key == "EXTEND" ||
+                key == "BSCALE" || // Importante rimuoverlo: siamo 8-bit puri ora
+                key == "BZERO" ||  // Importante rimuoverlo
+                key == "CHECKSUM" || 
+                key == "DATASUM")
             {
-                string k = c.Key.ToUpper();
-                if (k != "BITPIX" && k != "BSCALE" && k != "BZERO" && k != "SIMPLE" && k != "GCOUNT" && k != "PCOUNT")
-                    newHeader.AddCard(new HeaderCard(c.Key, c.Value, c.Comment));
+                continue;
+            }
+
+            // Copiamo tutto il resto (TELESCOP, OBJECT, DATE-OBS, WCS coords, HISTORY, COMMENT, ecc.)
+            try 
+            {
+                // Se è un commento o history (chiave nulla o specifica), usiamo un costruttore diverso se necessario
+                // Ma in CSharpFITS solitamente clonare la card è sicuro.
+                newHeader.AddCard(new HeaderCard(card.Key, card.Value, card.Comment));
+            }
+            catch 
+            {
+                // Ignora card corrotte, ma non fermare il ciclo
             }
         }
         return newHeader;

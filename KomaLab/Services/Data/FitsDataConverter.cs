@@ -171,6 +171,11 @@ public class FitsDataConverter : IFitsDataConverter
     {
         if (data.RawData is not Array[] jagged) return (0, 255);
         
+        if (data.FitsHeader.GetIntValue("BITPIX") == 8)
+        {
+            return (0, 255);
+        }
+        
         int bitpix = data.FitsHeader.GetIntValue("BITPIX");
         double bscale = data.FitsHeader.GetDoubleValue("BSCALE", 1.0);
         double bzero = data.FitsHeader.GetDoubleValue("BZERO", 0.0);
