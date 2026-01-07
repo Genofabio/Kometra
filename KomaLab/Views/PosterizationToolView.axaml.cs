@@ -48,7 +48,7 @@ namespace KomaLab.Views
         }
 
         /// <summary>
-        /// Validazione input manuale con logica di Clamp per i limiti.
+        /// Validazione input manuale con logica di Clamp e Cross-Check (Nero < Bianco).
         /// Scatta quando si clicca fuori o quando viene chiamato this.Focus()
         /// </summary>
         private void OnValueInputLostFocus(object? sender, RoutedEventArgs e)
@@ -69,17 +69,31 @@ namespace KomaLab.Views
             else if (textBox.Name == "BlackInput")
             {
                 if (double.TryParse(input, NumberStyles.Any, culture, out double black))
-                    vm.BlackPoint = Math.Clamp(black, vm.SliderMin, vm.SliderMax);
+                {
+                    // FIX: Il nero non può superare il bianco (lasciamo un margine di 1 unità)
+                    // Se il bianco è 2000, il nero massimo accettabile è 1999.
+                    double maxAllowed = Math.Max(vm.SliderMin, vm.WhitePoint - 1);
+                    vm.BlackPoint = Math.Clamp(black, vm.SliderMin, maxAllowed);
+                }
                 else
+                {
                     vm.BlackPoint = vm.SliderMin;
+                }
                 textBox.Text = vm.BlackPoint.ToString("F1", culture);
             }
             else if (textBox.Name == "WhiteInput")
             {
                 if (double.TryParse(input, NumberStyles.Any, culture, out double white))
-                    vm.WhitePoint = Math.Clamp(white, vm.SliderMin, vm.SliderMax);
+                {
+                    // FIX: Il bianco non può scendere sotto il nero (lasciamo un margine di 1 unità)
+                    // Se il nero è 1000, il bianco minimo accettabile è 1001.
+                    double minAllowed = Math.Min(vm.SliderMax, vm.BlackPoint + 1);
+                    vm.WhitePoint = Math.Clamp(white, minAllowed, vm.SliderMax);
+                }
                 else
+                {
                     vm.WhitePoint = vm.SliderMax;
+                }
                 textBox.Text = vm.WhitePoint.ToString("F1", culture);
             }
         }

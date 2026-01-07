@@ -180,8 +180,60 @@ public partial class PosterizationToolViewModel : ObservableObject, IDisposable
     // --- Aggiornamento Anteprima ---
     partial void OnLevelsChanged(int value) => UpdatePreview();
     partial void OnSelectedModeChanged(VisualizationMode value) => UpdatePreview();
-    partial void OnBlackPointChanged(double value) => UpdatePreview();
-    partial void OnWhitePointChanged(double value) => UpdatePreview();
+    partial void OnBlackPointChanged(double value)
+    {
+        // Se il Nero sale e tocca il Bianco, SPINGE il Bianco in su
+        if (value >= WhitePoint - 1)
+        {
+            double pushedWhite = value + 1;
+            
+            // Se il Bianco sbatte contro il tetto massimo (SliderMax), fermiamo anche il Nero
+            if (pushedWhite > SliderMax)
+            {
+                // Blocca il nero a (Max - 1)
+                // Usiamo SetProperty sul campo backing field per evitare loop infiniti se necessario,
+                // ma qui basta reimpostare la proprietà corretta.
+                if (value > SliderMax - 1)
+                {
+                    BlackPoint = SliderMax - 1; 
+                    return; // Stop qui per evitare doppio update
+                }
+            }
+            else
+            {
+                // Spingi il bianco
+                WhitePoint = pushedWhite;
+            }
+        }
+        
+        UpdatePreview();
+    }
+
+    partial void OnWhitePointChanged(double value)
+    {
+        // Se il Bianco scende e tocca il Nero, SPINGE il Nero in giù
+        if (value <= BlackPoint + 1)
+        {
+            double pushedBlack = value - 1;
+
+            // Se il Nero sbatte contro il pavimento (SliderMin), fermiamo anche il Bianco
+            if (pushedBlack < SliderMin)
+            {
+                if (value < SliderMin + 1)
+                {
+                    WhitePoint = SliderMin + 1;
+                    return; // Stop qui
+                }
+            }
+            else
+            {
+                // Spingi il nero
+                BlackPoint = pushedBlack;
+            }
+        }
+
+        UpdatePreview();
+    }
 
     private void UpdatePreview()
     {

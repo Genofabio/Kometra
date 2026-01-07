@@ -76,7 +76,7 @@
                 </MenuItem.Icon>
             </MenuItem>
             
-            <MenuItem Header="Posterizzazione/Isofote"
+            <MenuItem Header="Posterizzazione"
                       Classes="innerMenuItem"
                       Command="{Binding BoardVm.ShowPosterizationWindowCommand}">
                 <MenuItem.Icon>

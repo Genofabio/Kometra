@@ -15,22 +15,17 @@ namespace KomaLab.Services.Data;
 
 public class FitsService : IFitsService
 {
-    // --- 1. CARICAMENTO (Refactoring DRY) ---
+    // --- 1. CARICAMENTO (Con Buffer in RAM) ---
 
     public async Task<FitsImageData?> LoadFitsFromFileAsync(string assetPath)
     {
         return await Task.Run(() =>
         {
-            // Usiamo l'helper interno per leggere i dati grezzi
             var rawResult = ReadRawFitsData(assetPath);
             if (rawResult == null) return null;
 
             var (rawData, header, width, height) = rawResult.Value;
 
-            // --- GESTIONE ORIENTAMENTO FITS (Solo per UI/Array C#) ---
-            // FITS è Bottom-Left. Per Avalonia/Bitmap serve Top-Left.
-            // Invertiamo l'array qui per l'uso in UI.
-            // (Nota: Per OpenCV nel video gestiremo il flip separatamente per velocità)
             if (rawData is Array arr && arr.Rank == 1) 
             {
                 Array.Reverse(arr);
@@ -46,16 +41,18 @@ public class FitsService : IFitsService
         });
     }
 
-    /// <summary>
-    /// Helper privato DRY: Apre il file, trova l'immagine e restituisce i dati grezzi.
-    /// Non inverte ancora l'array (Flip Y) per lasciare flessibilità.
-    /// </summary>
     private (Array Data, Header Header, int Width, int Height)? ReadRawFitsData(string path)
     {
         try 
         {
-            using Stream stream = OpenStream(path);
-            var fitsFile = new Fits(stream);
+            // Copia in RAM e rilascio immediato del file per evitare lock
+            using Stream fileStream = OpenStream(path);
+            using var memoryStream = new MemoryStream();
+            
+            fileStream.CopyTo(memoryStream);
+            memoryStream.Position = 0; 
+            
+            var fitsFile = new Fits(memoryStream);
             fitsFile.Read();
 
             ImageHDU? imageHdu = null;
@@ -75,7 +72,7 @@ public class FitsService : IFitsService
             var header = imageHdu.Header;
             int width = header.GetIntValue("NAXIS1");
             int height = header.GetIntValue("NAXIS2");
-            var rawData = imageHdu.Kernel; // Array jagged o rettangolare
+            var rawData = imageHdu.Kernel;
 
             if (rawData is Array arr)
             {
@@ -85,18 +82,20 @@ public class FitsService : IFitsService
         }
         catch (Exception ex)
         {
-            System.Diagnostics.Debug.WriteLine($"Errore lettura FITS {path}: {ex.Message}");
+            System.Diagnostics.Debug.WriteLine($"[FitsService] Errore lettura FITS {path}: {ex.Message}");
             return null;
         }
     }
 
-    // --- 2. ESPORTAZIONE VIDEO (Nuova Feature) ---
+    // --- 2. ESPORTAZIONE VIDEO (WYSIWYG Reale) ---
 
-    public async Task ExportVideoAsync(
+    // --- 2. ESPORTAZIONE VIDEO (DEBUG VERSION) ---
+public async Task ExportVideoAsync(
         List<string> sourceFiles, 
         string outputPath, 
         double fps,
-        ContrastProfile profile)
+        ContrastProfile profile,
+        VisualizationMode mode = VisualizationMode.Linear)
     {
         await Task.Run(() =>
         {
@@ -104,181 +103,281 @@ public class FitsService : IFitsService
 
             VideoWriter? writer = null;
             Mat? frame8Bit = null; 
-            
-            // Buffer per la maschera (riutilizzabile)
-            Mat? mask = null;
+            // Maschera riutilizzabile per escludere i bordi neri
+            using Mat mask = new Mat(); 
 
             try
             {
-                // 1. Setup
+                // Init VideoWriter
                 var firstData = ReadRawFitsData(sourceFiles[0]);
                 if (firstData == null) throw new Exception("Impossibile leggere il primo file.");
-
                 var size = new Size(firstData.Value.Width, firstData.Value.Height);
-                int fourcc = VideoWriter.FourCC('M', 'J', 'P', 'G');
                 
+                int fourcc = VideoWriter.FourCC('M', 'J', 'P', 'G');
                 writer = new VideoWriter(outputPath, fourcc, fps, size, isColor: false);
-
-                if (!writer.IsOpened()) throw new Exception("Impossibile inizializzare VideoWriter.");
+                
+                if (!writer.IsOpened()) throw new Exception("Impossibile aprire VideoWriter.");
 
                 frame8Bit = new Mat(size.Height, size.Width, MatType.CV_8UC1);
-                mask = new Mat(size.Height, size.Width, MatType.CV_8UC1);
 
-                // 2. Loop
                 foreach (string path in sourceFiles)
                 {
                     var dataTuple = ReadRawFitsData(path);
                     if (dataTuple == null) continue;
+
                     var (rawData, _, w, h) = dataTuple.Value;
                     if (w != size.Width || h != size.Height) continue;
 
-                    // 2a. Ottieni la matrice (RawArrayToMat ora restituisce 0.0 al posto dei NaN)
-                    using Mat scientificMat = RawArrayToMat(rawData, w, h);
-                    if (scientificMat.Empty()) continue;
+                    // 1. Carichiamo i dati grezzi (potrebbero essere Double/CV_64F)
+                    using Mat tempSourceMat = RawArrayToMat(rawData, w, h);
+                    if (tempSourceMat.Empty()) continue;
 
-                    // 2b. Flip Y
-                    Cv2.Flip(scientificMat, scientificMat, FlipMode.X);
-
-                    // 2c. Calcolo Soglie
-                    double black = 0, white = 1;
-
-                    if (profile.IsAbsolute)
+                    // 2. CONVERSIONE A FLOAT E PULIZIA NAN (Fix Crash OpenCV)
+                    // PatchNaNs richiede CV_32F. Se i dati sono Double, dobbiamo convertirli.
+                    // Inoltre CV_32F è più leggero e sufficiente per l'export video.
+                    Mat scientificMat = new Mat();
+                    try
                     {
-                        black = profile.Black;
-                        white = profile.White;
-                    }
-                    else
-                    {
-                        // --- CORREZIONE QUI ---
-                        // Creiamo una maschera che seleziona solo i pixel DIVERSI da 0.0
-                        // Assumiamo che 0.0 sia il valore di background/NaN che non vogliamo contare.
-                        Cv2.Compare(scientificMat, 0.0, mask, CmpType.NE);
-
-                        // Se l'immagine è tutta nera/NaN, evitiamo crash
-                        if (Cv2.CountNonZero(mask) == 0)
+                        if (tempSourceMat.Depth() == MatType.CV_64F)
                         {
-                             // Fallback se non ci sono dati validi
-                             black = 0; white = 1;
+                            tempSourceMat.ConvertTo(scientificMat, MatType.CV_32F);
                         }
                         else
                         {
-                            // Passiamo la maschera a MeanStdDev!
-                            // Ora calcola la media SOLO sui pixel validi.
-                            Cv2.MeanStdDev(scientificMat, out var meanScalar, out var stdDevScalar, mask);
-                            
-                            double mean = meanScalar.Val0;
-                            double sigma = stdDevScalar.Val0;
-
-                            black = mean + (profile.KBlack * sigma);
-                            white = mean + (profile.KWhite * sigma);
+                            tempSourceMat.CopyTo(scientificMat);
                         }
+
+                        // Ora siamo sicuri che è CV_32F -> Rimuoviamo i NaN (bordi neri dell'allineamento)
+                        Cv2.PatchNaNs(scientificMat, 0.0);
+
+                        // Orientamento corretto
+                        Cv2.Flip(scientificMat, scientificMat, FlipMode.X);
+
+                        double finalBlack, finalWhite;
+
+                        // 3. CALCOLO SOGLIE
+                        if (profile.IsAbsolute)
+                        {
+                            finalBlack = profile.Black;
+                            finalWhite = profile.White;
+                        }
+                        else
+                        {
+                            // Ignora i pixel che sono esattamente 0.0 (i bordi neri creati da PatchNaNs)
+                            // La maschera avrà valore 255 dove il pixel è valido, 0 dove è bordo
+                            Cv2.Compare(scientificMat, 0.0, mask, CmpType.NE);
+                            
+                            // Se l'immagine è vuota o tutta nera
+                            if (Cv2.CountNonZero(mask) == 0)
+                            {
+                                finalBlack = 0; finalWhite = 1;
+                            }
+                            else
+                            {
+                                // Calcoliamo statistiche solo sui pixel validi
+                                Cv2.MeanStdDev(scientificMat, out var meanScalar, out var stdDevScalar, mask);
+                                
+                                double mean = meanScalar.Val0;
+                                double sigma = stdDevScalar.Val0;
+
+                                // Protezione matematica
+                                if (double.IsNaN(mean) || double.IsNaN(sigma) || sigma < 1e-9) 
+                                {
+                                    // Fallback: usa Min/Max reali dell'area valida
+                                    Cv2.MinMaxLoc(scientificMat, out double minVal, out double maxVal, out _, out _, mask);
+                                    finalBlack = minVal;
+                                    finalWhite = maxVal > minVal ? maxVal : minVal + 1.0;
+                                }
+                                else
+                                {
+                                    finalBlack = mean + (profile.KBlack * sigma);
+                                    finalWhite = mean + (profile.KWhite * sigma);
+                                }
+                            }
+                        }
+
+                        // 4. NORMALIZZAZIONE E SCRITTURA FRAME
+                        ApplyNormalizationToMat(scientificMat, frame8Bit, finalBlack, finalWhite, mode);
+                        writer.Write(frame8Bit);
                     }
-
-                    // 2d. Normalizzazione
-                    double range = white - black;
-                    double alpha = (Math.Abs(range) < 1e-9) ? 0 : 255.0 / range;
-                    double beta = (Math.Abs(range) < 1e-9) 
-                        ? (black >= white ? 0 : 128) 
-                        : -black * alpha;
-
-                    scientificMat.ConvertTo(frame8Bit, MatType.CV_8UC1, alpha, beta);
-
-                    writer.Write(frame8Bit);
+                    finally
+                    {
+                        // Importante: Rilasciare la matrice float ad ogni ciclo per non saturare la RAM
+                        scientificMat.Dispose();
+                    }
                 }
             }
             finally
             {
                 writer?.Dispose();
                 frame8Bit?.Dispose();
-                mask?.Dispose();
             }
         });
     }
     
+    // --- 3. NORMALIZZAZIONE CENTRALIZZATA (Core Logic) ---
+
     /// <summary>
-    /// Converte un array C# generico in una Mat OpenCV usando Marshal.Copy.
-    /// È molto più veloce di SetArray ed evita errori di ambiguità sui tipi.
+    /// Applica la logica di visualizzazione (Linear/Log/Sqrt) convertendo da Float/Double a 8-bit.
+    /// Usato sia per il video export che per l'anteprima UI.
     /// </summary>
-    private Mat RawArrayToMat(Array rawData, int width, int height)
-{
-    // Caso 1: Array 1D
-    if (rawData.Rank == 1)
+    private void ApplyNormalizationToMat(Mat src, Mat dst8Bit, double black, double white, VisualizationMode mode)
     {
-        if (rawData is short[] sData)
+        double range = white - black;
+        // Evitiamo divisioni per zero o range negativi assurdi
+        if (Math.Abs(range) < 1e-9) range = 1e-5;
+
+        if (mode == VisualizationMode.Linear)
         {
-            var mat = new Mat(height, width, MatType.CV_16SC1);
-            Marshal.Copy(sData, 0, mat.Data, sData.Length);
-            return mat;
+            double alpha = 255.0 / range;
+            double beta = -black * alpha;
+
+            // Protezioni overflow matematico
+            if (double.IsInfinity(alpha) || double.IsNaN(alpha)) alpha = 0;
+            if (double.IsInfinity(beta) || double.IsNaN(beta)) beta = 0;
+
+            src.ConvertTo(dst8Bit, MatType.CV_8UC1, alpha, beta);
         }
-        if (rawData is float[] fData)
+        else
         {
-            var mat = new Mat(height, width, MatType.CV_32FC1);
-            Marshal.Copy(fData, 0, mat.Data, fData.Length);
-            return mat;
+            // Logica Non-Lineare (Log / Sqrt)
+            
+            // 1. Normalizzazione in range [0.0 ... 1.0] su matrice Float32
+            double scale = 1.0 / range;
+            double offset = -black * scale;
+
+            using Mat tempMat = new Mat();
+            src.ConvertTo(tempMat, MatType.CV_32FC1, scale, offset);
+
+            // 2. Clipping dei valori fuori scala
+            Cv2.Threshold(tempMat, tempMat, 0, 0, ThresholdTypes.Tozero); // < 0 -> 0
+            Cv2.Threshold(tempMat, tempMat, 1, 1, ThresholdTypes.Trunc);  // > 1 -> 1
+
+            // 3. Applicazione Funzione
+            if (mode == VisualizationMode.SquareRoot)
+            {
+                Cv2.Sqrt(tempMat, tempMat);
+            }
+            else if (mode == VisualizationMode.Logarithmic)
+            {
+                // Log(1 + v) / Log(2) -> Scaling percettivo standard
+                Cv2.Add(tempMat, 1.0, tempMat); 
+                Cv2.Log(tempMat, tempMat); 
+                Cv2.Multiply(tempMat, 1.442695, tempMat); // Moltiplicatore per base 2
+            }
+
+            // 4. Conversione finale a 8-bit [0...255]
+            tempMat.ConvertTo(dst8Bit, MatType.CV_8UC1, 255.0, 0);
         }
-        if (rawData is double[] dData)
-        {
-            var mat = new Mat(height, width, MatType.CV_64FC1);
-            Marshal.Copy(dData, 0, mat.Data, dData.Length);
-            return mat;
-        }
-        if (rawData is int[] iData)
-        {
-            var mat = new Mat(height, width, MatType.CV_32SC1);
-            Marshal.Copy(iData, 0, mat.Data, iData.Length);
-            return mat;
-        }
-        if (rawData is byte[] bData)
-        {
-            var mat = new Mat(height, width, MatType.CV_8UC1);
-            Marshal.Copy(bData, 0, mat.Data, bData.Length);
-            return mat;
-        }
+    }
+
+    // --- 4. NORMALIZZAZIONE UI (Avalonia Wrapper) ---
+
+    public void NormalizeData(
+        Mat sourceMat, 
+        int width, 
+        int height, 
+        double blackPoint, 
+        double whitePoint, 
+        IntPtr destinationBuffer, 
+        long stride,
+        VisualizationMode mode)
+    {
+        if (sourceMat.Empty()) return; 
+
+        // Crea wrapper Mat attorno al buffer della bitmap Avalonia
+        using Mat dstMat = Mat.FromPixelData(height, width, MatType.CV_8UC1, destinationBuffer, stride);
+        
+        // Riutilizza la logica core
+        ApplyNormalizationToMat(sourceMat, dstMat, blackPoint, whitePoint, mode);
     }
     
-    // Caso 2: Jagged Array
-    if (rawData is IEnumerable enumerable)
+    // --- 5. UTILITY MAT & FILES ---
+
+    private Mat RawArrayToMat(Array rawData, int width, int height)
     {
-        Mat? mat = null;
-        int row = 0;
-        foreach (var item in enumerable)
+        if (rawData.Rank == 1)
         {
-            if (item is Array rowArray)
+            if (rawData is short[] sData) { var m = new Mat(height, width, MatType.CV_16SC1); Marshal.Copy(sData, 0, m.Data, sData.Length); return m; }
+            if (rawData is float[] fData) { var m = new Mat(height, width, MatType.CV_32FC1); Marshal.Copy(fData, 0, m.Data, fData.Length); return m; }
+            if (rawData is double[] dData) { var m = new Mat(height, width, MatType.CV_64FC1); Marshal.Copy(dData, 0, m.Data, dData.Length); return m; }
+            if (rawData is int[] iData) { var m = new Mat(height, width, MatType.CV_32SC1); Marshal.Copy(iData, 0, m.Data, iData.Length); return m; }
+            if (rawData is byte[] bData) { var m = new Mat(height, width, MatType.CV_8UC1); Marshal.Copy(bData, 0, m.Data, bData.Length); return m; }
+        }
+        
+        if (rawData is IEnumerable enumerable)
+        {
+            Mat? mat = null;
+            int row = 0;
+            foreach (var item in enumerable)
             {
-                if (mat == null)
+                if (item is Array rowArray)
                 {
-                    MatType type = MatType.CV_64FC1; 
-                    if (rowArray is short[]) type = MatType.CV_16SC1;
-                    else if (rowArray is float[]) type = MatType.CV_32FC1;
-                    else if (rowArray is double[]) type = MatType.CV_64FC1;
-                    else if (rowArray is int[]) type = MatType.CV_32SC1;
-                    else if (rowArray is byte[]) type = MatType.CV_8UC1;
-                    mat = new Mat(height, width, type);
+                    if (mat == null)
+                    {
+                        MatType type = MatType.CV_64FC1; 
+                        if (rowArray is short[]) type = MatType.CV_16SC1;
+                        else if (rowArray is float[]) type = MatType.CV_32FC1;
+                        else if (rowArray is double[]) type = MatType.CV_64FC1;
+                        else if (rowArray is int[]) type = MatType.CV_32SC1;
+                        else if (rowArray is byte[]) type = MatType.CV_8UC1;
+                        mat = new Mat(height, width, type);
+                    }
+                    if (row < height)
+                    {
+                        IntPtr rowPtr = mat.Ptr(row);
+                        if (rowArray is short[] s) Marshal.Copy(s, 0, rowPtr, s.Length);
+                        else if (rowArray is float[] f) Marshal.Copy(f, 0, rowPtr, f.Length);
+                        else if (rowArray is double[] d) Marshal.Copy(d, 0, rowPtr, d.Length);
+                        else if (rowArray is int[] i) Marshal.Copy(i, 0, rowPtr, i.Length);
+                        else if (rowArray is byte[] b) Marshal.Copy(b, 0, rowPtr, b.Length);
+                    }
+                    row++;
                 }
-                if (row < height)
-                {
-                    IntPtr rowPtr = mat.Ptr(row);
-                    if (rowArray is short[] s) Marshal.Copy(s, 0, rowPtr, s.Length);
-                    else if (rowArray is float[] f) Marshal.Copy(f, 0, rowPtr, f.Length);
-                    else if (rowArray is double[] d) Marshal.Copy(d, 0, rowPtr, d.Length);
-                    else if (rowArray is int[] i) Marshal.Copy(i, 0, rowPtr, i.Length);
-                    else if (rowArray is byte[] b) Marshal.Copy(b, 0, rowPtr, b.Length);
-                }
-                row++;
+            }
+            return mat ?? new Mat();
+        }
+        return new Mat();
+    }
+
+    private Stream OpenStream(string path)
+    {
+        if (path.StartsWith("avares://"))
+        {
+            var uri = new Uri(path);
+            if (!AssetLoader.Exists(uri)) throw new FileNotFoundException($"Asset non trovato: {path}");
+            return AssetLoader.Open(uri);
+        }
+        
+        if (!File.Exists(path)) throw new FileNotFoundException($"File non trovato: {path}");
+
+        // Retry Policy con FileShare.ReadWrite
+        int maxRetries = 3;
+        int delayMs = 100;
+
+        for (int i = 0; i < maxRetries; i++)
+        {
+            try
+            {
+                return new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+            }
+            catch (IOException)
+            {
+                if (i == maxRetries - 1) throw;
+                System.Threading.Thread.Sleep(delayMs);
             }
         }
-        return mat ?? new Mat();
+        
+        throw new IOException($"Impossibile aprire {path}");
     }
-    return new Mat();
-}
-
-    // --- 3. METODI ESISTENTI (GetSize, Save, Normalize) ---
+    
+    // --- 6. METADATA E SALVATAGGIO ---
 
     public async Task<(int Width, int Height)> GetFitsImageSizeAsync(string path)
     {
-        Stream streamToRead = OpenStream(path);
-        await using (streamToRead)
+        try 
         {
+            using Stream streamToRead = OpenStream(path);
             return await Task.Run(() =>
             {
                 var fitsFile = new Fits(streamToRead);
@@ -291,90 +390,12 @@ public class FitsService : IFitsService
                 return (0, 0);
             });
         }
-    }
-
-    public void NormalizeData(
-        Mat sourceMat, 
-        int width, 
-        int height, 
-        double blackPoint, 
-        double whitePoint, 
-        IntPtr destinationBuffer, 
-        long stride,
-        VisualizationMode mode) // <--- NUOVO PARAMETRO
-    {
-        if (sourceMat.Empty()) return; 
-
-        // 1. Preparazione Buffer Destinazione
-        // Creiamo una Mat che punta direttamente alla memoria della Bitmap di Avalonia (zero-copy)
-        using Mat dstMat = Mat.FromPixelData(height, width, MatType.CV_8UC1, destinationBuffer, stride);
-
-        // 2. Calcoli preliminari
-        double range = whitePoint - blackPoint;
-        if (Math.Abs(range) < 1e-9) range = 1e-5; // Evita divisione per zero
-
-        // 3. SWITCH SULLA MODALITÀ
-        if (mode == VisualizationMode.Linear)
+        catch
         {
-            // --- MODO LINEARE (Veloce) ---
-            // Formula: Out = In * alpha + beta
-            // Alpha e Beta scalano i valori direttamente nel range 0-255
-            double alpha = 255.0 / range;
-            double beta = -blackPoint * alpha;
-
-            sourceMat.ConvertTo(dstMat, MatType.CV_8UC1, alpha, beta);
-        }
-        else
-        {
-            // --- MODO NON LINEARE (Log / Sqrt) ---
-            // OpenCV ConvertTo è solo lineare. Dobbiamo fare un passaggio intermedio in Float.
-            
-            // A. Normalizziamo in Float nel range 0.0 - 1.0
-            // Formula: Temp = (In - Black) / Range
-            double scale = 1.0 / range;
-            double offset = -blackPoint * scale;
-
-            using Mat tempMat = new Mat();
-            sourceMat.ConvertTo(tempMat, MatType.CV_32FC1, scale, offset);
-
-            // B. Clipping (Clamp): Assicuriamoci che i valori stiano tra 0 e 1
-            // (Altrimenti Sqrt di numeri negativi dà NaN, e numeri > 1 sfalsano il Log)
-            Cv2.Threshold(tempMat, tempMat, 0, 0, ThresholdTypes.Tozero); // Se < 0 -> 0
-            Cv2.Threshold(tempMat, tempMat, 1, 1, ThresholdTypes.Trunc);  // Se > 1 -> 1
-
-            // C. Applicazione Funzione Matematica
-            if (mode == VisualizationMode.SquareRoot)
-            {
-                // Out = Sqrt(In)
-                Cv2.Sqrt(tempMat, tempMat);
-            }
-            else if (mode == VisualizationMode.Logarithmic)
-            {
-                // Out = Log(1 + In * Factor) / Log(1 + Factor)
-                // Usiamo un fattore di compressione (es. 100) per rendere il logaritmo efficace
-                // Senza fattore, log(0..1) mappa a valori negativi o poco utili.
-                
-                // Formula approssimata veloce per visualizzazione: ln(1 + val)
-                // OpenCV Log calcola ln naturale.
-                
-                // 1. Aggiungiamo 1 a tutti i pixel per evitare log(0)
-                //    tempMat = tempMat + 1
-                Cv2.Add(tempMat, 1.0, tempMat); 
-                
-                // 2. Calcoliamo Log
-                Cv2.Log(tempMat, tempMat); 
-                
-                // 3. Normalizziamo di nuovo (ln(2) è il massimo teorico dato che input max era 1+1=2)
-                //    Moltiplichiamo per 1.0 / ln(2) ~= 1.4427 per tornare a 0..1
-                //    (Questa è una versione base del logaritmo, sufficiente per l'uso visuale)
-                Cv2.Multiply(tempMat, 1.442695, tempMat);
-            }
-
-            // D. Conversione finale a 8-bit (0-255)
-            tempMat.ConvertTo(dstMat, MatType.CV_8UC1, 255.0, 0);
+            return (0, 0);
         }
     }
-    
+
     public async Task SaveFitsFileAsync(FitsImageData data, string destinationPath)
     {
         await Task.Run(() =>
@@ -387,17 +408,27 @@ public class FitsService : IFitsService
                 var hdu = FitsFactory.HDUFactory(arrayToSave);
                 var newHeader = hdu.Header;
             
-                var cursor = data.FitsHeader.GetCursor();
-                while (cursor.MoveNext())
+                if (data.FitsHeader != null)
                 {
-                    HeaderCard? card = null;
-                    if (cursor.Current is DictionaryEntry entry && entry.Value is HeaderCard hc) card = hc;
-                    else if (cursor.Current is HeaderCard c) card = c;
+                    var cursor = data.FitsHeader.GetCursor();
+                    while (cursor.MoveNext())
+                    {
+                        HeaderCard? card = null;
+                        if (cursor.Current is DictionaryEntry entry && entry.Value is HeaderCard hc) card = hc;
+                        else if (cursor.Current is HeaderCard c) card = c;
 
-                    if (card == null) continue;
-                    string key = card.Key.ToUpper();
-                    if (key == "SIMPLE" || key == "BITPIX" || key == "EXTEND" || key.StartsWith("NAXIS") || key == "PCOUNT" || key == "GCOUNT") continue; 
-                    newHeader.AddCard(card);
+                        if (card == null) continue;
+                        
+                        string key = card.Key?.Trim().ToUpper() ?? ""; 
+
+                        if (key == "SIMPLE" || key == "BITPIX" || key == "EXTEND" || key.StartsWith("NAXIS") || key == "PCOUNT" || key == "GCOUNT") continue; 
+                        
+                        try
+                        {
+                            newHeader.AddCard(card);
+                        }
+                        catch { /* Ignora duplicati */ }
+                    }
                 }
 
                 using var fs = new FileStream(destinationPath, FileMode.Create, FileAccess.ReadWrite);
@@ -411,94 +442,37 @@ public class FitsService : IFitsService
         });
     }
 
-    private Stream OpenStream(string path)
-    {
-        if (path.StartsWith("avares://"))
-        {
-            var uri = new Uri(path);
-            if (!AssetLoader.Exists(uri)) throw new FileNotFoundException($"Asset non trovato: {path}");
-            return AssetLoader.Open(uri);
-        }
-        if (File.Exists(path)) return new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
-        throw new FileNotFoundException($"File non trovato: {path}");
-    }
-    
-    // --- 4. ORDINAMENTO TEMPORALE (Metadata Scan) ---
-
     public async Task<List<string>> SortFilesByObservationTimeAsync(List<string> filePaths)
     {
-        // Se c'è 0 o 1 file, è già ordinato
         if (filePaths.Count <= 1) return filePaths;
 
         return await Task.Run(() =>
         {
-            // Usiamo una lista thread-safe per raccogliere i risultati
             var fileInfos = new System.Collections.Concurrent.ConcurrentBag<(string Path, DateTime? Date)>();
-
-            // Scansione parallela degli header (molto più veloce del sequenziale per I/O)
             Parallel.ForEach(filePaths, (path) =>
             {
                 var date = TryGetObservationDate(path);
                 fileInfos.Add((path, date));
             });
-
-            // LOGICA DI ORDINAMENTO:
-            // 1. I file con data valida vengono prima.
-            // 2. Ordina cronologicamente (dal più vecchio al più recente).
-            // 3. Se la data è uguale o manca, usa il nome del file come fallback.
-            
-            var sortedList = fileInfos
-                .OrderBy(x => x.Date.HasValue ? 0 : 1) // Priorità a chi ha la data
-                .ThenBy(x => x.Date)                   // Cronologico
-                .ThenBy(x => x.Path)                   // Alfabetico (Fallback)
-                .Select(x => x.Path)
-                .ToList();
-
-            return sortedList;
+            return fileInfos.OrderBy(x => x.Date.HasValue ? 0 : 1).ThenBy(x => x.Date).ThenBy(x => x.Path).Select(x => x.Path).ToList();
         });
     }
 
-    /// <summary>
-    /// Legge SOLO l'header del FITS senza caricare i dati immagine.
-    /// Cerca DATE-OBS (Standard) o DATE.
-    /// </summary>
     private DateTime? TryGetObservationDate(string path)
     {
         try
         {
             using Stream stream = OpenStream(path);
             var fitsFile = new Fits(stream);
-            
-            // ReadHDU legge solo l'header iniziale e si ferma prima dei dati.
-            // È l'operazione più leggera possibile.
-            BasicHDU? hdu = fitsFile.ReadHDU();
-            
+            var hdu = fitsFile.ReadHDU();
             if (hdu == null) return null;
-
             Header header = hdu.Header;
-            
-            // DATE-OBS è lo standard IAU per "Data e ora dell'osservazione"
             string? dateStr = header.GetStringValue("DATE-OBS");
-            
-            // Fallback: Alcuni software usano solo "DATE" (che a volte è creazione file, ma meglio di nulla)
-            if (string.IsNullOrEmpty(dateStr)) 
-            {
-                dateStr = header.GetStringValue("DATE");
-            }
-
-            // Tentiamo il parsing
-            if (!string.IsNullOrEmpty(dateStr) && DateTime.TryParse(dateStr, out DateTime dt))
-            {
-                return dt;
-            }
-
+            if (string.IsNullOrEmpty(dateStr)) dateStr = header.GetStringValue("DATE");
+            if (!string.IsNullOrEmpty(dateStr) && DateTime.TryParse(dateStr, out DateTime dt)) return dt;
             return null;
         }
-        catch 
-        {
-            // Se il file è illeggibile o non è un FITS valido, lo mettiamo in fondo
-            return null;
-        }
+        catch { return null; }
     }
 
     public async Task<Header?> ReadHeaderOnlyAsync(string path)
@@ -507,21 +481,10 @@ public class FitsService : IFitsService
         {
             try
             {
-                // CORREZIONE: Apriamo noi il FileStream.
-                // FileStream implementa IDisposable, quindi qui "using" funziona e chiuderà il file alla fine.
-                using var stream = new System.IO.FileStream(path, System.IO.FileMode.Open, System.IO.FileAccess.Read);
-                
-                // Passiamo lo stream al costruttore di Fits
+                using var stream = OpenStream(path);
                 var fits = new nom.tam.fits.Fits(stream);
-                
-                // Leggiamo la prima HDU
                 var hdu = fits.ReadHDU();
-                
-                if (hdu != null)
-                {
-                    return hdu.Header;
-                }
-                return null;
+                return hdu?.Header;
             }
             catch (Exception ex)
             {
