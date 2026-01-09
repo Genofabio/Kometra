@@ -3,6 +3,7 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using KomaLab.Models;
+using KomaLab.Models.Fits;
 using MathNet.Numerics.Statistics;
 using nom.tam.fits;
 using OpenCvSharp;

@@ -4,6 +4,7 @@ using KomaLab.Models;
 using System;
 using System.Collections.ObjectModel;
 using Avalonia;
+using KomaLab.Models.Nodes;
 
 namespace KomaLab.ViewModels;
 
@@ -13,7 +14,6 @@ public abstract partial class BaseNodeViewModel : ObservableObject, IDisposable
     private bool _disposedValue;
     
     protected readonly BaseNodeModel Model;
-    public abstract NodeCategory Category { get; }
 
     public event Action<BaseNodeViewModel>? RequestRemove;
     public event Action<BaseNodeViewModel>? RequestBringToFront;

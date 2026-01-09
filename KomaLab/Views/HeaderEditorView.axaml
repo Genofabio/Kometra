@@ -5,6 +5,7 @@
         xmlns:vm="clr-namespace:KomaLab.ViewModels"
         xmlns:models="clr-namespace:KomaLab.Models"
         xmlns:avalonia="clr-namespace:Material.Icons.Avalonia;assembly=Material.Icons.Avalonia"
+        xmlns:fits="clr-namespace:KomaLab.Models.Fits"
         mc:Ignorable="d" d:DesignWidth="1000" d:DesignHeight="650"
         x:Class="KomaLab.Views.HeaderEditorView"
         x:DataType="vm:HeaderEditorViewModel"
@@ -237,7 +238,7 @@
                     
                     <DataGrid.Styles>
                         <Style Selector="DataGridRow">
-                            <Setter Property="Classes.modified" Value="{Binding IsModified, DataType=models:FitsHeaderItem}"/>
+                            <Setter Property="Classes.modified" Value="{Binding IsModified, DataType=fits:FitsHeaderItem}"/>
                         </Style>
                         <Style Selector="DataGridColumnHeader">
                             <Setter Property="FontWeight" Value="Bold"/>
@@ -249,12 +250,12 @@
                     <DataGrid.Columns>
                         <DataGridTemplateColumn Header="KEYWORD" Width="1.2*" MinWidth="130" SortMemberPath="Key">
                             <DataGridTemplateColumn.CellTemplate>
-                                <DataTemplate DataType="models:FitsHeaderItem">
+                                <DataTemplate DataType="fits:FitsHeaderItem">
                                     <TextBlock Text="{Binding Key}" VerticalAlignment="Center" Margin="10,0" FontWeight="SemiBold" FontFamily="Consolas, Monospace"/>
                                 </DataTemplate>
                             </DataGridTemplateColumn.CellTemplate>
                             <DataGridTemplateColumn.CellEditingTemplate>
-                                <DataTemplate DataType="models:FitsHeaderItem">
+                                <DataTemplate DataType="fits:FitsHeaderItem">
                                     <TextBox Text="{Binding Key}" IsEnabled="{Binding !IsReadOnly}" VerticalAlignment="Center"/>
                                 </DataTemplate>
                             </DataGridTemplateColumn.CellEditingTemplate>
@@ -262,12 +263,12 @@
                         
                         <DataGridTemplateColumn Header="VALORE" Width="1.5*">
                             <DataGridTemplateColumn.CellTemplate>
-                                <DataTemplate DataType="models:FitsHeaderItem">
+                                <DataTemplate DataType="fits:FitsHeaderItem">
                                     <TextBlock Text="{Binding Value}" VerticalAlignment="Center" Margin="10,0" TextTrimming="CharacterEllipsis"/>
                                 </DataTemplate>
                             </DataGridTemplateColumn.CellTemplate>
                             <DataGridTemplateColumn.CellEditingTemplate>
-                                <DataTemplate DataType="models:FitsHeaderItem">
+                                <DataTemplate DataType="fits:FitsHeaderItem">
                                     <TextBox Text="{Binding Value}" VerticalAlignment="Center"/>
                                 </DataTemplate>
                             </DataGridTemplateColumn.CellEditingTemplate>
@@ -275,12 +276,12 @@
                         
                         <DataGridTemplateColumn Header="COMMENTO" Width="2*">
                             <DataGridTemplateColumn.CellTemplate>
-                                <DataTemplate DataType="models:FitsHeaderItem">
+                                <DataTemplate DataType="fits:FitsHeaderItem">
                                     <TextBlock Text="{Binding Comment}" VerticalAlignment="Center" Margin="10,0" Opacity="0.6" FontStyle="Italic" TextTrimming="CharacterEllipsis"/>
                                 </DataTemplate>
                             </DataGridTemplateColumn.CellTemplate>
                             <DataGridTemplateColumn.CellEditingTemplate>
-                                <DataTemplate DataType="models:FitsHeaderItem">
+                                <DataTemplate DataType="fits:FitsHeaderItem">
                                     <TextBox Text="{Binding Comment}" VerticalAlignment="Center"/>
                                 </DataTemplate>
                             </DataGridTemplateColumn.CellEditingTemplate>

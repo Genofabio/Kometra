@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using Avalonia; 
 using KomaLab.Models;
+using KomaLab.Models.Astrometry; // Assicurati che WcsProjectionType sia visibile qui
 
 namespace KomaLab.Services.Astrometry;
 
@@ -41,7 +42,8 @@ public class WcsTransformation
     /// </summary>
     private void AnalyzeTpvCoefficients()
     {
-        if (_data.ProjectionType != "TPV") return;
+        // CORREZIONE: Uso dell'Enum invece della stringa "TPV"
+        if (_data.ProjectionType != WcsProjectionType.Tpv) return;
 
         double pv1_1 = GetPv(1, 1); // Coeff X per asse 1
         double pv2_1 = GetPv(2, 1); // Coeff X per asse 2
@@ -72,7 +74,9 @@ public class WcsTransformation
         double eta_target = idealPlane.Value.Y;
 
         Point rawPlane;
-        if (_data.ProjectionType == "TPV")
+        
+        // CORREZIONE: Uso dell'Enum
+        if (_data.ProjectionType == WcsProjectionType.Tpv)
         {
             // Solver Newton-Raphson per distorsione
             rawPlane = SolveDistortionInverseNewton(xi_target, eta_target);
@@ -107,7 +111,9 @@ public class WcsTransformation
         double rawEta = (_data.Cd2_1 * u) + (_data.Cd2_2 * v);
 
         Point distortedPlane;
-        if (_data.ProjectionType == "TPV")
+        
+        // CORREZIONE: Uso dell'Enum
+        if (_data.ProjectionType == WcsProjectionType.Tpv)
         {
             distortedPlane = ApplyTpvPolynomial(rawXi, rawEta);
         }
@@ -214,7 +220,6 @@ public class WcsTransformation
     // Calcolo Polinomio con logica SWAP
     private double ComputePolySum(int axis, double x, double y, double r)
     {
-        // Se è attivo lo swap per l'asse 2, scambiamo X e Y negli input
         if (axis == 2 && _swapAxis2Terms)
         {
             double temp = x; x = y; y = temp;
@@ -258,7 +263,6 @@ public class WcsTransformation
         double dr_dx = (r < 1e-9) ? 0 : x / r;
         double dr_dy = (r < 1e-9) ? 0 : y / r;
 
-        // Derivate standard rispetto agli input (locali)
         d_dx += GetPv(axis, 1);
         d_dy += GetPv(axis, 2);
         
@@ -281,8 +285,6 @@ public class WcsTransformation
 
         d_dy += GetPv(axis, 10) * 3 * y * y;
 
-        // Se abbiamo scambiato gli input, dobbiamo scambiare anche le derivate in uscita
-        // Perché dP/dXi_reale = dP/dY_locale
         if (swapped)
         {
             return (d_dy, d_dx);

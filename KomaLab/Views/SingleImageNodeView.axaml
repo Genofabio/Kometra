@@ -3,7 +3,6 @@
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
              xmlns:vm="clr-namespace:KomaLab.ViewModels"
-             xmlns:conv="clr-namespace:KomaLab.Converters"
              mc:Ignorable="d" 
              x:Class="KomaLab.Views.SingleImageNodeView"
              x:DataType="vm:SingleImageNodeViewModel"
@@ -14,13 +13,9 @@
              d:DesignWidth="200" 
              d:DesignHeight="150">
     
-    <UserControl.Resources>
-        <conv:NodeCategoryConverter x:Key="CatToClassConv" />
-    </UserControl.Resources>
-
     <Border Classes="NodeFrame"
             Classes.selected="{Binding IsSelected}"
-            Tag="{Binding Category, Converter={StaticResource CatToClassConv}}"
+            Tag="Image"
             
             Width="{Binding EstimatedTotalSize.Width}"
             MinWidth="150"
@@ -73,11 +68,9 @@
                             VerticalAlignment="Top"
                             IsHitTestVisible="False"
                             Background="{DynamicResource OverlayTextBackgroundBrush}"
-        
                             Margin="15"
                             Padding="16,10"
                             CornerRadius="8"
-        
                             IsVisible="{Binding Viewport.IsZoomed}">
     
                         <TextBlock Text="{Binding Viewport.Scale, StringFormat='{}{0:P0}'}"

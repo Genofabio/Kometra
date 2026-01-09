@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 using System.Diagnostics;
 using System.Text.RegularExpressions;
 using KomaLab.Models;
+using KomaLab.Models.Astrometry;
 
 namespace KomaLab.Services.Astrometry;
 

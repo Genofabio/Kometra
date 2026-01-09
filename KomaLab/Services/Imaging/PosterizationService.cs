@@ -3,6 +3,8 @@ using System.Collections; // Necessario per DictionaryEntry
 using System.IO;
 using System.Threading.Tasks;
 using KomaLab.Models;
+using KomaLab.Models.Fits;
+using KomaLab.Models.Visualization;
 using KomaLab.Services.Data;
 using nom.tam.fits;
 using OpenCvSharp;

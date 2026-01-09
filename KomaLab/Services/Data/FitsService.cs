@@ -7,6 +7,8 @@ using System.Runtime.InteropServices;
 using System.Threading.Tasks;
 using Avalonia.Platform;
 using KomaLab.Models;
+using KomaLab.Models.Fits;
+using KomaLab.Models.Visualization;
 using nom.tam.fits;
 using nom.tam.util;
 using OpenCvSharp;
@@ -89,8 +91,7 @@ public class FitsService : IFitsService
 
     // --- 2. ESPORTAZIONE VIDEO (WYSIWYG Reale) ---
 
-    // --- 2. ESPORTAZIONE VIDEO (DEBUG VERSION) ---
-public async Task ExportVideoAsync(
+    public async Task ExportVideoAsync(
         List<string> sourceFiles, 
         string outputPath, 
         double fps,
@@ -103,12 +104,12 @@ public async Task ExportVideoAsync(
 
             VideoWriter? writer = null;
             Mat? frame8Bit = null; 
-            // Maschera riutilizzabile per escludere i bordi neri
-            using Mat mask = new Mat(); 
-
+            
+            // Non usiamo più la maschera esterna qui, ma MinMaxLoc interno
+            
             try
             {
-                // Init VideoWriter
+                // Init VideoWriter leggendo il primo frame per le dimensioni
                 var firstData = ReadRawFitsData(sourceFiles[0]);
                 if (firstData == null) throw new Exception("Impossibile leggere il primo file.");
                 var size = new Size(firstData.Value.Width, firstData.Value.Height);
@@ -128,81 +129,60 @@ public async Task ExportVideoAsync(
                     var (rawData, _, w, h) = dataTuple.Value;
                     if (w != size.Width || h != size.Height) continue;
 
-                    // 1. Carichiamo i dati grezzi (potrebbero essere Double/CV_64F)
+                    // 1. Conversione Dati -> Matrice OpenCV (usa la nuova versione robusta)
                     using Mat tempSourceMat = RawArrayToMat(rawData, w, h);
                     if (tempSourceMat.Empty()) continue;
 
-                    // 2. CONVERSIONE A FLOAT E PULIZIA NAN (Fix Crash OpenCV)
-                    // PatchNaNs richiede CV_32F. Se i dati sono Double, dobbiamo convertirli.
-                    // Inoltre CV_32F è più leggero e sufficiente per l'export video.
+                    // 2. Conversione a Float32
+                    // Necessaria per le operazioni matematiche e per PatchNaNs
                     Mat scientificMat = new Mat();
                     try
                     {
                         if (tempSourceMat.Depth() == MatType.CV_64F)
-                        {
                             tempSourceMat.ConvertTo(scientificMat, MatType.CV_32F);
-                        }
                         else
-                        {
                             tempSourceMat.CopyTo(scientificMat);
-                        }
 
-                        // Ora siamo sicuri che è CV_32F -> Rimuoviamo i NaN (bordi neri dell'allineamento)
+                        // Pulizia NaN (bordi neri da allineamento)
                         Cv2.PatchNaNs(scientificMat, 0.0);
-
-                        // Orientamento corretto
+                        
+                        // Orientamento corretto per il video
                         Cv2.Flip(scientificMat, scientificMat, FlipMode.X);
 
                         double finalBlack, finalWhite;
 
-                        // 3. CALCOLO SOGLIE
-                        if (profile.IsAbsolute)
+                        // --- MODIFICA CORE: Gestione esplicita dei profili ---
+                        switch (profile)
                         {
-                            finalBlack = profile.Black;
-                            finalWhite = profile.White;
-                        }
-                        else
-                        {
-                            // Ignora i pixel che sono esattamente 0.0 (i bordi neri creati da PatchNaNs)
-                            // La maschera avrà valore 255 dove il pixel è valido, 0 dove è bordo
-                            Cv2.Compare(scientificMat, 0.0, mask, CmpType.NE);
-                            
-                            // Se l'immagine è vuota o tutta nera
-                            if (Cv2.CountNonZero(mask) == 0)
-                            {
-                                finalBlack = 0; finalWhite = 1;
-                            }
-                            else
-                            {
-                                // Calcoliamo statistiche solo sui pixel validi
-                                Cv2.MeanStdDev(scientificMat, out var meanScalar, out var stdDevScalar, mask);
+                            case AbsoluteContrastProfile abs:
+                                // Valori ADU fissi
+                                finalBlack = abs.BlackADU;
+                                finalWhite = abs.WhiteADU;
+                                break;
+
+                            case RelativeContrastProfile rel:
+                                // Calcolo dinamico basato sui percentili (0.0 - 1.0)
+                                // MinMaxLoc è molto veloce e scansiona tutta l'immagine
+                                Cv2.MinMaxLoc(scientificMat, out double minVal, out double maxVal, out _, out _);
                                 
-                                double mean = meanScalar.Val0;
-                                double sigma = stdDevScalar.Val0;
-
-                                // Protezione matematica
-                                if (double.IsNaN(mean) || double.IsNaN(sigma) || sigma < 1e-9) 
-                                {
-                                    // Fallback: usa Min/Max reali dell'area valida
-                                    Cv2.MinMaxLoc(scientificMat, out double minVal, out double maxVal, out _, out _, mask);
-                                    finalBlack = minVal;
-                                    finalWhite = maxVal > minVal ? maxVal : minVal + 1.0;
-                                }
-                                else
-                                {
-                                    finalBlack = mean + (profile.KBlack * sigma);
-                                    finalWhite = mean + (profile.KWhite * sigma);
-                                }
-                            }
+                                double range = maxVal - minVal;
+                                
+                                // Interpolazione lineare tra Min e Max
+                                finalBlack = minVal + (range * rel.LowerPercentile);
+                                finalWhite = minVal + (range * rel.UpperPercentile);
+                                break;
+                                
+                            default:
+                                finalBlack = 0; finalWhite = 65535; // Fallback di sicurezza
+                                break;
                         }
 
-                        // 4. NORMALIZZAZIONE E SCRITTURA FRAME
+                        // 4. Normalizzazione e Scrittura
                         ApplyNormalizationToMat(scientificMat, frame8Bit, finalBlack, finalWhite, mode);
                         writer.Write(frame8Bit);
                     }
                     finally
                     {
-                        // Importante: Rilasciare la matrice float ad ogni ciclo per non saturare la RAM
                         scientificMat.Dispose();
                     }
                 }
@@ -296,6 +276,35 @@ public async Task ExportVideoAsync(
 
     private Mat RawArrayToMat(Array rawData, int width, int height)
     {
+        // 1. Caso Matrice 2D (T[,]) - Standard FITS
+        if (rawData.Rank == 2)
+        {
+            GCHandle handle = GCHandle.Alloc(rawData, GCHandleType.Pinned);
+            try
+            {
+                IntPtr ptr = handle.AddrOfPinnedObject();
+                MatType type = MatType.CV_64FC1; // Default
+                
+                if (rawData is short[,]) type = MatType.CV_16SC1;
+                else if (rawData is float[,]) type = MatType.CV_32FC1;
+                else if (rawData is double[,]) type = MatType.CV_64FC1;
+                else if (rawData is int[,]) type = MatType.CV_32SC1;
+                else if (rawData is byte[,]) type = MatType.CV_8UC1;
+                else if (rawData is ushort[,]) type = MatType.CV_16UC1;
+
+                // CORREZIONE QUI: Usa Mat.FromPixelData invece di new Mat(...)
+                using Mat temp = Mat.FromPixelData(height, width, type, ptr);
+                
+                // Clona subito i dati perché l'handle verrà rilasciato nel finally
+                return temp.Clone();
+            }
+            finally
+            {
+                handle.Free();
+            }
+        }
+
+        // 2. Caso Array 1D Flattened (T[])
         if (rawData.Rank == 1)
         {
             if (rawData is short[] sData) { var m = new Mat(height, width, MatType.CV_16SC1); Marshal.Copy(sData, 0, m.Data, sData.Length); return m; }
@@ -305,6 +314,7 @@ public async Task ExportVideoAsync(
             if (rawData is byte[] bData) { var m = new Mat(height, width, MatType.CV_8UC1); Marshal.Copy(bData, 0, m.Data, bData.Length); return m; }
         }
         
+        // 3. Caso Jagged Array (T[][]) - Fallback
         if (rawData is IEnumerable enumerable)
         {
             Mat? mat = null;
@@ -337,6 +347,7 @@ public async Task ExportVideoAsync(
             }
             return mat ?? new Mat();
         }
+        
         return new Mat();
     }
 

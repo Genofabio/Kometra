@@ -6,6 +6,8 @@ using Avalonia.Media.Imaging;
 using Avalonia.Platform; 
 using CommunityToolkit.Mvvm.ComponentModel;
 using KomaLab.Models;
+using KomaLab.Models.Fits;
+using KomaLab.Models.Visualization;
 using KomaLab.Services.Data;
 using KomaLab.Services.Imaging;
 using OpenCvSharp;
@@ -35,7 +37,7 @@ public partial class FitsRenderer : ObservableObject, IDisposable
     [ObservableProperty] private double _blackPoint;
     [ObservableProperty] private double _whitePoint;
 
-    // NUOVO: Modalità di visualizzazione (Lineare, Log, ecc.)
+    // Modalità di visualizzazione
     [ObservableProperty] private VisualizationMode _visualizationMode = VisualizationMode.Linear;
     
     public bool IsDisposed => _disposedValue; 
@@ -59,62 +61,79 @@ public partial class FitsRenderer : ObservableObject, IDisposable
 
         await Task.Run(() =>
         {
-            // Offload su thread background per non bloccare la UI durante la conversione
+            // Offload su thread background
             _cachedScientificMat = _converter.RawToMat(_imageData);
         });
 
-        // Calcoliamo i default ma non rigeneriamo subito la bitmap per evitare doppio lavoro
+        // Calcoliamo i default
         await ResetThresholdsAsync(skipRegeneration: true);
         
-        // Prima renderizzazione effettiva
+        // Prima renderizzazione
         await TriggerRegeneration();
     }
 
-    // --- Gestione Profili di Contrasto (SRP Logic) ---
+    // --- Gestione Profili di Contrasto (LOGICA CORRETTA) ---
 
+    /// <summary>
+    /// Cattura lo stato corrente dei livelli come profilo Assoluto (Snapshot).
+    /// </summary>
     public ContrastProfile CaptureContrastProfile()
     {
-        var (mean, sigma) = GetImageStatistics();
-
-        if (sigma <= 1e-9) 
-            return new ContrastProfile(BlackPoint, WhitePoint, IsAbsolute: true);
-
-        double kBlack = (BlackPoint - mean) / sigma;
-        double kWhite = (WhitePoint - mean) / sigma;
-
-        return new ContrastProfile(kBlack, kWhite, IsAbsolute: false);
+        // Quando l'utente cattura manualmente il profilo, salviamo i valori esatti (ADU).
+        // Questo garantisce che riapplicandolo si ottenga esattamente la stessa immagine.
+        return new AbsoluteContrastProfile(BlackPoint, WhitePoint);
     }
 
+    /// <summary>
+    /// Applica un profilo (Assoluto o Relativo) calcolando i nuovi Black/White Point.
+    /// </summary>
     public void ApplyContrastProfile(ContrastProfile profile)
     {
         if (_disposedValue) return;
+        if (_cachedScientificMat == null || _cachedScientificMat.IsDisposed) return;
 
-        if (profile.IsAbsolute)
+        double newBlack, newWhite;
+
+        switch (profile)
         {
-            BlackPoint = profile.Black;
-            WhitePoint = profile.White;
+            case AbsoluteContrastProfile abs:
+                // Caso semplice: Copia diretta dei valori ADU
+                newBlack = abs.BlackADU;
+                newWhite = abs.WhiteADU;
+                break;
+
+            case RelativeContrastProfile rel:
+                // Caso dinamico: Calcola i valori basandosi sul range Min-Max attuale
+                // Nota: MinMaxLoc è molto veloce su Mat in memoria
+                Cv2.MinMaxLoc(_cachedScientificMat, out double minVal, out double maxVal, out _, out _);
+                
+                double range = maxVal - minVal;
+                
+                // Formula: Valore = Min + (Range * Percentile)
+                newBlack = minVal + (range * rel.LowerPercentile);
+                newWhite = minVal + (range * rel.UpperPercentile);
+                break;
+
+            default:
+                return; // Profilo sconosciuto
         }
-        else
-        {
-            var (mean, sigma) = GetImageStatistics();
-            BlackPoint = mean + (profile.KBlack * sigma);
-            WhitePoint = mean + (profile.KWhite * sigma);
-        }
+
+        // Impostiamo le proprietà (questo triggera OnBlackPointChanged -> Rigenerazione)
+        // Usiamo SetProperty per notificare la UI
+        BlackPoint = newBlack;
+        WhitePoint = newWhite;
     }
 
     // --- Logica Rendering ---
 
     partial void OnBlackPointChanged(double value) => _ = TriggerRegeneration();
     partial void OnWhitePointChanged(double value) => _ = TriggerRegeneration();
-    
-    // NUOVO: Se cambia il modo, rigeneriamo l'immagine
     partial void OnVisualizationModeChanged(VisualizationMode value) => _ = TriggerRegeneration();
 
     private async Task TriggerRegeneration()
     {
         if (_disposedValue) return;
         
-        // FIX MEMORY LEAK (Resource): Dispose del token precedente
         if (_regenerationCts != null)
         {
             _regenerationCts.Cancel();
@@ -139,6 +158,7 @@ public partial class FitsRenderer : ObservableObject, IDisposable
     {
         if (_cachedScientificMat == null || _cachedScientificMat.IsDisposed) return;
 
+        // Crea una WriteableBitmap (buffer CPU condiviso)
         var writeableBmp = new WriteableBitmap(
             new PixelSize(_imageData.Width, _imageData.Height), 
             new Vector(96, 96),                                 
@@ -156,21 +176,18 @@ public partial class FitsRenderer : ObservableObject, IDisposable
                 var addr = lockedBuffer.Address;
                 var rowBytes = lockedBuffer.RowBytes;
                 var mat = _cachedScientificMat;
-                
-                // Catturiamo il modo corrente per passarlo al thread background
                 var mode = VisualizationMode; 
 
                 await Task.Run(() =>
                 {
                     token.ThrowIfCancellationRequested();
-                    // Modifica qui: Passiamo 'mode' al servizio
+                    // Normalizzazione diretta sul buffer della bitmap
                     _fitsService.NormalizeData(mat, w, h, bp, wp, addr, rowBytes, mode);
                 }, token);
             }
 
             if (!token.IsCancellationRequested)
             {
-                // FIX MEMORY LEAK (RAM/VRAM): Swap sicuro della bitmap
                 UpdateImage(writeableBmp);
             }
             else
@@ -185,10 +202,6 @@ public partial class FitsRenderer : ObservableObject, IDisposable
         }
     }
 
-    /// <summary>
-    /// Sostituisce l'immagine corrente assicurandosi di disporre quella vecchia
-    /// per liberare immediatamente la memoria video.
-    /// </summary>
     private void UpdateImage(Bitmap newImage)
     {
         var oldImage = Image;
@@ -200,12 +213,14 @@ public partial class FitsRenderer : ObservableObject, IDisposable
     {
         if (_disposedValue) return;
 
+        // Calcolo automatico iniziale (solitamente Min/Max o AutoStretch)
         var (newBlack, newWhite) = await Task.Run(() => 
             _converter.CalculateDisplayThresholds(_imageData)
         );
 
         if (skipRegeneration)
         {
+            // Aggiorna i backing field senza scatenare l'evento PropertyChanged
             SetProperty(ref _blackPoint, newBlack, nameof(BlackPoint));
             SetProperty(ref _whitePoint, newWhite, nameof(WhitePoint));
         }
@@ -236,8 +251,6 @@ public partial class FitsRenderer : ObservableObject, IDisposable
             {
                 _regenerationCts?.Cancel();
                 _regenerationCts?.Dispose();
-                
-                // Dispose dell'immagine attiva
                 Image?.Dispose();
             }
             

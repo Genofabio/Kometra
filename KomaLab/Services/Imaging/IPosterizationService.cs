@@ -1,5 +1,6 @@
 ﻿using System.Threading.Tasks;
 using KomaLab.Models;
+using KomaLab.Models.Visualization;
 
 namespace KomaLab.Services.Imaging;
 

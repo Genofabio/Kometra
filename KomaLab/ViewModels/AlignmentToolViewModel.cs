@@ -10,6 +10,8 @@ using System.Windows.Input;
 using Avalonia.Media;     
 using Avalonia.Media.Imaging;
 using KomaLab.Models;
+using KomaLab.Models.Processing;
+using KomaLab.Models.Visualization;
 using KomaLab.Services.Astrometry;
 using KomaLab.Services.Data;
 using KomaLab.Services.Imaging;

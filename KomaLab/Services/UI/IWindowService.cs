@@ -2,6 +2,7 @@
 using System.Threading.Tasks;
 using Avalonia.Controls;
 using KomaLab.Models;
+using KomaLab.Models.Visualization;
 using KomaLab.ViewModels;
 
 namespace KomaLab.Services.UI;

@@ -12,6 +12,7 @@ using CommunityToolkit.Mvvm.Input;
 using nom.tam.fits;
 using KomaLab.Models;
 using KomaLab.Services.Astrometry;
+using FitsHeaderItem = KomaLab.Models.Fits.FitsHeaderItem;
 
 namespace KomaLab.ViewModels;
 

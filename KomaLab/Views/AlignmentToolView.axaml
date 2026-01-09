@@ -8,6 +8,7 @@
         xmlns:helpers="clr-namespace:KomaLab.ViewModels.Helpers"
         xmlns:models="clr-namespace:KomaLab.Models"
         xmlns:av="clr-namespace:Avalonia.Data.Converters;assembly=Avalonia.Base"
+        xmlns:processing="clr-namespace:KomaLab.Models.Processing"
         mc:Ignorable="d" d:DesignWidth="800" d:DesignHeight="600"
         x:Class="KomaLab.Views.AlignmentToolView"
         x:DataType="vm:AlignmentToolViewModel"
@@ -98,14 +99,14 @@
                             
                             <Grid ColumnDefinitions="*,*">
                                 <RadioButton Grid.Column="0" GroupName="TargetGroup" Content="Cometa" Classes="segmented" CornerRadius="4,0,0,4" BorderThickness="1,1,0,1" HorizontalAlignment="Stretch"
-                                             IsChecked="{Binding SelectedTarget, Converter={StaticResource EnumToBool}, ConverterParameter={x:Static models:AlignmentTarget.Comet}}" />
+                                             IsChecked="{Binding SelectedTarget, Converter={StaticResource EnumToBool}, ConverterParameter={x:Static processing:AlignmentTarget.Comet}}" />
                                 <RadioButton Grid.Column="1" GroupName="TargetGroup" Content="Stelle" Classes="segmented" CornerRadius="0,4,4,0" BorderThickness="1" HorizontalAlignment="Stretch"
-                                             IsChecked="{Binding SelectedTarget, Converter={StaticResource EnumToBool}, ConverterParameter={x:Static models:AlignmentTarget.Stars}}" />
+                                             IsChecked="{Binding SelectedTarget, Converter={StaticResource EnumToBool}, ConverterParameter={x:Static processing:AlignmentTarget.Stars}}" />
                             </Grid>
                             <Separator Margin="0,5,0,5"/>
                         </StackPanel>
 
-                        <StackPanel Spacing="12" IsVisible="{Binding SelectedTarget, Converter={StaticResource EnumToBool}, ConverterParameter={x:Static models:AlignmentTarget.Comet}}">
+                        <StackPanel Spacing="12" IsVisible="{Binding SelectedTarget, Converter={StaticResource EnumToBool}, ConverterParameter={x:Static processing:AlignmentTarget.Comet}}">
                             <TextBlock Text="Metodologia" FontSize="16" FontWeight="Bold" />
                             <ComboBox ItemsSource="{Binding AvailableAlignmentModes}" SelectedItem="{Binding SelectedMode}" HorizontalAlignment="Stretch">
                                 <ComboBox.ItemTemplate>

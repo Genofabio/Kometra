@@ -1,4 +1,5 @@
 ﻿using KomaLab.Models;
+using KomaLab.Models.Fits;
 using OpenCvSharp;
 
 namespace KomaLab.Services.Data;

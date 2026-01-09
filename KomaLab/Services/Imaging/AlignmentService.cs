@@ -5,6 +5,8 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using KomaLab.Models;
+using KomaLab.Models.Fits;
+using KomaLab.Models.Processing;
 using KomaLab.Services.Data;
 using OpenCvSharp;
 using Point = Avalonia.Point;

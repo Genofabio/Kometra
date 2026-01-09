@@ -5,6 +5,8 @@ using System.IO;
 using System.Threading.Tasks;
 using Avalonia;
 using KomaLab.Models;
+using KomaLab.Models.Fits;
+using KomaLab.Models.Nodes;
 using KomaLab.Services.Data;
 using KomaLab.Services.Imaging;
 using KomaLab.ViewModels;

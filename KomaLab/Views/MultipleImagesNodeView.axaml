@@ -4,7 +4,6 @@
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
              xmlns:vm="clr-namespace:KomaLab.ViewModels"
              xmlns:avalonia="clr-namespace:Material.Icons.Avalonia;assembly=Material.Icons.Avalonia"
-             xmlns:conv="clr-namespace:KomaLab.Converters"
              mc:Ignorable="d" 
              x:Class="KomaLab.Views.MultipleImagesNodeView"
              x:DataType="vm:MultipleImagesNodeViewModel"
@@ -13,10 +12,6 @@
              PointerReleased="OnPointerReleased"
              PointerMoved="OnPointerMoved"
              PointerWheelChanged="OnPointerWheelChanged">
-    
-    <UserControl.Resources>
-        <conv:NodeCategoryConverter x:Key="CatToClassConv" />
-    </UserControl.Resources>
     
     <UserControl.Styles>
         <Style Selector="Button.NavButton">
@@ -49,7 +44,7 @@
 
     <Border Classes="NodeFrame" 
             Classes.selected="{Binding IsSelected}"
-            Tag="{Binding Category, Converter={StaticResource CatToClassConv}}">
+            Tag="Image">
         
         <Grid RowDefinitions="Auto, *">
             

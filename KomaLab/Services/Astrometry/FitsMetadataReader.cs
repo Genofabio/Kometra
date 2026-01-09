@@ -2,7 +2,8 @@
 using System.Globalization;
 using nom.tam.fits;
 using System.Diagnostics;
-using KomaLab.Models; 
+using KomaLab.Models;
+using KomaLab.Models.Astrometry;
 
 namespace KomaLab.Services.Astrometry;
 

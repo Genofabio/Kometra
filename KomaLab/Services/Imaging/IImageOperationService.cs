@@ -1,6 +1,8 @@
 ﻿using System.Collections.Generic;
 using System.Threading.Tasks;
 using KomaLab.Models;
+using KomaLab.Models.Fits;
+using KomaLab.Models.Processing;
 using OpenCvSharp;
 using Point = Avalonia.Point;
 using Size = Avalonia.Size;

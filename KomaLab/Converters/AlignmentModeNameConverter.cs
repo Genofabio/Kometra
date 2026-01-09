@@ -2,7 +2,8 @@
 using Avalonia.Data.Converters;
 using System;
 using System.Globalization;
-using KomaLab.Models; 
+using KomaLab.Models;
+using KomaLab.Models.Processing;
 
 namespace KomaLab.Converters;
 

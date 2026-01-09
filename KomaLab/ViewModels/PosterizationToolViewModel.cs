@@ -12,6 +12,8 @@ using System.Threading.Tasks;
 using System.IO;
 using Avalonia;
 using Avalonia.Platform;
+using KomaLab.Models.Fits;
+using KomaLab.Models.Visualization;
 using Point = Avalonia.Point;
 using Size = Avalonia.Size;
 

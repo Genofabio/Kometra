@@ -5,6 +5,9 @@ using Avalonia;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using KomaLab.Models;
+using KomaLab.Models.Fits;
+using KomaLab.Models.Nodes;
+using KomaLab.Models.Visualization;
 using KomaLab.Services.Data;
 using KomaLab.ViewModels.Helpers;
 
@@ -41,7 +44,7 @@ public abstract partial class ImageNodeViewModel : BaseNodeViewModel
     // --- Proprietà Gestione Immagine ---
     
     [ObservableProperty]
-    private VisualizationMode _visualizationMode = Models.VisualizationMode.Linear;
+    private VisualizationMode _visualizationMode = VisualizationMode.Linear;
 
     // Quando l'utente cambia la modalià dal menu/UI:
     partial void OnVisualizationModeChanged(VisualizationMode value)
@@ -67,8 +70,6 @@ public abstract partial class ImageNodeViewModel : BaseNodeViewModel
     public VisualizationMode[] AvailableVisualizationModes => Enum.GetValues<VisualizationMode>();
 
     // --- Override BaseNodeViewModel ---
-
-    public override NodeCategory Category => NodeCategory.Image;
 
     public override Size EstimatedTotalSize
     {

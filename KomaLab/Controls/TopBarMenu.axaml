@@ -6,6 +6,8 @@
              xmlns:vm="clr-namespace:KomaLab.ViewModels"
              xmlns:models="clr-namespace:KomaLab.Models"
              xmlns:conv="clr-namespace:KomaLab.Converters"
+             xmlns:processing="clr-namespace:KomaLab.Models.Processing"
+             xmlns:visualization="clr-namespace:KomaLab.Models.Visualization"
              mc:Ignorable="d" d:DesignWidth="800" d:DesignHeight="450"
              x:Class="KomaLab.Controls.TopBarMenu"
              x:DataType="vm:MainWindowViewModel">
@@ -111,7 +113,7 @@
 
                 <MenuItem Header="Somma"
                           Command="{Binding BoardVm.StackImagesCommand}"
-                          CommandParameter="{x:Static models:StackingMode.Sum}">
+                          CommandParameter="{x:Static processing:StackingMode.Sum}">
                     <MenuItem.Icon>
                         <avalonia:MaterialIcon Kind="PlusBoxMultiple" />
                     </MenuItem.Icon>
@@ -119,7 +121,7 @@
 
                 <MenuItem Header="Media"
                           Command="{Binding BoardVm.StackImagesCommand}"
-                          CommandParameter="{x:Static models:StackingMode.Average}">
+                          CommandParameter="{x:Static processing:StackingMode.Average}">
                     <MenuItem.Icon>
                         <avalonia:MaterialIcon Kind="DivisionBox" />
                     </MenuItem.Icon>
@@ -127,7 +129,7 @@
         
                 <MenuItem Header="Mediana"
                           Command="{Binding BoardVm.StackImagesCommand}"
-                          CommandParameter="{x:Static models:StackingMode.Median}">
+                          CommandParameter="{x:Static processing:StackingMode.Median}">
                     <MenuItem.Icon>
                         <avalonia:MaterialIcon Kind="ChartBox" /> 
                     </MenuItem.Icon>
@@ -143,7 +145,7 @@
 
                 <MenuItem Header="Lineare"
                           Command="{Binding BoardVm.SetVisualizationModeCommand}"
-                          CommandParameter="{x:Static models:VisualizationMode.Linear}">
+                          CommandParameter="{x:Static visualization:VisualizationMode.Linear}">
                     <MenuItem.Icon>
                         <avalonia:MaterialIcon Kind="ChartLineVariant" /> 
                     </MenuItem.Icon>
@@ -151,7 +153,7 @@
 
                 <MenuItem Header="Radice Quadrata"
                           Command="{Binding BoardVm.SetVisualizationModeCommand}"
-                          CommandParameter="{x:Static models:VisualizationMode.SquareRoot}">
+                          CommandParameter="{x:Static visualization:VisualizationMode.SquareRoot}">
                     <MenuItem.Icon>
                         <avalonia:MaterialIcon Kind="SquareRoot" /> 
                     </MenuItem.Icon>
@@ -159,7 +161,7 @@
 
                 <MenuItem Header="Logaritmica"
                           Command="{Binding BoardVm.SetVisualizationModeCommand}"
-                          CommandParameter="{x:Static models:VisualizationMode.Logarithmic}">
+                          CommandParameter="{x:Static visualization:VisualizationMode.Logarithmic}">
                     <MenuItem.Icon>
                         <avalonia:MaterialIcon Kind="MathLog" /> 
                     </MenuItem.Icon>

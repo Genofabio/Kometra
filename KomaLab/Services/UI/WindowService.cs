@@ -2,7 +2,8 @@
 using System.Collections.Generic;
 using System.Threading.Tasks;
 using Avalonia.Controls;
-using KomaLab.Models; // <--- NECESSARIO PER VisualizationMode
+using KomaLab.Models;
+using KomaLab.Models.Visualization; // <--- NECESSARIO PER VisualizationMode
 using KomaLab.Services.Data;
 using KomaLab.Services.Imaging;
 using KomaLab.ViewModels;

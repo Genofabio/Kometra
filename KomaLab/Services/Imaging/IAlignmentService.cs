@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Threading.Tasks;
 using KomaLab.Models;
+using KomaLab.Models.Processing;
 using Point = Avalonia.Point;
 
 namespace KomaLab.Services.Imaging;

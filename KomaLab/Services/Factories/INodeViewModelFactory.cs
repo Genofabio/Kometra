@@ -1,6 +1,7 @@
 ﻿using System.Collections.Generic;
 using System.Threading.Tasks;
 using KomaLab.Models;
+using KomaLab.Models.Fits;
 using KomaLab.ViewModels;
 
 namespace KomaLab.Services.Factories;

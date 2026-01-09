@@ -2,6 +2,8 @@
 using System.Collections.Generic;
 using System.Threading.Tasks;
 using KomaLab.Models;
+using KomaLab.Models.Fits;
+using KomaLab.Models.Visualization;
 using nom.tam.fits;
 
 namespace KomaLab.Services.Data;
