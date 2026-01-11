@@ -19,12 +19,20 @@ using Size = Avalonia.Size;
 
 namespace KomaLab.ViewModels;
 
+// ---------------------------------------------------------------------------
+// FILE: PosterizationToolViewModel.cs
+// RUOLO: ViewModel Tool Interattivo
+// DESCRIZIONE:
+// Permette all'utente di vedere in anteprima l'effetto di posterizzazione
+// e regolare le soglie prima di applicarlo a tutti i file.
+// ---------------------------------------------------------------------------
+
 public partial class PosterizationToolViewModel : ObservableObject, IDisposable
 {
-    // --- Dipendenze ---
-    private readonly IFitsService _fitsService;
+    // --- Dipendenze Enterprise ---
+    private readonly IFitsIoService _ioService;      // Sostituisce IFitsService
     private readonly IPosterizationService _postService;
-    private readonly IFitsDataConverter _converter;
+    private readonly IFitsImageDataConverter _converter;
     private readonly IImageAnalysisService _analysis;
 
     // --- Dati e Stato Interno ---
@@ -80,14 +88,14 @@ public partial class PosterizationToolViewModel : ObservableObject, IDisposable
     // --- Costruttore ---
     public PosterizationToolViewModel(
         List<string> paths,
-        IFitsService fitsService,
+        IFitsIoService ioService,           // Updated Dependency
         IPosterizationService postService,
-        IFitsDataConverter converter,
+        IFitsImageDataConverter converter,
         IImageAnalysisService analysis,
         VisualizationMode initialMode)
     {
         _sourcePaths = paths;
-        _fitsService = fitsService;
+        _ioService = ioService;
         _postService = postService;
         _converter = converter;
         _analysis = analysis;
@@ -109,7 +117,8 @@ public partial class PosterizationToolViewModel : ObservableObject, IDisposable
             _sourceMat = null;
             _currentData = null;
 
-            var data = await _fitsService.LoadFitsFromFileAsync(_sourcePaths[index]);
+            // Updated: LoadAsync
+            var data = await _ioService.LoadAsync(_sourcePaths[index]);
             if (data != null)
             {
                 _currentData = data;
@@ -120,7 +129,9 @@ public partial class PosterizationToolViewModel : ObservableObject, IDisposable
                 SliderMin = minVal;
                 SliderMax = maxVal;
 
-                var (currentAutoBlack, currentAutoWhite) = await Task.Run(() => _converter.CalculateDisplayThresholds(data));
+                // Updated: CalculateAutoStretchLevels (ritorna una Tupla)
+                // Poiché CalculateAutoStretchLevels richiede una Mat, usiamo quella che abbiamo appena creato
+                var (currentAutoBlack, currentAutoWhite) = await Task.Run(() => _analysis.CalculateAutoStretchLevels(_sourceMat));
 
                 if (!_hasLoadedFirstImage)
                 {
@@ -171,10 +182,14 @@ public partial class PosterizationToolViewModel : ObservableObject, IDisposable
     [RelayCommand]
     public async Task ResetThresholdsAsync()
     {
-        if (_currentData == null) return;
-        var (bp, wp) = await Task.Run(() => _converter.CalculateDisplayThresholds(_currentData));
-        BlackPoint = Math.Clamp(bp, SliderMin, SliderMax);
-        WhitePoint = Math.Clamp(wp, SliderMin, SliderMax);
+        if (_sourceMat == null) return;
+        
+        // Updated: CalculateAutoStretchLevels
+        var (autoB, autoW) = await Task.Run(() => _analysis.CalculateAutoStretchLevels(_sourceMat));
+        
+        BlackPoint = Math.Clamp(autoB, SliderMin, SliderMax);
+        WhitePoint = Math.Clamp(autoW, SliderMin, SliderMax);
+        
         if (Math.Abs(WhitePoint - BlackPoint) < 1) WhitePoint = BlackPoint + 100;
         UpdatePreview();
     }
@@ -184,56 +199,43 @@ public partial class PosterizationToolViewModel : ObservableObject, IDisposable
     partial void OnSelectedModeChanged(VisualizationMode value) => UpdatePreview();
     partial void OnBlackPointChanged(double value)
     {
-        // Se il Nero sale e tocca il Bianco, SPINGE il Bianco in su
         if (value >= WhitePoint - 1)
         {
             double pushedWhite = value + 1;
-            
-            // Se il Bianco sbatte contro il tetto massimo (SliderMax), fermiamo anche il Nero
             if (pushedWhite > SliderMax)
             {
-                // Blocca il nero a (Max - 1)
-                // Usiamo SetProperty sul campo backing field per evitare loop infiniti se necessario,
-                // ma qui basta reimpostare la proprietà corretta.
                 if (value > SliderMax - 1)
                 {
                     BlackPoint = SliderMax - 1; 
-                    return; // Stop qui per evitare doppio update
+                    return; 
                 }
             }
             else
             {
-                // Spingi il bianco
                 WhitePoint = pushedWhite;
             }
         }
-        
         UpdatePreview();
     }
 
     partial void OnWhitePointChanged(double value)
     {
-        // Se il Bianco scende e tocca il Nero, SPINGE il Nero in giù
         if (value <= BlackPoint + 1)
         {
             double pushedBlack = value - 1;
-
-            // Se il Nero sbatte contro il pavimento (SliderMin), fermiamo anche il Bianco
             if (pushedBlack < SliderMin)
             {
                 if (value < SliderMin + 1)
                 {
                     WhitePoint = SliderMin + 1;
-                    return; // Stop qui
+                    return; 
                 }
             }
             else
             {
-                // Spingi il nero
                 BlackPoint = pushedBlack;
             }
         }
-
         UpdatePreview();
     }
 
@@ -245,7 +247,7 @@ public partial class PosterizationToolViewModel : ObservableObject, IDisposable
             var writeableBmp = new WriteableBitmap(
                 new PixelSize(_sourceMat.Width, _sourceMat.Height),
                 new Vector(96, 96),
-                PixelFormats.Gray8, // Corretto: plurale
+                PixelFormats.Gray8, 
                 AlphaFormat.Opaque);
 
             using (var lockedBuffer = writeableBmp.Lock())
@@ -254,14 +256,59 @@ public partial class PosterizationToolViewModel : ObservableObject, IDisposable
                     _sourceMat.Height, _sourceMat.Width, MatType.CV_8UC1, 
                     lockedBuffer.Address, lockedBuffer.RowBytes);
 
-                PosterizationService.ComputePosterization(_sourceMat, dstMat, Levels, SelectedMode, BlackPoint, WhitePoint);
+                // Rendering locale per anteprima
+                ComputePreviewPosterization(_sourceMat, dstMat, Levels, SelectedMode, BlackPoint, WhitePoint);
             }
 
-            var old = PreviewBitmap; // Risolve warning MVVMTK0034
+            var old = PreviewBitmap; 
             PreviewBitmap = writeableBmp;
             old?.Dispose();
         }
         catch (Exception ex) { System.Diagnostics.Debug.WriteLine(ex); }
+    }
+
+    /// <summary>
+    /// Logica locale per l'anteprima.
+    /// </summary>
+    private static void ComputePreviewPosterization(Mat src, Mat dst, int levels, VisualizationMode mode, double bp, double wp)
+    {
+        double range = wp - bp;
+        if (Math.Abs(range) < 1e-9) range = 1e-5;
+        
+        using Mat temp = new Mat();
+        double scale = 1.0 / range;
+        double offset = -bp * scale;
+
+        // Normalizzazione
+        src.ConvertTo(temp, MatType.CV_32FC1, scale, offset);
+        
+        // Clipping
+        Cv2.Max(temp, 0.0, temp);
+        Cv2.Min(temp, 1.0, temp);
+
+        // Stretch non lineare
+        if (mode == VisualizationMode.SquareRoot)
+        {
+            Cv2.Sqrt(temp, temp);
+        }
+        else if (mode == VisualizationMode.Logarithmic)
+        {
+            Cv2.Add(temp, 1.0, temp);
+            Cv2.Log(temp, temp);
+            Cv2.Multiply(temp, 1.442695, temp);
+        }
+
+        // Quantizzazione
+        Cv2.Multiply(temp, (double)levels - 0.001, temp);
+        using Mat intTemp = new Mat();
+        temp.ConvertTo(intTemp, MatType.CV_32SC1);
+        intTemp.ConvertTo(temp, MatType.CV_32FC1);
+        
+        double divScale = levels > 1 ? 1.0 / (levels - 1) : 1.0;
+        Cv2.Multiply(temp, divScale, temp);
+
+        // Conversione 8-bit
+        temp.ConvertTo(dst, MatType.CV_8UC1, 255.0, 0);
     }
 
     // --- Navigazione ---
@@ -292,14 +339,11 @@ public partial class PosterizationToolViewModel : ObservableObject, IDisposable
             string tempFolder = Path.Combine(Path.GetTempPath(), "KomaLab", "Posterized");
             if (!Directory.Exists(tempFolder)) Directory.CreateDirectory(tempFolder);
 
-            // Calcoliamo l'offset (la "volontà dell'utente") rispetto all'auto-stretch dell'immagine corrente
             double userOffsetBlack = 0;
             double userOffsetWhite = 0;
 
             if (_autoAdaptThresholds)
             {
-                // _lastAutoBlack è il valore calcolato automaticamente per l'immagine che stiamo guardando ORA.
-                // BlackPoint è dove l'utente ha spostato lo slider.
                 userOffsetBlack = BlackPoint - _lastAutoBlack;
                 userOffsetWhite = WhitePoint - _lastAutoWhite;
             }
@@ -310,20 +354,19 @@ public partial class PosterizationToolViewModel : ObservableObject, IDisposable
                 double targetBlack = BlackPoint;
                 double targetWhite = WhitePoint;
 
-                // Se l'adattamento è attivo e NON è l'immagine che stiamo già guardando (per cui le soglie sono già giuste)
-                // dobbiamo ricalcolare le soglie specifiche per quel file.
                 if (_autoAdaptThresholds && i != _currentIndex)
                 {
                     StatusText = $"Calcolo soglie {i + 1}/{_sourcePaths.Count}...";
                     
-                    // Nota: Dobbiamo caricare l'header/data per calcolare le statistiche.
-                    // È un po' più lento ma garantisce il risultato corretto.
-                    var tempData = await _fitsService.LoadFitsFromFileAsync(path);
+                    var tempData = await _ioService.LoadAsync(path);
                     if (tempData != null)
                     {
-                        var (autoB, autoW) = await Task.Run(() => _converter.CalculateDisplayThresholds(tempData));
+                        // Poiché CalculateAutoStretchLevels richiede una Mat, dobbiamo convertire
+                        using var tempMat = _converter.RawToMat(tempData);
                         
-                        // Applichiamo l'offset utente alle statistiche di QUESTA immagine
+                        // Updated: CalculateAutoStretchLevels
+                        var (autoB, autoW) = await Task.Run(() => _analysis.CalculateAutoStretchLevels(tempMat));
+                        
                         targetBlack = Math.Clamp(autoB + userOffsetBlack, _sliderMin, _sliderMax);
                         targetWhite = Math.Clamp(autoW + userOffsetWhite, _sliderMin, _sliderMax);
                     }

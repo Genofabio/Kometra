@@ -1,26 +1,35 @@
 ﻿using System;
+using System.Runtime.InteropServices; // Necessario per Marshal
 using System.Threading;
 using System.Threading.Tasks;
 using Avalonia; 
 using Avalonia.Media.Imaging; 
 using Avalonia.Platform; 
 using CommunityToolkit.Mvvm.ComponentModel;
-using KomaLab.Models;
 using KomaLab.Models.Fits;
 using KomaLab.Models.Visualization;
-using KomaLab.Services.Data;
-using KomaLab.Services.Imaging;
+using KomaLab.Services.Data;        
+using KomaLab.Services.Imaging;     
 using OpenCvSharp;
 using Size = Avalonia.Size;
 
 namespace KomaLab.ViewModels.Helpers;
 
+// ---------------------------------------------------------------------------
+// FILE: FitsRenderer.cs
+// RUOLO: Motore di Visualizzazione (Safe Implementation)
+// DESCRIZIONE:
+// Gestisce la pipeline di rendering real-time:
+// Dati Scientifici (Double) -> Pipeline (Stretch, Cutoff) -> Bitmap UI (8-bit).
+// Implementazione "Managed" senza blocchi unsafe.
+// ---------------------------------------------------------------------------
+
 public partial class FitsRenderer : ObservableObject, IDisposable
 {
-    // --- Dipendenze ---
+    // --- Dipendenze Enterprise ---
     private readonly FitsImageData _imageData;
-    private readonly IFitsService _fitsService;
-    private readonly IFitsDataConverter _converter;
+    private readonly IFitsIoService _ioService;         // Sostituisce FitsService
+    private readonly IFitsImageDataConverter _converter;
     private readonly IImageAnalysisService _analysis;
 
     // --- Stato Interno ---
@@ -45,12 +54,12 @@ public partial class FitsRenderer : ObservableObject, IDisposable
     // --- Costruttore ---
     public FitsRenderer(
         FitsImageData imageData, 
-        IFitsService fitsService, 
-        IFitsDataConverter converter,    
+        IFitsIoService ioService, 
+        IFitsImageDataConverter converter,    
         IImageAnalysisService analysis)  
     {
         _imageData = imageData;
-        _fitsService = fitsService;
+        _ioService = ioService;
         _converter = converter;
         _analysis = analysis;
     }
@@ -62,6 +71,7 @@ public partial class FitsRenderer : ObservableObject, IDisposable
         await Task.Run(() =>
         {
             // Offload su thread background
+            // Conversione Raw -> Mat (Unmanaged Memory)
             _cachedScientificMat = _converter.RawToMat(_imageData);
         });
 
@@ -72,21 +82,13 @@ public partial class FitsRenderer : ObservableObject, IDisposable
         await TriggerRegeneration();
     }
 
-    // --- Gestione Profili di Contrasto (LOGICA CORRETTA) ---
+    // --- Gestione Profili di Contrasto ---
 
-    /// <summary>
-    /// Cattura lo stato corrente dei livelli come profilo Assoluto (Snapshot).
-    /// </summary>
     public ContrastProfile CaptureContrastProfile()
     {
-        // Quando l'utente cattura manualmente il profilo, salviamo i valori esatti (ADU).
-        // Questo garantisce che riapplicandolo si ottenga esattamente la stessa immagine.
         return new AbsoluteContrastProfile(BlackPoint, WhitePoint);
     }
 
-    /// <summary>
-    /// Applica un profilo (Assoluto o Relativo) calcolando i nuovi Black/White Point.
-    /// </summary>
     public void ApplyContrastProfile(ContrastProfile profile)
     {
         if (_disposedValue) return;
@@ -97,29 +99,20 @@ public partial class FitsRenderer : ObservableObject, IDisposable
         switch (profile)
         {
             case AbsoluteContrastProfile abs:
-                // Caso semplice: Copia diretta dei valori ADU
                 newBlack = abs.BlackADU;
                 newWhite = abs.WhiteADU;
                 break;
 
             case RelativeContrastProfile rel:
-                // Caso dinamico: Calcola i valori basandosi sul range Min-Max attuale
-                // Nota: MinMaxLoc è molto veloce su Mat in memoria
                 Cv2.MinMaxLoc(_cachedScientificMat, out double minVal, out double maxVal, out _, out _);
-                
                 double range = maxVal - minVal;
-                
-                // Formula: Valore = Min + (Range * Percentile)
                 newBlack = minVal + (range * rel.LowerPercentile);
                 newWhite = minVal + (range * rel.UpperPercentile);
                 break;
 
-            default:
-                return; // Profilo sconosciuto
+            default: return;
         }
 
-        // Impostiamo le proprietà (questo triggera OnBlackPointChanged -> Rigenerazione)
-        // Usiamo SetProperty per notificare la UI
         BlackPoint = newBlack;
         WhitePoint = newWhite;
     }
@@ -158,7 +151,7 @@ public partial class FitsRenderer : ObservableObject, IDisposable
     {
         if (_cachedScientificMat == null || _cachedScientificMat.IsDisposed) return;
 
-        // Crea una WriteableBitmap (buffer CPU condiviso)
+        // WriteableBitmap per accesso alla memoria video
         var writeableBmp = new WriteableBitmap(
             new PixelSize(_imageData.Width, _imageData.Height), 
             new Vector(96, 96),                                 
@@ -174,15 +167,15 @@ public partial class FitsRenderer : ObservableObject, IDisposable
                 var bp = BlackPoint;
                 var wp = WhitePoint;
                 var addr = lockedBuffer.Address;
-                var rowBytes = lockedBuffer.RowBytes;
+                var stride = lockedBuffer.RowBytes;
                 var mat = _cachedScientificMat;
                 var mode = VisualizationMode; 
 
                 await Task.Run(() =>
                 {
                     token.ThrowIfCancellationRequested();
-                    // Normalizzazione diretta sul buffer della bitmap
-                    _fitsService.NormalizeData(mat, w, h, bp, wp, addr, rowBytes, mode);
+                    // Rendering SAFE (usando Marshal invece di unsafe)
+                    RenderToBufferSafe(mat, w, h, bp, wp, addr, stride, mode);
                 }, token);
             }
 
@@ -202,6 +195,62 @@ public partial class FitsRenderer : ObservableObject, IDisposable
         }
     }
 
+    /// <summary>
+    /// Rendering SAFE: Usa Marshal.Copy per trasferire i dati, evitando blocchi 'unsafe'.
+    /// </summary>
+    private static void RenderToBufferSafe(Mat source, int w, int h, double bp, double wp, IntPtr destBuffer, int stride, VisualizationMode mode)
+    {
+        // 1. Setup range
+        double range = wp - bp;
+        if (Math.Abs(range) < 1e-9) range = 1e-5;
+        
+        double scale = 1.0 / range;
+        double offset = -bp * scale;
+
+        using Mat temp = new Mat();
+
+        // 2. Normalizzazione
+        source.ConvertTo(temp, MatType.CV_32FC1, scale, offset);
+
+        // 3. Clipping
+        Cv2.Max(temp, 0.0, temp);
+        Cv2.Min(temp, 1.0, temp);
+
+        // 4. Stretch Non Lineare
+        if (mode == VisualizationMode.SquareRoot)
+        {
+            Cv2.Sqrt(temp, temp);
+        }
+        else if (mode == VisualizationMode.Logarithmic)
+        {
+            Cv2.Add(temp, 1.0, temp);
+            Cv2.Log(temp, temp);
+            Cv2.Multiply(temp, 1.442695, temp);
+        }
+
+        // 5. Conversione a Byte (8-bit)
+        using Mat byteMat = new Mat();
+        temp.ConvertTo(byteMat, MatType.CV_8UC1, 255.0, 0);
+
+        // 6. Copia nella Bitmap (Metodo SAFE)
+        // Creiamo un buffer gestito per una singola riga per minimizzare l'allocazione
+        byte[] rowBuffer = new byte[w];
+
+        for (int y = 0; y < h; y++)
+        {
+            // A. Copia da OpenCV (Unmanaged) -> Buffer Gestito (Managed)
+            IntPtr srcRowPtr = byteMat.Ptr(y);
+            Marshal.Copy(srcRowPtr, rowBuffer, 0, w);
+
+            // B. Copia da Buffer Gestito (Managed) -> Bitmap Avalonia (Unmanaged)
+            // Calcoliamo l'indirizzo della riga di destinazione
+            // Nota: IntPtr.Add è il modo sicuro per fare aritmetica dei puntatori
+            IntPtr dstRowPtr = IntPtr.Add(destBuffer, y * stride);
+            
+            Marshal.Copy(rowBuffer, 0, dstRowPtr, w);
+        }
+    }
+
     private void UpdateImage(Bitmap newImage)
     {
         var oldImage = Image;
@@ -213,14 +262,15 @@ public partial class FitsRenderer : ObservableObject, IDisposable
     {
         if (_disposedValue) return;
 
-        // Calcolo automatico iniziale (solitamente Min/Max o AutoStretch)
-        var (newBlack, newWhite) = await Task.Run(() => 
-            _converter.CalculateDisplayThresholds(_imageData)
-        );
+        // Usiamo l'analisi per calcolare statistiche di base
+        var stats = await Task.Run(() => _analysis.ComputeStatistics(_cachedScientificMat));
+
+        // Auto-Stretch base: Media +/- 2.5 Deviazioni Standard
+        double newBlack = stats.Mean - (2.5 * stats.StdDev);
+        double newWhite = stats.Mean + (5.0 * stats.StdDev); // Un po' più di highlight
 
         if (skipRegeneration)
         {
-            // Aggiorna i backing field senza scatenare l'evento PropertyChanged
             SetProperty(ref _blackPoint, newBlack, nameof(BlackPoint));
             SetProperty(ref _whitePoint, newWhite, nameof(WhitePoint));
         }

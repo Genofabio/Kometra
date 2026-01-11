@@ -27,7 +27,8 @@
         <PackageReference Include="FITS.Lib" Version="1.1.7" />
         <PackageReference Include="Material.Icons.Avalonia" Version="3.0.0-preview5" />
         <PackageReference Include="MathNet.Numerics" Version="6.0.0-beta2" />
-        <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.0-rc.2.25502.107" />
+        <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.1" />
+        <PackageReference Include="Microsoft.Extensions.Http" Version="10.0.1" />
         <PackageReference Include="OpenCvSharp4.Windows" Version="4.11.0.20250507" />
     </ItemGroup>
 </Project>

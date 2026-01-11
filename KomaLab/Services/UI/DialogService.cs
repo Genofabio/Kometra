@@ -1,13 +1,22 @@
-﻿using System.Collections.Generic;
+﻿using System;
+using System.Collections.Generic;
 using System.Linq;
+using System.IO; 
 using System.Threading.Tasks;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Platform.Storage;
-using System.IO; 
 
 namespace KomaLab.Services.UI;
+
+// ---------------------------------------------------------------------------
+// FILE: DialogService.cs
+// RUOLO: UI Service (File Picking)
+// DESCRIZIONE:
+// Implementazione specifica per Avalonia del servizio di dialogo.
+// Fa da ponte tra la UI (StorageProvider) e il Backend (che si aspetta percorsi stringa).
+// ---------------------------------------------------------------------------
 
 public class DialogService : IDialogService
 {
@@ -18,7 +27,8 @@ public class DialogService : IDialogService
 
         var fitsFilter = new FilePickerFileType("File FITS")
         {
-            Patterns = new[] { "*.fits", "*.fit", "*.fts" }
+            Patterns = new[] { "*.fits", "*.fit", "*.fts" },
+            MimeTypes = new[] { "image/fits", "application/fits" } // Aggiunto MimeType per completezza Linux/Mac
         };
 
         var files = await storage.OpenFilePickerAsync(new FilePickerOpenOptions
@@ -30,6 +40,10 @@ public class DialogService : IDialogService
 
         if (files.Count >= 1)
         {
+            // NOTA: TryGetLocalPath() è cruciale. 
+            // Il nostro backend (OpenCV/CSharpFITS) lavora con FileStream su percorsi fisici.
+            // Se siamo in un ambiente sandboxed che non espone il path (es. WebAssembly), 
+            // questo filtrerà i file, che è il comportamento corretto (fail-safe) per ora.
             return files
                 .Select(f => f.TryGetLocalPath())
                 .Where(p => !string.IsNullOrEmpty(p))
@@ -45,15 +59,11 @@ public class DialogService : IDialogService
         if (storage == null) return null;
 
         // --- FIX NOME FILE ---
-        // Se il nome suggerito ha già un'estensione, la rimuoviamo.
-        // Il FilePicker aggiungerà automaticamente l'estensione scelta dall'utente (DefaultExtension).
-        // Questo evita "immagine.fit.fits".
+        // Pulisce estensioni multiple o errate prima di proporre il nome.
         string cleanName = Path.GetFileNameWithoutExtension(defaultFileName);
         
-        // Sicurezza extra: se c'era doppia estensione (es. .tar.fits), Path.GetFileNameWithoutExtension ne toglie solo una.
-        // Controlliamo se finisce ancora con .fit o .fits e puliamo ancora se necessario.
-        while (cleanName.EndsWith(".fit", System.StringComparison.OrdinalIgnoreCase) || 
-               cleanName.EndsWith(".fits", System.StringComparison.OrdinalIgnoreCase))
+        while (cleanName.EndsWith(".fit", StringComparison.OrdinalIgnoreCase) || 
+               cleanName.EndsWith(".fits", StringComparison.OrdinalIgnoreCase))
         {
             cleanName = Path.GetFileNameWithoutExtension(cleanName);
         }
@@ -61,13 +71,14 @@ public class DialogService : IDialogService
 
         var fitsFilter = new FilePickerFileType("File FITS")
         {
-            Patterns = new[] { "*.fits", "*.fit", "*.fts" }
+            Patterns = new[] { "*.fits", "*.fit", "*.fts" },
+            MimeTypes = new[] { "image/fits", "application/fits" }
         };
 
         var file = await storage.SaveFilePickerAsync(new FilePickerSaveOptions
         {
             Title = "Salva Immagine FITS",
-            SuggestedFileName = cleanName, // Usiamo il nome pulito
+            SuggestedFileName = cleanName, 
             FileTypeChoices = new[] { fitsFilter },
             DefaultExtension = "fits"
         });
@@ -86,8 +97,6 @@ public class DialogService : IDialogService
         };
 
         var defaultExt = pattern.TrimStart('*', '.');
-        
-        // Applichiamo la stessa logica di pulizia anche qui per sicurezza
         string cleanName = Path.GetFileNameWithoutExtension(defaultFileName);
 
         var file = await storage.SaveFilePickerAsync(new FilePickerSaveOptions
@@ -101,13 +110,26 @@ public class DialogService : IDialogService
         return file?.TryGetLocalPath();
     }
 
+    /// <summary>
+    /// Recupera il Provider di Storage in modo agnostico rispetto al Lifetime dell'app.
+    /// </summary>
     private IStorageProvider? GetStorageProvider()
     {
+        // 1. Caso Desktop Classico (MainWindow)
         if (Application.Current?.ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
-            var topLevel = TopLevel.GetTopLevel(desktop.MainWindow);
-            return topLevel?.StorageProvider;
+            if (desktop.MainWindow == null) return null; // Finestra non ancora inizializzata
+            return TopLevel.GetTopLevel(desktop.MainWindow)?.StorageProvider;
         }
+        
+        // 2. Caso Single View (Mobile / Browser / Embedded)
+        // Utile per rendere il servizio "future-proof" se mai porterai KomaLab su Android/Linux Touch
+        if (Application.Current?.ApplicationLifetime is ISingleViewApplicationLifetime singleView)
+        {
+             if (singleView.MainView == null) return null;
+             return TopLevel.GetTopLevel(singleView.MainView)?.StorageProvider;
+        }
+
         return null;
     }
 }

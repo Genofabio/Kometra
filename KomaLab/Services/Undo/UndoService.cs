@@ -1,110 +1,144 @@
-﻿using System.Collections.Generic;
+﻿using System;
+using System.Collections.Generic;
+using System.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 
 namespace KomaLab.Services.Undo;
 
-public partial class UndoService : ObservableObject, IUndoService
-{
-    // CONFIGURAZIONE
-    private const int MaxHistoryCount = 10;
+// ---------------------------------------------------------------------------
+// FILE: UndoService.cs
+// RUOLO: Orchestratore dello Stato Reversibile
+// DESCRIZIONE:
+// Implementazione Enterprise del servizio Undo.
+// Utilizza una LinkedList per la cronologia di Undo (permettendo la rimozione 
+// efficiente degli elementi più vecchi) e uno Stack per il Redo.
+//
+// GESTIONE MEMORIA:
+// Poiché le azioni FITS possono occupare centinaia di MB, il servizio impone
+// un limite rigido (MaxHistoryCount). Al superamento, le azioni rimosse
+// vengono disposate immediatamente.
+// ---------------------------------------------------------------------------
 
-    // STRUTTURE DATI OTTIMIZZATE
-    // LinkedList ci permette di fare .RemoveFirst() in O(1) quando superiamo il limite.
+public class UndoService : ObservableObject, IUndoService
+{
+    private const int MaxHistoryCount = 20; // Bilanciamento tra UX e RAM
+    private readonly Lock _lock = new();
+
     private readonly LinkedList<IUndoableAction> _undoList = new();
-    
-    // Stack va bene per il Redo perché svuotiamo tutto appena si fa una nuova azione.
     private readonly Stack<IUndoableAction> _redoStack = new();
 
+    // Proprietà calcolate per il binding della UI
     public bool CanUndo => _undoList.Count > 0;
     public bool CanRedo => _redoStack.Count > 0;
 
+    /// <summary>
+    /// Registra un'azione e invalida il futuro alternativo (Redo Stack).
+    /// </summary>
     public void RecordAction(IUndoableAction action)
     {
-        // 1. Aggiungiamo la nuova azione in coda (Cima dello stack virtuale)
-        _undoList.AddLast(action);
 
-        // 2. OTTIMIZZAZIONE MEMORIA: Limite storico
-        if (_undoList.Count > MaxHistoryCount)
+        lock (_lock)
         {
-            // Rimuoviamo l'azione più vecchia (testa della lista)
-            var oldestNode = _undoList.First;
-            if (oldestNode != null)
+            // 1. Aggiungiamo l'azione alla fine della lista (punto più recente)
+            _undoList.AddLast(action);
+
+            // 2. Controllo saturazione cronologia
+            if (_undoList.Count > MaxHistoryCount)
             {
-                _undoList.RemoveFirst();
-                
-                // CRITICO: Liberiamo le risorse dell'azione persa per sempre
-                oldestNode.Value.Dispose();
+                var oldest = _undoList.First;
+                if (oldest != null)
+                {
+                    _undoList.RemoveFirst();
+                    oldest.Value.Dispose(); // Libera risorse FITS/Mat/File
+                }
             }
+
+            // 3. Quando si compie una nuova azione, la catena del Redo si spezza
+            ClearRedoStackInternal();
         }
 
-        // 3. Pulizia Redo (Il futuro alternativo è perso)
-        ClearRedoStack();
-
-        NotifyChanges();
+        NotifyStatusChanged();
     }
 
     public void Undo()
     {
-        if (_undoList.Count == 0) return;
+        lock (_lock)
+        {
+            if (_undoList.Count == 0) return;
 
-        // Prendiamo l'ultima azione inserita
-        var actionNode = _undoList.Last;
-        if (actionNode == null) return;
-        
-        var action = actionNode.Value;
+            var actionNode = _undoList.Last;
+            if (actionNode == null) return;
 
-        // Eseguiamo l'undo
-        action.Undo();
+            var action = actionNode.Value;
+            
+            try
+            {
+                action.Undo();
+                
+                _undoList.RemoveLast();
+                _redoStack.Push(action);
+            }
+            catch (Exception ex)
+            {
+                // In un sistema enterprise qui andrebbe un log serio
+                System.Diagnostics.Debug.WriteLine($"[UndoService] Fallimento Undo: {ex.Message}");
+            }
+        }
 
-        // Spostiamo da UndoList -> RedoStack
-        _undoList.RemoveLast();
-        _redoStack.Push(action);
-        
-        NotifyChanges();
+        NotifyStatusChanged();
     }
 
     public void Redo()
     {
-        if (_redoStack.Count == 0) return;
+        lock (_lock)
+        {
+            if (_redoStack.Count == 0) return;
 
-        // Prendiamo l'azione dallo stack Redo
-        var action = _redoStack.Pop();
+            var action = _redoStack.Pop();
 
-        // Rieseguiamo l'azione
-        action.Execute();
+            try
+            {
+                action.Execute();
+                _undoList.AddLast(action);
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[UndoService] Fallimento Redo: {ex.Message}");
+            }
+        }
 
-        // Spostiamo da RedoStack -> UndoList
-        _undoList.AddLast(action);
-        
-        NotifyChanges();
+        NotifyStatusChanged();
     }
 
     public void ClearHistory()
     {
-        // Dispose di tutte le azioni pendenti per liberare memoria FITS
-        foreach (var action in _undoList) action.Dispose();
-        _undoList.Clear();
-
-        ClearRedoStack();
-        
-        NotifyChanges();
-    }
-
-    private void ClearRedoStack()
-    {
-        if (_redoStack.Count > 0)
+        lock (_lock)
         {
-            // Dispose delle azioni nel limbo del Redo che stiamo cancellando
-            foreach (var action in _redoStack)
+            foreach (var action in _undoList)
             {
                 action.Dispose();
             }
-            _redoStack.Clear();
+            _undoList.Clear();
+
+            ClearRedoStackInternal();
+        }
+
+        NotifyStatusChanged();
+    }
+
+    private void ClearRedoStackInternal()
+    {
+        // Metodo interno senza lock (da chiamare dentro un blocco lock)
+        while (_redoStack.Count > 0)
+        {
+            var action = _redoStack.Pop();
+            action.Dispose();
         }
     }
 
-    private void NotifyChanges()
+    private void NotifyStatusChanged()
     {
+        // Notifica la UI che i comandi Undo/Redo devono essere ri-valutati
         OnPropertyChanged(nameof(CanUndo));
         OnPropertyChanged(nameof(CanRedo));
     }

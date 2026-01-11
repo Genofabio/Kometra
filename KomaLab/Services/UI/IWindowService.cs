@@ -1,32 +1,50 @@
 ﻿using System.Collections.Generic;
 using System.Threading.Tasks;
 using Avalonia.Controls;
-using KomaLab.Models;
 using KomaLab.Models.Visualization;
 using KomaLab.ViewModels;
+using nom.tam.fits;
 
 namespace KomaLab.Services.UI;
 
-/// <summary>
-/// Definisce un servizio per gestire l'apertura di finestre secondarie.
-/// </summary>
+// ---------------------------------------------------------------------------
+// FILE: IWindowService.cs
+// RUOLO: Interfaccia di Navigazione UI
+// DESCRIZIONE:
+// Definisce il contratto per la gestione delle finestre modali e dei tool
+// secondari. Astrae la creazione delle View dai ViewModel, permettendo
+// l'apertura di finestre complesse senza accoppiamento diretto.
+// ---------------------------------------------------------------------------
+
 public interface IWindowService
 {
     /// <summary>
     /// Registra la finestra principale dell'applicazione per
-    /// usarla come genitore per le finestre modali.
+    /// usarla come owner per le finestre modali.
     /// </summary>
     void RegisterMainWindow(Window window);
 
     /// <summary>
-    /// Apre la finestra di allineamento per il nodo specificato.
+    /// Apre il tool di allineamento e stacking.
     /// </summary>
     Task<List<string>?> ShowAlignmentWindowAsync(
         List<string> inputPaths, 
         VisualizationMode initialMode = VisualizationMode.Linear);
     
-    Task<nom.tam.fits.Header?> ShowHeaderEditorAsync(ImageNodeViewModel node);
+    /// <summary>
+    /// Apre l'editor per la modifica dei metadati FITS.
+    /// </summary>
+    Task<Header?> ShowHeaderEditorAsync(ImageNodeViewModel node);
+    
+    /// <summary>
+    /// Apre il pannello di controllo per il Plate Solving (Astrometria).
+    /// </summary>
     Task ShowPlateSolvingWindowAsync(ImageNodeViewModel node);
-    Task<List<string>?> ShowPosterizationWindowAsync(List<string> sourcePaths, 
+    
+    /// <summary>
+    /// Apre il tool per l'effetto di posterizzazione.
+    /// </summary>
+    Task<List<string>?> ShowPosterizationWindowAsync(
+        List<string> sourcePaths, 
         VisualizationMode initialMode);
 }

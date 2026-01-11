@@ -13,7 +13,7 @@ using KomaLab.Models;
 using KomaLab.Models.Fits;
 using KomaLab.Models.Processing;
 using KomaLab.Models.Visualization;
-using KomaLab.Services.Data;
+using KomaLab.Services.Data;        // IFitsIoService, IFitsMetadataService
 using KomaLab.Services.Factories;
 using KomaLab.Services.Imaging;
 using KomaLab.Services.UI;
@@ -21,15 +21,25 @@ using KomaLab.Services.Undo;
 
 namespace KomaLab.ViewModels;
 
+// ---------------------------------------------------------------------------
+// FILE: BoardViewModel.cs
+// RUOLO: Viewmodel Principale (Orchestratore della Board)
+// DESCRIZIONE:
+// Gestisce lo stato globale dei nodi, le connessioni e i comandi di alto livello.
+// Aggiornato per utilizzare i servizi atomici IFitsIoService e IFitsMetadataService.
+// ---------------------------------------------------------------------------
+
 public partial class BoardViewModel : ObservableObject
 {
     // --- Dipendenze ---
     private readonly INodeViewModelFactory _nodeFactory;
     private readonly IDialogService _dialogService;
     private readonly IWindowService _windowService;
-    private readonly IFitsService _fitsService;
+    private readonly IFitsIoService _ioService;          
+    private readonly IFitsMetadataService _metadataService; 
     private readonly IImageOperationService _opsService;
     private readonly IUndoService _undoService;
+    private readonly IMediaExportService _mediaService;  
 
     // --- Proprietà ---
     [ObservableProperty] private double _offsetX;
@@ -47,7 +57,7 @@ public partial class BoardViewModel : ObservableObject
     [NotifyCanExecuteChangedFor(nameof(ToggleNodeAnimationCommand))]
     [NotifyCanExecuteChangedFor(nameof(EditSelectedNodeHeaderCommand))]
     [NotifyCanExecuteChangedFor(nameof(ShowPlateSolvingWindowCommand))]
-    [NotifyCanExecuteChangedFor(nameof(SetVisualizationModeCommand))] // <-- AGGIORNATO: Abilita il menu View -> Modalità
+    [NotifyCanExecuteChangedFor(nameof(SetVisualizationModeCommand))] 
     [NotifyCanExecuteChangedFor(nameof(ShowPosterizationWindowCommand))]
     private BaseNodeViewModel? _selectedNode;
     
@@ -66,16 +76,20 @@ public partial class BoardViewModel : ObservableObject
         INodeViewModelFactory nodeFactory,
         IDialogService dialogService,
         IWindowService windowService,
-        IFitsService fitsService,
+        IFitsIoService ioService,           
+        IFitsMetadataService metadataService, 
         IImageOperationService opsService,
-        IUndoService undoService)
+        IUndoService undoService,
+        IMediaExportService mediaService)    // Iniezione corretta
     {
         _nodeFactory = nodeFactory;
         _dialogService = dialogService;
         _windowService = windowService;
-        _fitsService = fitsService;
+        _ioService = ioService;
+        _metadataService = metadataService;
         _opsService = opsService;
         _undoService = undoService;
+        _mediaService = mediaService;
     }
 
     // --- Comandi ---
@@ -83,7 +97,6 @@ public partial class BoardViewModel : ObservableObject
     private async Task AddNode()
     {
         var imagePaths = await _dialogService.ShowOpenFitsFileDialogAsync();
-
         if (imagePaths == null) return;
         var pathList = imagePaths.ToList();
         if (pathList.Count == 0) return;
@@ -96,7 +109,22 @@ public partial class BoardViewModel : ObservableObject
         }
         else
         {
-            var sortedPaths = await _fitsService.SortFilesByObservationTimeAsync(pathList);
+            // RISOLUZIONE ENTERPRISE: Orchestrazione dei servizi
+            // 1. Leggiamo gli header di tutti i file in parallelo (IO Service)
+            // 2. Estraiamo le date (Metadata Service)
+            // 3. Ordiniamo la lista
+            var pathDatePairs = await Task.WhenAll(pathList.Select(async path =>
+            {
+                var header = await _ioService.ReadHeaderOnlyAsync(path);
+                var date = header != null ? _metadataService.GetObservationDate(header) : null;
+                return new { Path = path, Date = date ?? DateTime.MinValue };
+            }));
+
+            var sortedPaths = pathDatePairs
+                .OrderBy(x => x.Date)
+                .Select(x => x.Path)
+                .ToList();
+
             await AddMultipleNodesAsync(sortedPaths, center.X, center.Y);
         }
     }
@@ -348,70 +376,17 @@ public partial class BoardViewModel : ObservableObject
 
         try
         {
-            var inputPaths = await imgNode.PrepareInputPathsAsync(_fitsService);
+            // RISOLTO: Sostituito _fitsService con _ioService
+            var inputPaths = await imgNode.PrepareInputPathsAsync(_ioService);
             if (inputPaths.Count == 0) return;
 
             VisualizationMode currentMode = imgNode.VisualizationMode;
-
             var newPaths = await _windowService.ShowPosterizationWindowAsync(inputPaths, currentMode);
 
             if (newPaths != null && newPaths.Count > 0)
             {
-                double gap = 300;
-                double newX = imgNode.X + imgNode.EstimatedTotalSize.Width + gap;
-                double newY = imgNode.Y;
-                
-                // --- MODIFICA QUI ---
-                // Prima: string newTitle = $"{imgNode.Title} (Morfologia)";
-                string newTitle = $"{imgNode.Title} (Posterizzata)"; 
-                // --------------------
-
-                BaseNodeViewModel newNode;
-                if (newPaths.Count == 1)
-                {
-                    newNode = await _nodeFactory.CreateSingleImageNodeAsync(newPaths[0], newX, newY, centerOnPosition: false);
-                }
-                else
-                {
-                    var multiNode = await _nodeFactory.CreateMultipleImagesNodeAsync(newPaths, newX, newY, centerOnPosition: false);
-                    string? dirPath = System.IO.Path.GetDirectoryName(newPaths[0]);
-                    multiNode.TemporaryFolderPath = dirPath;
-                    newNode = multiNode;
-                }
-
-                newNode.Title = newTitle;
-                
-                // Opzionale: Impostiamo Lineare perché l'immagine è già processata
-                if (newNode is ImageNodeViewModel resNode) resNode.VisualizationMode = VisualizationMode.Linear;
-
-                var action = new DelegateAction(
-                    "Analisi Morfologica", // Questo è il nome per l'Undo, puoi lasciarlo così o cambiarlo in "Posterizzazione"
-                    execute: () =>
-                    {
-                        if (!Nodes.Contains(newNode))
-                        {
-                            Nodes.Add(newNode);
-                            RegisterNodeEvents(newNode);
-                            OnNodeRequestBringToFront(newNode);
-                            CreateConnection(imgNode, newNode);
-                        }
-                    },
-                    undo: () =>
-                    {
-                        if (Nodes.Contains(newNode))
-                        {
-                            var link = Connections.FirstOrDefault(c => c.Source == imgNode && c.Target == newNode);
-                            if (link != null) Connections.Remove(link);
-                            if (SelectedNode == newNode) DeselectAllNodes();
-                            UnregisterNodeEvents(newNode);
-                            Nodes.Remove(newNode);
-                        }
-                    }
-                );
-
-                action.Execute();
-                _undoService.RecordAction(action);
-                SetSelectedNode(newNode);
+                // [Logica di creazione nodo posterizzato...]
+                await HandleProcessingResultAsync(imgNode, newPaths, "Posterizzazione", "(Posterizzata)");
             }
         }
         catch (Exception ex)
@@ -430,76 +405,16 @@ public partial class BoardViewModel : ObservableObject
 
         try
         {
-            var inputPaths = await imgNode.PrepareInputPathsAsync(_fitsService);
+            // RISOLTO: Sostituito _fitsService con _ioService
+            var inputPaths = await imgNode.PrepareInputPathsAsync(_ioService);
             if (inputPaths.Count == 0) return;
 
-            // FIX ARCHITETTURALE: Passiamo il modo di visualizzazione corrente del Nodo
-            // in modo che la finestra di allineamento si apra coerente con ciò che vede l'utente.
-            var newPaths = await _windowService.ShowAlignmentWindowAsync(
-                inputPaths, 
-                imgNode.VisualizationMode 
-            );
+            var newPaths = await _windowService.ShowAlignmentWindowAsync(inputPaths, imgNode.VisualizationMode);
 
             if (newPaths != null && newPaths.Count > 0)
             {
-                double gap = 300;
-                double newX = imgNode.X + imgNode.EstimatedTotalSize.Width + gap;
-                double newY = imgNode.Y;
-
-                string newTitle = $"{imgNode.Title} (Allineata)";
-                string? dirPath = System.IO.Path.GetDirectoryName(newPaths[0]);
-                bool isTemp = dirPath != null && dirPath.Contains("Komalab", StringComparison.OrdinalIgnoreCase);
-
-                BaseNodeViewModel newNode;
-
-                if (newPaths.Count == 1)
-                {
-                    newNode = await _nodeFactory.CreateSingleImageNodeAsync(newPaths[0], newX, newY, centerOnPosition: false);
-                }
-                else
-                {
-                    var multiNode = await _nodeFactory.CreateMultipleImagesNodeAsync(newPaths, newX, newY, centerOnPosition: false);
-                    if (isTemp) multiNode.TemporaryFolderPath = dirPath;
-                    newNode = multiNode;
-                }
-
-                // Ereditiamo il modo anche per il nuovo nodo risultato
-                if (newNode is ImageNodeViewModel newImgNode)
-                {
-                    newImgNode.VisualizationMode = imgNode.VisualizationMode;
-                }
-
-                newNode.Title = newTitle;
-
-                var action = new DelegateAction(
-                    "Allineamento Immagini",
-                    execute: () =>
-                    {
-                        if (!Nodes.Contains(newNode))
-                        {
-                            Nodes.Add(newNode);
-                            RegisterNodeEvents(newNode);
-                            OnNodeRequestBringToFront(newNode);
-                            CreateConnection(imgNode, newNode);
-                        }
-                    },
-                    undo: () =>
-                    {
-                        if (Nodes.Contains(newNode))
-                        {
-                            var link = Connections.FirstOrDefault(c => c.Source == imgNode && c.Target == newNode);
-                            if (link != null) Connections.Remove(link);
-
-                            if (SelectedNode == newNode) DeselectAllNodes();
-                            UnregisterNodeEvents(newNode);
-                            Nodes.Remove(newNode);
-                        }
-                    }
-                );
-
-                action.Execute();
-                _undoService.RecordAction(action);
-                SetSelectedNode(newNode);
+                // [Logica di creazione nodo allineato...]
+                await HandleProcessingResultAsync(imgNode, newPaths, "Allineamento Immagini", "(Allineata)");
             }
         }
         catch (Exception ex)
@@ -677,9 +592,11 @@ public partial class BoardViewModel : ObservableObject
 
         string defaultName = $"{imgNode.Title}.fits";
         var savePath = await _dialogService.ShowSaveFitsFileDialogAsync(defaultName);
+        
         if (!string.IsNullOrWhiteSpace(savePath))
         {
-            await _fitsService.SaveFitsFileAsync(dataToSave, savePath);
+            // FIX: Metodo aggiornato SaveAsync
+            await _ioService.SaveAsync(dataToSave, savePath);
         }
     }
     private bool CanSaveNode() => SelectedNode is ImageNodeViewModel;
@@ -706,23 +623,20 @@ public partial class BoardViewModel : ObservableObject
         string cleanTitle = string.Join("_", multiNode.Title.Split(Path.GetInvalidFileNameChars()));
         string defaultName = $"{cleanTitle}.avi";
         
-        var savePath = await _dialogService.ShowSaveFileDialogAsync(
-            defaultName, 
-            "Video AVI", 
-            "*.avi"
-        );
-        
+        var savePath = await _dialogService.ShowSaveFileDialogAsync(defaultName, "Video AVI", "*.avi");
         if (string.IsNullOrWhiteSpace(savePath)) return;
 
         try
         {
             var contrastProfile = multiNode.ActiveRenderer.CaptureContrastProfile();
 
-            await _fitsService.ExportVideoAsync(
+            // FIX: Usiamo IMediaExportService con i parametri richiesti
+            await _mediaService.ExportVideoAsync(
                 multiNode.ImagePaths, 
                 savePath, 
                 fps: 5.0, 
-                profile: contrastProfile
+                profile: contrastProfile,
+                mode: multiNode.VisualizationMode // Passiamo la modalità corrente
             );
         }
         catch (Exception ex)
@@ -730,11 +644,8 @@ public partial class BoardViewModel : ObservableObject
             Debug.WriteLine($"Errore esportazione video: {ex.Message}");
         }
     }
-
-    private bool CanSaveVideo()
-    {
-        return SelectedNode is MultipleImagesNodeViewModel vm && vm.ImagePaths.Count > 1;
-    }
+    private bool CanSaveVideo() => SelectedNode is MultipleImagesNodeViewModel vm && vm.ImagePaths.Count > 1;
+    
     
     // --- NAVIGAZIONE TASTIERA ---
 
@@ -765,5 +676,59 @@ public partial class BoardViewModel : ObservableObject
         var center = new Point(ViewBounds.Width / 2.0, ViewBounds.Height / 2.0);
         double delta = mode.ToLower() == "in" ? 120 : -120;
         Zoom(delta, center);
+    }
+    
+    private async Task HandleProcessingResultAsync(ImageNodeViewModel imgNode, List<string> newPaths, string undoName, string titleSuffix)
+    {
+        double gap = 300;
+        double newX = imgNode.X + imgNode.EstimatedTotalSize.Width + gap;
+        double newY = imgNode.Y;
+        string newTitle = $"{imgNode.Title} {titleSuffix}";
+
+        BaseNodeViewModel newNode;
+        if (newPaths.Count == 1)
+        {
+            newNode = await _nodeFactory.CreateSingleImageNodeAsync(newPaths[0], newX, newY, false);
+        }
+        else
+        {
+            var multiNode = await _nodeFactory.CreateMultipleImagesNodeAsync(newPaths, newX, newY, false);
+            string? dirPath = Path.GetDirectoryName(newPaths[0]);
+            if (dirPath != null && dirPath.Contains("Komalab", StringComparison.OrdinalIgnoreCase))
+                multiNode.TemporaryFolderPath = dirPath;
+            newNode = multiNode;
+        }
+
+        newNode.Title = newTitle;
+        if (newNode is ImageNodeViewModel resNode) resNode.VisualizationMode = imgNode.VisualizationMode;
+
+        var action = new DelegateAction(
+            undoName,
+            execute: () =>
+            {
+                if (!Nodes.Contains(newNode))
+                {
+                    Nodes.Add(newNode);
+                    RegisterNodeEvents(newNode);
+                    OnNodeRequestBringToFront(newNode);
+                    CreateConnection(imgNode, newNode);
+                }
+            },
+            undo: () =>
+            {
+                if (Nodes.Contains(newNode))
+                {
+                    var link = Connections.FirstOrDefault(c => c.Source == imgNode && c.Target == newNode);
+                    if (link != null) Connections.Remove(link);
+                    if (SelectedNode == newNode) DeselectAllNodes();
+                    UnregisterNodeEvents(newNode);
+                    Nodes.Remove(newNode);
+                }
+            }
+        );
+
+        action.Execute();
+        _undoService.RecordAction(action);
+        SetSelectedNode(newNode);
     }
 }

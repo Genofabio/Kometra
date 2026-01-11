@@ -11,7 +11,8 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using nom.tam.fits;
 using KomaLab.Models;
-using KomaLab.Services.Astrometry;
+using KomaLab.Models.Fits;
+using KomaLab.Services.Data.Parsers; // Necessario per WcsParser e GeographicParser
 using FitsHeaderItem = KomaLab.Models.Fits.FitsHeaderItem;
 
 namespace KomaLab.ViewModels;
@@ -22,7 +23,6 @@ public partial class HeaderEditorViewModel : ObservableObject
     private readonly List<FitsHeaderItem> _allItems = new();
     private CancellationTokenSource? _healthCheckCts;
 
-    // Evento per lo scroll
     public event Action? RequestScrollToSelection;
 
     // --- COLORI STATUS ---
@@ -55,7 +55,7 @@ public partial class HeaderEditorViewModel : ObservableObject
 
     public HeaderEditorViewModel(ImageNodeViewModel sourceNode)
     {
-        _sourceNode = sourceNode;
+        _sourceNode = sourceNode ?? throw new ArgumentNullException(nameof(sourceNode));
         IsMultipleImages = _sourceNode is MultipleImagesNodeViewModel;
         FitsFactory.UseHierarch = true; 
         
@@ -82,11 +82,16 @@ public partial class HeaderEditorViewModel : ObservableObject
         var renderer = _sourceNode.ActiveRenderer;
         var header = renderer?.Data?.FitsHeader;
 
-        if (_sourceNode is SingleImageNodeViewModel single) { CurrentFileName = single.Title ?? "N/A"; ImageCounterText = "1 / 1"; }
+        if (_sourceNode is SingleImageNodeViewModel single) 
+        { 
+            CurrentFileName = single.Title ?? "N/A"; 
+            ImageCounterText = "1 / 1"; 
+        }
         else if (_sourceNode is MultipleImagesNodeViewModel multi) 
         { 
             int idx = multi.CurrentIndex;
-            if (idx >= 0 && idx < multi.ImagePaths.Count) CurrentFileName = System.IO.Path.GetFileName(multi.ImagePaths[idx]);
+            if (idx >= 0 && idx < multi.ImagePaths.Count) 
+                CurrentFileName = System.IO.Path.GetFileName(multi.ImagePaths[idx]);
             ImageCounterText = multi.CurrentImageText; 
         }
 
@@ -98,65 +103,7 @@ public partial class HeaderEditorViewModel : ObservableObject
             return; 
         }
 
-        var parsedItems = await Task.Run(() => 
-        {
-            var tempList = new List<FitsHeaderItem>();
-            var cursor = header.GetCursor();
-            
-            while (cursor.MoveNext())
-            {
-                nom.tam.fits.HeaderCard? card = null;
-                if (cursor.Current is nom.tam.fits.HeaderCard hc) card = hc;
-                else if (cursor.Current is DictionaryEntry de && de.Value is nom.tam.fits.HeaderCard hcd) card = hcd;
-
-                if (card != null && !string.IsNullOrWhiteSpace(card.Key))
-                {
-                    string rawKey = card.Key.Trim();
-
-                    // FIX: Ora permettiamo la END, ma non HIERARCH duplicati sporchi
-                    
-                    if (rawKey.ToUpper() == "HIERARCH")
-                    {
-                        string raw = card.ToString();
-                        int eqIndex = raw.IndexOf('=');
-                        if (eqIndex > 8)
-                        {
-                            string realKey = raw.Substring(0, eqIndex).Trim();
-                            if (realKey.Length > 8 && !char.IsWhiteSpace(realKey[8])) 
-                                realKey = realKey.Insert(8, " ");
-
-                            string valPart = raw.Substring(eqIndex + 1).Trim();
-                            string realValue = valPart;
-                            string realComment = "";
-
-                            int slashIndex = valPart.IndexOf('/');
-                            if (slashIndex >= 0)
-                            {
-                                realValue = valPart.Substring(0, slashIndex).Trim();
-                                realComment = valPart.Substring(slashIndex + 1).Trim();
-                            }
-                            realValue = realValue.Replace("'", "");
-
-                            tempList.Add(new FitsHeaderItem { Key = realKey, Value = realValue, Comment = realComment, IsModified = false });
-                            continue;
-                        }
-                    }
-
-                    string displayKey = card.Key;
-                    if (displayKey.Contains(".")) displayKey = displayKey.Replace(".", " ");
-
-                    // NOTA: IsSystemKey ora includerà END per renderla ReadOnly
-                    tempList.Add(new FitsHeaderItem { 
-                        Key = displayKey, 
-                        Value = card.Value ?? "", 
-                        Comment = card.Comment ?? "", 
-                        IsReadOnly = IsSystemKey(displayKey), 
-                        IsModified = false 
-                    });
-                }
-            }
-            return tempList;
-        });
+        var parsedItems = await Task.Run(() => ParseHeaderSafe(header));
 
         _allItems.Clear();
         _allItems.AddRange(parsedItems);
@@ -164,55 +111,125 @@ public partial class HeaderEditorViewModel : ObservableObject
         RefreshHealthCheck();
     }
 
-    // [RefreshHealthCheck rimane invariato rispetto al tuo codice funzionante]
+    private List<FitsHeaderItem> ParseHeaderSafe(Header header)
+    {
+        var tempList = new List<FitsHeaderItem>();
+        var cursor = header.GetCursor();
+        
+        while (cursor.MoveNext())
+        {
+            nom.tam.fits.HeaderCard? card = null;
+            if (cursor.Current is nom.tam.fits.HeaderCard hc) card = hc;
+            else if (cursor.Current is DictionaryEntry de && de.Value is nom.tam.fits.HeaderCard hcd) card = hcd;
+
+            if (card != null && !string.IsNullOrWhiteSpace(card.Key))
+            {
+                string rawKey = card.Key.Trim();
+
+                if (rawKey.ToUpper() == "HIERARCH")
+                {
+                    string raw = card.ToString();
+                    int eqIndex = raw.IndexOf('=');
+                    if (eqIndex > 8)
+                    {
+                        string realKey = raw.Substring(0, eqIndex).Trim();
+                        if (realKey.Length > 8 && !char.IsWhiteSpace(realKey[8])) 
+                            realKey = realKey.Insert(8, " ");
+
+                        string valPart = raw.Substring(eqIndex + 1).Trim();
+                        string realValue = valPart;
+                        string realComment = "";
+
+                        int slashIndex = valPart.IndexOf('/');
+                        if (slashIndex >= 0)
+                        {
+                            realValue = valPart.Substring(0, slashIndex).Trim();
+                            realComment = valPart.Substring(slashIndex + 1).Trim();
+                        }
+                        realValue = realValue.Replace("'", "");
+
+                        tempList.Add(new FitsHeaderItem { Key = realKey, Value = realValue, Comment = realComment, IsModified = false });
+                        continue;
+                    }
+                }
+
+                string displayKey = card.Key;
+                if (displayKey.Contains(".")) displayKey = displayKey.Replace(".", " ");
+
+                tempList.Add(new FitsHeaderItem { 
+                    Key = displayKey, 
+                    Value = card.Value ?? "", 
+                    Comment = card.Comment ?? "", 
+                    IsReadOnly = IsSystemKey(displayKey), 
+                    IsModified = false 
+                });
+            }
+        }
+        return tempList;
+    }
+
     public async void RefreshHealthCheck()
     {
         _healthCheckCts?.Cancel();
         _healthCheckCts = new CancellationTokenSource();
         var token = _healthCheckCts.Token;
         IsChecking = true;
+
         try
         {
-            await Task.Delay(100, token);
-            if (_allItems.Count == 0) { IsChecking = false; ResetStatusToWaiting(); return; }
+            await Task.Delay(100, token); 
+            
+            var currentHeader = _sourceNode.ActiveRenderer?.Data?.FitsHeader;
+            
+            if (currentHeader == null || _allItems.Count == 0) 
+            { 
+                IsChecking = false; 
+                ResetStatusToWaiting(); 
+                return; 
+            }
 
-            var itemsSnapshot = _allItems.Select(x => new { x.Key, x.Value, x.Comment }).ToList();
             var result = await Task.Run(() => 
             {
                 token.ThrowIfCancellationRequested();
                 var status = new HealthCheckResult();
-                string? FindValue(string[] tokens)
-                {
-                    foreach (var item in itemsSnapshot)
-                    {
-                        string k = item.Key.ToUpper().Trim();
-                        if (k == "COMMENT" || k == "HISTORY" || k == "HIERARCH" || k == "END") continue;
-                        foreach (var t in tokens) if (k.Contains(t) && !string.IsNullOrWhiteSpace(item.Value)) return item.Value;
-                    }
-                    return null;
-                }
                 
-                // Data
-                string? dateVal = FindValue(new[] { "DATE-OBS", "DATE" });
-                if (DateTime.TryParse(dateVal, out DateTime dt)) status.DateMsg = $"Acquisizione: {dt:yyyy-MM-dd HH:mm:ss}";
-                else status.DateError = "Timestamp mancante (DATE-OBS/DATE).";
+                // 1. DATA
+                string? dateStr = currentHeader.GetStringValue("DATE-OBS");
+                if (string.IsNullOrWhiteSpace(dateStr)) dateStr = currentHeader.GetStringValue("DATE");
+                
+                if (DateTime.TryParse(dateStr, out DateTime dt)) 
+                    status.DateMsg = $"Acquisizione: {dt:yyyy-MM-dd HH:mm:ss}";
+                else 
+                    status.DateError = "Timestamp mancante o invalido.";
+                
                 token.ThrowIfCancellationRequested();
 
-                // Luogo
-                string? latStr = FindValue(new[] { "SITELAT", "LATITUDE", "LAT-OBS", "GEOLAT", "GEO_LAT", "OBSGEO-B" });
-                string? lonStr = FindValue(new[] { "SITELONG", "LONGITUD", "LONG-OBS", "GEOLON", "GEO_LON", "OBSGEO-L" });
-                double? lat = FitsMetadataReader.ParseCoordinateString(latStr);
-                double? lon = FitsMetadataReader.ParseCoordinateString(lonStr);
-                if (lat.HasValue && lon.HasValue) status.LocMsg = $"Lat: {lat:F4}, Lon: {lon:F4}";
-                else if (latStr != null && lonStr != null) status.LocMsg = $"Trovati (Raw): {latStr} / {lonStr}";
-                else status.LocError = "Coordinate geografiche non trovate.";
+                // 2. LOCATION (Usa GeographicParser)
+                var loc = GeographicParser.ParseLocation(currentHeader);
+                if (loc != null)
+                {
+                    status.LocMsg = $"Lat: {loc.Latitude:F4}, Lon: {loc.Longitude:F4}";
+                }
+                else
+                {
+                    status.LocError = "Coordinate geografiche non trovate.";
+                }
+
                 token.ThrowIfCancellationRequested();
 
-                // WCS
-                bool hasCrval = FindValue(new[] { "CRVAL1" }) != null;
-                bool hasCtype = FindValue(new[] { "CTYPE1" }) != null;
-                if (hasCrval && hasCtype) status.WcsMsg = "Soluzione valida (WCS rilevato).";
-                else status.WcsError = "Soluzione astrometrica incompleta.";
+                // 3. WCS (Usa WcsParser + Fix PixelScaleArcsec)
+                var wcs = WcsParser.Parse(currentHeader);
+                
+                if (wcs != null && wcs.IsValid)
+                {
+                    // FIX: Usiamo PixelScaleArcsec presente nel tuo modello WcsData
+                    status.WcsMsg = $"Soluzione valida (Scale: {wcs.PixelScaleArcsec:F2}\" / px)";
+                }
+                else
+                {
+                    status.WcsError = "Soluzione astrometrica incompleta o assente.";
+                }
+
                 return status;
             }, token);
 
@@ -221,13 +238,19 @@ public partial class HeaderEditorViewModel : ObservableObject
             
             if (result.DateError == null) { DateStatusColor = SuccessBrush; DateStatusText = result.DateMsg!; }
             else { DateStatusColor = ErrorBrush; DateStatusText = result.DateError; }
+            
             if (result.LocError == null) { LocationStatusColor = SuccessBrush; LocationStatusText = result.LocMsg!; }
             else { LocationStatusColor = ErrorBrush; LocationStatusText = result.LocError; }
+            
             if (result.WcsError == null) { WcsStatusColor = SuccessBrush; WcsStatusText = result.WcsMsg!; }
             else { WcsStatusColor = ErrorBrush; WcsStatusText = result.WcsError; }
         }
         catch (OperationCanceledException) { }
-        catch (Exception ex) { IsChecking = false; Debug.WriteLine($"[HealthCheck] Error: {ex.Message}"); }
+        catch (Exception ex) 
+        { 
+            IsChecking = false; 
+            Debug.WriteLine($"[HealthCheck] Error: {ex.Message}"); 
+        }
     }
 
     private void ResetStatusToWaiting()
@@ -278,14 +301,12 @@ public partial class HeaderEditorViewModel : ObservableObject
 
         foreach (var item in _allItems)
         {
-            // Salta le chiavi di sistema perché le abbiamo già copiate o rigenerate
-            // SALTA ANCHE END: perché la libreria FITS la aggiunge automaticamente alla fine del file.
             if (IsSystemKey(item.Key) || string.IsNullOrWhiteSpace(item.Key)) continue;
 
             try
             {
                 string keyUpper = item.Key.Trim().ToUpper();
-                if (keyUpper == "END") continue; // Doppia sicurezza per il salvataggio
+                if (keyUpper == "END") continue;
 
                 if (keyUpper == "COMMENT" || keyUpper == "HISTORY")
                 {
@@ -312,7 +333,6 @@ public partial class HeaderEditorViewModel : ObservableObject
     private bool IsSystemKey(string key)
     {
         if (string.IsNullOrWhiteSpace(key)) return false;
-        // AGGIUNTO "END" qui, così nella griglia appare ReadOnly e non modificabile
         var sysKeys = new[] { "SIMPLE", "BITPIX", "NAXIS", "NAXIS1", "NAXIS2", "EXTEND", "BSCALE", "BZERO", "END" };
         return sysKeys.Contains(key.ToUpper());
     }
@@ -324,26 +344,15 @@ public partial class HeaderEditorViewModel : ObservableObject
         var newItem = new FitsHeaderItem { Key = newKeyName, Value = "0", Comment = "Manuale", IsModified = true };
         SearchText = ""; 
         
-        // --- LOGICA DI INSERIMENTO ---
-        // Trova l'indice della chiave "END"
         var endIndex = _allItems.FindIndex(x => x.Key.Trim().ToUpper() == "END");
 
-        if (endIndex >= 0)
-        {
-            // Inserisci PRIMA di END
-            _allItems.Insert(endIndex, newItem);
-        }
-        else
-        {
-            // Se per assurdo END non c'è, aggiungi in fondo
-            _allItems.Add(newItem);
-        }
+        if (endIndex >= 0) _allItems.Insert(endIndex, newItem);
+        else _allItems.Add(newItem);
 
         ApplyFilter(); 
         SelectedItem = newItem;
         RefreshHealthCheck();
         
-        // Richiedi scroll alla View
         RequestScrollToSelection?.Invoke();
     }
     

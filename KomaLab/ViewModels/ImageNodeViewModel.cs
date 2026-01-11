@@ -1,25 +1,31 @@
-﻿using System; // Necessario per Enum.GetValues
+﻿using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 using Avalonia;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
-using KomaLab.Models;
 using KomaLab.Models.Fits;
 using KomaLab.Models.Nodes;
 using KomaLab.Models.Visualization;
-using KomaLab.Services.Data;
+using KomaLab.Services.Data;        // Necessario per IFitsIoService
 using KomaLab.ViewModels.Helpers;
 
 namespace KomaLab.ViewModels;
 
-/// <summary>
-/// Classe base per tutti i nodi che visualizzano o manipolano immagini FITS.
-/// Gestisce la logica comune di:
-/// 1. Geometria (Viewport, Zoom, Pan)
-/// 2. Radiometria (Black/White Point, Reset Soglie, Visualization Mode)
-/// 3. Interfaccia con il Renderer attivo
-/// </summary>
+// ---------------------------------------------------------------------------
+// FILE: ImageNodeViewModel.cs
+// RUOLO: Classe Base Astratta per Nodi Immagine
+// DESCRIZIONE:
+// Fornisce l'infrastruttura comune per la gestione della visualizzazione FITS.
+// Gestisce:
+// 1. Viewport: Coordinate, Zoom e Pan locali alla finestra del nodo.
+// 2. Radiometria: Black Point, White Point e Stretching (VisualizationMode).
+// 3. Renderer: Ponte tra i dati scientifici (Double) e i pixel visualizzabili (8-bit).
+//
+// CAMBIAMENTI REFACTORING:
+// - Sostituito IFitsService con IFitsIoService in PrepareInputPathsAsync.
+// ---------------------------------------------------------------------------
+
 public abstract partial class ImageNodeViewModel : BaseNodeViewModel
 {
     // --- Campi Privati ---
@@ -41,21 +47,25 @@ public abstract partial class ImageNodeViewModel : BaseNodeViewModel
         }
     }
 
-    // --- Proprietà Gestione Immagine ---
+    // --- Proprietà Gestione Immagine (Radiometria) ---
     
     [ObservableProperty]
     private VisualizationMode _visualizationMode = VisualizationMode.Linear;
 
-    // Quando l'utente cambia la modalià dal menu/UI:
+    /// <summary>
+    /// Notifica il renderer quando cambia la modalità di stretch (Linear, Log, Sqrt).
+    /// </summary>
     partial void OnVisualizationModeChanged(VisualizationMode value)
     {
-        // Imponiamo subito la scelta al renderer attivo (se esiste)
         if (ActiveRenderer != null)
         {
             ActiveRenderer.VisualizationMode = value;
         }
     }
     
+    /// <summary>
+    /// Il Renderer attivo (Single o Multiple) che gestisce la trasformazione scientifica -> bitmap.
+    /// </summary>
     public abstract FitsRenderer? ActiveRenderer { get; }
 
     [ObservableProperty] 
@@ -65,7 +75,7 @@ public abstract partial class ImageNodeViewModel : BaseNodeViewModel
     private double _whitePoint;
 
     /// <summary>
-    /// Lista dei modi disponibili per popolare la ComboBox.
+    /// Lista dei modi disponibili per popolare i menu di scelta nella UI.
     /// </summary>
     public VisualizationMode[] AvailableVisualizationModes => Enum.GetValues<VisualizationMode>();
 
@@ -95,12 +105,12 @@ public abstract partial class ImageNodeViewModel : BaseNodeViewModel
     {
         if (ActiveRenderer == null) return;
 
+        // Esegue l'auto-stretch calcolando i livelli ottimali (solitamente tramite IImageAnalysisService)
         await ActiveRenderer.ResetThresholdsAsync();
 
+        // Sincronizza le proprietà del ViewModel con i risultati del calcolo
         BlackPoint = ActiveRenderer.BlackPoint;
         WhitePoint = ActiveRenderer.WhitePoint;
-        // Nota: Il VisualizationMode solitamente non si resetta con l'auto-stretch, 
-        // ma se volessi forzarlo a Linear, lo faresti qui.
     }
 
     partial void OnBlackPointChanged(double value)
@@ -116,16 +126,15 @@ public abstract partial class ImageNodeViewModel : BaseNodeViewModel
     // --- Helper per le Sottoclassi (Sync UI) ---
 
     /// <summary>
-    /// Da chiamare nelle classi derivate (es. MultipleImagesNode) quando
-    /// cambia l'immagine visualizzata (ActiveRenderer cambia).
-    /// Forza la UI a rileggere tutte le proprietà visive dal nuovo renderer.
+    /// Da chiamare nelle classi derivate quando cambia l'immagine attiva.
+    /// Forza la UI a rinfrescare i controlli di contrasto.
     /// </summary>
     protected void NotifyActiveRendererChanged()
     {
         OnPropertyChanged(nameof(ActiveRenderer));
         OnPropertyChanged(nameof(BlackPoint));
         OnPropertyChanged(nameof(WhitePoint));
-        OnPropertyChanged(nameof(VisualizationMode)); // Aggiorna la ComboBox col valore della nuova immagine
+        OnPropertyChanged(nameof(VisualizationMode)); 
     }
 
     // --- Gestione Zoom/Pan ---
@@ -140,8 +149,16 @@ public abstract partial class ImageNodeViewModel : BaseNodeViewModel
     // --- Metodi Astratti (Contratto Dati) ---
 
     public abstract Task<List<FitsImageData?>> GetCurrentDataAsync();
+    
     public abstract FitsImageData? GetActiveImageData();
+    
     public abstract Task ApplyProcessedDataAsync(List<FitsImageData> newProcessedData);
-    public abstract Task<List<string>> PrepareInputPathsAsync(IFitsService fitsService);
+
+    /// <summary>
+    /// Prepara i percorsi file necessari per le operazioni di processing esterno.
+    /// </summary>
+    /// <param name="ioService">Il servizio di I/O Enterprise per gestire eventuali salvataggi temporanei.</param>
+    public abstract Task<List<string>> PrepareInputPathsAsync(IFitsIoService ioService);
+    
     public abstract Task RefreshDataFromDiskAsync();
 }

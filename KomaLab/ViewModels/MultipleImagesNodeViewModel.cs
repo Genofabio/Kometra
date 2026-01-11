@@ -12,24 +12,32 @@ using KomaLab.Models;
 using KomaLab.Models.Fits;
 using KomaLab.Models.Nodes;
 using KomaLab.Models.Visualization;
-using KomaLab.Services.Data;
+using KomaLab.Services.Data;        // IFitsIoService
 using KomaLab.Services.Imaging;
 using KomaLab.Services.Utilities;
 using KomaLab.ViewModels.Helpers;
 
 namespace KomaLab.ViewModels;
 
+// ---------------------------------------------------------------------------
+// FILE: MultipleImagesNodeViewModel.cs
+// RUOLO: Nodo per sequenze di immagini (Animazioni/Stacking)
+// DESCRIZIONE:
+// Gestisce una lista di file FITS, permettendo la navigazione sequenziale,
+// l'animazione e la gestione della memoria tramite LRU Cache.
+// ---------------------------------------------------------------------------
+
 public partial class MultipleImagesNodeViewModel : ImageNodeViewModel
 {
-    // --- Dipendenze ---
-    private readonly IFitsService _fitsService;
-    private readonly IFitsDataConverter _converter;
+    // --- Dipendenze Enterprise ---
+    private readonly IFitsIoService _ioService;      // Sostituisce IFitsService
+    private readonly IFitsImageDataConverter _converter;
     private readonly IImageAnalysisService _analysis;
     private readonly MultipleImagesNodeModel _multiModel;
 
     // --- Stato Interno ---
     private readonly int _imageCount;
-    private readonly LruCache<int, FitsImageData> _dataCache = new(3);
+    private readonly LruCache<int, FitsImageData> _dataCache = new(3); // Cache LRU per limitare RAM
     private CancellationTokenSource? _loadingCts;
     private Size _maxImageSize;
     
@@ -76,16 +84,16 @@ public partial class MultipleImagesNodeViewModel : ImageNodeViewModel
     // --- Costruttore ---
     public MultipleImagesNodeViewModel(
         MultipleImagesNodeModel model,
-        IFitsService fitsService,
-        IFitsDataConverter converter,
+        IFitsIoService ioService,           // Updated Dependency
+        IFitsImageDataConverter converter,
         IImageAnalysisService analysis,
         Size maxSize, 
         FitsImageData? initialData) 
         : base(model)
     {
-        _fitsService = fitsService;
-        _converter = converter;
-        _analysis = analysis;
+        _ioService = ioService ?? throw new ArgumentNullException(nameof(ioService));
+        _converter = converter ?? throw new ArgumentNullException(nameof(converter));
+        _analysis = analysis ?? throw new ArgumentNullException(nameof(analysis));
         _multiModel = model;
         _maxImageSize = maxSize;
         _imageCount = model.ImagePaths.Count; 
@@ -104,7 +112,7 @@ public partial class MultipleImagesNodeViewModel : ImageNodeViewModel
     }
 
     // --- Inizializzazione ---
-    public async Task InitializeAsync()
+    public async Task InitializeAsync(bool centerOnPosition = false)
     {
         _dataCache.TryGet(0, out var initialData);
         
@@ -114,15 +122,16 @@ public partial class MultipleImagesNodeViewModel : ImageNodeViewModel
             return;
         }
 
-        ActiveFitsImage = new FitsRenderer(initialData, _fitsService, _converter, _analysis);
+        // Creazione Renderer con le nuove dipendenze
+        ActiveFitsImage = new FitsRenderer(initialData, _ioService, _converter, _analysis);
         await ActiveFitsImage.InitializeAsync();
         
-        // ARCHITECTURE FIX: Applichiamo subito il modo visualizzazione corrente del Nodo
+        // Applichiamo subito il modo visualizzazione corrente del Nodo
         ActiveFitsImage.VisualizationMode = this.VisualizationMode;
 
         // Setup iniziale Viewport
         Viewport.ImageSize = ActiveFitsImage.ImageSize;
-        Viewport.ResetView(); // 1:1
+        if (centerOnPosition) Viewport.ResetView(); 
 
         // Inizializza il profilo di contrasto basato sull'auto-stretch iniziale
         _lastContrastProfile = ActiveFitsImage.CaptureContrastProfile();
@@ -147,7 +156,7 @@ public partial class MultipleImagesNodeViewModel : ImageNodeViewModel
     {
         if (index < 0 || index >= _imageCount) return;
 
-        // --- FIX 1: ANNULLAMENTO PRECEDENTE ---
+        // Annullamento caricamento precedente
         _loadingCts?.Cancel();
         _loadingCts = new CancellationTokenSource();
         var token = _loadingCts.Token;
@@ -163,7 +172,7 @@ public partial class MultipleImagesNodeViewModel : ImageNodeViewModel
 
             ContrastProfile? profileToApply = _lastContrastProfile;
 
-            // --- FIX 2: CATTURA SICURA ---
+            // Cattura profilo corrente
             if (ActiveFitsImage != null && !ActiveFitsImage.IsDisposed) 
             {
                 profileToApply = ActiveFitsImage.CaptureContrastProfile();
@@ -171,23 +180,21 @@ public partial class MultipleImagesNodeViewModel : ImageNodeViewModel
             }
 
             // Creazione nuovo renderer
-            var newFitsImage = new FitsRenderer(cachedData, _fitsService, _converter, _analysis);
+            var newFitsImage = new FitsRenderer(cachedData, _ioService, _converter, _analysis);
             
             // Inizializza
             await newFitsImage.InitializeAsync();
 
-            // --- ARCHITECTURE FIX: APPLICAZIONE STATO DEL NODO ---
-            // Imponiamo al nuovo renderer di usare la modalità scelta nel Nodo (es. Logaritmica)
+            // Imponiamo al nuovo renderer di usare la modalità scelta nel Nodo
             newFitsImage.VisualizationMode = this.VisualizationMode;
 
-            // --- FIX 3: PUNTO DI NON RITORNO ---
             if (token.IsCancellationRequested)
             {
                 newFitsImage.UnloadData();
                 return;
             }
 
-            // Applicazione Profilo Contrasto
+            // Applicazione Profilo Contrasto (mantiene lo stesso stretch tra i frame)
             if (profileToApply != null)
             {
                 newFitsImage.ApplyContrastProfile(profileToApply);
@@ -196,7 +203,7 @@ public partial class MultipleImagesNodeViewModel : ImageNodeViewModel
             // Aggiorna Viewport
             Viewport.ImageSize = newFitsImage.ImageSize;
 
-            // --- FIX 4: SWAP ATOMICO E PULIZIA ---
+            // Swap Atomico
             var oldImage = ActiveFitsImage;
             ActiveFitsImage = newFitsImage; 
 
@@ -213,7 +220,7 @@ public partial class MultipleImagesNodeViewModel : ImageNodeViewModel
         }
         catch (OperationCanceledException)
         {
-            // Normale
+            // Normale cancellazione task
         }
         catch (Exception ex)
         {
@@ -276,11 +283,11 @@ public partial class MultipleImagesNodeViewModel : ImageNodeViewModel
 
         // Ricarica la vista corrente
         int tempIndex = CurrentIndex;
-        CurrentIndex = -1; 
+        CurrentIndex = -1; // Hack per forzare il refresh property changed
         CurrentIndex = tempIndex;
     }
     
-    public override Task<List<string>> PrepareInputPathsAsync(IFitsService fitsService)
+    public override Task<List<string>> PrepareInputPathsAsync(IFitsIoService ioService)
     {
         return Task.FromResult(new List<string>(ImagePaths));
     }
@@ -303,7 +310,8 @@ public partial class MultipleImagesNodeViewModel : ImageNodeViewModel
     {
         try
         {
-            var data = await _fitsService.LoadFitsFromFileAsync(_multiModel.ImagePaths[index]);
+            // Utilizzo del nuovo servizio IO
+            var data = await _ioService.LoadAsync(_multiModel.ImagePaths[index]);
             if (data != null) _dataCache.Add(index, data);
             return data;
         }

@@ -3,8 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Threading.Tasks;
-using Avalonia;
-using KomaLab.Models;
+using Avalonia; // Necessario per la struttura Size (UI)
 using KomaLab.Models.Fits;
 using KomaLab.Models.Nodes;
 using KomaLab.Services.Data;
@@ -13,32 +12,40 @@ using KomaLab.ViewModels;
 
 namespace KomaLab.Services.Factories;
 
+// ---------------------------------------------------------------------------
+// FILE: NodeViewModelFactory.cs
+// RUOLO: Factory di ViewModel
+// DESCRIZIONE:
+// Crea istanze complesse dei nodi (Single/Multiple Image) iniettando le dipendenze
+// corrette (I/O, Converter, Analysis) e gestendo il caricamento iniziale.
+// ---------------------------------------------------------------------------
+
 public class NodeViewModelFactory : INodeViewModelFactory
 {
-    // Servizi necessari ai Nodi
-    private readonly IFitsService _fitsService;
-    private readonly IFitsDataConverter _converter;    // <--- NUOVO
-    private readonly IImageAnalysisService _analysis;  // <--- NUOVO
+    private readonly IFitsIoService _ioService;      // Sostituisce il vecchio FitsService
+    private readonly IFitsImageDataConverter _converter;
+    private readonly IImageAnalysisService _analysis;
 
     public NodeViewModelFactory(
-        IFitsService fitsService,
-        IFitsDataConverter converter,      // Iniezione dei nuovi servizi separati
+        IFitsIoService ioService,
+        IFitsImageDataConverter converter,
         IImageAnalysisService analysis)
     {
-        _fitsService = fitsService;
-        _converter = converter;
-        _analysis = analysis;
+        _ioService = ioService ?? throw new ArgumentNullException(nameof(ioService));
+        _converter = converter ?? throw new ArgumentNullException(nameof(converter));
+        _analysis = analysis ?? throw new ArgumentNullException(nameof(analysis));
     }
 
     /// <summary>
-    /// Crea, carica e posiziona un nuovo SingleImageNodeViewModel.
+    /// Crea un nodo immagine singola caricando il file da disco.
     /// </summary>
     public async Task<SingleImageNodeViewModel> CreateSingleImageNodeAsync(
-        string imagePath, // NOTA: Rimossa BoardViewModel parent
+        string imagePath, 
         double x, double y, 
         bool centerOnPosition = false)
     {
-        // 1. CREA IL NUOVO MODELLO SPECIFICO
+        // 1. Creazione del Modello Dati
+        // FIX: Usiamo l'inizializzatore di proprietà invece del costruttore con parametri
         var newNodeModel = new SingleImageNodeModel
         {
             ImagePath = imagePath,
@@ -47,64 +54,72 @@ public class NodeViewModelFactory : INodeViewModelFactory
             Y = y
         };
     
-        // 2. ISTANZIA IL VIEWMODEL (Con i nuovi servizi)
+        // 2. Istanziazione del ViewModel con i NUOVI servizi
         var newNodeViewModel = new SingleImageNodeViewModel(
             newNodeModel,
-            _fitsService,
-            _converter, // <--- Passiamo il converter
-            _analysis   // <--- Passiamo l'analysis
+            _ioService,  // Iniettiamo il servizio I/O puro
+            _converter,
+            _analysis
         );
         
+        // 3. Caricamento asincrono dei dati (Header + Raw)
         await newNodeViewModel.LoadDataAsync();
         
+        // 4. Centratura opzionale basata sulle dimensioni reali caricate
         if (centerOnPosition)
         {
-            // Usiamo EstimatedTotalSize che viene calcolato dal VM dopo il load
-            var size = newNodeViewModel.EstimatedTotalSize;
-            newNodeViewModel.X = x - (size.Width / 2);
-            newNodeViewModel.Y = y - (size.Height / 2);
+            // EstimatedTotalSize è di tipo Avalonia.Size
+            Size size = newNodeViewModel.EstimatedTotalSize;
+            newNodeViewModel.X = x - (size.Width / 2.0);
+            newNodeViewModel.Y = y - (size.Height / 2.0);
         }
         
         return newNodeViewModel;
     }
 
+    /// <summary>
+    /// Crea un nodo immagine singola iniettando direttamente dati in memoria (es. da un'operazione di stack).
+    /// </summary>
     public async Task<SingleImageNodeViewModel> CreateSingleImageNodeFromDataAsync(
         FitsImageData data, 
         string title, 
         double x, 
         double y)
     {
-        // 1. Crea il Modello per dati in memoria
+        // FIX: Inizializzatore di proprietà anche qui
         var model = new SingleImageNodeModel
         {
+            ImagePath = string.Empty, // Path vuoto per dati in memoria
             Title = title,
             X = x,
-            Y = y,
-            ImagePath = string.Empty 
+            Y = y
         };
 
-        // 2. Crea il ViewModel
         var node = new SingleImageNodeViewModel(
             model, 
-            _fitsService, 
+            _ioService, 
             _converter, 
             _analysis);
 
-        // 3. Inietta i dati calcolati (es. risultato di uno stack)
+        // Inietta i dati processati in memoria
         await node.ApplyProcessedDataAsync(new List<FitsImageData> { data });
 
         return node;
     }
 
     /// <summary>
-    /// Crea, pre-scansiona e pre-carica un nuovo MultipleImagesNodeViewModel.
+    /// Crea un nodo multi-immagine (stacking/video).
     /// </summary>
     public async Task<MultipleImagesNodeViewModel> CreateMultipleImagesNodeAsync(
         List<string> imagePaths, 
         double x, double y,
-        bool centerOnPosition = false) // <--- Parametro Aggiunto
+        bool centerOnPosition = false)
     {
-        // --- 1. Pre-scansione (Invariato) ---
+        if (imagePaths == null || imagePaths.Count == 0)
+            throw new ArgumentException("La lista dei file non può essere vuota.", nameof(imagePaths));
+
+        // --- 1. Pre-scansione Dimensioni (Ottimizzata) ---
+        // Calcoliamo la bounding box massima leggendo SOLO gli header
         double maxWidth = 0;
         double maxHeight = 0;
 
@@ -112,61 +127,78 @@ public class NodeViewModelFactory : INodeViewModelFactory
         {
             try
             {
-                var (w, h) = await _fitsService.GetFitsImageSizeAsync(path);
-                if (w > maxWidth) maxWidth = w;
-                if (h > maxHeight) maxHeight = h;
+                // Usiamo il metodo efficiente di IoService che legge solo l'header
+                var header = await _ioService.ReadHeaderOnlyAsync(path);
+                if (header != null)
+                {
+                    double w = header.GetIntValue("NAXIS1");
+                    double h = header.GetIntValue("NAXIS2");
+                    if (w > maxWidth) maxWidth = w;
+                    if (h > maxHeight) maxHeight = h;
+                }
             }
             catch (Exception ex)
             {
-                Debug.WriteLine($"Impossibile leggere l'header di {path}: {ex.Message}");
+                Debug.WriteLine($"[Factory] Warning header {path}: {ex.Message}");
             }
         }
+        
+        // Fallback size se qualcosa va storto
+        if (maxWidth == 0) maxWidth = 500;
+        if (maxHeight == 0) maxHeight = 500;
+
+        // Usiamo Avalonia.Size
         var maxSize = new Size(maxWidth, maxHeight);
         
-        // --- 2. Caricamento primo file (Invariato) ---
+        // --- 2. Caricamento dati iniziali dal primo file ---
+        // Necessario per avere un'immagine di riferimento da mostrare subito
         string title;
         FitsImageData? firstImageData;
         try
         {
-            firstImageData = await _fitsService.LoadFitsFromFileAsync(imagePaths[0]);
-            if (firstImageData == null) throw new InvalidOperationException("File FITS iniziale non valido.");
+            firstImageData = await _ioService.LoadAsync(imagePaths[0]);
+            
+            if (firstImageData == null) 
+                throw new InvalidOperationException($"File iniziale non valido: {imagePaths[0]}");
             
             title = firstImageData.FitsHeader.GetStringValue("OBJECT");
-            if (string.IsNullOrWhiteSpace(title)) title = Path.GetFileName(imagePaths[0]);
-            title += $" ({imagePaths.Count} immagini)";
+            if (string.IsNullOrWhiteSpace(title)) 
+                title = Path.GetFileName(imagePaths[0]);
+            
+            title += $" ({imagePaths.Count} frame)";
         }
         catch (Exception ex)
         {
-            Debug.WriteLine($"Errore critico durante il caricamento di {imagePaths[0]}: {ex.Message}");
-            throw new InvalidOperationException("Impossibile creare la pila di immagini.", ex);
+            Debug.WriteLine($"[Factory] Errore critico load first image: {ex.Message}");
+            throw new InvalidOperationException("Impossibile inizializzare il nodo multi-immagine.", ex);
         }
 
-        // --- 3. CREA IL NUOVO MODELLO ---
+        // --- 3. Creazione Modello e ViewModel ---
         var newNodeModel = new MultipleImagesNodeModel
         {
             Title = title,
-            X = x, // Se centerOnPosition=false, questa è già la coordinata Top-Left corretta
+            X = x,
             Y = y,
             ImagePaths = imagePaths
         };
 
-        // --- 4. ISTANZIA IL VIEWMODEL (Invariato) ---
         var newNodeViewModel = new MultipleImagesNodeViewModel(
             newNodeModel, 
-            _fitsService, 
+            _ioService, 
             _converter,
             _analysis, 
-            maxSize,
+            maxSize, 
             firstImageData); 
         
+        // Inizializzazione asincrona
         await newNodeViewModel.InitializeAsync();
 
-        // --- 5. Centra (SOLO SE RICHIESTO) ---
-        if (centerOnPosition) // <--- Condizione aggiunta
+        // --- 4. Centratura ---
+        if (centerOnPosition)
         {
-            var size = newNodeViewModel.EstimatedTotalSize;
-            newNodeViewModel.X = x - (size.Width / 2);
-            newNodeViewModel.Y = y - (size.Height / 2);
+            Size size = newNodeViewModel.EstimatedTotalSize;
+            newNodeViewModel.X = x - (size.Width / 2.0);
+            newNodeViewModel.Y = y - (size.Height / 2.0);
         }
 
         return newNodeViewModel;

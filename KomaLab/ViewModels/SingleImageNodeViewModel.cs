@@ -8,22 +8,26 @@ using KomaLab.Models;
 using KomaLab.Models.Fits;
 using KomaLab.Models.Nodes;
 using KomaLab.Models.Visualization;
-using KomaLab.Services.Data;
+using KomaLab.Services.Data;        // IFitsIoService
 using KomaLab.Services.Imaging;
 using KomaLab.ViewModels.Helpers;
 using nom.tam.fits;
 
 namespace KomaLab.ViewModels;
 
-/// <summary>
-/// ViewModel per un nodo che visualizza una singola immagine FITS.
-/// Gestisce il caricamento, il rendering e il mantenimento dello stato di una singola risorsa.
-/// </summary>
+// ---------------------------------------------------------------------------
+// FILE: SingleImageNodeViewModel.cs
+// RUOLO: Nodo Immagine Singola
+// DESCRIZIONE:
+// Gestisce il ciclo di vita di una singola immagine FITS.
+// Responsabile del caricamento, rendering e della gestione della memoria.
+// ---------------------------------------------------------------------------
+
 public partial class SingleImageNodeViewModel : ImageNodeViewModel
 {
-    // --- Servizi ---
-    private readonly IFitsService _fitsService;
-    private readonly IFitsDataConverter _converter;
+    // --- Servizi Enterprise ---
+    private readonly IFitsIoService _ioService;      // Sostituisce IFitsService
+    private readonly IFitsImageDataConverter _converter;
     private readonly IImageAnalysisService _analysis;
     
     // --- Model Sottostante ---
@@ -57,14 +61,14 @@ public partial class SingleImageNodeViewModel : ImageNodeViewModel
     // --- Costruttore ---
     public SingleImageNodeViewModel(
         SingleImageNodeModel model,
-        IFitsService fitsService,
-        IFitsDataConverter converter,      
+        IFitsIoService ioService,           // Updated Dependency
+        IFitsImageDataConverter converter,      
         IImageAnalysisService analysis)    
         : base(model) 
     {
-        _fitsService = fitsService;
-        _converter = converter;
-        _analysis = analysis;
+        _ioService = ioService ?? throw new ArgumentNullException(nameof(ioService));
+        _converter = converter ?? throw new ArgumentNullException(nameof(converter));
+        _analysis = analysis ?? throw new ArgumentNullException(nameof(analysis));
         _imageModel = model;
 
         // Inizializzazione con Placeholder (evita null checks ovunque)
@@ -76,7 +80,8 @@ public partial class SingleImageNodeViewModel : ImageNodeViewModel
             Height = 0
         };
 
-        _fitsImage = new FitsRenderer(placeholderData, _fitsService, _converter, _analysis);
+        // Creazione Renderer con le nuove dipendenze
+        _fitsImage = new FitsRenderer(placeholderData, _ioService, _converter, _analysis);
     }
 
     // --- Logica di Caricamento ---
@@ -87,8 +92,8 @@ public partial class SingleImageNodeViewModel : ImageNodeViewModel
         {
             if (string.IsNullOrEmpty(_imageModel.ImagePath)) return;
 
-            // Caricamento IO
-            var imageData = await _fitsService.LoadFitsFromFileAsync(_imageModel.ImagePath);
+            // Caricamento IO con il nuovo servizio
+            var imageData = await _ioService.LoadAsync(_imageModel.ImagePath);
             if (imageData == null)
             {
                 throw new Exception("I dati FITS caricati sono nulli.");
@@ -114,10 +119,10 @@ public partial class SingleImageNodeViewModel : ImageNodeViewModel
 
         _currentData = newData;
 
-        // 2. Creazione Nuovo Renderer
+        // 2. Creazione Nuovo Renderer con dipendenze aggiornate
         var newFitsImage = new FitsRenderer(
             newData,
-            _fitsService,
+            _ioService,
             _converter,
             _analysis);
         
@@ -130,8 +135,6 @@ public partial class SingleImageNodeViewModel : ImageNodeViewModel
         newFitsImage.VisualizationMode = this.VisualizationMode;
 
         // 3. Ripristino stato visualizzazione (Contrasto)
-        // Se è la prima volta (dal placeholder), _lastContrastProfile sarà null, 
-        // quindi SALTIAMO questo blocco e manteniamo l'Auto-Stretch appena calcolato.
         if (_lastContrastProfile != null)
         {
             newFitsImage.ApplyContrastProfile(_lastContrastProfile);
@@ -151,8 +154,6 @@ public partial class SingleImageNodeViewModel : ImageNodeViewModel
         FitsImage = newFitsImage;
 
         // 6. Sincronizzazione UI (Slider Base)
-        // Aggiorniamo le proprietà del ViewModel (a cui sono collegati gli slider)
-        // con i nuovi valori calcolati dal Renderer.
         BlackPoint = newFitsImage.BlackPoint;
         WhitePoint = newFitsImage.WhitePoint;
 
@@ -193,7 +194,8 @@ public partial class SingleImageNodeViewModel : ImageNodeViewModel
         return _currentData;
     }
     
-    public override async Task<List<string>> PrepareInputPathsAsync(IFitsService fitsService)
+    // Updated: Firma aggiornata per accettare IFitsIoService
+    public override async Task<List<string>> PrepareInputPathsAsync(IFitsIoService ioService)
     {
         // CASO A: File esistente su disco
         if (!string.IsNullOrEmpty(_imageModel.ImagePath) && System.IO.File.Exists(_imageModel.ImagePath))
@@ -210,7 +212,8 @@ public partial class SingleImageNodeViewModel : ImageNodeViewModel
 
             try 
             {
-                await fitsService.SaveFitsFileAsync(_currentData, cleanTempPath);
+                // Updated: Metodo SaveAsync
+                await ioService.SaveAsync(_currentData, cleanTempPath);
                 return new List<string> { cleanTempPath };
             }
             catch (Exception ex)
