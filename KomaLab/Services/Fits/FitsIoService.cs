@@ -1,24 +1,22 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Threading.Tasks;
 using KomaLab.Models.Fits;
 using nom.tam.fits;
 using nom.tam.util;
 
-namespace KomaLab.Services.Data;
+namespace KomaLab.Services.Fits;
 
 // ---------------------------------------------------------------------------
 // FILE: FitsIoService.cs
-// RUOLO: I/O Scientifico
+// RUOLO: I/O Scientifico e Coordinatore Batch
 // DESCRIZIONE:
-// Gestisce esclusivamente la lettura e scrittura fisica dei file FITS su disco.
-// Orchestratala creazione degli oggetti FitsImageData delegando:
-// - La gestione dei metadati a IFitsMetadataService.
-// - L'apertura dei flussi a IFileStreamProvider.
-//
-// NOTA:
-// Questo servizio preserva l'integrità scientifica dei dati (non converte a 8-bit,
-// non applica stretch distruttivi). Per l'export visuale, vedi MediaExportService.
+// Centralizza la lettura, scrittura e validazione dei file FITS.
+// Dopo il refactoring, assorbe le logiche di FitsBatchService per:
+// 1. Evitare classi ridondanti (Purezza Architetturale).
+// 2. Mantenere una gerarchia di dipendenze lineare (IoService -> MetadataService).
 // ---------------------------------------------------------------------------
 
 public class FitsIoService : IFitsIoService
@@ -34,27 +32,24 @@ public class FitsIoService : IFitsIoService
         _metadataService = metadataService ?? throw new ArgumentNullException(nameof(metadataService));
     }
 
+    // --- OPERAZIONI SU SINGOLO FILE ---
+
     public async Task<FitsImageData?> LoadAsync(string path)
     {
         return await Task.Run(() =>
         {
             try
             {
-                // 1. Apertura stream astratto (File Locale o Risorsa Embedded)
                 using Stream stream = _streamProvider.Open(path);
                 
-                // 2. Bufferizzazione in memoria
-                // Necessario perché la libreria CSharpFits richiede accesso random (Seek)
-                // e per evitare lock prolungati sul file fisico.
+                // Bufferizzazione necessaria per l'accesso random (Seek) richiesto da CSharpFits
                 using var ms = new MemoryStream();
                 stream.CopyTo(ms);
                 ms.Position = 0;
 
-                var fits = new Fits(ms);
+                var fits = new nom.tam.fits.Fits(ms);
                 fits.Read();
 
-                // 3. Ricerca della prima immagine valida
-                // Alcuni FITS hanno l'HDU primario vuoto e i dati nella prima estensione.
                 ImageHDU? imgHdu = null;
                 for (int i = 0; i < fits.NumberOfHDUs; i++)
                 {
@@ -68,11 +63,9 @@ public class FitsIoService : IFitsIoService
 
                 if (imgHdu == null) return null;
 
-                // 4. Estrazione Array Raw
                 var rawData = imgHdu.Kernel as Array;
                 if (rawData == null) return null;
 
-                // FIX: CSharpFits talvolta legge array 1D invertiti rispetto allo standard
                 if (rawData.Rank == 1) Array.Reverse(rawData);
 
                 return new FitsImageData
@@ -85,7 +78,6 @@ public class FitsIoService : IFitsIoService
             }
             catch (Exception ex)
             {
-                // In produzione qui andrebbe un Logger.LogError(...)
                 System.Diagnostics.Debug.WriteLine($"[FitsIoService] Errore caricamento {path}: {ex.Message}");
                 return null;
             }
@@ -99,11 +91,7 @@ public class FitsIoService : IFitsIoService
             try
             {
                 using var stream = _streamProvider.Open(path);
-                var fits = new Fits(stream);
-                
-                // Ottimizzazione: Legge SOLO il primo Header Unit (Primary HDU).
-                // Solitamente contiene i metadati globali (Data, Oggetto, Telescopio).
-                // Non carica i dati immagine, rendendolo rapidissimo per scansioni di directory.
+                var fits = new nom.tam.fits.Fits(stream);
                 var hdu = fits.ReadHDU();
                 return hdu?.Header;
             }
@@ -120,32 +108,86 @@ public class FitsIoService : IFitsIoService
         {
             if (data.RawData == null) throw new ArgumentException("Nessun dato da salvare.");
 
-            // 1. Clonazione difensiva dei dati
-            // Evita che modifiche successive all'array in memoria corrompano il salvataggio
-            // o che il processo di salvataggio modifichi i dati originali (es. reverse).
             var arrayToSave = (Array)data.RawData.Clone();
             if (arrayToSave.Rank == 1) Array.Reverse(arrayToSave);
 
-            // 2. Creazione HDU FITS
-            // FitsFactory calcola automaticamente BITPIX e NAXIS corretti basandosi sul tipo di array C#
             var hdu = FitsFactory.HDUFactory(arrayToSave);
             
-            // 3. Trasferimento Metadati (Punto chiave Architetturale)
-            // Usiamo il servizio dedicato per copiare i metadati astronomici dal vecchio header
-            // al nuovo, filtrando automaticamente le chiavi tecniche obsolete.
+            // Delega al cervello (MetadataService) la logica di filtraggio/trasferimento chiavi
             _metadataService.TransferMetadata(data.FitsHeader, hdu.Header);
 
-            // 4. Scrittura fisica
-            // Usiamo FileStream diretto perché il salvataggio è sempre un output locale
             using var fs = new FileStream(path, FileMode.Create, FileAccess.ReadWrite);
             using var bs = new BufferedDataStream(fs);
             
-            var newFits = new Fits();
+            var newFits = new nom.tam.fits.Fits();
             newFits.AddHDU(hdu);
             newFits.Write(bs);
             
             bs.Flush();
             fs.Flush();
         });
+    }
+
+    // --- OPERAZIONI BATCH (Ex FitsBatchService) ---
+
+    /// <summary>
+    /// Analizza un set di file e li restituisce ordinati cronologicamente.
+    /// </summary>
+    public async Task<List<string>> PrepareBatchAsync(IEnumerable<string> paths)
+    {
+        var pathList = paths.ToList();
+        if (pathList.Count <= 1) return pathList;
+
+        try
+        {
+            var tasks = pathList.Select(async path =>
+            {
+                var header = await ReadHeaderOnlyAsync(path);
+                // Utilizza direttamente il MetadataService per interpretare l'header letto
+                var date = header != null ? _metadataService.GetObservationDate(header) : DateTime.MinValue;
+                return new { Path = path, Date = date ?? DateTime.MinValue };
+            });
+
+            var results = await Task.WhenAll(tasks);
+
+            return results
+                .OrderBy(x => x.Date)
+                .Select(x => x.Path)
+                .ToList();
+        }
+        catch
+        {
+            return pathList;
+        }
+    }
+
+    /// <summary>
+    /// Verifica se una sequenza di file è compatibile per operazioni di Stacking o Allineamento.
+    /// </summary>
+    public async Task<(bool IsCompatible, string? Error)> ValidateCompatibilityAsync(IEnumerable<string> paths)
+    {
+        int? firstWidth = null;
+        int? firstHeight = null;
+
+        foreach (var path in paths)
+        {
+            var header = await ReadHeaderOnlyAsync(path);
+            if (header == null) continue;
+
+            int w = header.GetIntValue("NAXIS1");
+            int h = header.GetIntValue("NAXIS2");
+
+            if (firstWidth == null)
+            {
+                firstWidth = w;
+                firstHeight = h;
+            }
+            else if (w != firstWidth || h != firstHeight)
+            {
+                return (false, $"Dimensioni non corrispondenti. File: {System.IO.Path.GetFileName(path)}");
+            }
+        }
+
+        return (true, null);
     }
 }

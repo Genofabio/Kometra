@@ -5,7 +5,7 @@ using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using KomaLab.Models.Astrometry;
-using KomaLab.Services.Data.Parsers; // Aggiunto per usare GeographicParser
+using KomaLab.Services.Fits.Parsers; // Aggiunto per usare GeographicParser
 
 namespace KomaLab.Services.Astrometry;
 

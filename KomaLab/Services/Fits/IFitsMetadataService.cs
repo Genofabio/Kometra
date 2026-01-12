@@ -1,10 +1,10 @@
 ﻿using System;
 using System.Collections.Generic;
-using nom.tam.fits;
 using KomaLab.Models.Astrometry;
 using KomaLab.Models.Fits;
+using nom.tam.fits;
 
-namespace KomaLab.Services.Data;
+namespace KomaLab.Services.Fits;
 
 public interface IFitsMetadataService
 {

@@ -1,14 +1,15 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Runtime.InteropServices; 
+using System.Runtime.InteropServices;
 using System.Threading.Tasks;
 using KomaLab.Models.Fits;
 using KomaLab.Models.Primitives;
 using KomaLab.Models.Processing;
-using KomaLab.Services.Data; // Per IFitsMetadataService
+using KomaLab.Services.Fits;
 using OpenCvSharp;
+// Per IFitsMetadataService
 
-namespace KomaLab.Services.Imaging;
+namespace KomaLab.Services.Processing;
 
 // ---------------------------------------------------------------------------
 // FILE: ImageOperationService.cs

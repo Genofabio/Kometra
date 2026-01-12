@@ -12,9 +12,9 @@ using CommunityToolkit.Mvvm.Input;
 using KomaLab.Models.Fits;
 using KomaLab.Models.Processing;
 using KomaLab.Models.Visualization;
-using KomaLab.Services.Data;
 using KomaLab.Services.Factories;
-using KomaLab.Services.Imaging;
+using KomaLab.Services.Fits;
+using KomaLab.Services.Processing;
 using KomaLab.Services.UI;
 using KomaLab.Services.Undo;
 using KomaLab.ViewModels.Nodes; 
@@ -32,7 +32,6 @@ public partial class BoardViewModel : ObservableObject
     private readonly IImageOperationService _opsService;
     private readonly IUndoService _undoService;
     private readonly IMediaExportService _mediaService; 
-    private readonly IFitsBatchService _batchService; // Nuova dipendenza
 
     // --- Proprietà Visuali ---
     [ObservableProperty] private double _offsetX;
@@ -73,8 +72,7 @@ public partial class BoardViewModel : ObservableObject
         IFitsMetadataService metadataService, 
         IImageOperationService opsService,
         IUndoService undoService,
-        IMediaExportService mediaService,
-        IFitsBatchService batchService) // Iniettato correttamente
+        IMediaExportService mediaService) // Iniettato correttamente
     {
         _nodeFactory = nodeFactory ?? throw new ArgumentNullException(nameof(nodeFactory));
         _dialogService = dialogService ?? throw new ArgumentNullException(nameof(dialogService));
@@ -84,7 +82,6 @@ public partial class BoardViewModel : ObservableObject
         _opsService = opsService ?? throw new ArgumentNullException(nameof(opsService));
         _undoService = undoService ?? throw new ArgumentNullException(nameof(undoService));
         _mediaService = mediaService ?? throw new ArgumentNullException(nameof(mediaService));
-        _batchService = batchService ?? throw new ArgumentNullException(nameof(batchService));
     }
 
     // --- Comandi Aggiunta Nodi ---
@@ -96,7 +93,7 @@ public partial class BoardViewModel : ObservableObject
         if (imagePaths == null || !imagePaths.Any()) return;
 
         // Utilizzo del BatchService per la preparazione (ordinamento cronologico)
-        var preparedPaths = await _batchService.PrepareBatchAsync(imagePaths);
+        var preparedPaths = await _ioService.PrepareBatchAsync(imagePaths);
 
         Point center = GetCenterOfView();
 
@@ -362,7 +359,7 @@ public partial class BoardViewModel : ObservableObject
         try
         {
             // Validazione compatibilità batch prima dello stacking
-            var (isCompatible, error) = await _batchService.ValidateCompatibilityAsync(multiNode.ImagePaths);
+            var (isCompatible, error) = await _ioService.ValidateCompatibilityAsync(multiNode.ImagePaths);
             if (!isCompatible)
             {
                 Debug.WriteLine($"Stacking abortito: {error}");

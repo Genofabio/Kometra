@@ -9,7 +9,7 @@ using Avalonia.Media;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using KomaLab.Models.Fits;
-using KomaLab.Services.Data;
+using KomaLab.Services.Fits;
 using KomaLab.ViewModels.Nodes;
 using nom.tam.fits;
 

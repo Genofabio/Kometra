@@ -4,12 +4,12 @@ using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
-using KomaLab.Models.Fits;
 using KomaLab.Models.Primitives;
-using KomaLab.Services.Data; // Namespace corretto per IFitsIoService
+using KomaLab.Services.Fits;
 using OpenCvSharp;
+// Namespace corretto per IFitsIoService
 
-namespace KomaLab.Services.Imaging.AlignmentStrategies;
+namespace KomaLab.Services.Processing.AlignmentStrategies;
 
 // ---------------------------------------------------------------------------
 // FILE: GuidedCometAlignmentStrategy.cs

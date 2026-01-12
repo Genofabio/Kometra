@@ -1,9 +1,11 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
-using KomaLab.Models.Primitives; // Usa le primitive pure (Point2D)
+using KomaLab.Models.Primitives;
 
-namespace KomaLab.Services.Imaging.AlignmentStrategies;
+// Usa le primitive pure (Point2D)
+
+namespace KomaLab.Services.Processing.AlignmentStrategies;
 
 // ---------------------------------------------------------------------------
 // FILE: IAlignmentStrategy.cs

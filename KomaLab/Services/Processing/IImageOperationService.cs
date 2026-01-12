@@ -5,7 +5,7 @@ using KomaLab.Models.Primitives;
 using KomaLab.Models.Processing;
 using OpenCvSharp;
 
-namespace KomaLab.Services.Imaging;
+namespace KomaLab.Services.Processing;
 
 // ---------------------------------------------------------------------------
 // FILE: IImageOperationService.cs

@@ -11,8 +11,8 @@ using CommunityToolkit.Mvvm.Input;
 using KomaLab.Models.Fits;
 using KomaLab.Models.Nodes;
 using KomaLab.Models.Visualization;
-using KomaLab.Services.Data;
-using KomaLab.Services.Imaging;
+using KomaLab.Services.Fits;
+using KomaLab.Services.Processing;
 using KomaLab.Services.Utilities;
 using KomaLab.ViewModels.Visualization;
 

@@ -7,8 +7,8 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using KomaLab.Models.Fits;
 using KomaLab.Models.Nodes;
 using KomaLab.Models.Visualization;
-using KomaLab.Services.Data;
-using KomaLab.Services.Imaging;
+using KomaLab.Services.Fits;
+using KomaLab.Services.Processing;
 using KomaLab.ViewModels.Visualization; // Namespace corretto per FitsRenderer
 
 namespace KomaLab.ViewModels.Nodes;

@@ -2,11 +2,12 @@
 using System.Collections.Generic;
 using System.IO;
 using System.Threading.Tasks;
+using KomaLab.Models.Visualization;
+using KomaLab.Services.Fits;
 using OpenCvSharp;
-using KomaLab.Models.Visualization; // Namespace corretto per ContrastProfile/VisualizationMode
-using KomaLab.Services.Data;
+// Namespace corretto per ContrastProfile/VisualizationMode
 
-namespace KomaLab.Services.Imaging;
+namespace KomaLab.Services.Processing;
 
 // ---------------------------------------------------------------------------
 // FILE: MediaExportService.cs

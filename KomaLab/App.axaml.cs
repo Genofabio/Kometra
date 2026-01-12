@@ -6,9 +6,10 @@ using KomaLab.Views;
 using Microsoft.Extensions.DependencyInjection;
 using System;
 using KomaLab.Services.Astrometry;
-using KomaLab.Services.Data;        // Contiene FitsIoService, FitsMetadataService
+// Contiene FitsIoService, FitsMetadataService
 using KomaLab.Services.Factories;
-using KomaLab.Services.Imaging;     // Contiene MediaExportService, ImageAnalysisService, etc.
+using KomaLab.Services.Fits;
+using KomaLab.Services.Processing; // Contiene MediaExportService, ImageAnalysisService, etc.
 using KomaLab.Services.UI;
 using KomaLab.Services.Undo;
 
@@ -76,7 +77,6 @@ public class App : Application
         // AGGIUNTO: Nuovi servizi Enterprise
         services.AddSingleton<IFitsIoService, FitsIoService>();
         services.AddSingleton<IFitsMetadataService, FitsMetadataService>();
-        services.AddSingleton<IFitsBatchService, FitsBatchService>();
         services.AddSingleton<IFitsImageDataConverter, FitsImageDataConverter>();
 
         // --- 4. Servizi Imaging & Processing ---

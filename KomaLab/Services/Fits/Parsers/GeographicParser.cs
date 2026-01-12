@@ -1,9 +1,9 @@
 ﻿using System;
 using System.Globalization;
-using nom.tam.fits;
 using KomaLab.Models.Astrometry;
+using nom.tam.fits;
 
-namespace KomaLab.Services.Data.Parsers;
+namespace KomaLab.Services.Fits.Parsers;
 
 // ---------------------------------------------------------------------------
 // FILE: GeographicParser.cs

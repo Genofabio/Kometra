@@ -7,11 +7,11 @@ using System.Threading.Tasks;
 using KomaLab.Models.Fits;
 using KomaLab.Models.Primitives;
 using KomaLab.Models.Processing;
-using KomaLab.Services.Data;
-using KomaLab.Services.Imaging.AlignmentStrategies;
+using KomaLab.Services.Fits;
+using KomaLab.Services.Processing.AlignmentStrategies;
 using OpenCvSharp;
 
-namespace KomaLab.Services.Imaging;
+namespace KomaLab.Services.Processing;
 
 // ---------------------------------------------------------------------------
 // FILE: AlignmentService.cs

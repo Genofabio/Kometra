@@ -5,10 +5,11 @@ using System.Threading;
 using System.Threading.Tasks;
 using KomaLab.Models.Primitives;
 using KomaLab.Models.Processing;
-using KomaLab.Services.Data; // Namespace per IFitsIoService
+using KomaLab.Services.Fits;
 using OpenCvSharp;
+// Namespace per IFitsIoService
 
-namespace KomaLab.Services.Imaging.AlignmentStrategies;
+namespace KomaLab.Services.Processing.AlignmentStrategies;
 
 // ---------------------------------------------------------------------------
 // FILE: ManualCometAlignmentStrategy.cs

@@ -1,10 +1,10 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
-using KomaLab.Models.Primitives; 
+using KomaLab.Models.Primitives;
 using KomaLab.Models.Processing;
 
-namespace KomaLab.Services.Imaging;
+namespace KomaLab.Services.Processing;
 
 // ---------------------------------------------------------------------------
 // FILE: IAlignmentService.cs

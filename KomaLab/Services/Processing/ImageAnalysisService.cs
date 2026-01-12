@@ -1,13 +1,13 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
+using KomaLab.Models.Primitives;
 using MathNet.Numerics;
 using MathNet.Numerics.LinearAlgebra;
-using OpenCvSharp;
-using KomaLab.Models.Primitives;
 using MathNet.Numerics.Statistics;
+using OpenCvSharp;
 
-namespace KomaLab.Services.Imaging;
+namespace KomaLab.Services.Processing;
 
 // ---------------------------------------------------------------------------
 // FILE: ImageAnalysisService.cs

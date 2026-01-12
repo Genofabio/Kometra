@@ -1,10 +1,12 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
+using KomaLab.Models.Visualization;
 using OpenCvSharp;
-using KomaLab.Models.Visualization; // Per VisualizationMode
 
-namespace KomaLab.Services.Imaging;
+// Per VisualizationMode
+
+namespace KomaLab.Services.Processing;
 
 public interface IMediaExportService
 {

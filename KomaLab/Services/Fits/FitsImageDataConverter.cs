@@ -1,10 +1,10 @@
 ﻿using System;
 using System.Runtime.InteropServices;
-using OpenCvSharp;
 using KomaLab.Models.Fits;
 using nom.tam.fits;
+using OpenCvSharp;
 
-namespace KomaLab.Services.Data;
+namespace KomaLab.Services.Fits;
 
 // ---------------------------------------------------------------------------
 // FILE: FitsImageDataConverter.cs

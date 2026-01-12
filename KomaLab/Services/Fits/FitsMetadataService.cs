@@ -2,12 +2,12 @@
 using System.Collections;
 using System.Collections.Generic;
 using System.Globalization;
-using nom.tam.fits;
 using KomaLab.Models.Astrometry;
 using KomaLab.Models.Fits;
-using KomaLab.Services.Data.Parsers;
+using KomaLab.Services.Fits.Parsers;
+using nom.tam.fits;
 
-namespace KomaLab.Services.Data;
+namespace KomaLab.Services.Fits;
 
 // ---------------------------------------------------------------------------
 // FILE: FitsMetadataService.cs

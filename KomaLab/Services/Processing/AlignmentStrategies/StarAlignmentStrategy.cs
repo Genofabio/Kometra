@@ -2,10 +2,11 @@
 using System.Collections.Generic;
 using System.Threading.Tasks;
 using KomaLab.Models.Primitives;
-using KomaLab.Services.Data; // Namespace corretto per IFitsIoService
+using KomaLab.Services.Fits;
 using OpenCvSharp;
+// Namespace corretto per IFitsIoService
 
-namespace KomaLab.Services.Imaging.AlignmentStrategies;
+namespace KomaLab.Services.Processing.AlignmentStrategies;
 
 // ---------------------------------------------------------------------------
 // FILE: StarAlignmentStrategy.cs

@@ -6,8 +6,8 @@ using System.Threading.Tasks;
 using Avalonia; // Necessario per la struttura Size (UI)
 using KomaLab.Models.Fits;
 using KomaLab.Models.Nodes;
-using KomaLab.Services.Data;
-using KomaLab.Services.Imaging;
+using KomaLab.Services.Fits;
+using KomaLab.Services.Processing;
 using KomaLab.ViewModels.Nodes;
 
 namespace KomaLab.Services.Factories;

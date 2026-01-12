@@ -133,10 +133,10 @@ public class PlateSolvingService : IPlateSolvingService
         return await Task.Run(() =>
         {
             var issues = new List<string>();
-            Fits? f = null;
+            nom.tam.fits.Fits? f = null;
             try
             {
-                f = new Fits(fitsFilePath);
+                f = new nom.tam.fits.Fits(fitsFilePath);
                 var hdu = f.ReadHDU();
                 if (hdu == null) return ">> DIAGNOSI: File FITS corrotto o non leggibile.";
 

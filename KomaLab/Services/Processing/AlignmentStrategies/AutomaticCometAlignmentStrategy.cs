@@ -4,9 +4,9 @@ using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using KomaLab.Models.Primitives;
-using KomaLab.Services.Data;
+using KomaLab.Services.Fits;
 
-namespace KomaLab.Services.Imaging.AlignmentStrategies;
+namespace KomaLab.Services.Processing.AlignmentStrategies;
 
 // ---------------------------------------------------------------------------
 // FILE: AutomaticCometAlignmentStrategy.cs

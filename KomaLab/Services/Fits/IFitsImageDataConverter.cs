@@ -1,8 +1,8 @@
-﻿using System.Threading.Tasks; // Non strettamente necessario qui, ma buona pratica nei using
-using KomaLab.Models.Fits;
+﻿using KomaLab.Models.Fits;
 using OpenCvSharp;
+// Non strettamente necessario qui, ma buona pratica nei using
 
-namespace KomaLab.Services.Data;
+namespace KomaLab.Services.Fits;
 
 // ---------------------------------------------------------------------------
 // FILE: IFitsImageDataConverter.cs

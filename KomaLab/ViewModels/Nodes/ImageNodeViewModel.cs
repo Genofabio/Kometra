@@ -7,7 +7,7 @@ using CommunityToolkit.Mvvm.Input;
 using KomaLab.Models.Nodes;
 using KomaLab.Models.Fits;
 using KomaLab.Models.Visualization;
-using KomaLab.Services.Data;
+using KomaLab.Services.Fits;
 using KomaLab.ViewModels.Visualization; // Namespace corretto per FitsRenderer e ImageViewport
 
 namespace KomaLab.ViewModels.Nodes;

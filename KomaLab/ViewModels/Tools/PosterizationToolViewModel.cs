@@ -8,8 +8,8 @@ using Avalonia.Platform;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using KomaLab.Models.Visualization;
-using KomaLab.Services.Data;
-using KomaLab.Services.Imaging;
+using KomaLab.Services.Fits;
+using KomaLab.Services.Processing;
 using KomaLab.ViewModels.Visualization;
 using OpenCvSharp;
 

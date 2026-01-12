@@ -1,6 +1,6 @@
 ﻿using System.IO;
 
-namespace KomaLab.Services.Data;
+namespace KomaLab.Services.Fits;
 
 // ---------------------------------------------------------------------------
 // FILE: LocalFileStreamProvider.cs

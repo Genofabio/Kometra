@@ -2,7 +2,7 @@
 using System.Threading.Tasks;
 using KomaLab.Models.Visualization;
 
-namespace KomaLab.Services.Imaging;
+namespace KomaLab.Services.Processing;
 
 public interface IPosterizationService
 {

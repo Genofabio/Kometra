@@ -2,13 +2,15 @@
 using System.Collections.Generic;
 using System.IO;
 using System.Threading.Tasks;
-using OpenCvSharp;
-using KomaLab.Models.Fits;        // Per FitsBitDepth
+using KomaLab.Models.Fits;
 using KomaLab.Models.Visualization;
-using KomaLab.Services.Data;      // Per IoService, Converter, MetadataService
+using KomaLab.Services.Fits;
 using nom.tam.fits;
+using OpenCvSharp;
+// Per FitsBitDepth
+// Per IoService, Converter, MetadataService
 
-namespace KomaLab.Services.Imaging;
+namespace KomaLab.Services.Processing;
 
 // ---------------------------------------------------------------------------
 // FILE: PosterizationService.cs
