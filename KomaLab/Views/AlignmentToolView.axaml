@@ -59,10 +59,6 @@
             </Border>
         </DataTemplate>
     </Window.Resources>
-
-    <Window.Styles>
-        <StyleInclude Source="/Styles/AlignmentToolStyles.axaml" />
-    </Window.Styles>
     
     <Grid ColumnDefinitions="300, *">
         

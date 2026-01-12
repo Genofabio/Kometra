@@ -19,10 +19,6 @@
     <Window.Resources>
         <conv:PosterizationModeConverter x:Key="ModeConverter"/>
     </Window.Resources>
-
-    <Window.Styles>
-        <StyleInclude Source="/Styles/PosterizationToolStyles.axaml" />
-    </Window.Styles>
     
     <Grid ColumnDefinitions="320, *">
         

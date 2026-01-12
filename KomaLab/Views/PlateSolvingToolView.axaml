@@ -17,10 +17,6 @@
         Background="{DynamicResource ToolWindowBackgroundBrush}"
         Focusable="True">
 
-    <Window.Styles>
-        <StyleInclude Source="/Styles/PlateSolvingToolStyles.axaml" />
-    </Window.Styles>
-
     <Border Padding="20" Background="Transparent">
         <Grid RowDefinitions="Auto, Auto, *, Auto" RowSpacing="15">
 

@@ -16,10 +16,6 @@
         CanResize="True"
         Background="{DynamicResource ToolWindowBackgroundBrush}">
 
-    <Window.Styles>
-        <StyleInclude Source="/Styles/HeaderEditorToolStyles.axaml" />
-    </Window.Styles>
-
     <Grid RowDefinitions="*, Auto">
 
         <Grid Grid.Row="0" ColumnDefinitions="300, *">
