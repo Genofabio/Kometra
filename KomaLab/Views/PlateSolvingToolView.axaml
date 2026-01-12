@@ -11,8 +11,9 @@
         
         Title="Risoluzione Astrometrica"
         Width="650" Height="550"
+        MinWidth="650" MinHeight="550"
         WindowStartupLocation="CenterOwner"
-        CanResize="False"
+        CanResize="True"
         Background="{DynamicResource ToolWindowBackgroundBrush}"
         Focusable="True">
 

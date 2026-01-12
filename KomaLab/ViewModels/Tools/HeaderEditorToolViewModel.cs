@@ -12,91 +12,94 @@ using KomaLab.Models.Fits;
 using KomaLab.Services.Data;
 using KomaLab.ViewModels.Nodes;
 using nom.tam.fits;
-// Importiamo il Service
 
 namespace KomaLab.ViewModels.Tools;
 
 // ---------------------------------------------------------------------------
 // FILE: HeaderEditorToolViewModel.cs
+// RUOLO: ViewModel Editor Metadati
 // DESCRIZIONE:
-// ViewModel per l'editor degli Header FITS.
-// Si occupa esclusivamente della logica di presentazione (filtro, selezione, status UI).
-// Delega tutta la logica di business (Parsing, Validazione, Ricostruzione FITS)
-// al FitsMetadataService, garantendo coerenza e sicurezza dei dati.
+// Gestisce l'interfaccia per la visualizzazione e modifica dell'header FITS.
+// 
+// MIGLIORAMENTI APPLICATI:
+// 1. Memory Safety: Implementa IDisposable per sganciare gli eventi dal SourceNode.
+// 2. Dependency Injection: Il servizio viene iniettato tramite interfaccia.
+// 3. Robustezza: Gestione dei task asincroni con CancellationToken per evitare race conditions.
+// 4. Separation of Concerns: Logica di ricostruzione header delegata interamente al Service.
 // ---------------------------------------------------------------------------
 
-public partial class HeaderEditorToolViewModel : ObservableObject
+public partial class HeaderEditorToolViewModel : ObservableObject, IDisposable
 {
     private readonly ImageNodeViewModel _sourceNode;
-    private readonly FitsMetadataService _metadataService; // Il nostro "Brain"
+    private readonly IFitsMetadataService _metadataService; // Iniettato tramite interfaccia
     private readonly List<FitsHeaderItem> _allItems = new();
     private CancellationTokenSource? _healthCheckCts;
+    private bool _isDisposed;
 
     public event Action? RequestScrollToSelection;
 
-    // --- COLORI STATUS ---
+    // --- COLORI STATUS (UI Logic) ---
     private static readonly IBrush SuccessBrush = new SolidColorBrush(Color.Parse("#03A077"));
     private static readonly IBrush ErrorBrush = new SolidColorBrush(Color.Parse("#E6606A"));
     private static readonly IBrush PendingBrush = new SolidColorBrush(Color.Parse("#808080"));
 
-    // --- PROPRIETÀ UI ---
+    // --- PROPRIETÀ OBSERVABLE ---
 
-    [ObservableProperty] 
-    private ObservableCollection<FitsHeaderItem> _filteredItems = new();
-
+    [ObservableProperty] private ObservableCollection<FitsHeaderItem> _filteredItems = new();
     [ObservableProperty] private FitsHeaderItem? _selectedItem;
-
     [ObservableProperty] private string _currentFileName = "N/A";
     [ObservableProperty] private string _imageCounterText = "";
     [ObservableProperty] private bool _isMultipleImages;
-    
     [ObservableProperty] private string _searchText = "";
-    partial void OnSearchTextChanged(string value) => ApplyFilter();
-
-    // --- SEMAFORI ---
     [ObservableProperty] private bool _isChecking = false;
 
-    // --- HEALTH CHECK UI ---
+    // --- HEALTH CHECK STATUS ---
     [ObservableProperty] private IBrush _dateStatusColor = PendingBrush;
     [ObservableProperty] private string _dateStatusText = "In attesa...";
-    
     [ObservableProperty] private IBrush _locationStatusColor = PendingBrush;
     [ObservableProperty] private string _locationStatusText = "In attesa...";
-    
     [ObservableProperty] private IBrush _wcsStatusColor = PendingBrush;
     [ObservableProperty] private string _wcsStatusText = "In attesa...";
 
-    public HeaderEditorToolViewModel(ImageNodeViewModel sourceNode)
+    partial void OnSearchTextChanged(string value) => ApplyFilter();
+
+    // --- COSTRUTTORE ---
+    public HeaderEditorToolViewModel(ImageNodeViewModel sourceNode, IFitsMetadataService metadataService)
     {
         _sourceNode = sourceNode ?? throw new ArgumentNullException(nameof(sourceNode));
-        
-        // Istanziamo il service (o lo iniettiamo via DI se il progetto lo supporta)
-        _metadataService = new FitsMetadataService();
+        _metadataService = metadataService ?? throw new ArgumentNullException(nameof(metadataService));
 
         IsMultipleImages = _sourceNode is MultipleImagesNodeViewModel;
         
+        // Sottoscrizione eventi (da sganciare nel Dispose)
         _sourceNode.PropertyChanged += OnSourceNodePropertyChanged;
-        LoadCurrentHeader();
+        
+        // Inizializzazione asincrona sicura
+        _ = LoadCurrentHeaderAsync();
     }
 
-    private void OnSourceNodePropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    private async void OnSourceNodePropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
     {
+        // Monitoriamo i cambi di indice (per MultipleImages) o di renderer
         if (e.PropertyName == nameof(ImageNodeViewModel.ActiveRenderer) || 
             e.PropertyName == "CurrentIndex" || 
             e.PropertyName == "CurrentImageText")
         {
-            LoadCurrentHeader();
+            await LoadCurrentHeaderAsync();
         }
     }
 
-    private async void LoadCurrentHeader()
+    /// <summary>
+    /// Carica l'header corrente dal renderer attivo del nodo sorgente.
+    /// </summary>
+    private async Task LoadCurrentHeaderAsync()
     {
         IsChecking = true;
         ResetStatusToWaiting(); 
 
         var header = _sourceNode.ActiveRenderer?.Data?.FitsHeader;
 
-        // Gestione Titolo Finestra
+        // Gestione Identificativi UI
         if (_sourceNode is SingleImageNodeViewModel single) 
         { 
             CurrentFileName = single.Title ?? "N/A"; 
@@ -118,18 +121,20 @@ public partial class HeaderEditorToolViewModel : ObservableObject
             return; 
         }
 
-        // --- REFACTORING: Delega al Service ---
-        // Il VM non deve sapere come parsare HIERARCH o iterare cursori.
+        // DELEGA: Il parsing dell'header è logica di business del Service
         var parsedItems = await Task.Run(() => _metadataService.ParseForEditor(header));
 
         _allItems.Clear();
         _allItems.AddRange(parsedItems);
         
         ApplyFilter();
-        RefreshHealthCheck();
+        await RefreshHealthCheckAsync();
     }
 
-    public async void RefreshHealthCheck()
+    /// <summary>
+    /// Esegue un'analisi di integrità (Health Check) sui dati astronomici attuali.
+    /// </summary>
+    public async Task RefreshHealthCheckAsync()
     {
         _healthCheckCts?.Cancel();
         _healthCheckCts = new CancellationTokenSource();
@@ -138,10 +143,9 @@ public partial class HeaderEditorToolViewModel : ObservableObject
 
         try
         {
-            await Task.Delay(100, token); // Debounce
+            await Task.Delay(150, token); // Debounce per non sovraccaricare durante la digitazione
             
             var currentHeader = _sourceNode.ActiveRenderer?.Data?.FitsHeader;
-            
             if (currentHeader == null || _allItems.Count == 0) 
             { 
                 IsChecking = false; 
@@ -149,66 +153,57 @@ public partial class HeaderEditorToolViewModel : ObservableObject
                 return; 
             }
 
-            // Eseguiamo i controlli in background usando il Service
+            // Analisi in background tramite i parser del Service
             var result = await Task.Run(() => 
             {
                 token.ThrowIfCancellationRequested();
                 var status = new HealthCheckResult();
                 
-                // 1. DATA (Usa logica centralizzata Service)
+                // 1. DATA
                 var dt = _metadataService.GetObservationDate(currentHeader);
-                if (dt.HasValue) 
-                    status.DateMsg = $"Acquisizione: {dt.Value:yyyy-MM-dd HH:mm:ss}";
-                else 
-                    status.DateError = "Timestamp mancante o formato non valido.";
+                status.DateMsg = dt.HasValue ? $"Acquisizione: {dt.Value:yyyy-MM-dd HH:mm:ss}" : null;
+                status.DateError = dt.HasValue ? null : "Timestamp mancante o non standard.";
                 
                 token.ThrowIfCancellationRequested();
 
-                // 2. LOCATION (Usa logica centralizzata Service)
+                // 2. LOCATION
                 var loc = _metadataService.GetObservatoryLocation(currentHeader);
-                if (loc != null)
-                    status.LocMsg = $"Lat: {loc.Latitude:F4}, Lon: {loc.Longitude:F4}";
-                else
-                    status.LocError = "Coordinate geografiche non trovate.";
+                status.LocMsg = loc != null ? $"Osservatorio: {loc.Latitude:F3}, {loc.Longitude:F3}" : null;
+                status.LocError = loc != null ? null : "Coordinate geografiche assenti.";
 
                 token.ThrowIfCancellationRequested();
 
-                // 3. WCS (Usa logica centralizzata Service)
+                // 3. WCS (Astrometria)
                 var wcs = _metadataService.ExtractWcs(currentHeader);
-                if (wcs != null && wcs.IsValid)
-                    status.WcsMsg = $"Soluzione valida (Scale: {wcs.PixelScaleArcsec:F2}\" / px)";
-                else
-                    status.WcsError = "Soluzione astrometrica incompleta o assente.";
+                status.WcsMsg = (wcs != null && wcs.IsValid) ? $"Risolto ({wcs.PixelScaleArcsec:F2}\"/px)" : null;
+                status.WcsError = (wcs != null && wcs.IsValid) ? null : "Soluzione WCS non valida.";
 
                 return status;
             }, token);
 
             if (token.IsCancellationRequested) return;
-            IsChecking = false;
-            
-            // Aggiornamento UI
-            if (result.DateError == null) { DateStatusColor = SuccessBrush; DateStatusText = result.DateMsg!; }
-            else { DateStatusColor = ErrorBrush; DateStatusText = result.DateError; }
-            
-            if (result.LocError == null) { LocationStatusColor = SuccessBrush; LocationStatusText = result.LocMsg!; }
-            else { LocationStatusColor = ErrorBrush; LocationStatusText = result.LocError; }
-            
-            if (result.WcsError == null) { WcsStatusColor = SuccessBrush; WcsStatusText = result.WcsMsg!; }
-            else { WcsStatusColor = ErrorBrush; WcsStatusText = result.WcsError; }
+
+            // Aggiornamento visuale degli indicatori
+            UpdateStatusIndicator(result.DateMsg, result.DateError, m => DateStatusText = m, c => DateStatusColor = c);
+            UpdateStatusIndicator(result.LocMsg, result.LocError, m => LocationStatusText = m, c => LocationStatusColor = c);
+            UpdateStatusIndicator(result.WcsMsg, result.WcsError, m => WcsStatusText = m, c => WcsStatusColor = c);
         }
         catch (OperationCanceledException) { }
-        catch (Exception ex) 
-        { 
-            IsChecking = false; 
-            Debug.WriteLine($"[HealthCheck] Error: {ex.Message}"); 
-        }
+        catch (Exception ex) { Debug.WriteLine($"[HealthCheck Error] {ex.Message}"); }
+        finally { IsChecking = false; }
+    }
+
+    private void UpdateStatusIndicator(string? msg, string? error, Action<string> setText, Action<IBrush> setColor)
+    {
+        if (error == null) { setText(msg ?? ""); setColor(SuccessBrush); }
+        else { setText(error); setColor(ErrorBrush); }
     }
 
     private void ResetStatusToWaiting()
     {
-        DateStatusColor = PendingBrush; DateStatusText = "Analisi in corso...";
-        LocationStatusColor = PendingBrush; LocationStatusText = "Analisi in corso...";
-        WcsStatusColor = PendingBrush; WcsStatusText = "Analisi in corso...";
+        DateStatusColor = PendingBrush; DateStatusText = "Analisi...";
+        LocationStatusColor = PendingBrush; LocationStatusText = "Analisi...";
+        WcsStatusColor = PendingBrush; WcsStatusText = "Analisi...";
     }
 
     private void ApplyFilter()
@@ -222,26 +217,24 @@ public partial class HeaderEditorToolViewModel : ObservableObject
         {
             var results = _allItems
                 .Where(item => 
-                    (item.Key?.Contains((string)query, StringComparison.OrdinalIgnoreCase) ?? false) ||
-                    (item.Value?.Contains((string)query, StringComparison.OrdinalIgnoreCase) ?? false) ||
-                    (item.Comment?.Contains((string)query, StringComparison.OrdinalIgnoreCase) ?? false))
-                .OrderBy(item => 
-                {
-                    if (item.Key?.Contains((string)query, StringComparison.OrdinalIgnoreCase) == true) return 0;
-                    return 2;
-                });
+                    (item.Key?.Contains(query, StringComparison.OrdinalIgnoreCase) ?? false) ||
+                    (item.Value?.Contains(query, StringComparison.OrdinalIgnoreCase) ?? false) ||
+                    (item.Comment?.Contains(query, StringComparison.OrdinalIgnoreCase) ?? false))
+                .OrderBy(item => item.Key?.StartsWith(query, StringComparison.OrdinalIgnoreCase) == true ? 0 : 1);
+            
             FilteredItems = new ObservableCollection<FitsHeaderItem>(results);
         }
     }
 
+    /// <summary>
+    /// Restituisce un nuovo Header FITS basato sulle modifiche apportate nella UI.
+    /// </summary>
     public Header GetUpdatedHeader()
     {
-        // --- REFACTORING: Delega al Service ---
-        // Il VM non deve sapere quali chiavi sono "di sistema" o come ricostruire HIERARCH.
         var activeHeader = _sourceNode.ActiveRenderer?.Data?.FitsHeader;
-        
         if (activeHeader == null) return new Header();
 
+        // DELEGA: Il servizio sa come iniettare correttamente i dati nell'oggetto FITS
         return _metadataService.ReconstructHeader(activeHeader, _allItems);
     }
 
@@ -249,39 +242,50 @@ public partial class HeaderEditorToolViewModel : ObservableObject
     private void AddNewKey()
     {
         string newKeyName = !string.IsNullOrWhiteSpace(SearchText) ? SearchText.Trim().ToUpper() : "NEW_KEY";
-        var newItem = new FitsHeaderItem { Key = newKeyName, Value = "0", Comment = "Manuale", IsModified = true };
-        SearchText = ""; 
+        var newItem = new FitsHeaderItem { Key = newKeyName, Value = "0", Comment = "Aggiunta manuale", IsModified = true };
         
-        // Logica UI per inserire prima di END (se esiste visualmente)
+        // Logica di inserimento: cerchiamo di stare prima della chiave END
         var endIndex = _allItems.FindIndex(x => x.Key.Trim().ToUpper() == "END");
         if (endIndex >= 0) _allItems.Insert(endIndex, newItem);
         else _allItems.Add(newItem);
 
+        SearchText = ""; 
         ApplyFilter(); 
         SelectedItem = newItem;
-        RefreshHealthCheck();
-        
+        _ = RefreshHealthCheckAsync();
         RequestScrollToSelection?.Invoke();
     }
     
     [RelayCommand]
     private void DeleteRow()
     {
-        var item = SelectedItem;
-        if (item == null || item.IsReadOnly) return;
-        _allItems.Remove(item);
+        if (SelectedItem == null || SelectedItem.IsReadOnly) return;
+        _allItems.Remove(SelectedItem);
         ApplyFilter();
-        RefreshHealthCheck();
+        _ = RefreshHealthCheckAsync();
     }
 
-    [RelayCommand] private void NextImage() { if (_sourceNode is MultipleImagesNodeViewModel m && m.NextImageCommand.CanExecute(null)) m.NextImageCommand.Execute(null); }
-    [RelayCommand] private void PreviousImage() { if (_sourceNode is MultipleImagesNodeViewModel m && m.PreviousImageCommand.CanExecute(null)) m.PreviousImageCommand.Execute(null); }
+    [RelayCommand] 
+    private void NextImage() => (_sourceNode as MultipleImagesNodeViewModel)?.NextImageCommand.Execute(null);
 
-    // DTO locale per passare i dati dal Task background alla UI
+    [RelayCommand] 
+    private void PreviousImage() => (_sourceNode as MultipleImagesNodeViewModel)?.PreviousImageCommand.Execute(null);
+
+    // --- GESTIONE MEMORIA (IDisposable) ---
+    public void Dispose()
+    {
+        if (_isDisposed) return;
+        
+        _sourceNode.PropertyChanged -= OnSourceNodePropertyChanged;
+        _healthCheckCts?.Cancel();
+        _healthCheckCts?.Dispose();
+        
+        _isDisposed = true;
+        GC.SuppressFinalize(this);
+    }
+
     private class HealthCheckResult
     {
-        public string? DateMsg; public string? DateError;
-        public string? LocMsg; public string? LocError;
-        public string? WcsMsg; public string? WcsError;
+        public string? DateMsg, DateError, LocMsg, LocError, WcsMsg, WcsError;
     }
 }

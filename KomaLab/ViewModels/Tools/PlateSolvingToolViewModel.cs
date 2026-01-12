@@ -1,7 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Avalonia.Controls;
@@ -11,37 +10,36 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using KomaLab.Services.Astrometry;
 using KomaLab.ViewModels.Nodes;
-using nom.tam.fits;
-// FONDAMENTALE per vedere ImageNodeViewModel
 
 namespace KomaLab.ViewModels.Tools;
 
 // ---------------------------------------------------------------------------
 // FILE: PlateSolvingToolViewModel.cs
+// RUOLO: Orchestratore UI per Risoluzione Astrometrica
 // DESCRIZIONE:
-// ViewModel dedicato alla finestra di dialogo per il Plate Solving (Risoluzione Astrometrica).
-//
-// PATTERN & RESPONSABILITÀ:
-// 1. Orchestrator: Gestisce il ciclo di vita del processo batch (Start -> Processing -> End).
-// 2. Observer: Osserva l'output del Service (via callback) e aggiorna il Log in tempo reale.
-// 3. Error Handling: Isola i fallimenti dei singoli file per non bloccare l'intero batch.
-// 4. Thread Safety: Marshalling degli aggiornamenti UI (Log) sul Dispatcher principale.
+// Gestisce il ciclo di vita della sessione di Plate Solving.
+// 
+// RESPONSABILITÀ:
+// 1. Controllo Flusso: Avvio, cancellazione e finalizzazione del batch.
+// 2. Feedback Visivo: Aggiornamento log, progress bar e stati colore.
+// 3. Thread Safety: Marshalling dei log provenienti dal processo esterno su UI Thread.
+// 4. Decoupling: Non conosce i dettagli dei file FITS, delega tutto al Service.
 // ---------------------------------------------------------------------------
 
 public partial class PlateSolvingToolViewModel : ObservableObject
 {
     // --- Dipendenze & Stato ---
     private readonly ImageNodeViewModel _targetNode;
-    private readonly PlateSolvingService _solverService;
+    private readonly IPlateSolvingService _solverService;
     private CancellationTokenSource? _cts;
 
-    // --- Risorse Statiche (Flyweight per i pennelli) ---
+    // --- Risorse Statiche (Pennelli) ---
     private static readonly IBrush SuccessBrush = new SolidColorBrush(Color.Parse("#03A077"));
     private static readonly IBrush ErrorBrush = new SolidColorBrush(Color.Parse("#E6606A"));
     private static readonly IBrush PendingBrush = new SolidColorBrush(Color.Parse("#808080"));
     private static readonly IBrush RunningTextBrush = new SolidColorBrush(Color.Parse("#E0E0E0")); 
 
-    // --- Proprietà Observable (MVVM) ---
+    // --- Proprietà Observable ---
     [ObservableProperty] private string _title = "Risoluzione Astrometrica";
     [ObservableProperty] private string _targetFileName = "";
     
@@ -57,14 +55,13 @@ public partial class PlateSolvingToolViewModel : ObservableObject
     [ObservableProperty] private int _progressValue = 0;
     [ObservableProperty] private int _progressMax = 100;
 
-    // Proprietà calcolata per abilitare/disabilitare controlli UI
     public bool CanInteract => !IsBusy;
 
-    public PlateSolvingToolViewModel(ImageNodeViewModel targetNode)
+    // --- Costruttore ---
+    public PlateSolvingToolViewModel(ImageNodeViewModel targetNode, IPlateSolvingService solverService)
     {
-        _targetNode = targetNode;
-        // In un'architettura DI completa, questo verrebbe iniettato nel costruttore
-        _solverService = new PlateSolvingService(); 
+        _targetNode = targetNode ?? throw new ArgumentNullException(nameof(targetNode));
+        _solverService = solverService ?? throw new ArgumentNullException(nameof(solverService));
         
         IsFinished = false;
         InitializeTargetName();
@@ -76,14 +73,13 @@ public partial class PlateSolvingToolViewModel : ObservableObject
         else if (_targetNode is MultipleImagesNodeViewModel m) TargetFileName = m.Title;
     }
 
-    // --- Comandi (Command Pattern) ---
+    // --- Comandi ---
 
     [RelayCommand]
     private async Task StartSolving()
     {
         if (IsBusy) return;
 
-        // 1. Setup Iniziale
         var filesToProcess = PrepareSession();
         if (filesToProcess.Count == 0) return;
 
@@ -92,10 +88,13 @@ public partial class PlateSolvingToolViewModel : ObservableObject
 
         try 
         {
-            // 2. Esecuzione Batch
             for (int i = 0; i < filesToProcess.Count; i++)
             {
-                if (_cts!.Token.IsCancellationRequested) { wasCancelled = true; break; }
+                if (_cts!.Token.IsCancellationRequested) 
+                { 
+                    wasCancelled = true; 
+                    break; 
+                }
 
                 bool result = await ProcessSingleFileAsync(filesToProcess[i], i, filesToProcess.Count);
                 if (result) successCount++;
@@ -103,12 +102,10 @@ public partial class PlateSolvingToolViewModel : ObservableObject
         }
         catch (Exception ex)
         {
-            // Catch-all per errori imprevisti di orchestrazione
-            AppendLog($"!!! ERRORE FATALE: {ex.Message}");
+            AppendLog($"\n!!! ERRORE CRITICO DI SISTEMA: {ex.Message}");
         }
         finally
         {
-            // 3. Finalizzazione
             await FinalizeSessionAsync(successCount, filesToProcess.Count, wasCancelled);
         }
     }
@@ -118,7 +115,7 @@ public partial class PlateSolvingToolViewModel : ObservableObject
     {
         if (_cts != null && !_cts.IsCancellationRequested)
         {
-            AppendLog(">> Richiesta di cancellazione inviata...");
+            AppendLog("\n>> Arresto del processo in corso...");
             _cts.Cancel();
         }
     }
@@ -126,7 +123,7 @@ public partial class PlateSolvingToolViewModel : ObservableObject
     [RelayCommand]
     private void CloseWindow(Window window) => window?.Close();
 
-    // --- Logica di Business (Private Methods) ---
+    // --- Logica Ausiliaria ---
 
     private List<string> PrepareSession()
     {
@@ -136,7 +133,7 @@ public partial class PlateSolvingToolViewModel : ObservableObject
         
         FullLog = "";
         StatusColor = RunningTextBrush; 
-        StatusText = "Preparazione sessione...";
+        StatusText = "Inizializzazione...";
         ProgressValue = 0;
 
         var files = new List<string>();
@@ -146,8 +143,8 @@ public partial class PlateSolvingToolViewModel : ObservableObject
         ProgressMax = files.Count;
         
         AppendLog($"--- INIZIO SESSIONE: {DateTime.Now:HH:mm:ss} ---");
-        AppendLog($"Target: {files.Count} immagini.");
-        AppendLog("Motore: ASTAP (External CLI)");
+        AppendLog($"Motore: ASTAP");
+        AppendLog($"Immagini totali: {files.Count}");
 
         return files;
     }
@@ -156,20 +153,19 @@ public partial class PlateSolvingToolViewModel : ObservableObject
     {
         string fileName = Path.GetFileName(filePath);
         
-        // Update UI Context
-        StatusText = $"Elaborazione {index + 1}/{total}: {fileName}...";
+        StatusText = $"Risoluzione {index + 1}/{total}: {fileName}...";
         ProgressValue = index + 1;
         
         AppendLog("");
-        AppendLog($"[{index + 1}/{total}] FILE: {fileName}");
+        AppendLog($"[{index + 1}/{total}] ELABORAZIONE: {fileName}");
         AppendLog("----------------------------------------");
 
         try
         {
-            // Esecuzione Service
+            // Esecuzione del Service con callback per il log real-time
             var result = await _solverService.SolveAsync(filePath, _cts!.Token, (logLine) => 
             {
-                // Thread Marshalling: Assicura che l'aggiornamento avvenga sul UI Thread
+                // Dispatcher necessario per aggiornare la UI da thread esterni (processo ASTAP)
                 Dispatcher.UIThread.Post(() => FullLog += logLine + Environment.NewLine);
             });
 
@@ -181,10 +177,12 @@ public partial class PlateSolvingToolViewModel : ObservableObject
             else
             {
                 AppendLog(">> RISULTATO: FALLITO");
+                
                 if (!_cts.Token.IsCancellationRequested)
                 {
-                    // Diagnostica (eseguita in background per non bloccare UI)
-                    var diagnosis = await Task.Run(() => AnalyzeFailureReason(filePath));
+                    // Diagnostica: Chiediamo al servizio perché il file non è stato risolto
+                    // (Logica spostata dal ViewModel al Service)
+                    var diagnosis = await _solverService.DiagnoseIssuesAsync(filePath);
                     AppendLog(diagnosis);
                 }
                 return false;
@@ -192,11 +190,11 @@ public partial class PlateSolvingToolViewModel : ObservableObject
         }
         catch (OperationCanceledException)
         {
-            throw; // Rilancia per essere gestito dal ciclo principale
+            return false;
         }
         catch (Exception ex)
         {
-            AppendLog($">> ERRORE FILE: {ex.Message}");
+            AppendLog($">> ERRORE DURANTE L'ESECUZIONE: {ex.Message}");
             return false;
         }
     }
@@ -209,48 +207,50 @@ public partial class PlateSolvingToolViewModel : ObservableObject
 
         if (wasCancelled)
         {
-            AppendLog("\n>> OPERAZIONE INTERROTTA DALL'UTENTE.");
-            StatusText = "Operazione annullata.";
+            AppendLog("\n>> SESSIONE ANNULLATA DALL'UTENTE.");
+            StatusText = "Operazione interrotta.";
             StatusColor = ErrorBrush;
         }
         else
         {
             IsFinished = true;
-            DetermineFinalStatus(successCount, totalCount);
+            UpdateFinalStatus(successCount, totalCount);
         }
 
-        // Aggiornamento Dati Nodo
+        // Se almeno un'immagine è stata risolta, aggiorniamo il nodo (WCS è stato scritto su disco)
         if (successCount > 0)
         {
-            AppendLog("\n--- Aggiornamento Dati Nodo ---");
+            AppendLog("\n--- Aggiornamento Metadati Nodo ---");
             try
             {
                 await _targetNode.RefreshDataFromDiskAsync();
-                AppendLog("Dati aggiornati correttamente.");
+                AppendLog("Metadati sincronizzati con successo.");
             }
             catch (Exception ex)
             {
-                AppendLog($"Errore refresh: {ex.Message}");
+                AppendLog($"Errore durante il refresh del nodo: {ex.Message}");
             }
         }
+        
+        AppendLog($"\n--- FINE SESSIONE: {DateTime.Now:HH:mm:ss} ---");
     }
 
-    private void DetermineFinalStatus(int success, int total)
+    private void UpdateFinalStatus(int success, int total)
     {
         if (success == total && success > 0)
         {
-            StatusText = "Tutte le immagini risolte!";
+            StatusText = "Risoluzione completata con successo!";
             StatusColor = SuccessBrush;
             ProgressValue = ProgressMax;
         }
         else if (success > 0)
         {
-            StatusText = $"Completato parzialmente ({success}/{total}).";
+            StatusText = $"Risoluzione parziale: {success} su {total}.";
             StatusColor = PendingBrush;
         }
         else
         {
-            StatusText = "Nessuna soluzione trovata.";
+            StatusText = "Impossibile risolvere le immagini.";
             StatusColor = ErrorBrush;
         }
     }
@@ -258,51 +258,5 @@ public partial class PlateSolvingToolViewModel : ObservableObject
     private void AppendLog(string message)
     {
         FullLog += message + Environment.NewLine;
-    }
-
-    // --- Helper Diagnostico (Logica pura) ---
-
-    private string AnalyzeFailureReason(string filePath)
-    {
-        var issues = new List<string>();
-        Fits? f = null;
-        try
-        {
-            f = new Fits(filePath);
-            var hdu = f.ReadHDU();
-            if (hdu == null) return ">> DIAGNOSI: File FITS corrotto/vuoto.";
-
-            var header = hdu.Header;
-            
-            bool hasRa = header.ContainsKey("RA") || header.ContainsKey("OBJCTRA");
-            bool hasDec = header.ContainsKey("DEC") || header.ContainsKey("OBJCTDEC");
-            bool hasFocal = header.ContainsKey("FOCALLEN") || header.ContainsKey("FOCAL");
-            bool hasPixel = header.ContainsKey("XPIXSZ") || header.ContainsKey("PIXSIZE");
-            bool hasScale = header.ContainsKey("PLTSCALE"); 
-
-            if (!hasRa || !hasDec) issues.Add("Coordinate approssimative (RA/DEC) mancanti.");
-            if (!hasScale) 
-            {
-                if (!hasFocal) issues.Add("Lunghezza Focale mancante.");
-                if (!hasPixel) issues.Add("Dimensione Pixel mancante.");
-            }
-        }
-        catch (Exception ex)
-        { 
-            return $">> DIAGNOSI IMPOSSIBILE: {ex.Message}"; 
-        }
-        finally 
-        { 
-            f?.Close(); 
-        }
-
-        if (issues.Count > 0) {
-            var sb = new StringBuilder();
-            sb.AppendLine(">> DIAGNOSI PROBABILE:");
-            foreach (var issue in issues) sb.AppendLine($"   - {issue}");
-            return sb.ToString().TrimEnd();
-        }
-        
-        return ">> DIAGNOSI: Parametri ok, possibile mancanza di stelle o nuvole.";
     }
 }

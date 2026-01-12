@@ -2,10 +2,8 @@
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
-using KomaLab.ViewModels;
 using System;
 using System.Globalization;
-using System.Threading.Tasks;
 using PosterizationToolViewModel = KomaLab.ViewModels.Tools.PosterizationToolViewModel;
 
 namespace KomaLab.Views
@@ -14,43 +12,57 @@ namespace KomaLab.Views
     {
         private bool _isPanning;
         private Point? _lastPointerPos;
+        private bool _isFirstLayout = true; // Flag per gestire l'inizializzazione automatica
 
         public PosterizationToolView()
         {
             InitializeComponent();
+            
+            // Registriamo l'evento Loaded in modo sincrono
             this.Loaded += OnLoaded;
         }
 
-        private async void OnLoaded(object? sender, RoutedEventArgs e)
+        private void OnLoaded(object? sender, RoutedEventArgs e)
         {
-            // Piccolo ritardo per assicurarsi che il layout sia renderizzato
-            await Task.Delay(100);
+            // Inizializziamo il focus sulla finestra per catturare i KeyBindings
+            this.Focus();
+
             if (DataContext is PosterizationToolViewModel vm)
             {
                 var border = this.FindControl<Border>("PreviewBorder");
-                if (border != null)
+                if (border != null && border.Bounds.Width > 0 && border.Bounds.Height > 0)
                 {
+                    // Se per caso le Bounds sono già pronte, inizializziamo subito
                     vm.Viewport.ViewportSize = border.Bounds.Size;
+                    vm.ResetView();
+                    _isFirstLayout = false;
                 }
-                vm.ResetView();
             }
         }
 
         /// <summary>
         /// Gestisce il ridimensionamento della finestra per adattare il viewport.
-        /// Collegato all'evento SizeChanged="OnPreviewSizeChanged" nello XAML.
+        /// Questo evento è più affidabile del Delay perché scatta non appena Avalonia calcola le dimensioni reali.
         /// </summary>
         private void OnPreviewSizeChanged(object? sender, SizeChangedEventArgs e)
         {
             if (DataContext is PosterizationToolViewModel vm)
             {
+                // Aggiorniamo sempre la dimensione del viewport nel ViewModel
                 vm.Viewport.ViewportSize = e.NewSize;
+
+                // Solo la prima volta che riceviamo dimensioni valide (>0), 
+                // eseguiamo il ResetView per "incorniciare" l'immagine correttamente.
+                if (_isFirstLayout && e.NewSize.Width > 0 && e.NewSize.Height > 0)
+                {
+                    vm.ResetView();
+                    _isFirstLayout = false;
+                }
             }
         }
 
         /// <summary>
         /// Validazione input manuale con logica di Clamp e Cross-Check (Nero < Bianco).
-        /// Scatta quando si clicca fuori o quando viene chiamato this.Focus()
         /// </summary>
         private void OnValueInputLostFocus(object? sender, RoutedEventArgs e)
         {
@@ -71,8 +83,6 @@ namespace KomaLab.Views
             {
                 if (double.TryParse(input, NumberStyles.Any, culture, out double black))
                 {
-                    // FIX: Il nero non può superare il bianco (lasciamo un margine di 1 unità)
-                    // Se il bianco è 2000, il nero massimo accettabile è 1999.
                     double maxAllowed = Math.Max(vm.SliderMin, vm.WhitePoint - 1);
                     vm.BlackPoint = Math.Clamp(black, vm.SliderMin, maxAllowed);
                 }
@@ -86,8 +96,6 @@ namespace KomaLab.Views
             {
                 if (double.TryParse(input, NumberStyles.Any, culture, out double white))
                 {
-                    // FIX: Il bianco non può scendere sotto il nero (lasciamo un margine di 1 unità)
-                    // Se il nero è 1000, il bianco minimo accettabile è 1001.
                     double minAllowed = Math.Min(vm.SliderMax, vm.BlackPoint + 1);
                     vm.WhitePoint = Math.Clamp(white, minAllowed, vm.SliderMax);
                 }
@@ -100,9 +108,7 @@ namespace KomaLab.Views
         }
 
         /// <summary>
-        /// NUOVO: Gestisce la pressione di INVIO.
-        /// Toglie il focus dal TextBox spostandolo sulla Finestra.
-        /// Questo fa scattare automaticamente OnValueInputLostFocus.
+        /// Gestisce la pressione di INVIO nei TextBox per confermare i valori.
         /// </summary>
         private void OnInputKeyDown(object? sender, KeyEventArgs e)
         {
@@ -154,6 +160,7 @@ namespace KomaLab.Views
             if (DataContext is not PosterizationToolViewModel vm) return;
             if (sender is not Border border) return;
 
+            // Zoom con Ctrl + Rotellina
             if (e.KeyModifiers.HasFlag(KeyModifiers.Control))
             {
                 var mousePos = e.GetPosition(border);
@@ -163,6 +170,7 @@ namespace KomaLab.Views
                 return;
             }
 
+            // Regolazione Soglie con Rotellina (Shift per il Nero, Default per il Bianco)
             double currentRange = Math.Max(100, vm.WhitePoint - vm.BlackPoint);
             double step = currentRange * 0.05;
             if (e.Delta.Y < 0) step = -step;

@@ -30,6 +30,11 @@ public interface IFitsMetadataService
     WcsData ExtractWcs(Header header);
 
     /// <summary>
+    /// Estrae le coordinate geografiche dell'osservatorio (Lat/Lon).
+    /// </summary>
+    GeographicLocation? GetObservatoryLocation(Header header);
+
+    /// <summary>
     /// Tenta di estrarre la data di osservazione standardizzando i vari formati FITS.
     /// </summary>
     DateTime? GetObservationDate(Header header);

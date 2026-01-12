@@ -31,7 +31,8 @@ public partial class BoardViewModel : ObservableObject
     private readonly IFitsMetadataService _metadataService; 
     private readonly IImageOperationService _opsService;
     private readonly IUndoService _undoService;
-    private readonly IMediaExportService _mediaService;  
+    private readonly IMediaExportService _mediaService; 
+    private readonly IFitsBatchService _batchService; // Nuova dipendenza
 
     // --- Proprietà Visuali ---
     [ObservableProperty] private double _offsetX;
@@ -58,8 +59,6 @@ public partial class BoardViewModel : ObservableObject
         Nodes.OfType<MultipleImagesNodeViewModel>().Any(n => n.IsAnimating);
     
     // --- Collezioni ---
-    // Nodes accetta BaseNodeViewModel. Poiché Single/Multiple ereditano da BaseNodeViewModel,
-    // il casting dovrebbe essere implicito se i namespace sono corretti.
     public ObservableCollection<BaseNodeViewModel> Nodes { get; } = new();
     public ObservableCollection<ConnectionViewModel> Connections { get; } = new();
     
@@ -74,7 +73,8 @@ public partial class BoardViewModel : ObservableObject
         IFitsMetadataService metadataService, 
         IImageOperationService opsService,
         IUndoService undoService,
-        IMediaExportService mediaService)
+        IMediaExportService mediaService,
+        IFitsBatchService batchService) // Iniettato correttamente
     {
         _nodeFactory = nodeFactory ?? throw new ArgumentNullException(nameof(nodeFactory));
         _dialogService = dialogService ?? throw new ArgumentNullException(nameof(dialogService));
@@ -84,6 +84,7 @@ public partial class BoardViewModel : ObservableObject
         _opsService = opsService ?? throw new ArgumentNullException(nameof(opsService));
         _undoService = undoService ?? throw new ArgumentNullException(nameof(undoService));
         _mediaService = mediaService ?? throw new ArgumentNullException(nameof(mediaService));
+        _batchService = batchService ?? throw new ArgumentNullException(nameof(batchService));
     }
 
     // --- Comandi Aggiunta Nodi ---
@@ -92,31 +93,20 @@ public partial class BoardViewModel : ObservableObject
     private async Task AddNode()
     {
         var imagePaths = await _dialogService.ShowOpenFitsFileDialogAsync();
-        if (imagePaths == null) return;
-        var pathList = imagePaths.ToList();
-        if (pathList.Count == 0) return;
+        if (imagePaths == null || !imagePaths.Any()) return;
+
+        // Utilizzo del BatchService per la preparazione (ordinamento cronologico)
+        var preparedPaths = await _batchService.PrepareBatchAsync(imagePaths);
 
         Point center = GetCenterOfView();
 
-        if (pathList.Count == 1)
+        if (preparedPaths.Count == 1)
         {
-            await AddSingleNodeAsync(pathList[0], center.X, center.Y, centerOnPosition: true);
+            await AddSingleNodeAsync(preparedPaths[0], center.X, center.Y, centerOnPosition: true);
         }
         else
         {
-            var pathDatePairs = await Task.WhenAll(pathList.Select(async path =>
-            {
-                var header = await _ioService.ReadHeaderOnlyAsync(path);
-                var date = header != null ? _metadataService.GetObservationDate(header) : null;
-                return new { Path = path, Date = date ?? DateTime.MinValue };
-            }));
-
-            var sortedPaths = pathDatePairs
-                .OrderBy(x => x.Date)
-                .Select(x => x.Path)
-                .ToList();
-
-            await AddMultipleNodesAsync(sortedPaths, center.X, center.Y);
+            await AddMultipleNodesAsync(preparedPaths, center.X, center.Y);
         }
     }
 
@@ -245,7 +235,6 @@ public partial class BoardViewModel : ObservableObject
     {
         try
         {
-            // Il cast (BaseNodeViewModel) è implicito, ma qui lo rendiamo chiaro
             BaseNodeViewModel newNode = await _nodeFactory.CreateSingleImageNodeAsync(imagePath, x, y, centerOnPosition);
             RegisterNodeWithUndo(newNode, "Aggiungi Immagine");
         }
@@ -372,6 +361,14 @@ public partial class BoardViewModel : ObservableObject
 
         try
         {
+            // Validazione compatibilità batch prima dello stacking
+            var (isCompatible, error) = await _batchService.ValidateCompatibilityAsync(multiNode.ImagePaths);
+            if (!isCompatible)
+            {
+                Debug.WriteLine($"Stacking abortito: {error}");
+                return;
+            }
+
             var rawDataList = await multiNode.GetCurrentDataAsync();
             var sourceImages = rawDataList.Where(d => d != null).Cast<FitsImageData>().ToList();
             if (sourceImages.Count < 2) return;
@@ -392,12 +389,10 @@ public partial class BoardViewModel : ObservableObject
             };
             string newTitle = $"{cleanTitle.Trim()} ({modeString})";
 
-            // Qui è dove avevi l'errore. newImgNode è specifico, ma newNode è BaseNode.
             BaseNodeViewModel newNode = await _nodeFactory.CreateSingleImageNodeFromDataAsync(
                 resultData, newTitle, newX, newY
             );
 
-            // Se il nodo creato è un ImageNode, possiamo settare proprietà specifiche
             if (newNode is ImageNodeViewModel imgNode)
             {
                 imgNode.VisualizationMode = multiNode.VisualizationMode;
@@ -409,7 +404,7 @@ public partial class BoardViewModel : ObservableObject
                 {
                     if (!Nodes.Contains(newNode))
                     {
-                        Nodes.Add(newNode); // Funziona perché newNode è BaseNodeViewModel
+                        Nodes.Add(newNode);
                         RegisterNodeEvents(newNode);
                         OnNodeRequestBringToFront(newNode);
                         CreateConnection(multiNode, newNode);
@@ -462,12 +457,14 @@ public partial class BoardViewModel : ObservableObject
     // --- ZOOM / PAN ---
     [RelayCommand] private void IncrementOffset() { OffsetX += 20; }
     [RelayCommand] private void ResetBoard() { OffsetX = 0.0; OffsetY = 0.0; Scale = 0.5; }
+    
     public void Pan(Vector delta) { OffsetX += delta.X; OffsetY += delta.Y; }
+    
     public void Zoom(double deltaY, Point mousePosition)
     {
         double oldScale = Scale;
         double zoomFactor = deltaY > 0 ? 1.1 : 1 / 1.1;
-        double newScale = Math.Clamp(oldScale * zoomFactor, 0.1, 10);
+        double newScale = Math.Clamp(oldScale * zoomFactor, 0.05, 10);
         OffsetX = mousePosition.X - (mousePosition.X - OffsetX) * (newScale / oldScale);
         OffsetY = mousePosition.Y - (mousePosition.Y - OffsetY) * (newScale / oldScale);
         Scale = newScale;
@@ -557,7 +554,7 @@ public partial class BoardViewModel : ObservableObject
     [RelayCommand]
     private void PanBoard(string direction)
     {
-        double step = 50.0;
+        double step = 50.0 / Scale;
         switch (direction.ToLower())
         {
             case "left":  Pan(new Vector(step, 0)); break;

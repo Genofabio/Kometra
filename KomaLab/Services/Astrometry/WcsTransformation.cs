@@ -15,12 +15,13 @@ namespace KomaLab.Services.Astrometry;
 // - Supporta proiezioni standard TAN (Gnomonica).
 // - Supporta distorsioni polinomiali TPV (essenziale per ottiche a largo campo).
 // - Implementa inversione numerica (Newton-Raphson) per le distorsioni.
-// - Ottimizzato con caching dei coefficienti per calcoli massivi (es. griglie).
+// - Gestisce internamente l'inversione Y per sincronizzare coordinate FITS e UI.
 // ---------------------------------------------------------------------------
 
 public class WcsTransformation : IWcsTransformation
 {
     private readonly WcsData _data;
+    private readonly int _imageHeight; // Necessario per l'inversione asse Y
     
     // Matrice inversa CD pre-calcolata
     private double _invCd11, _invCd12, _invCd21, _invCd22;
@@ -35,9 +36,10 @@ public class WcsTransformation : IWcsTransformation
     private const double DegToRad = Math.PI / 180.0;
     private const double RadToDeg = 180.0 / Math.PI;
 
-    public WcsTransformation(WcsData data)
+    public WcsTransformation(WcsData data, int imageHeight)
     {
         _data = data ?? throw new ArgumentNullException(nameof(data));
+        _imageHeight = imageHeight;
         
         // Inizializza cache per i coefficienti (fino all'ordine 39, standard TPV ne usa ~10)
         _pvCache = new double[2][];
@@ -85,7 +87,6 @@ public class WcsTransformation : IWcsTransformation
         if (_data.ProjectionType != WcsProjectionType.Tpv) return;
 
         // Euristica per rilevare se i coefficienti dell'asse Y sono scambiati (x<->y)
-        // Comune in alcuni software di astrometria.
         double pv11 = GetCachedPv(1, 1); 
         double pv21 = GetCachedPv(2, 1); 
         double pv22 = GetCachedPv(2, 2); 
@@ -97,13 +98,13 @@ public class WcsTransformation : IWcsTransformation
     }
 
     // ==========================================
-    // INVERSE: RA/DEC (World) -> X/Y (Pixel)
+    // INVERSE: RA/DEC (World) -> X/Y (Pixel UI)
     // ==========================================
     public Point2D? WorldToPixel(double raDeg, double decDeg)
     {
         if (!_data.IsValid || !_matrixInverted) return null;
 
-        // 1. Proiezione sferica -> Piano Ideale (Coordinate Intermedie Standard)
+        // 1. Proiezione sferica -> Piano Ideale
         var idealPlane = ProjectRaDecToPlane(raDeg, decDeg);
         if (idealPlane == null) return null;
 
@@ -114,8 +115,7 @@ public class WcsTransformation : IWcsTransformation
         
         if (_data.ProjectionType == WcsProjectionType.Tpv)
         {
-            // 2. Inversione Distorsione (Non lineare -> Lineare)
-            // TPV definisce Forward (Raw->Distorted), quindi l'Inverse richiede solver numerico.
+            // 2. Inversione Distorsione via Newton-Raphson
             rawPlane = SolveDistortionInverseNewton(xiTarget, etaTarget);
         }
         else
@@ -127,26 +127,28 @@ public class WcsTransformation : IWcsTransformation
         double u = (_invCd11 * rawPlane.X) + (_invCd12 * rawPlane.Y);
         double v = (_invCd21 * rawPlane.X) + (_invCd22 * rawPlane.Y);
 
-        // 4. Offset Pixel di Riferimento (CRPIX)
-        // FITS usa coordinate pixel base-1, noi base-0 (quindi -1.0)
-        return new Point2D(
-            (u + _data.RefPixelX) - 1.0, 
-            (v + _data.RefPixelY) - 1.0
-        );
+        // 4. Offset Pixel di Riferimento (CRPIX) e Inversione Y UI
+        double fitsX = (u + _data.RefPixelX) - 1.0;
+        double fitsY = (v + _data.RefPixelY) - 1.0;
+
+        return new Point2D(fitsX, _imageHeight - fitsY);
     }
 
     // ==========================================
-    // FORWARD: X/Y (Pixel) -> RA/DEC (World)
+    // FORWARD: X/Y (Pixel UI) -> RA/DEC (World)
     // ==========================================
     public (double Ra, double Dec)? PixelToWorld(double x, double y)
     {
         if (!_data.IsValid) return null;
 
-        // 1. Offset Pixel relativi al centro (FITS base-1 adjustment)
-        double u = (x + 1.0) - _data.RefPixelX;
-        double v = (y + 1.0) - _data.RefPixelY;
+        // 1. Compensazione Inversione Y UI -> FITS Coordinate
+        double fitsY = _imageHeight - y;
 
-        // 2. Trasformazione Lineare (CD Matrix)
+        // 2. Offset Pixel relativi al centro (FITS base-1 adjustment)
+        double u = (x + 1.0) - _data.RefPixelX;
+        double v = (fitsY + 1.0) - _data.RefPixelY;
+
+        // 3. Trasformazione Lineare (CD Matrix)
         double rawXi = (_data.Cd1_1 * u) + (_data.Cd1_2 * v);
         double rawEta = (_data.Cd2_1 * u) + (_data.Cd2_2 * v);
 
@@ -154,7 +156,7 @@ public class WcsTransformation : IWcsTransformation
         
         if (_data.ProjectionType == WcsProjectionType.Tpv)
         {
-            // 3. Applicazione Distorsione Polinomiale
+            // 4. Applicazione Distorsione Polinomiale
             distortedPlane = ApplyTpvPolynomial(rawXi, rawEta);
         }
         else
@@ -162,7 +164,7 @@ public class WcsTransformation : IWcsTransformation
             distortedPlane = new Point2D(rawXi, rawEta);
         }
 
-        // 4. Deproiezione (Piano -> Sfera Celeste)
+        // 5. Deproiezione (Piano -> Sfera Celeste)
         return DeprojectStandardPlane(distortedPlane.X, distortedPlane.Y);
     }
 
@@ -182,10 +184,8 @@ public class WcsTransformation : IWcsTransformation
         double cosDec0 = Math.Cos(dec0);
         double cosdRa = Math.Cos(dRa);
 
-        // Denominatore proiezione gnomonica
         double den = (sinDec * sinDec0) + (cosDec * cosDec0 * cosdRa);
-
-        if (Math.Abs(den) < 1e-12) return null; // Punto all'infinito o dietro l'osservatore
+        if (Math.Abs(den) < 1e-12) return null; 
 
         double num = cosDec * Math.Sin(dRa);
         double xi = (num / den) * RadToDeg;
@@ -222,7 +222,6 @@ public class WcsTransformation : IWcsTransformation
         double raFinal = (ra0 + dRa) * RadToDeg;
         double decFinal = dec * RadToDeg;
 
-        // Normalizzazione RA [0, 360)
         while (raFinal < 0) raFinal += 360.0;
         while (raFinal >= 360.0) raFinal -= 360.0;
 
@@ -233,7 +232,6 @@ public class WcsTransformation : IWcsTransformation
     
     private Point2D SolveDistortionInverseNewton(double targetXi, double targetEta)
     {
-        // Guess iniziale: assumiamo distorsione nulla
         double xi = targetXi;
         double eta = targetEta;
         const int maxIter = 20;
@@ -253,7 +251,6 @@ public class WcsTransformation : IWcsTransformation
             var d1 = ComputePolyDerivs(1, xi, eta, r);
             var d2 = ComputePolyDerivs(2, xi, eta, r);
 
-            // Jacobiano
             double det = (d1.dXi * d2.dEta) - (d1.dEta * d2.dXi);
             if (Math.Abs(det) < 1e-15) { xi -= f; eta -= g; continue; }
 
@@ -280,8 +277,6 @@ public class WcsTransformation : IWcsTransformation
     {
         if (axis == 2 && _swapAxis2Terms) (x, y) = (y, x);
 
-        // Implementazione polinomiale TPV standard (termini fino al 3° ordine mostrati, ma supporta n)
-        // PVn_0, PVn_1 * x, ...
         double val = GetCachedPv(axis, 0)
                    + GetCachedPv(axis, 1) * x
                    + GetCachedPv(axis, 2) * y
@@ -304,7 +299,6 @@ public class WcsTransformation : IWcsTransformation
         double drDx = (r < 1e-9) ? 0 : x / r;
         double drDy = (r < 1e-9) ? 0 : y / r;
 
-        // Derivate parziali del polinomio TPV
         double dDx = GetCachedPv(axis, 1)
                     + GetCachedPv(axis, 3) * drDx
                     + GetCachedPv(axis, 4) * 2 * x
@@ -321,7 +315,6 @@ public class WcsTransformation : IWcsTransformation
                     + GetCachedPv(axis, 9) * 2 * x * y
                     + GetCachedPv(axis, 10) * 3 * y * y;
 
-        // Se abbiamo scambiato gli assi in input, dobbiamo scambiare anche le derivate in output
         return swapped ? (dDy, dDx) : (dDx, dDy);
     }
 

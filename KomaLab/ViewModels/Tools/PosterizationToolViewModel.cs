@@ -25,8 +25,8 @@ namespace KomaLab.ViewModels.Tools;
 // Gestisce l'interfaccia di anteprima per il tool di posterizzazione.
 // Responsabilità:
 // 1. Caricamento e gestione della Matrice OpenCV sorgente.
-// 2. Rendering Real-Time dell'anteprima (Preview) quando l'utente muove gli slider.
-// 3. Applicazione batch delle impostazioni a tutte le immagini selezionate.
+// 2. Rendering Real-Time dell'anteprima (Preview) richiamando il servizio.
+// 3. Applicazione batch delle impostazioni delegando la logica al PosterizationService.
 // ---------------------------------------------------------------------------
 
 public partial class PosterizationToolViewModel : ObservableObject, IDisposable
@@ -235,8 +235,6 @@ public partial class PosterizationToolViewModel : ObservableObject, IDisposable
 
             using (var lockedBuffer = writeableBmp.Lock())
             {
-                // *** FIX APPLICATO QUI ***
-                // Invece di 'new Mat(...)', usiamo 'Mat.FromPixelData'
                 using var dstMat = Mat.FromPixelData(
                     _sourceMat.Height, 
                     _sourceMat.Width, 
@@ -244,7 +242,8 @@ public partial class PosterizationToolViewModel : ObservableObject, IDisposable
                     lockedBuffer.Address, 
                     lockedBuffer.RowBytes);
 
-                ComputePreviewPosterization(_sourceMat, dstMat, Levels, SelectedMode, BlackPoint, WhitePoint);
+                // LOGICA MIGLIORATA: Chiamata al metodo statico del servizio (DRY)
+                PosterizationService.ComputePosterization(_sourceMat, dstMat, Levels, SelectedMode, BlackPoint, WhitePoint);
             }
 
             var old = PreviewBitmap; 
@@ -252,43 +251,6 @@ public partial class PosterizationToolViewModel : ObservableObject, IDisposable
             old?.Dispose();
         }
         catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"Preview Error: {ex.Message}"); }
-    }
-
-    private static void ComputePreviewPosterization(Mat src, Mat dst, int levels, VisualizationMode mode, double bp, double wp)
-    {
-        double range = wp - bp;
-        if (Math.Abs(range) < 1e-9) range = 1e-5;
-        
-        using var temp32f = new Mat();
-        
-        double scale = 1.0 / range;
-        double offset = -bp * scale;
-        src.ConvertTo(temp32f, MatType.CV_32FC1, scale, offset);
-        
-        Cv2.Max(temp32f, 0.0, temp32f);
-        Cv2.Min(temp32f, 1.0, temp32f);
-
-        if (mode == VisualizationMode.SquareRoot)
-        {
-            Cv2.Sqrt(temp32f, temp32f);
-        }
-        else if (mode == VisualizationMode.Logarithmic)
-        {
-            Cv2.Add(temp32f, 1.0, temp32f);
-            Cv2.Log(temp32f, temp32f);
-            Cv2.Multiply(temp32f, 1.442695, temp32f);
-        }
-
-        Cv2.Multiply(temp32f, (double)levels - 0.001, temp32f);
-        
-        using var temp32s = new Mat();
-        temp32f.ConvertTo(temp32s, MatType.CV_32SC1);
-        temp32s.ConvertTo(temp32f, MatType.CV_32FC1); 
-        
-        double divScale = levels > 1 ? 1.0 / (levels - 1) : 1.0;
-        Cv2.Multiply(temp32f, divScale, temp32f);
-
-        temp32f.ConvertTo(dst, MatType.CV_8UC1, 255.0, 0);
     }
 
     // --- Comandi Navigazione ---
@@ -318,49 +280,43 @@ public partial class PosterizationToolViewModel : ObservableObject, IDisposable
         
         try
         {
-            var results = new List<string>();
             string tempFolder = Path.Combine(Path.GetTempPath(), "KomaLab", "Posterized");
             if (!Directory.Exists(tempFolder)) Directory.CreateDirectory(tempFolder);
 
-            double userOffsetBlack = 0;
-            double userOffsetWhite = 0;
+            // LOGICA MIGLIORATA: Calcoliamo gli offset e deleghiamo il batch al servizio
+            double offsetBlack = AutoAdaptThresholds ? (BlackPoint - _lastAutoBlack) : 0;
+            double offsetWhite = AutoAdaptThresholds ? (WhitePoint - _lastAutoWhite) : 0;
 
-            if (_autoAdaptThresholds)
+            if (AutoAdaptThresholds)
             {
-                userOffsetBlack = BlackPoint - _lastAutoBlack;
-                userOffsetWhite = WhitePoint - _lastAutoWhite;
+                // Il servizio gestisce internamente il loop, l'analisi e l'applicazione degli offset
+                ResultPaths = await _postService.PosterizeBatchWithOffsetsAsync(
+                    _sourcePaths, 
+                    tempFolder, 
+                    Levels, 
+                    SelectedMode, 
+                    offsetBlack, 
+                    offsetWhite);
             }
-
-            for (int i = 0; i < _sourcePaths.Count; i++)
+            else
             {
-                string path = _sourcePaths[i];
-                double targetBlack = BlackPoint;
-                double targetWhite = WhitePoint;
-
-                if (_autoAdaptThresholds && i != _currentIndex)
+                // Se non è adattivo, usiamo i punti fissi per tutti in parallelo
+                var tasks = new List<Task<string>>();
+                foreach (var path in _sourcePaths)
                 {
-                    StatusText = $"Analisi {i + 1}/{_sourcePaths.Count}...";
-                    
-                    var tempData = await _ioService.LoadAsync(path);
-                    if (tempData != null)
-                    {
-                        using var tempMat = _converter.RawToMat(tempData);
-                        var (autoB, autoW) = await Task.Run(() => _analysis.CalculateAutoStretchLevels(tempMat));
-                        
-                        targetBlack = Math.Clamp(autoB + userOffsetBlack, _sliderMin, _sliderMax);
-                        targetWhite = Math.Clamp(autoW + userOffsetWhite, _sliderMin, _sliderMax);
-                    }
+                    tasks.Add(_postService.PosterizeAndSaveAsync(
+                        path, 
+                        tempFolder, 
+                        Levels, 
+                        SelectedMode, 
+                        BlackPoint, 
+                        WhitePoint));
                 }
-
-                StatusText = $"Rendering {i + 1}/{_sourcePaths.Count}...";
                 
-                var outPath = await _postService.PosterizeAndSaveAsync(
-                    path, tempFolder, Levels, SelectedMode, targetBlack, targetWhite);
-                
-                results.Add(outPath);
+                var results = await Task.WhenAll(tasks);
+                ResultPaths = new List<string>(results);
             }
 
-            ResultPaths = results;
             DialogResult = true;
             RequestClose?.Invoke();
         }
@@ -377,6 +333,8 @@ public partial class PosterizationToolViewModel : ObservableObject, IDisposable
         DialogResult = false; 
         RequestClose?.Invoke(); 
     }
+
+    // --- Integrazione Viewport (Zoom e Pan) ---
 
     public void ZoomIn() => Viewport.ZoomIn();
     public void ZoomOut() => Viewport.ZoomOut();

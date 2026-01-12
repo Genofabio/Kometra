@@ -25,4 +25,6 @@ public interface IPlateSolvingService
         string fitsFilePath, 
         CancellationToken token = default, 
         Action<string>? onLogReceived = null);
+    
+    Task<string> DiagnoseIssuesAsync(string fitsFilePath);
 }

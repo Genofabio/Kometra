@@ -3,17 +3,14 @@ using System.Collections.Generic;
 using System.Threading.Tasks;
 using Avalonia.Controls;
 using KomaLab.Models.Visualization;
-using KomaLab.Services.Astrometry; // Necessario per IJplHorizonsService
-using KomaLab.Services.Data;       // IFitsIoService, IFitsMetadataService
+using KomaLab.Services.Astrometry; 
+using KomaLab.Services.Data;       
 using KomaLab.Services.Imaging;
 using KomaLab.ViewModels.Nodes;
 using KomaLab.ViewModels.Tools;
 using KomaLab.Views;
 using Microsoft.Extensions.DependencyInjection;
 using nom.tam.fits;
-using HeaderEditorToolViewModel = KomaLab.ViewModels.Tools.HeaderEditorToolViewModel;
-using PlateSolvingToolViewModel = KomaLab.ViewModels.Tools.PlateSolvingToolViewModel;
-using PosterizationToolViewModel = KomaLab.ViewModels.Tools.PosterizationToolViewModel;
 
 namespace KomaLab.Services.UI;
 
@@ -23,9 +20,9 @@ namespace KomaLab.Services.UI;
 // DESCRIZIONE:
 // Implementazione concreta del servizio finestre per Avalonia.
 // Responsabilità:
-// 1. Risoluzione delle dipendenze per i tool tramite IServiceProvider.
+// 1. Risoluzione delle dipendenze per i tool tramite IServiceProvider (DI).
 // 2. Iniezione dei servizi nei ViewModel dei tool (Alignment, Posterization, ecc.).
-// 3. Gestione del ciclo di vita delle finestre modali (ShowDialog).
+// 3. Gestione del ciclo di vita delle finestre modali e pulizia della memoria (Dispose).
 // ---------------------------------------------------------------------------
 
 public class WindowService : IWindowService
@@ -52,39 +49,32 @@ public class WindowService : IWindowService
     {
         if (_mainWindow == null) throw new InvalidOperationException("Finestra principale non registrata.");
 
-        // 1. Risoluzione dei servizi necessari dal container DI
         var ioService = _serviceProvider.GetRequiredService<IFitsIoService>();
-        var metadataService = _serviceProvider.GetRequiredService<IFitsMetadataService>(); // NUOVO
+        var metadataService = _serviceProvider.GetRequiredService<IFitsMetadataService>();
         var alignmentService = _serviceProvider.GetRequiredService<IAlignmentService>();
         var converter = _serviceProvider.GetRequiredService<IFitsImageDataConverter>();
         var analysis = _serviceProvider.GetRequiredService<IImageAnalysisService>();
-        var jplService = _serviceProvider.GetRequiredService<IJplHorizonsService>(); // NUOVO
+        var jplService = _serviceProvider.GetRequiredService<IJplHorizonsService>();
 
-        // 2. Iniezione dipendenze nel ViewModel del tool
         using var viewModel = new AlignmentToolViewModel(
             sourcePaths,
-            ioService,          // Updated
-            metadataService,    // New
+            ioService,
+            metadataService,
             alignmentService,
             converter,
             analysis,
-            jplService,         // New
+            jplService,
             initialMode
         );
     
-        var alignmentWindow = new AlignmentToolView
-        {
-            DataContext = viewModel
-        };
+        var alignmentWindow = new AlignmentToolView { DataContext = viewModel };
 
-        // 3. Gestione chiusura
         Action closeHandler = () => alignmentWindow.Close();
         viewModel.RequestClose += closeHandler;
 
         await alignmentWindow.ShowDialog<object>(_mainWindow); 
 
         viewModel.RequestClose -= closeHandler;
-
         return viewModel.DialogResult ? viewModel.FinalProcessedPaths : null; 
     }
     
@@ -95,16 +85,17 @@ public class WindowService : IWindowService
     {
         if (_mainWindow == null) return null;
         
-        // HeaderEditorToolViewModel prende solo il nodo, le dipendenze interne 
-        // le recupera dal nodo o sono parser statici.
-        var editorVm = new HeaderEditorToolViewModel(node);
-        var editorView = new HeaderEditorToolView
-        {
-            DataContext = editorVm
-        };
+        // Risoluzione servizio metadati per l'editor
+        var metadataService = _serviceProvider.GetRequiredService<IFitsMetadataService>();
+
+        // Usiamo 'using' perché HeaderEditorToolViewModel è IDisposable
+        using var editorVm = new HeaderEditorToolViewModel(node, metadataService);
+        
+        var editorView = new HeaderEditorToolView { DataContext = editorVm };
 
         await editorView.ShowDialog(_mainWindow);
 
+        // Se l'utente ha salvato (proprietà IsSaved nella View), restituiamo l'header aggiornato
         return editorView.IsSaved ? editorVm.GetUpdatedHeader() : null;
     }
     
@@ -115,11 +106,13 @@ public class WindowService : IWindowService
     {
         if (_mainWindow == null) return;
 
-        var plateVm = new PlateSolvingToolViewModel(node);
-        var plateView = new PlateSolvingToolView
-        {
-            DataContext = plateVm
-        };
+        // Risoluzione servizio astrometrico
+        var solverService = _serviceProvider.GetRequiredService<IPlateSolvingService>();
+
+        // PlateSolvingToolViewModel non è ancora IDisposable ma seguiamo la pratica della DI
+        var plateVm = new PlateSolvingToolViewModel(node, solverService);
+        
+        var plateView = new PlateSolvingToolView { DataContext = plateVm };
 
         await plateView.ShowDialog(_mainWindow);
     }
@@ -133,24 +126,21 @@ public class WindowService : IWindowService
     {
         if (_mainWindow == null) throw new InvalidOperationException("Finestra principale non registrata.");
 
-        // Risoluzione Dipendenze Posterizzazione
         var ioService = _serviceProvider.GetRequiredService<IFitsIoService>();
         var postService = _serviceProvider.GetRequiredService<IPosterizationService>();
         var converter = _serviceProvider.GetRequiredService<IFitsImageDataConverter>();
         var analysis = _serviceProvider.GetRequiredService<IImageAnalysisService>();
 
+        // Usiamo 'using' per smaltire le matrici OpenCV nel ViewModel una volta chiusa la finestra
         using var vm = new PosterizationToolViewModel(
             sourcePaths, 
-            ioService,      // Updated
+            ioService,
             postService, 
             converter, 
             analysis, 
             initialMode);
             
-        var view = new PosterizationToolView
-        {
-            DataContext = vm
-        };
+        var view = new PosterizationToolView { DataContext = vm };
 
         Action closeHandler = () => view.Close();
         vm.RequestClose += closeHandler;
@@ -158,7 +148,6 @@ public class WindowService : IWindowService
         await view.ShowDialog(_mainWindow);
 
         vm.RequestClose -= closeHandler;
-
         return vm.DialogResult ? vm.ResultPaths : null;
     }
 }

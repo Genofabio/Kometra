@@ -1,6 +1,4 @@
 ﻿using Avalonia.Controls;
-using Avalonia.Input;
-using Avalonia.Markup.Xaml;
 
 namespace KomaLab.Views;
 
@@ -10,16 +8,16 @@ public partial class PlateSolvingToolView : Window
     {
         InitializeComponent();
     }
+    
+    // Il metodo InitializeComponent() è gestito automaticamente dal compilatore 
+    // nelle versioni recenti di Avalonia, ma tenerlo non guasta.
 
-    private void InitializeComponent()
+    // Se vuoi davvero che il log sia sempre a fuoco per permettere lo scroll con la tastiera:
+    protected override void OnOpened(System.EventArgs e)
     {
-        AvaloniaXamlLoader.Load(this);
-    }
-
-    private void OnBackgroundClicked(object? sender, PointerPressedEventArgs e)
-    {
-        // Questo metodo forza il focus sulla Finestra principale.
-        // Se la TextBox aveva il focus (cursore attivo), lo perderà immediatamente.
-        this.Focus();
+        base.OnOpened(e);
+        // Possiamo dare il focus al log o al pulsante principale
+        var startBtn = this.Find<Button>("StartBtn"); // Se gli dai un Nome nello XAML
+        startBtn?.Focus();
     }
 }

@@ -76,6 +76,7 @@ public class App : Application
         // AGGIUNTO: Nuovi servizi Enterprise
         services.AddSingleton<IFitsIoService, FitsIoService>();
         services.AddSingleton<IFitsMetadataService, FitsMetadataService>();
+        services.AddSingleton<IFitsBatchService, FitsBatchService>();
         services.AddSingleton<IFitsImageDataConverter, FitsImageDataConverter>();
 
         // --- 4. Servizi Imaging & Processing ---

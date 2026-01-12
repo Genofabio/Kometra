@@ -6,19 +6,23 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using KomaLab.Models.Astrometry;
+using nom.tam.fits;
 
 namespace KomaLab.Services.Astrometry;
 
 // ---------------------------------------------------------------------------
 // FILE: PlateSolvingService.cs
-// RUOLO: Wrapper Processo Esterno
+// RUOLO: Wrapper Processo Esterno & Logica Astrometrica
 // DESCRIZIONE:
-// Gestisce l'interazione con il motore di risoluzione astrometrica ASTAP.
-// Si occupa di:
-// 1. Trovare l'eseguibile (GUI o CLI) nel sistema.
-// 2. Lanciare il processo con i parametri corretti (-update per scrivere WCS).
-// 3. Monitorare l'esecuzione (timeout, cancellazione).
-// 4. Interpretare l'output per determinare il successo.
+// Gestisce l'interazione con il motore di risoluzione astrometrica ASTAP e 
+// fornisce strumenti di diagnostica sui file FITS per identificare cause di fallimento.
+//
+// RESPONSABILITÀ:
+// 1. Discovery: Trova l'eseguibile ASTAP (CLI o GUI) nel sistema.
+// 2. Esecuzione: Lancia il processo con parametri ottimizzati per il blind solve.
+// 3. Monitoraggio: Gestisce timeout, cancellazione e ridirezione dei log.
+// 4. Diagnostica: Analizza l'header FITS per verificare la presenza di metadati 
+//    critici (RA, DEC, Focale) necessari al solver.
 // ---------------------------------------------------------------------------
 
 public class PlateSolvingService : IPlateSolvingService
@@ -48,7 +52,7 @@ public class PlateSolvingService : IPlateSolvingService
         // -f: file input
         // -r 180: blind solve (cerca in tutto il cielo, range 180 gradi)
         // -update: scrive il WCS (header) direttamente nel file FITS originale
-        // -z 0: downsample factor (0 = auto, migliora velocità su immagini grandi)
+        // -z 0: downsample factor (0 = auto)
         // -fov 0: campo visivo (0 = auto/da header)
         var args = $"-f \"{fitsFilePath}\" -r 180 -update -z 0 -fov 0";
         
@@ -57,8 +61,6 @@ public class PlateSolvingService : IPlateSolvingService
             FileName = _cachedExePath,
             Arguments = args,
             CreateNoWindow = true,
-            // UseShellExecute deve essere FALSE per ridirigere l'output (necessario per la versione CLI)
-            // Se è la versione GUI, non possiamo ridirigere facilmente stdout, ma ASTAP GUI scrive log su file.
             UseShellExecute = !_isCliVersion, 
             WindowStyle = ProcessWindowStyle.Hidden
         };
@@ -71,17 +73,13 @@ public class PlateSolvingService : IPlateSolvingService
 
         using var process = new Process();
         process.StartInfo = startInfo;
-        process.EnableRaisingEvents = true; // Necessario per l'evento Exited
+        process.EnableRaisingEvents = true;
         
         var logBuilder = new StringBuilder();
 
-        // Collega i gestori di eventi per catturare l'output in tempo reale
         SetupLogRedirection(process, logBuilder, onLogReceived);
 
         var tcs = new TaskCompletionSource<bool>();
-        
-        // 3. Gestione Cancellazione
-        // Registra una callback sul token che annulla il TaskCompletionSource
         using var registration = token.Register(() => tcs.TrySetCanceled());
 
         process.Exited += (_, _) => tcs.TrySetResult(true);
@@ -96,7 +94,6 @@ public class PlateSolvingService : IPlateSolvingService
                 process.BeginErrorReadLine();
             }
 
-            // 4. Attesa Esecuzione con Timeout
             // ASTAP può impiegare tempo per blind solve, diamo 90 secondi.
             var timeoutTask = Task.Delay(TimeSpan.FromSeconds(90), token);
             var processTask = tcs.Task;
@@ -105,15 +102,12 @@ public class PlateSolvingService : IPlateSolvingService
 
             if (completedTask == timeoutTask || token.IsCancellationRequested)
             {
-                // Timeout o Annullamento Manuale
                 KillProcessSafe(process);
                 result.Success = false;
                 result.Message = token.IsCancellationRequested ? "Operazione annullata dall'utente." : "Timeout operazione (90s).";
             }
             else
             {
-                // Processo terminato naturalmente
-                // Aspettiamo un istante per assicurarci che i buffer di output siano flushati
                 if (_isCliVersion) await Task.Delay(100); 
 
                 result.FullLog = logBuilder.ToString();
@@ -130,6 +124,60 @@ public class PlateSolvingService : IPlateSolvingService
         return result;
     }
 
+    /// <summary>
+    /// Analizza il file FITS per trovare mancanze nei metadati che impediscono la risoluzione.
+    /// (Logica spostata dal ViewModel per rispettare MVVM e SoC).
+    /// </summary>
+    public async Task<string> DiagnoseIssuesAsync(string fitsFilePath)
+    {
+        return await Task.Run(() =>
+        {
+            var issues = new List<string>();
+            Fits? f = null;
+            try
+            {
+                f = new Fits(fitsFilePath);
+                var hdu = f.ReadHDU();
+                if (hdu == null) return ">> DIAGNOSI: File FITS corrotto o non leggibile.";
+
+                var header = hdu.Header;
+                
+                // Verifica Coordinate
+                bool hasRa = header.ContainsKey("RA") || header.ContainsKey("OBJCTRA");
+                bool hasDec = header.ContainsKey("DEC") || header.ContainsKey("OBJCTDEC");
+                
+                // Verifica Scala/Ottica
+                bool hasFocal = header.ContainsKey("FOCALLEN") || header.ContainsKey("FOCAL");
+                bool hasPixel = header.ContainsKey("XPIXSZ") || header.ContainsKey("PIXSIZE");
+                bool hasScale = header.ContainsKey("PLTSCALE"); 
+
+                if (!hasRa || !hasDec) 
+                    issues.Add("Coordinate approssimative (RA/DEC) mancanti nell'header.");
+                
+                if (!hasScale && (!hasFocal || !hasPixel)) 
+                    issues.Add("Dati ottici insufficienti: mancano Focale o Dimensione Pixel (necessari per calcolare la scala).");
+            }
+            catch (Exception ex)
+            { 
+                return $">> DIAGNOSI FALLITA: {ex.Message}"; 
+            }
+            finally 
+            { 
+                f?.Close(); 
+            }
+
+            if (issues.Count > 0)
+            {
+                var sb = new StringBuilder();
+                sb.AppendLine(">> DIAGNOSI PROBABILE:");
+                foreach (var issue in issues) sb.AppendLine($"   - {issue}");
+                return sb.ToString().TrimEnd();
+            }
+            
+            return ">> DIAGNOSI: Metadati header corretti. Il fallimento potrebbe dipendere da scarsa qualità dell'immagine, troppe poche stelle o catalogo ASTAP non installato.";
+        });
+    }
+
     private void EnsureExecutableFound()
     {
         if (_hasSearched) return;
@@ -139,16 +187,13 @@ public class PlateSolvingService : IPlateSolvingService
         void AddVariations(string basePath)
         {
             if (string.IsNullOrEmpty(basePath)) return;
-            // Ordine preferenza: CLI (più verboso/facile da integrare) -> GUI
             searchPaths.Add(Path.Combine(basePath, "astap", "astap_cli.exe"));
             searchPaths.Add(Path.Combine(basePath, "astap", "astap.exe"));
         }
 
-        // Percorsi standard Windows
         AddVariations(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles));
         AddVariations(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86));
         
-        // Percorsi "Hardcoded" comuni (molti astrofili installano in root C:\astap)
         string[] drives = { "C:\\", "D:\\", "E:\\" };
         foreach (var drive in drives)
         {
@@ -165,7 +210,7 @@ public class PlateSolvingService : IPlateSolvingService
             {
                 _cachedExePath = path;
                 _isCliVersion = path.EndsWith("astap_cli.exe", StringComparison.OrdinalIgnoreCase);
-                break; // Trovato il primo valido
+                break;
             }
         }
 
@@ -191,7 +236,6 @@ public class PlateSolvingService : IPlateSolvingService
             {
                 string err = $"[STDERR] {e.Data}";
                 buffer.AppendLine(err);
-                // Non sempre stderr di ASTAP è un errore fatale, spesso sono info di debug
                 uiCallback?.Invoke(err);
             } 
         };
@@ -199,34 +243,18 @@ public class PlateSolvingService : IPlateSolvingService
 
     private bool EvaluateSuccess(Process process, string output)
     {
-        // Logica di validazione del successo
         if (_isCliVersion)
         {
-            // La CLI scrive esplicitamente messaggi di successo
             return output.Contains("Solution found", StringComparison.InvariantCultureIgnoreCase) 
                 || output.Contains("PLTSOLVD=T", StringComparison.InvariantCultureIgnoreCase)
                 || output.Contains("created wcs", StringComparison.InvariantCultureIgnoreCase)
                 || output.Contains("Updating header", StringComparison.InvariantCultureIgnoreCase);
         }
-        else
-        {
-            // La versione GUI è "muta" se lanciata così, ci affidiamo all'ExitCode.
-            // ASTAP GUI solitamente ritorna 0 se ok, o diverso se errore.
-            // Una verifica più robusta (da implementare nel chiamante) è controllare
-            // se il file FITS ha una data di modifica recente o nuove chiavi WCS.
-            return process.ExitCode == 0;
-        }
+        return process.ExitCode == 0;
     }
 
     private void KillProcessSafe(Process p)
     {
-        try 
-        { 
-            if (!p.HasExited) p.Kill(); 
-        } 
-        catch 
-        { 
-            // Ignora race conditions (il processo potrebbe essersi chiuso mentre tentavamo di ucciderlo) 
-        }
+        try { if (!p.HasExited) p.Kill(); } catch { }
     }
 }
