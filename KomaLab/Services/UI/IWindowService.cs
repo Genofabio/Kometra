@@ -2,7 +2,7 @@
 using System.Threading.Tasks;
 using Avalonia.Controls;
 using KomaLab.Models.Visualization;
-using KomaLab.ViewModels;
+using KomaLab.ViewModels.Nodes;
 using nom.tam.fits;
 
 namespace KomaLab.Services.UI;

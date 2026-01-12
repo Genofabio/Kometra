@@ -8,36 +8,35 @@ using System.Threading.Tasks;
 using Avalonia;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
-using KomaLab.Models;
 using KomaLab.Models.Fits;
 using KomaLab.Models.Nodes;
 using KomaLab.Models.Visualization;
-using KomaLab.Services.Data;        // IFitsIoService
+using KomaLab.Services.Data;
 using KomaLab.Services.Imaging;
 using KomaLab.Services.Utilities;
-using KomaLab.ViewModels.Helpers;
+using KomaLab.ViewModels.Visualization;
 
-namespace KomaLab.ViewModels;
+namespace KomaLab.ViewModels.Nodes;
 
 // ---------------------------------------------------------------------------
 // FILE: MultipleImagesNodeViewModel.cs
 // RUOLO: Nodo per sequenze di immagini (Animazioni/Stacking)
 // DESCRIZIONE:
-// Gestisce una lista di file FITS, permettendo la navigazione sequenziale,
-// l'animazione e la gestione della memoria tramite LRU Cache.
+// Gestisce una lista di file FITS, permettendo la navigazione sequenziale
+// e l'animazione. Utilizza una LRU Cache per limitare la RAM.
 // ---------------------------------------------------------------------------
 
 public partial class MultipleImagesNodeViewModel : ImageNodeViewModel
 {
     // --- Dipendenze Enterprise ---
-    private readonly IFitsIoService _ioService;      // Sostituisce IFitsService
+    private readonly IFitsIoService _ioService;
     private readonly IFitsImageDataConverter _converter;
     private readonly IImageAnalysisService _analysis;
     private readonly MultipleImagesNodeModel _multiModel;
 
     // --- Stato Interno ---
     private readonly int _imageCount;
-    private readonly LruCache<int, FitsImageData> _dataCache = new(3); // Cache LRU per limitare RAM
+    private readonly LruCache<int, FitsImageData> _dataCache = new(3); // Cache piccola per risparmiare RAM
     private CancellationTokenSource? _loadingCts;
     private Size _maxImageSize;
     
@@ -47,7 +46,7 @@ public partial class MultipleImagesNodeViewModel : ImageNodeViewModel
     // --- Proprietà Observable ---
 
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(ActiveRenderer))] // Notifica la base che il renderer è cambiato
+    [NotifyPropertyChangedFor(nameof(ActiveRenderer))] 
     private FitsRenderer? _activeFitsImage;
     
     [ObservableProperty]
@@ -56,6 +55,7 @@ public partial class MultipleImagesNodeViewModel : ImageNodeViewModel
     [NotifyCanExecuteChangedFor(nameof(PreviousImageCommand))]
     [NotifyCanExecuteChangedFor(nameof(NextImageCommand))]
     private bool _isAnimating;
+    
     private const int AnimationDelayMs = 150;
 
     // Implementazione astratta della base
@@ -84,7 +84,7 @@ public partial class MultipleImagesNodeViewModel : ImageNodeViewModel
     // --- Costruttore ---
     public MultipleImagesNodeViewModel(
         MultipleImagesNodeModel model,
-        IFitsIoService ioService,           // Updated Dependency
+        IFitsIoService ioService,
         IFitsImageDataConverter converter,
         IImageAnalysisService analysis,
         Size maxSize, 
@@ -105,6 +105,7 @@ public partial class MultipleImagesNodeViewModel : ImageNodeViewModel
 
         _currentIndex = 0;
         
+        // Popola cache iniziale se disponibile
         if (initialData != null)
         {
             _dataCache.Add(0, initialData);
@@ -126,10 +127,8 @@ public partial class MultipleImagesNodeViewModel : ImageNodeViewModel
         ActiveFitsImage = new FitsRenderer(initialData, _ioService, _converter, _analysis);
         await ActiveFitsImage.InitializeAsync();
         
-        // Applichiamo subito il modo visualizzazione corrente del Nodo
+        // Setup iniziale: Modo e Viewport
         ActiveFitsImage.VisualizationMode = this.VisualizationMode;
-
-        // Setup iniziale Viewport
         Viewport.ImageSize = ActiveFitsImage.ImageSize;
         if (centerOnPosition) Viewport.ResetView(); 
 
@@ -140,13 +139,16 @@ public partial class MultipleImagesNodeViewModel : ImageNodeViewModel
         BlackPoint = ActiveFitsImage.BlackPoint;
         WhitePoint = ActiveFitsImage.WhitePoint;
         
+        // Caricamento speculativo del prossimo frame
         _ = PrefetchImageAsync(1);
     }
 
+    // Trigger quando cambia l'indice (se non stiamo animando)
     partial void OnCurrentIndexChanged(int value)
     {
         if (!IsAnimating) 
         {
+            // Lanciamo il caricamento in "fire-and-forget" safe
             _ = LoadImageAtIndexAsync(value);
         }
     }
@@ -156,36 +158,40 @@ public partial class MultipleImagesNodeViewModel : ImageNodeViewModel
     {
         if (index < 0 || index >= _imageCount) return;
 
-        // Annullamento caricamento precedente
+        // Debounce: Annulla caricamento precedente
         _loadingCts?.Cancel();
         _loadingCts = new CancellationTokenSource();
         var token = _loadingCts.Token;
 
         try
         {
+            // 1. Recupero dati (Cache o Disco)
             var cachedData = await GetOrLoadDataAtIndex(index);
             
             if (token.IsCancellationRequested) return;
 
+            // Se l'immagine è già quella attiva o nulla, esci
             if (ActiveFitsImage != null && ActiveFitsImage.Data == cachedData) return;
             if (cachedData == null) return;
 
+            // 2. Gestione Profilo Contrasto (Persistenza tra frame)
             ContrastProfile? profileToApply = _lastContrastProfile;
 
-            // Cattura profilo corrente
+            // Se il renderer attuale è valido, catturiamo il suo profilo corrente
+            // (così se l'utente ha modificato il contrasto, lo manteniamo nel prossimo frame)
             if (ActiveFitsImage != null && !ActiveFitsImage.IsDisposed) 
             {
                 profileToApply = ActiveFitsImage.CaptureContrastProfile();
                 _lastContrastProfile = profileToApply;
             }
 
-            // Creazione nuovo renderer
+            // 3. Creazione Nuovo Renderer
             var newFitsImage = new FitsRenderer(cachedData, _ioService, _converter, _analysis);
             
-            // Inizializza
+            // Inizializzazione asincrona
             await newFitsImage.InitializeAsync();
 
-            // Imponiamo al nuovo renderer di usare la modalità scelta nel Nodo
+            // Applicazione impostazioni globali
             newFitsImage.VisualizationMode = this.VisualizationMode;
 
             if (token.IsCancellationRequested)
@@ -194,34 +200,35 @@ public partial class MultipleImagesNodeViewModel : ImageNodeViewModel
                 return;
             }
 
-            // Applicazione Profilo Contrasto (mantiene lo stesso stretch tra i frame)
+            // Applicazione Profilo Contrasto
             if (profileToApply != null)
             {
                 newFitsImage.ApplyContrastProfile(profileToApply);
             }
 
-            // Aggiorna Viewport
+            // 4. Swap Sicuro
+            var oldImage = ActiveFitsImage;
+            
+            // Viewport update (importante se le dimensioni cambiano, ma in stack solitamente no)
             Viewport.ImageSize = newFitsImage.ImageSize;
 
-            // Swap Atomico
-            var oldImage = ActiveFitsImage;
             ActiveFitsImage = newFitsImage; 
 
+            // Dispose immediato della vecchia immagine per liberare VRAM
             oldImage?.UnloadData();
 
-            // Aggiorna UI valori
+            // Sincronizza UI
             BlackPoint = newFitsImage.BlackPoint;
             WhitePoint = newFitsImage.WhitePoint;
 
+            // Aggiorna stato comandi
             PreviousImageCommand.NotifyCanExecuteChanged();
             NextImageCommand.NotifyCanExecuteChanged();
 
+            // Prefetch prossimo frame
             _ = PrefetchImageAsync(index + 1);
         }
-        catch (OperationCanceledException)
-        {
-            // Normale cancellazione task
-        }
+        catch (OperationCanceledException) { /* Ignora */ }
         catch (Exception ex)
         {
             Debug.WriteLine($"Errore LoadImageAtIndex: {ex.Message}");
@@ -229,6 +236,7 @@ public partial class MultipleImagesNodeViewModel : ImageNodeViewModel
     }
 
     // --- Comandi Navigazione ---
+
     [RelayCommand(CanExecute = nameof(CanShowPrevious))]
     private void PreviousImage()
     {
@@ -281,9 +289,9 @@ public partial class MultipleImagesNodeViewModel : ImageNodeViewModel
         
         _lastContrastProfile = null;
 
-        // Ricarica la vista corrente
+        // Hack per forzare il refresh property changed se l'indice non cambia
         int tempIndex = CurrentIndex;
-        CurrentIndex = -1; // Hack per forzare il refresh property changed
+        CurrentIndex = -1; 
         CurrentIndex = tempIndex;
     }
     
@@ -310,7 +318,6 @@ public partial class MultipleImagesNodeViewModel : ImageNodeViewModel
     {
         try
         {
-            // Utilizzo del nuovo servizio IO
             var data = await _ioService.LoadAsync(_multiModel.ImagePaths[index]);
             if (data != null) _dataCache.Add(index, data);
             return data;
@@ -338,22 +345,13 @@ public partial class MultipleImagesNodeViewModel : ImageNodeViewModel
     [RelayCommand]
     public void ToggleAnimation()
     {
-        if (IsAnimating)
-        {
-            StopAnimation();
-        }
-        else
-        {
-            StartAnimation();
-        }
+        if (IsAnimating) StopAnimation(); else StartAnimation();
     }
 
     private void StartAnimation()
     {
         if (_imageCount < 2) return;
-        
         IsAnimating = true;
-
         _ = AnimationLoopAsync();
     }
 
@@ -369,8 +367,12 @@ public partial class MultipleImagesNodeViewModel : ImageNodeViewModel
             while (IsAnimating)
             {
                 int nextIndex = (_currentIndex + 1) % _imageCount;
+                
+                // Carichiamo l'immagine direttamente (senza passare dalla proprietà CurrentIndex
+                // per avere un controllo più fine sul timing)
                 await LoadImageAtIndexAsync(nextIndex);
                 
+                // Aggiorniamo la proprietà solo alla fine per muovere lo slider UI
                 SetProperty(ref _currentIndex, nextIndex, nameof(CurrentIndex));
                 OnPropertyChanged(nameof(CurrentImageText));
 
@@ -397,24 +399,37 @@ public partial class MultipleImagesNodeViewModel : ImageNodeViewModel
     }
 
     // --- Dispose ---
+    
+    // Flag privato per evitare problemi di doppia dispose
+    private bool _isDisposed;
+
     protected override void Dispose(bool disposing)
     {
-        if (disposing)
+        if (!_isDisposed)
         {
-            ActiveFitsImage?.UnloadData();
-            _dataCache.Clear(); 
-        }
-        
-        if (!string.IsNullOrEmpty(TemporaryFolderPath) && Directory.Exists(TemporaryFolderPath))
-        {
-            try
+            if (disposing)
             {
-                Directory.Delete(TemporaryFolderPath, true);
+                StopAnimation();
+                _loadingCts?.Cancel();
+                
+                ActiveFitsImage?.UnloadData();
+                _dataCache.Clear(); 
             }
-            catch (Exception ex)
+            
+            // Pulizia cartella temporanea
+            if (!string.IsNullOrEmpty(TemporaryFolderPath) && Directory.Exists(TemporaryFolderPath))
             {
-                Debug.WriteLine($"[DISK CLEANUP ERROR] Impossibile eliminare temp: {ex.Message}");
+                try
+                {
+                    Directory.Delete(TemporaryFolderPath, true);
+                }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"[DISK CLEANUP ERROR] Impossibile eliminare temp: {ex.Message}");
+                }
             }
+            
+            _isDisposed = true;
         }
         
         base.Dispose(disposing);

@@ -1,45 +1,45 @@
-﻿using CommunityToolkit.Mvvm.ComponentModel;
+﻿using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Threading.Tasks;
+using Avalonia;
+using Avalonia.Media.Imaging;
+using Avalonia.Platform;
+using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
-using KomaLab.Models;
+using KomaLab.Models.Visualization;
 using KomaLab.Services.Data;
 using KomaLab.Services.Imaging;
-using KomaLab.ViewModels.Helpers;
-using Avalonia.Media.Imaging;
+using KomaLab.ViewModels.Visualization;
 using OpenCvSharp;
-using System;
-using System.Collections.Generic;
-using System.Threading.Tasks;
-using System.IO;
-using Avalonia;
-using Avalonia.Platform;
-using KomaLab.Models.Fits;
-using KomaLab.Models.Visualization;
+
 using Point = Avalonia.Point;
 using Size = Avalonia.Size;
 
-namespace KomaLab.ViewModels;
+namespace KomaLab.ViewModels.Tools;
 
 // ---------------------------------------------------------------------------
 // FILE: PosterizationToolViewModel.cs
 // RUOLO: ViewModel Tool Interattivo
 // DESCRIZIONE:
-// Permette all'utente di vedere in anteprima l'effetto di posterizzazione
-// e regolare le soglie prima di applicarlo a tutti i file.
+// Gestisce l'interfaccia di anteprima per il tool di posterizzazione.
+// Responsabilità:
+// 1. Caricamento e gestione della Matrice OpenCV sorgente.
+// 2. Rendering Real-Time dell'anteprima (Preview) quando l'utente muove gli slider.
+// 3. Applicazione batch delle impostazioni a tutte le immagini selezionate.
 // ---------------------------------------------------------------------------
 
 public partial class PosterizationToolViewModel : ObservableObject, IDisposable
 {
-    // --- Dipendenze Enterprise ---
-    private readonly IFitsIoService _ioService;      // Sostituisce IFitsService
+    // --- Dipendenze ---
+    private readonly IFitsIoService _ioService;
     private readonly IPosterizationService _postService;
     private readonly IFitsImageDataConverter _converter;
     private readonly IImageAnalysisService _analysis;
 
-    // --- Dati e Stato Interno ---
+    // --- Stato Interno ---
     private readonly List<string> _sourcePaths;
     private Mat? _sourceMat; 
-    private FitsImageData? _currentData;
-    
     private double _lastAutoBlack;
     private double _lastAutoWhite;
     private bool _hasLoadedFirstImage = false;
@@ -61,15 +61,11 @@ public partial class PosterizationToolViewModel : ObservableObject, IDisposable
     public string CurrentImageText => $"{CurrentIndex + 1} / {_sourcePaths.Count}";
     public bool IsNavigationVisible => _sourcePaths.Count > 1;
 
-    // --- Parametri di Quantizzazione ---
-    [ObservableProperty] 
-    private int _levels = 64; 
-
+    // --- Parametri UI ---
+    [ObservableProperty] private int _levels = 64; 
     [ObservableProperty] private VisualizationMode _selectedMode;
 
-    // --- Logica Soglie ---
     [ObservableProperty] private bool _autoAdaptThresholds = true; 
-
     [ObservableProperty] private double _sliderMin = 0;
     [ObservableProperty] private double _sliderMax = 65535;
 
@@ -79,7 +75,7 @@ public partial class PosterizationToolViewModel : ObservableObject, IDisposable
     [ObservableProperty] private bool _isProcessing;
     [ObservableProperty] private string _statusText = "Pronto";
 
-    // --- Helper UI ---
+    // --- Output del Dialogo ---
     public VisualizationMode[] AvailableModes => Enum.GetValues<VisualizationMode>();
     public List<string>? ResultPaths { get; private set; }
     public bool DialogResult { get; private set; }
@@ -88,24 +84,26 @@ public partial class PosterizationToolViewModel : ObservableObject, IDisposable
     // --- Costruttore ---
     public PosterizationToolViewModel(
         List<string> paths,
-        IFitsIoService ioService,           // Updated Dependency
+        IFitsIoService ioService,
         IPosterizationService postService,
         IFitsImageDataConverter converter,
         IImageAnalysisService analysis,
         VisualizationMode initialMode)
     {
-        _sourcePaths = paths;
-        _ioService = ioService;
-        _postService = postService;
-        _converter = converter;
-        _analysis = analysis;
+        _sourcePaths = paths ?? new List<string>();
+        _ioService = ioService ?? throw new ArgumentNullException(nameof(ioService));
+        _postService = postService ?? throw new ArgumentNullException(nameof(postService));
+        _converter = converter ?? throw new ArgumentNullException(nameof(converter));
+        _analysis = analysis ?? throw new ArgumentNullException(nameof(analysis));
+        
         _selectedMode = initialMode;
 
         if (_sourcePaths.Count > 0) 
             _ = LoadImageAtIndexAsync(0);
     }
 
-    // --- Caricamento Immagine e Logica Smart ---
+    // --- Logica Caricamento ---
+
     private async Task LoadImageAtIndexAsync(int index)
     {
         if (index < 0 || index >= _sourcePaths.Count) return;
@@ -115,22 +113,16 @@ public partial class PosterizationToolViewModel : ObservableObject, IDisposable
         {
             _sourceMat?.Dispose(); 
             _sourceMat = null;
-            _currentData = null;
 
-            // Updated: LoadAsync
             var data = await _ioService.LoadAsync(_sourcePaths[index]);
             if (data != null)
             {
-                _currentData = data;
                 _sourceMat = _converter.RawToMat(data);
 
-                double minVal, maxVal;
-                Cv2.MinMaxLoc(_sourceMat, out minVal, out maxVal);
+                Cv2.MinMaxLoc(_sourceMat, out double minVal, out double maxVal);
                 SliderMin = minVal;
                 SliderMax = maxVal;
 
-                // Updated: CalculateAutoStretchLevels (ritorna una Tupla)
-                // Poiché CalculateAutoStretchLevels richiede una Mat, usiamo quella che abbiamo appena creato
                 var (currentAutoBlack, currentAutoWhite) = await Task.Run(() => _analysis.CalculateAutoStretchLevels(_sourceMat));
 
                 if (!_hasLoadedFirstImage)
@@ -150,8 +142,8 @@ public partial class PosterizationToolViewModel : ObservableObject, IDisposable
                     }
                     else
                     {
-                        BlackPoint = Math.Clamp(BlackPoint, SliderMin, SliderMax);
-                        WhitePoint = Math.Clamp(WhitePoint, SliderMin, SliderMax);
+                        BlackPoint = Math.Clamp((double)BlackPoint, SliderMin, SliderMax);
+                        WhitePoint = Math.Clamp((double)WhitePoint, SliderMin, SliderMax);
                         if (WhitePoint <= BlackPoint + 1)
                         {
                             BlackPoint = currentAutoBlack;
@@ -184,19 +176,21 @@ public partial class PosterizationToolViewModel : ObservableObject, IDisposable
     {
         if (_sourceMat == null) return;
         
-        // Updated: CalculateAutoStretchLevels
         var (autoB, autoW) = await Task.Run(() => _analysis.CalculateAutoStretchLevels(_sourceMat));
         
         BlackPoint = Math.Clamp(autoB, SliderMin, SliderMax);
         WhitePoint = Math.Clamp(autoW, SliderMin, SliderMax);
         
-        if (Math.Abs(WhitePoint - BlackPoint) < 1) WhitePoint = BlackPoint + 100;
+        if (Math.Abs((double)(WhitePoint - BlackPoint)) < 1) WhitePoint = BlackPoint + 100;
+        
         UpdatePreview();
     }
 
-    // --- Aggiornamento Anteprima ---
+    // --- Gestione Cambiamenti UI ---
+    
     partial void OnLevelsChanged(int value) => UpdatePreview();
     partial void OnSelectedModeChanged(VisualizationMode value) => UpdatePreview();
+    
     partial void OnBlackPointChanged(double value)
     {
         if (value >= WhitePoint - 1)
@@ -204,16 +198,9 @@ public partial class PosterizationToolViewModel : ObservableObject, IDisposable
             double pushedWhite = value + 1;
             if (pushedWhite > SliderMax)
             {
-                if (value > SliderMax - 1)
-                {
-                    BlackPoint = SliderMax - 1; 
-                    return; 
-                }
+                if (value > SliderMax - 1) BlackPoint = SliderMax - 1; 
             }
-            else
-            {
-                WhitePoint = pushedWhite;
-            }
+            else WhitePoint = pushedWhite;
         }
         UpdatePreview();
     }
@@ -225,23 +212,19 @@ public partial class PosterizationToolViewModel : ObservableObject, IDisposable
             double pushedBlack = value - 1;
             if (pushedBlack < SliderMin)
             {
-                if (value < SliderMin + 1)
-                {
-                    WhitePoint = SliderMin + 1;
-                    return; 
-                }
+                if (value < SliderMin + 1) WhitePoint = SliderMin + 1;
             }
-            else
-            {
-                BlackPoint = pushedBlack;
-            }
+            else BlackPoint = pushedBlack;
         }
         UpdatePreview();
     }
 
+    // --- Core Rendering Anteprima ---
+
     private void UpdatePreview()
     {
         if (_sourceMat == null || _sourceMat.IsDisposed) return;
+        
         try
         {
             var writeableBmp = new WriteableBitmap(
@@ -252,11 +235,15 @@ public partial class PosterizationToolViewModel : ObservableObject, IDisposable
 
             using (var lockedBuffer = writeableBmp.Lock())
             {
+                // *** FIX APPLICATO QUI ***
+                // Invece di 'new Mat(...)', usiamo 'Mat.FromPixelData'
                 using var dstMat = Mat.FromPixelData(
-                    _sourceMat.Height, _sourceMat.Width, MatType.CV_8UC1, 
-                    lockedBuffer.Address, lockedBuffer.RowBytes);
+                    _sourceMat.Height, 
+                    _sourceMat.Width, 
+                    MatType.CV_8UC1, 
+                    lockedBuffer.Address, 
+                    lockedBuffer.RowBytes);
 
-                // Rendering locale per anteprima
                 ComputePreviewPosterization(_sourceMat, dstMat, Levels, SelectedMode, BlackPoint, WhitePoint);
             }
 
@@ -264,54 +251,48 @@ public partial class PosterizationToolViewModel : ObservableObject, IDisposable
             PreviewBitmap = writeableBmp;
             old?.Dispose();
         }
-        catch (Exception ex) { System.Diagnostics.Debug.WriteLine(ex); }
+        catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"Preview Error: {ex.Message}"); }
     }
 
-    /// <summary>
-    /// Logica locale per l'anteprima.
-    /// </summary>
     private static void ComputePreviewPosterization(Mat src, Mat dst, int levels, VisualizationMode mode, double bp, double wp)
     {
         double range = wp - bp;
         if (Math.Abs(range) < 1e-9) range = 1e-5;
         
-        using Mat temp = new Mat();
+        using var temp32f = new Mat();
+        
         double scale = 1.0 / range;
         double offset = -bp * scale;
-
-        // Normalizzazione
-        src.ConvertTo(temp, MatType.CV_32FC1, scale, offset);
+        src.ConvertTo(temp32f, MatType.CV_32FC1, scale, offset);
         
-        // Clipping
-        Cv2.Max(temp, 0.0, temp);
-        Cv2.Min(temp, 1.0, temp);
+        Cv2.Max(temp32f, 0.0, temp32f);
+        Cv2.Min(temp32f, 1.0, temp32f);
 
-        // Stretch non lineare
         if (mode == VisualizationMode.SquareRoot)
         {
-            Cv2.Sqrt(temp, temp);
+            Cv2.Sqrt(temp32f, temp32f);
         }
         else if (mode == VisualizationMode.Logarithmic)
         {
-            Cv2.Add(temp, 1.0, temp);
-            Cv2.Log(temp, temp);
-            Cv2.Multiply(temp, 1.442695, temp);
+            Cv2.Add(temp32f, 1.0, temp32f);
+            Cv2.Log(temp32f, temp32f);
+            Cv2.Multiply(temp32f, 1.442695, temp32f);
         }
 
-        // Quantizzazione
-        Cv2.Multiply(temp, (double)levels - 0.001, temp);
-        using Mat intTemp = new Mat();
-        temp.ConvertTo(intTemp, MatType.CV_32SC1);
-        intTemp.ConvertTo(temp, MatType.CV_32FC1);
+        Cv2.Multiply(temp32f, (double)levels - 0.001, temp32f);
+        
+        using var temp32s = new Mat();
+        temp32f.ConvertTo(temp32s, MatType.CV_32SC1);
+        temp32s.ConvertTo(temp32f, MatType.CV_32FC1); 
         
         double divScale = levels > 1 ? 1.0 / (levels - 1) : 1.0;
-        Cv2.Multiply(temp, divScale, temp);
+        Cv2.Multiply(temp32f, divScale, temp32f);
 
-        // Conversione 8-bit
-        temp.ConvertTo(dst, MatType.CV_8UC1, 255.0, 0);
+        temp32f.ConvertTo(dst, MatType.CV_8UC1, 255.0, 0);
     }
 
-    // --- Navigazione ---
+    // --- Comandi Navigazione ---
+    
     [RelayCommand(CanExecute = nameof(CanGoNext))]
     private async Task NextImage() { CurrentIndex++; await LoadImageAtIndexAsync(CurrentIndex); }
     private bool CanGoNext() => CurrentIndex < _sourcePaths.Count - 1;
@@ -326,13 +307,15 @@ public partial class PosterizationToolViewModel : ObservableObject, IDisposable
     [RelayCommand(CanExecute = nameof(CanGoNext))]
     private async Task GoToLastImage() { CurrentIndex = _sourcePaths.Count - 1; await LoadImageAtIndexAsync(CurrentIndex); }
 
-    // --- Applicazione ---
+    // --- Applicazione Finale ---
+
     [RelayCommand]
     private async Task Apply()
     {
         if (IsProcessing) return;
         IsProcessing = true;
-        StatusText = "Elaborazione...";
+        StatusText = "Elaborazione in corso...";
+        
         try
         {
             var results = new List<string>();
@@ -356,15 +339,12 @@ public partial class PosterizationToolViewModel : ObservableObject, IDisposable
 
                 if (_autoAdaptThresholds && i != _currentIndex)
                 {
-                    StatusText = $"Calcolo soglie {i + 1}/{_sourcePaths.Count}...";
+                    StatusText = $"Analisi {i + 1}/{_sourcePaths.Count}...";
                     
                     var tempData = await _ioService.LoadAsync(path);
                     if (tempData != null)
                     {
-                        // Poiché CalculateAutoStretchLevels richiede una Mat, dobbiamo convertire
                         using var tempMat = _converter.RawToMat(tempData);
-                        
-                        // Updated: CalculateAutoStretchLevels
                         var (autoB, autoW) = await Task.Run(() => _analysis.CalculateAutoStretchLevels(tempMat));
                         
                         targetBlack = Math.Clamp(autoB + userOffsetBlack, _sliderMin, _sliderMax);
@@ -372,7 +352,7 @@ public partial class PosterizationToolViewModel : ObservableObject, IDisposable
                     }
                 }
 
-                StatusText = $"Posterizzazione {i + 1}/{_sourcePaths.Count}...";
+                StatusText = $"Rendering {i + 1}/{_sourcePaths.Count}...";
                 
                 var outPath = await _postService.PosterizeAndSaveAsync(
                     path, tempFolder, Levels, SelectedMode, targetBlack, targetWhite);
@@ -384,10 +364,19 @@ public partial class PosterizationToolViewModel : ObservableObject, IDisposable
             DialogResult = true;
             RequestClose?.Invoke();
         }
-        catch (Exception ex) { StatusText = $"Errore: {ex.Message}"; IsProcessing = false; }
+        catch (Exception ex) 
+        { 
+            StatusText = $"Errore Critico: {ex.Message}"; 
+            IsProcessing = false; 
+        }
     }
 
-    [RelayCommand] private void Cancel() { DialogResult = false; RequestClose?.Invoke(); }
+    [RelayCommand] 
+    private void Cancel() 
+    { 
+        DialogResult = false; 
+        RequestClose?.Invoke(); 
+    }
 
     public void ZoomIn() => Viewport.ZoomIn();
     public void ZoomOut() => Viewport.ZoomOut();
@@ -395,5 +384,10 @@ public partial class PosterizationToolViewModel : ObservableObject, IDisposable
     public void ApplyPan(double dx, double dy) => Viewport.ApplyPan(dx, dy);
     public void ApplyZoomAtPoint(double f, Point c) => Viewport.ApplyZoomAtPoint(f, c);
 
-    public void Dispose() { _sourceMat?.Dispose(); _previewBitmap?.Dispose(); }
+    public void Dispose() 
+    { 
+        _sourceMat?.Dispose(); 
+        _previewBitmap?.Dispose(); 
+        GC.SuppressFinalize(this);
+    }
 }

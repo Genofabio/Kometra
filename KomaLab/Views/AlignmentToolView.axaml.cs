@@ -7,6 +7,7 @@ using System;
 using System.Diagnostics;
 using System.Threading.Tasks;
 using Avalonia.VisualTree;
+using KomaLab.ViewModels.Tools;
 
 namespace KomaLab.Views;
 

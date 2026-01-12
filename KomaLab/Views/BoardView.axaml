@@ -5,6 +5,7 @@
              xmlns:vm="clr-namespace:KomaLab.ViewModels"
              xmlns:views="clr-namespace:KomaLab.Views"
              xmlns:controls="clr-namespace:KomaLab.Controls"
+             xmlns:nodes="clr-namespace:KomaLab.ViewModels.Nodes"
              mc:Ignorable="d" d:DesignWidth="800" d:DesignHeight="450"
              x:Class="KomaLab.Views.BoardView"
              x:DataType="vm:BoardViewModel"
@@ -70,7 +71,7 @@
                 </ItemsControl.ItemsPanel>
 
                 <ItemsControl.DataTemplates>
-                    <DataTemplate DataType="vm:ConnectionViewModel">
+                    <DataTemplate DataType="nodes:ConnectionViewModel">
                         <controls:ConnectionControl IsHighlighted="{Binding IsHighlighted}" />
                     </DataTemplate>
                 </ItemsControl.DataTemplates>
@@ -89,10 +90,10 @@
                 </ItemsControl.RenderTransform>
 
                 <ItemsControl.DataTemplates>
-                    <DataTemplate DataType="vm:SingleImageNodeViewModel">
+                    <DataTemplate DataType="nodes:SingleImageNodeViewModel">
                         <views:SingleImageNodeView />
                     </DataTemplate>
-                    <DataTemplate DataType="vm:MultipleImagesNodeViewModel">
+                    <DataTemplate DataType="nodes:MultipleImagesNodeViewModel">
                         <views:MultipleImagesNodeView />
                     </DataTemplate>
                 </ItemsControl.DataTemplates>
@@ -105,9 +106,9 @@
 
                 <ItemsControl.ItemContainerTheme>
                     <ControlTheme TargetType="ContentPresenter">
-                        <Setter Property="Canvas.Left" Value="{Binding X, DataType=vm:BaseNodeViewModel}" />
-                        <Setter Property="Canvas.Top" Value="{Binding Y, DataType=vm:BaseNodeViewModel}" />
-                        <Setter Property="Canvas.ZIndex" Value="{Binding ZIndex, DataType=vm:BaseNodeViewModel}" />
+                        <Setter Property="Canvas.Left" Value="{Binding X, DataType=nodes:BaseNodeViewModel}" />
+                        <Setter Property="Canvas.Top" Value="{Binding Y, DataType=nodes:BaseNodeViewModel}" />
+                        <Setter Property="Canvas.ZIndex" Value="{Binding ZIndex, DataType=nodes:BaseNodeViewModel}" />
                     </ControlTheme>
                 </ItemsControl.ItemContainerTheme>
 

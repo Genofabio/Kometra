@@ -1,49 +1,52 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Linq;
+using System.IO;
 using System.Threading.Tasks;
 using Avalonia;
 using CommunityToolkit.Mvvm.ComponentModel;
-using KomaLab.Models;
 using KomaLab.Models.Fits;
 using KomaLab.Models.Nodes;
 using KomaLab.Models.Visualization;
-using KomaLab.Services.Data;        // IFitsIoService
+using KomaLab.Services.Data;
 using KomaLab.Services.Imaging;
-using KomaLab.ViewModels.Helpers;
-using nom.tam.fits;
+using KomaLab.ViewModels.Visualization; // Namespace corretto per FitsRenderer
 
-namespace KomaLab.ViewModels;
+namespace KomaLab.ViewModels.Nodes;
 
 // ---------------------------------------------------------------------------
 // FILE: SingleImageNodeViewModel.cs
-// RUOLO: Nodo Immagine Singola
+// RUOLO: ViewModel Nodo Immagine Singola
 // DESCRIZIONE:
-// Gestisce il ciclo di vita di una singola immagine FITS.
-// Responsabile del caricamento, rendering e della gestione della memoria.
+// Specializzazione di ImageNodeViewModel per gestire un singolo file FITS.
+// Orchesta il caricamento I/O e la creazione del FitsRenderer.
 // ---------------------------------------------------------------------------
 
 public partial class SingleImageNodeViewModel : ImageNodeViewModel
 {
-    // --- Servizi Enterprise ---
-    private readonly IFitsIoService _ioService;      // Sostituisce IFitsService
+    // --- Dipendenze ---
+    private readonly IFitsIoService _ioService;
     private readonly IFitsImageDataConverter _converter;
     private readonly IImageAnalysisService _analysis;
     
-    // --- Model Sottostante ---
+    // --- Model ---
     private readonly SingleImageNodeModel _imageModel;
 
     // --- Stato Interno ---
+    // Manteniamo un riferimento ai dati grezzi per operazioni I/O (es. salvataggio temp)
     private FitsImageData? _currentData;
     private ContrastProfile? _lastContrastProfile;
+    
+    // Shortcut per la View
     public string ImagePath => _imageModel.ImagePath;
 
     // --- Proprietà Observable ---
+
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(ActiveRenderer))] // Notifica la base
+    [NotifyPropertyChangedFor(nameof(ActiveRenderer))] // Notifica la classe base
     private FitsRenderer? _fitsImage;
 
-    // --- Implementazione Base ---
+    // --- Override ImageNodeViewModel ---
+
     public override FitsRenderer? ActiveRenderer => FitsImage;
 
     protected override Size NodeContentSize
@@ -52,36 +55,29 @@ public partial class SingleImageNodeViewModel : ImageNodeViewModel
         {
             if (FitsImage?.Data == null || FitsImage.Data.Width == 0)
             {
-                return new Size(200, 150); // Fallback size
+                // Dimensione default se nessuna immagine è caricata
+                return new Size(250, 200); 
             }
             return new Size(FitsImage.Data.Width, FitsImage.Data.Height);
         }
     }
 
     // --- Costruttore ---
+
     public SingleImageNodeViewModel(
         SingleImageNodeModel model,
-        IFitsIoService ioService,           // Updated Dependency
+        IFitsIoService ioService,
         IFitsImageDataConverter converter,      
         IImageAnalysisService analysis)    
         : base(model) 
     {
+        _imageModel = model ?? throw new ArgumentNullException(nameof(model));
         _ioService = ioService ?? throw new ArgumentNullException(nameof(ioService));
         _converter = converter ?? throw new ArgumentNullException(nameof(converter));
         _analysis = analysis ?? throw new ArgumentNullException(nameof(analysis));
-        _imageModel = model;
 
-        // Inizializzazione con Placeholder (evita null checks ovunque)
-        var placeholderData = new FitsImageData
-        {
-            RawData = Array.Empty<Array>(),
-            FitsHeader = new Header(),
-            Width = 0,
-            Height = 0
-        };
-
-        // Creazione Renderer con le nuove dipendenze
-        _fitsImage = new FitsRenderer(placeholderData, _ioService, _converter, _analysis);
+        // NOTA: Non creiamo nessun Placeholder qui. 
+        // Risparmiamo RAM e CPU lasciando FitsImage a null finché non carichiamo dati veri.
     }
 
     // --- Logica di Caricamento ---
@@ -92,80 +88,84 @@ public partial class SingleImageNodeViewModel : ImageNodeViewModel
         {
             if (string.IsNullOrEmpty(_imageModel.ImagePath)) return;
 
-            // Caricamento IO con il nuovo servizio
+            // 1. Caricamento IO (Heavy I/O Bound)
             var imageData = await _ioService.LoadAsync(_imageModel.ImagePath);
             if (imageData == null)
             {
-                throw new Exception("I dati FITS caricati sono nulli.");
+                throw new IOException($"Impossibile caricare i dati FITS da: {_imageModel.ImagePath}");
             }
 
-            // Applicazione al ViewModel
+            // 2. Applicazione al ViewModel (passando per il metodo standard)
             await ApplyProcessedDataAsync(new List<FitsImageData> { imageData });
         }
         catch (Exception ex)
         {
+            // Visualizza l'errore nel titolo del nodo per feedback immediato
             Title = $"ERR: {ex.Message}";
+            System.Diagnostics.Debug.WriteLine($"[SingleImageNode] Load Error: {ex}");
         }
     }
 
+    /// <summary>
+    /// Metodo centrale per l'aggiornamento dell'immagine.
+    /// Gestisce la creazione del renderer e la migrazione dello stato (contrasto/zoom).
+    /// </summary>
     private async Task SetFitsData(FitsImageData newData)
     {
-        // 1. Salvataggio stato precedente (Contrasto)
-        // Catturiamo il profilo SOLO se l'immagine precedente era valida (non placeholder)
-        if (FitsImage != null && FitsImage.Data.Width > 0) 
+        // 1. Cattura stato precedente (Contrasto)
+        if (FitsImage != null && !_isDisposed) 
         {
             _lastContrastProfile = FitsImage.CaptureContrastProfile();
         }
 
         _currentData = newData;
 
-        // 2. Creazione Nuovo Renderer con dipendenze aggiornate
+        // 2. Creazione Nuovo Renderer (Allocazione RAM/VRAM)
         var newFitsImage = new FitsRenderer(
             newData,
             _ioService,
             _converter,
             _analysis);
         
-        // Inizializzazione (Calcola istogramma e Auto-Stretch iniziale Lineare)
+        // 3. Inizializzazione Pipeline (Calcolo Auto-Stretch)
         await newFitsImage.InitializeAsync(); 
 
-        // --- ARCHITECTURE FIX: APPLICAZIONE STATO DEL NODO ---
-        // Il renderer nasce di default "Linear", ma noi gli imponiamo 
-        // la modalità di visualizzazione attualmente attiva nel Nodo (es. Logaritmica).
+        // 4. Ripristino Configurazione Visuale
+        // Applichiamo la modalità (Log/Linear) definita nel ViewModel
         newFitsImage.VisualizationMode = this.VisualizationMode;
 
-        // 3. Ripristino stato visualizzazione (Contrasto)
+        // Applichiamo il vecchio contrasto se esisteva, altrimenti teniamo l'Auto-Stretch calcolato in init
         if (_lastContrastProfile != null)
         {
             newFitsImage.ApplyContrastProfile(_lastContrastProfile);
         }
 
-        // 4. Aggiornamento Viewport
+        // 5. Swap e Cleanup
+        var oldFitsImage = FitsImage;
+        FitsImage = newFitsImage;
+
+        // Liberiamo SUBITO la memoria vecchia per ridurre il picco (RAM Spike)
+        oldFitsImage?.Dispose();
+
+        // 6. Aggiornamento Viewport e UI
         Viewport.ImageSize = newFitsImage.ImageSize;
         
-        // Se è il primo caricamento o veniamo da un placeholder, resettiamo zoom/pan
-        if (FitsImage == null || FitsImage.Data.Width == 0)
+        // Reset vista solo se è il primo caricamento
+        if (oldFitsImage == null)
         {
             Viewport.ResetView();
         }
 
-        // 5. Swap Atomico
-        var oldFitsImage = FitsImage;
-        FitsImage = newFitsImage;
-
-        // 6. Sincronizzazione UI (Slider Base)
+        // Sincronizza gli slider UI con i valori del nuovo renderer
         BlackPoint = newFitsImage.BlackPoint;
         WhitePoint = newFitsImage.WhitePoint;
 
-        // 7. Notifiche Layout e Cleanup
+        // Notifica cambiamento dimensioni al sistema di layout dei nodi
         OnPropertyChanged(nameof(NodeContentSize));
         OnPropertyChanged(nameof(EstimatedTotalSize));
-        
-        // Liberiamo la memoria della vecchia immagine (texture GPU e array)
-        oldFitsImage?.UnloadData();
     }
 
-    // --- Implementazione Metodi Astratti (Dati & IO) ---
+    // --- Implementazione Contratti Astratti ---
 
     public override async Task<List<FitsImageData?>> GetCurrentDataAsync()
     {
@@ -178,47 +178,40 @@ public partial class SingleImageNodeViewModel : ImageNodeViewModel
 
     public override async Task ApplyProcessedDataAsync(List<FitsImageData> newProcessedData)
     {
-        if (newProcessedData.Count == 0) return;
+        if (newProcessedData == null || newProcessedData.Count == 0) return;
 
-        var newData = newProcessedData.FirstOrDefault();
+        var newData = newProcessedData[0];
         if (newData != null)
         {
             await SetFitsData(newData);
         }
     }
 
-    // Nota: ResetThresholdsAsync è rimosso perché ereditato dalla base
-
     public override FitsImageData? GetActiveImageData()
     {
         return _currentData;
     }
     
-    // Updated: Firma aggiornata per accettare IFitsIoService
     public override async Task<List<string>> PrepareInputPathsAsync(IFitsIoService ioService)
     {
-        // CASO A: File esistente su disco
-        if (!string.IsNullOrEmpty(_imageModel.ImagePath) && System.IO.File.Exists(_imageModel.ImagePath))
+        // A. File su disco esistente: ritorniamo il path originale
+        if (!string.IsNullOrEmpty(_imageModel.ImagePath) && File.Exists(_imageModel.ImagePath))
         {
             return new List<string> { _imageModel.ImagePath };
         }
 
-        // CASO B: Dati in memoria (es. risultato elaborazione) -> Creazione Temp
+        // B. Dati in memoria (senza file): creiamo un temporaneo
         if (_currentData != null)
         {
-            string cleanTempPath = System.IO.Path.Combine(
-                System.IO.Path.GetTempPath(), 
-                $"Temp_AlignInput_{Guid.NewGuid()}.fits");
-
+            string tempPath = Path.Combine(Path.GetTempPath(), $"KomaLab_Node_{Guid.NewGuid()}.fits");
             try 
             {
-                // Updated: Metodo SaveAsync
-                await ioService.SaveAsync(_currentData, cleanTempPath);
-                return new List<string> { cleanTempPath };
+                await ioService.SaveAsync(_currentData, tempPath);
+                return new List<string> { tempPath };
             }
             catch (Exception ex)
             {
-                System.Diagnostics.Debug.WriteLine($"Errore creazione temp: {ex.Message}");
+                System.Diagnostics.Debug.WriteLine($"[SingleImageNode] Temp Save Error: {ex.Message}");
                 return new List<string>();
             }
         }
@@ -228,18 +221,28 @@ public partial class SingleImageNodeViewModel : ImageNodeViewModel
     
     public override async Task RefreshDataFromDiskAsync()
     {
-        // Semplicemente ricarichiamo i dati
         await LoadDataAsync(); 
     }
     
-    // --- Gestione Memoria (IDisposable) ---
+    // --- Gestione Risorse (IDisposable) ---
+
+    // Flag per evitare chiamate multiple durante il dispose
+    private bool _isDisposed;
+
     protected override void Dispose(bool disposing)
     {
-        if (disposing)
+        if (!_isDisposed)
         {
-            FitsImage?.UnloadData();
-            FitsImage = null;
-            _currentData = null;
+            if (disposing)
+            {
+                // Dispose del renderer attivo (libera VRAM e Mat OpenCV)
+                FitsImage?.Dispose();
+                FitsImage = null;
+                
+                // Dereferencing dei dati raw (libera RAM Managed)
+                _currentData = null;
+            }
+            _isDisposed = true;
         }
         
         base.Dispose(disposing);

@@ -5,13 +5,14 @@
         xmlns:vm="clr-namespace:KomaLab.ViewModels"
         xmlns:avalonia="clr-namespace:Material.Icons.Avalonia;assembly=Material.Icons.Avalonia"
         xmlns:converters="clr-namespace:KomaLab.Converters"
-        xmlns:helpers="clr-namespace:KomaLab.ViewModels.Helpers"
         xmlns:models="clr-namespace:KomaLab.Models"
         xmlns:av="clr-namespace:Avalonia.Data.Converters;assembly=Avalonia.Base"
         xmlns:processing="clr-namespace:KomaLab.Models.Processing"
+        xmlns:tools="clr-namespace:KomaLab.ViewModels.Tools"
+        xmlns:items="clr-namespace:KomaLab.ViewModels.Items"
         mc:Ignorable="d" d:DesignWidth="800" d:DesignHeight="600"
         x:Class="KomaLab.Views.AlignmentToolView"
-        x:DataType="vm:AlignmentToolViewModel"
+        x:DataType="tools:AlignmentToolViewModel"
         Title="Allineamento"
         Width="800" Height="600"
         MinHeight="500" MinWidth="710"
@@ -25,7 +26,7 @@
         <converters:EnumToBoolConverter x:Key="EnumToBool" />
         
         <DataTemplate x:Key="CoordinateItemTemplate"
-                      x:DataType="helpers:CoordinateEntry">
+                      x:DataType="items:CoordinateEntry">
             
             <Border Classes.active="{Binding IsActive}"
                     Background="{DynamicResource ToolPanelBackgroundBrush}"

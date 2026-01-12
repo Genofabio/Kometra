@@ -4,6 +4,8 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Media;
 using KomaLab.ViewModels;
+using KomaLab.ViewModels.Nodes;
+using ConnectionViewModel = KomaLab.ViewModels.Nodes.ConnectionViewModel;
 
 namespace KomaLab.Controls;
 

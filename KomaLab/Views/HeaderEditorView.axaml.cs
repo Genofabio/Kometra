@@ -4,6 +4,7 @@ using Avalonia.Interactivity;
 using Avalonia.Threading; // Necessario per il Dispatcher
 using KomaLab.ViewModels;
 using System;
+using HeaderEditorToolViewModel = KomaLab.ViewModels.Tools.HeaderEditorToolViewModel;
 
 namespace KomaLab.Views;
 
@@ -22,7 +23,7 @@ public partial class HeaderEditorView : Window
     {
         base.OnDataContextChanged(e);
 
-        if (DataContext is HeaderEditorViewModel vm)
+        if (DataContext is HeaderEditorToolViewModel vm)
         {
             // Rimuoviamo per sicurezza (evita doppi agganci se il context cambia)
             vm.RequestScrollToSelection -= OnRequestScroll;
@@ -39,7 +40,7 @@ public partial class HeaderEditorView : Window
         // Questo dà tempo alla DataGrid di creare visivamente la nuova riga prima di provare a scorrerla.
         Dispatcher.UIThread.Post(() =>
         {
-            if (DataContext is HeaderEditorViewModel vm && vm.SelectedItem != null)
+            if (DataContext is HeaderEditorToolViewModel vm && vm.SelectedItem != null)
             {
                 var grid = this.FindControl<DataGrid>("TheDataGrid");
                 grid?.ScrollIntoView(vm.SelectedItem, null);

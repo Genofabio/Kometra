@@ -6,6 +6,7 @@ using Avalonia.Input;
 using Avalonia.Media;
 using Avalonia.VisualTree; 
 using KomaLab.ViewModels;
+using KomaLab.ViewModels.Nodes;
 
 namespace KomaLab.Views;
 

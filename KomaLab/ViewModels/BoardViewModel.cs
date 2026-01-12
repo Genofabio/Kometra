@@ -9,25 +9,17 @@ using System.Threading.Tasks;
 using Avalonia;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
-using KomaLab.Models;
 using KomaLab.Models.Fits;
 using KomaLab.Models.Processing;
 using KomaLab.Models.Visualization;
-using KomaLab.Services.Data;        // IFitsIoService, IFitsMetadataService
+using KomaLab.Services.Data;
 using KomaLab.Services.Factories;
 using KomaLab.Services.Imaging;
 using KomaLab.Services.UI;
 using KomaLab.Services.Undo;
+using KomaLab.ViewModels.Nodes; 
 
 namespace KomaLab.ViewModels;
-
-// ---------------------------------------------------------------------------
-// FILE: BoardViewModel.cs
-// RUOLO: Viewmodel Principale (Orchestratore della Board)
-// DESCRIZIONE:
-// Gestisce lo stato globale dei nodi, le connessioni e i comandi di alto livello.
-// Aggiornato per utilizzare i servizi atomici IFitsIoService e IFitsMetadataService.
-// ---------------------------------------------------------------------------
 
 public partial class BoardViewModel : ObservableObject
 {
@@ -41,12 +33,13 @@ public partial class BoardViewModel : ObservableObject
     private readonly IUndoService _undoService;
     private readonly IMediaExportService _mediaService;  
 
-    // --- Proprietà ---
+    // --- Proprietà Visuali ---
     [ObservableProperty] private double _offsetX;
     [ObservableProperty] private double _offsetY;
     [ObservableProperty] private double _scale = 0.46;
     [ObservableProperty] private Rect _viewBounds;
     
+    // --- Stato Selezione ---
     [ObservableProperty] 
     [NotifyCanExecuteChangedFor(nameof(ResetNormalizationCommand))]
     [NotifyCanExecuteChangedFor(nameof(ResetNodeViewCommand))]
@@ -64,9 +57,10 @@ public partial class BoardViewModel : ObservableObject
     public bool IsGlobalAnimationRunning => 
         Nodes.OfType<MultipleImagesNodeViewModel>().Any(n => n.IsAnimating);
     
+    // --- Collezioni ---
+    // Nodes accetta BaseNodeViewModel. Poiché Single/Multiple ereditano da BaseNodeViewModel,
+    // il casting dovrebbe essere implicito se i namespace sono corretti.
     public ObservableCollection<BaseNodeViewModel> Nodes { get; } = new();
-    
-    // Collezione per i collegamenti (Link) tra i nodi
     public ObservableCollection<ConnectionViewModel> Connections { get; } = new();
     
     private int _maxZIndex;
@@ -80,19 +74,20 @@ public partial class BoardViewModel : ObservableObject
         IFitsMetadataService metadataService, 
         IImageOperationService opsService,
         IUndoService undoService,
-        IMediaExportService mediaService)    // Iniezione corretta
+        IMediaExportService mediaService)
     {
-        _nodeFactory = nodeFactory;
-        _dialogService = dialogService;
-        _windowService = windowService;
-        _ioService = ioService;
-        _metadataService = metadataService;
-        _opsService = opsService;
-        _undoService = undoService;
-        _mediaService = mediaService;
+        _nodeFactory = nodeFactory ?? throw new ArgumentNullException(nameof(nodeFactory));
+        _dialogService = dialogService ?? throw new ArgumentNullException(nameof(dialogService));
+        _windowService = windowService ?? throw new ArgumentNullException(nameof(windowService));
+        _ioService = ioService ?? throw new ArgumentNullException(nameof(ioService));
+        _metadataService = metadataService ?? throw new ArgumentNullException(nameof(metadataService));
+        _opsService = opsService ?? throw new ArgumentNullException(nameof(opsService));
+        _undoService = undoService ?? throw new ArgumentNullException(nameof(undoService));
+        _mediaService = mediaService ?? throw new ArgumentNullException(nameof(mediaService));
     }
 
-    // --- Comandi ---
+    // --- Comandi Aggiunta Nodi ---
+
     [RelayCommand]
     private async Task AddNode()
     {
@@ -109,10 +104,6 @@ public partial class BoardViewModel : ObservableObject
         }
         else
         {
-            // RISOLUZIONE ENTERPRISE: Orchestrazione dei servizi
-            // 1. Leggiamo gli header di tutti i file in parallelo (IO Service)
-            // 2. Estraiamo le date (Metadata Service)
-            // 3. Ordiniamo la lista
             var pathDatePairs = await Task.WhenAll(pathList.Select(async path =>
             {
                 var header = await _ioService.ReadHeaderOnlyAsync(path);
@@ -141,8 +132,11 @@ public partial class BoardViewModel : ObservableObject
     protected override void OnPropertyChanged(System.ComponentModel.PropertyChangedEventArgs e)
     {
         base.OnPropertyChanged(e);
-        UndoCommand.NotifyCanExecuteChanged();
-        RedoCommand.NotifyCanExecuteChanged();
+        if (e.PropertyName != nameof(UndoCommand) && e.PropertyName != nameof(RedoCommand))
+        {
+            UndoCommand.NotifyCanExecuteChanged();
+            RedoCommand.NotifyCanExecuteChanged();
+        }
     }
 
     // --- Gestione Eventi Nodi ---
@@ -169,7 +163,6 @@ public partial class BoardViewModel : ObservableObject
             "Rimuovi Nodo",
             execute: () =>
             {
-                // FIX 1: FERMARE L'ANIMAZIONE
                 if (node is MultipleImagesNodeViewModel multiNode && multiNode.IsAnimating)
                 {
                     multiNode.ToggleAnimation(); 
@@ -177,13 +170,15 @@ public partial class BoardViewModel : ObservableObject
 
                 if (SelectedNode == node) DeselectAllNodes();
                 UnregisterNodeEvents(node);
+                
                 foreach (var conn in connectionsToRemove)
                 {
                     Connections.Remove(conn);
+                    conn.Dispose();
                 }
+                
                 Nodes.Remove(node);
 
-                // FIX 2: AGGIORNARE LO STATO GLOBALE
                 OnPropertyChanged(nameof(IsGlobalAnimationRunning));
                 ToggleNodeAnimationCommand.NotifyCanExecuteChanged();
             },
@@ -193,12 +188,10 @@ public partial class BoardViewModel : ObservableObject
                 {
                     Nodes.Add(node);
                     RegisterNodeEvents(node);
+                    
                     foreach (var conn in connectionsToRemove)
                     {
-                        if (!Connections.Contains(conn))
-                        {
-                            Connections.Add(conn);
-                        }
+                        if (!Connections.Contains(conn)) Connections.Add(conn);
                     }
                     SetSelectedNode(node);
                     
@@ -252,31 +245,27 @@ public partial class BoardViewModel : ObservableObject
     {
         try
         {
-            var newNode = await _nodeFactory.CreateSingleImageNodeAsync(imagePath, x, y, centerOnPosition);
+            // Il cast (BaseNodeViewModel) è implicito, ma qui lo rendiamo chiaro
+            BaseNodeViewModel newNode = await _nodeFactory.CreateSingleImageNodeAsync(imagePath, x, y, centerOnPosition);
             RegisterNodeWithUndo(newNode, "Aggiungi Immagine");
         }
-        catch(Exception ex)
-        {
-            Debug.WriteLine($"Error adding single node: {ex.Message}");
-        }
+        catch(Exception ex) { Debug.WriteLine($"Error adding single node: {ex.Message}"); }
     }
     
     private async Task AddMultipleNodesAsync(List<string> imagePaths, double x, double y)
     {
         try
         {
-            var newNode = await _nodeFactory.CreateMultipleImagesNodeAsync(imagePaths, x, y, centerOnPosition: true);
+            BaseNodeViewModel newNode = await _nodeFactory.CreateMultipleImagesNodeAsync(imagePaths, x, y, centerOnPosition: true);
             RegisterNodeWithUndo(newNode, "Aggiungi Multi-Immagine");
         }
-        catch(Exception ex)
-        {
-            Debug.WriteLine($"Error adding multiple node: {ex.Message}");
-        }
+        catch(Exception ex) { Debug.WriteLine($"Error adding multiple node: {ex.Message}"); }
     }
     
     public void CreateConnection(BaseNodeViewModel source, BaseNodeViewModel target)
     {
-        var connection = new ConnectionViewModel(source, target);
+        var model = new Models.Nodes.ConnectionModel { SourceNodeId = source.Id, TargetNodeId = target.Id };
+        var connection = new ConnectionViewModel(model, source, target);
         Connections.Add(connection);
     }
     
@@ -285,20 +274,14 @@ public partial class BoardViewModel : ObservableObject
     [RelayCommand(CanExecute = nameof(CanResetNormalization))]
     private async Task ResetNormalization()
     {
-        if (SelectedNode is ImageNodeViewModel imgNode)
-        {
-            await imgNode.ResetThresholdsAsync();
-        }
+        if (SelectedNode is ImageNodeViewModel imgNode) await imgNode.ResetThresholdsAsync();
     }
     private bool CanResetNormalization() => SelectedNode is ImageNodeViewModel;
     
     [RelayCommand(CanExecute = nameof(CanResetNodeView))]
     private void ResetNodeView()
     {
-        if (SelectedNode is ImageNodeViewModel imgNode)
-        {
-            imgNode.ResetView();
-        }
+        if (SelectedNode is ImageNodeViewModel imgNode) imgNode.ResetView();
     }
     private bool CanResetNodeView() => SelectedNode is ImageNodeViewModel;
 
@@ -309,21 +292,13 @@ public partial class BoardViewModel : ObservableObject
         if (SelectedNode is ImageNodeViewModel imgNode)
         {
             var updatedHeader = await _windowService.ShowHeaderEditorAsync(imgNode);
-
             if (updatedHeader != null && imgNode.ActiveRenderer != null)
             {
                 imgNode.ActiveRenderer.Data.FitsHeader = updatedHeader;
-                Debug.WriteLine("Header aggiornato.");
             }
         }
     }
-
-    private bool CanEditHeader()
-    {
-        if (SelectedNode is ImageNodeViewModel) return true;
-        if (SelectedNode is MultipleImagesNodeViewModel m) return m.ImagePaths.Count > 0;
-        return false;
-    }
+    private bool CanEditHeader() => SelectedNode is ImageNodeViewModel || (SelectedNode is MultipleImagesNodeViewModel m && m.ImagePaths.Count > 0);
     
     // --- PLATE SOLVING ---
     [RelayCommand(CanExecute = nameof(CanShowPlateSolving))]
@@ -334,97 +309,62 @@ public partial class BoardViewModel : ObservableObject
             await _windowService.ShowPlateSolvingWindowAsync(imgNode);
         }
     }
-
     private bool CanShowPlateSolving() => SelectedNode is ImageNodeViewModel;
     
-    // --- CAMBIO MODALITÀ VISUALIZZAZIONE ---
-    
-    // --- CAMBIO MODALITÀ VISUALIZZAZIONE ---
-    
+    // --- VISUALIZATION MODE ---
     [RelayCommand(CanExecute = nameof(CanSetVisualizationMode))]
     private void SetVisualizationMode(VisualizationMode mode)
     {
         if (SelectedNode is ImageNodeViewModel imgNode)
         {
-            // Applica la modalità al nodo selezionato
             imgNode.VisualizationMode = mode;
-            
-            // IMPORTANTE:
-            // Anche se il RelayCommand lancia automaticamente CanExecuteChanged dopo l'esecuzione,
-            // forziamolo per sicurezza per aggiornare istantaneamente lo stato dei menu.
             SetVisualizationModeCommand.NotifyCanExecuteChanged();
         }
     }
-
-    private bool CanSetVisualizationMode(VisualizationMode mode)
-    {
-        // 1. Deve esserci un nodo immagine selezionato
-        if (SelectedNode is not ImageNodeViewModel imgNode) return false;
-
-        // 2. Il menu è abilitato SOLO se la modalità richiesta è DIVERSA da quella attuale.
-        // Esempio: Se sono in "Linear", il tasto "Linear" restituisce false (disabilitato),
-        // mentre "Logarithmic" restituisce true (abilitato).
-        return imgNode.VisualizationMode != mode;
-    }
+    private bool CanSetVisualizationMode(VisualizationMode mode) => 
+        SelectedNode is ImageNodeViewModel imgNode && imgNode.VisualizationMode != mode;
     
-    // --- POSTERIZZAZIONE ---
-
+    // --- POSTERIZATION ---
     [RelayCommand(CanExecute = nameof(CanShowPosterization))]
     private async Task ShowPosterizationWindow()
     {
         if (SelectedNode is not ImageNodeViewModel imgNode) return;
-
         try
         {
-            // RISOLTO: Sostituito _fitsService con _ioService
             var inputPaths = await imgNode.PrepareInputPathsAsync(_ioService);
             if (inputPaths.Count == 0) return;
 
-            VisualizationMode currentMode = imgNode.VisualizationMode;
-            var newPaths = await _windowService.ShowPosterizationWindowAsync(inputPaths, currentMode);
-
+            var newPaths = await _windowService.ShowPosterizationWindowAsync(inputPaths, imgNode.VisualizationMode);
             if (newPaths != null && newPaths.Count > 0)
             {
-                // [Logica di creazione nodo posterizzato...]
                 await HandleProcessingResultAsync(imgNode, newPaths, "Posterizzazione", "(Posterizzata)");
             }
         }
-        catch (Exception ex)
-        {
-            Debug.WriteLine($"Posterization process failed: {ex}");
-        }
+        catch (Exception ex) { Debug.WriteLine($"Posterization failed: {ex}"); }
     }
-
     private bool CanShowPosterization() => SelectedNode is ImageNodeViewModel;
 
-    // --- LOGICA ALLINEAMENTO ---
+    // --- ALIGNMENT ---
     [RelayCommand(CanExecute = nameof(CanShowAlignmentWindow))]
     private async Task ShowAlignmentWindow()
     {
         if (SelectedNode is not ImageNodeViewModel imgNode) return;
-
         try
         {
-            // RISOLTO: Sostituito _fitsService con _ioService
             var inputPaths = await imgNode.PrepareInputPathsAsync(_ioService);
             if (inputPaths.Count == 0) return;
 
             var newPaths = await _windowService.ShowAlignmentWindowAsync(inputPaths, imgNode.VisualizationMode);
-
             if (newPaths != null && newPaths.Count > 0)
             {
-                // [Logica di creazione nodo allineato...]
                 await HandleProcessingResultAsync(imgNode, newPaths, "Allineamento Immagini", "(Allineata)");
             }
         }
-        catch (Exception ex)
-        {
-            Debug.WriteLine($"Alignment failed: {ex}");
-        }
+        catch (Exception ex) { Debug.WriteLine($"Alignment failed: {ex}"); }
     }
     private bool CanShowAlignmentWindow() => SelectedNode is ImageNodeViewModel;
 
-    // --- LOGICA STACKING ---
+    // --- STACKING ---
     [RelayCommand(CanExecute = nameof(CanStackImages))]
     private async Task StackImages(StackingMode mode)
     {
@@ -434,33 +374,33 @@ public partial class BoardViewModel : ObservableObject
         {
             var rawDataList = await multiNode.GetCurrentDataAsync();
             var sourceImages = rawDataList.Where(d => d != null).Cast<FitsImageData>().ToList();
-
             if (sourceImages.Count < 2) return;
 
             var resultData = await _opsService.ComputeStackAsync(sourceImages, mode);
+            
             double gap = 300;
             double newX = multiNode.X + multiNode.EstimatedTotalSize.Width + gap;
             double newY = multiNode.Y;
+            
             string currentTitle = multiNode.Title;
             string cleanTitle = Regex.Replace(currentTitle, @"\s*\(\d+\s*immagini\)", "", RegexOptions.IgnoreCase);
-            string modeString = mode switch
-            {
+            string modeString = mode switch {
                 StackingMode.Average => "Media",
                 StackingMode.Median => "Mediana",
                 StackingMode.Sum => "Somma",
                 _ => mode.ToString()
             };
-
             string newTitle = $"{cleanTitle.Trim()} ({modeString})";
 
-            var newNode = await _nodeFactory.CreateSingleImageNodeFromDataAsync(
+            // Qui è dove avevi l'errore. newImgNode è specifico, ma newNode è BaseNode.
+            BaseNodeViewModel newNode = await _nodeFactory.CreateSingleImageNodeFromDataAsync(
                 resultData, newTitle, newX, newY
             );
 
-            // Eredita la visualizzazione
-            if (newNode is ImageNodeViewModel newImgNode)
+            // Se il nodo creato è un ImageNode, possiamo settare proprietà specifiche
+            if (newNode is ImageNodeViewModel imgNode)
             {
-                newImgNode.VisualizationMode = multiNode.VisualizationMode;
+                imgNode.VisualizationMode = multiNode.VisualizationMode;
             }
 
             var action = new DelegateAction(
@@ -469,7 +409,7 @@ public partial class BoardViewModel : ObservableObject
                 {
                     if (!Nodes.Contains(newNode))
                     {
-                        Nodes.Add(newNode);
+                        Nodes.Add(newNode); // Funziona perché newNode è BaseNodeViewModel
                         RegisterNodeEvents(newNode);
                         OnNodeRequestBringToFront(newNode);
                         CreateConnection(multiNode, newNode);
@@ -480,7 +420,7 @@ public partial class BoardViewModel : ObservableObject
                     if (Nodes.Contains(newNode))
                     {
                         var link = Connections.FirstOrDefault(c => c.Source == multiNode && c.Target == newNode);
-                        if (link != null) Connections.Remove(link);
+                        if (link != null) { Connections.Remove(link); link.Dispose(); }
 
                         if (SelectedNode == newNode) DeselectAllNodes();
                         UnregisterNodeEvents(newNode);
@@ -493,127 +433,89 @@ public partial class BoardViewModel : ObservableObject
             _undoService.RecordAction(action);
             SetSelectedNode(newNode);
         }
-        catch (Exception ex)
-        {
-            Debug.WriteLine($"Stacking error: {ex.Message}");
-        }
+        catch (Exception ex) { Debug.WriteLine($"Stacking error: {ex.Message}"); }
     }
     private bool CanStackImages(StackingMode mode) => SelectedNode is MultipleImagesNodeViewModel;
     
-    // --- LOGICA ANIMAZIONE ---
-    
+    // --- ANIMAZIONE ---
     [RelayCommand(CanExecute = nameof(CanToggleAnimation))]
     private void ToggleNodeAnimation()
     {
-        var runningNode = Nodes.OfType<MultipleImagesNodeViewModel>()
-            .FirstOrDefault(n => n.IsAnimating);
+        var runningNode = Nodes.OfType<MultipleImagesNodeViewModel>().FirstOrDefault(n => n.IsAnimating);
 
-        if (runningNode != null)
+        if (runningNode != null) runningNode.ToggleAnimation(); 
+        else if (SelectedNode is MultipleImagesNodeViewModel selectedMulti && selectedMulti.ImagePaths.Count > 1)
         {
-            runningNode.ToggleAnimation(); 
-        }
-        else if (SelectedNode is MultipleImagesNodeViewModel selectedMulti)
-        {
-            if (selectedMulti.ImagePaths.Count > 1)
-            {
-                selectedMulti.ToggleAnimation();
-            }
+            selectedMulti.ToggleAnimation();
         }
         
         OnPropertyChanged(nameof(IsGlobalAnimationRunning)); 
         ToggleNodeAnimationCommand.NotifyCanExecuteChanged();
     }
-
     private bool CanToggleAnimation()
     {
         bool isAnyAnimating = Nodes.OfType<MultipleImagesNodeViewModel>().Any(n => n.IsAnimating);
-        bool isSelectionValid = SelectedNode is MultipleImagesNodeViewModel multi && 
-                                multi.ImagePaths.Count > 1;
-
+        bool isSelectionValid = SelectedNode is MultipleImagesNodeViewModel multi && multi.ImagePaths.Count > 1;
         return isAnyAnimating || isSelectionValid;
     }
 
-    // --- Altri Comandi ---
+    // --- ZOOM / PAN ---
     [RelayCommand] private void IncrementOffset() { OffsetX += 20; }
     [RelayCommand] private void ResetBoard() { OffsetX = 0.0; OffsetY = 0.0; Scale = 0.5; }
-    
     public void Pan(Vector delta) { OffsetX += delta.X; OffsetY += delta.Y; }
-    
     public void Zoom(double deltaY, Point mousePosition)
     {
         double oldScale = Scale;
         double zoomFactor = deltaY > 0 ? 1.1 : 1 / 1.1;
         double newScale = Math.Clamp(oldScale * zoomFactor, 0.1, 10);
-
         OffsetX = mousePosition.X - (mousePosition.X - OffsetX) * (newScale / oldScale);
         OffsetY = mousePosition.Y - (mousePosition.Y - OffsetY) * (newScale / oldScale);
         Scale = newScale;
     }
     
+    // --- SELEZIONE ---
     public void SetSelectedNode(BaseNodeViewModel nodeToSelect)
     {
         if (SelectedNode == nodeToSelect) return;
-
         if (SelectedNode != null) SelectedNode.IsSelected = false;
         SelectedNode = nodeToSelect;
         if (SelectedNode != null) SelectedNode.IsSelected = true;
-        
-        ResetNormalizationCommand.NotifyCanExecuteChanged();
-        ShowAlignmentWindowCommand.NotifyCanExecuteChanged();
-        StackImagesCommand.NotifyCanExecuteChanged();
-        SaveSelectedNodeCommand.NotifyCanExecuteChanged();
-        ResetNodeViewCommand.NotifyCanExecuteChanged();
-        ToggleNodeAnimationCommand.NotifyCanExecuteChanged();
-        SaveVideoCommand.NotifyCanExecuteChanged();
-        SetVisualizationModeCommand.NotifyCanExecuteChanged(); // Notifica Menu
+        RefreshCommands();
     }
     
     public void DeselectAllNodes()
     {
         if (SelectedNode != null) SelectedNode.IsSelected = false;
         SelectedNode = null;
-        
+        RefreshCommands();
+    }
+
+    private void RefreshCommands()
+    {
         ResetNormalizationCommand.NotifyCanExecuteChanged();
         ShowAlignmentWindowCommand.NotifyCanExecuteChanged();
         StackImagesCommand.NotifyCanExecuteChanged();
         SaveSelectedNodeCommand.NotifyCanExecuteChanged();
         ResetNodeViewCommand.NotifyCanExecuteChanged();
+        ToggleNodeAnimationCommand.NotifyCanExecuteChanged();
         SaveVideoCommand.NotifyCanExecuteChanged();
-        SetVisualizationModeCommand.NotifyCanExecuteChanged(); // Notifica Menu
+        SetVisualizationModeCommand.NotifyCanExecuteChanged(); 
     }
 
+    // --- SAVE / EXPORT ---
     [RelayCommand(CanExecute = nameof(CanSaveNode))]
     private async Task SaveSelectedNode()
     {
         if (SelectedNode is not ImageNodeViewModel imgNode) return;
-
         FitsImageData? dataToSave = imgNode.GetActiveImageData();
         if (dataToSave == null) return;
 
         string defaultName = $"{imgNode.Title}.fits";
         var savePath = await _dialogService.ShowSaveFitsFileDialogAsync(defaultName);
-        
-        if (!string.IsNullOrWhiteSpace(savePath))
-        {
-            // FIX: Metodo aggiornato SaveAsync
-            await _ioService.SaveAsync(dataToSave, savePath);
-        }
+        if (!string.IsNullOrWhiteSpace(savePath)) await _ioService.SaveAsync(dataToSave, savePath);
     }
     private bool CanSaveNode() => SelectedNode is ImageNodeViewModel;
     
-    private Point GetCenterOfView()
-    {
-        if (ViewBounds.Width == 0 || ViewBounds.Height == 0) return new Point(0, 0);
-
-        double screenCenterX = ViewBounds.Width / 2.0;
-        double screenCenterY = ViewBounds.Height / 2.0;
-
-        double worldX = (screenCenterX - OffsetX) / Scale;
-        double worldY = (screenCenterY - OffsetY) / Scale;
-
-        return new Point(worldX, worldY);
-    }
-
     [RelayCommand(CanExecute = nameof(CanSaveVideo))]
     private async Task SaveVideo()
     {
@@ -622,51 +524,46 @@ public partial class BoardViewModel : ObservableObject
 
         string cleanTitle = string.Join("_", multiNode.Title.Split(Path.GetInvalidFileNameChars()));
         string defaultName = $"{cleanTitle}.avi";
-        
         var savePath = await _dialogService.ShowSaveFileDialogAsync(defaultName, "Video AVI", "*.avi");
         if (string.IsNullOrWhiteSpace(savePath)) return;
 
         try
         {
             var contrastProfile = multiNode.ActiveRenderer.CaptureContrastProfile();
-
-            // FIX: Usiamo IMediaExportService con i parametri richiesti
             await _mediaService.ExportVideoAsync(
                 multiNode.ImagePaths, 
                 savePath, 
                 fps: 5.0, 
                 profile: contrastProfile,
-                mode: multiNode.VisualizationMode // Passiamo la modalità corrente
+                mode: multiNode.VisualizationMode
             );
         }
-        catch (Exception ex)
-        {
-            Debug.WriteLine($"Errore esportazione video: {ex.Message}");
-        }
+        catch (Exception ex) { Debug.WriteLine($"Video export error: {ex.Message}"); }
     }
     private bool CanSaveVideo() => SelectedNode is MultipleImagesNodeViewModel vm && vm.ImagePaths.Count > 1;
     
+    // --- HELPER DI POSIZIONAMENTO ---
+    private Point GetCenterOfView()
+    {
+        if (ViewBounds.Width == 0 || ViewBounds.Height == 0) return new Point(0, 0);
+        double screenCenterX = ViewBounds.Width / 2.0;
+        double screenCenterY = ViewBounds.Height / 2.0;
+        double worldX = (screenCenterX - OffsetX) / Scale;
+        double worldY = (screenCenterY - OffsetY) / Scale;
+        return new Point(worldX, worldY);
+    }
     
     // --- NAVIGAZIONE TASTIERA ---
-
     [RelayCommand]
     private void PanBoard(string direction)
     {
         double step = 50.0;
         switch (direction.ToLower())
         {
-            case "left":
-                Pan(new Vector(step, 0)); 
-                break;
-            case "right":
-                Pan(new Vector(-step, 0));
-                break;
-            case "up":
-                Pan(new Vector(0, step));
-                break;
-            case "down":
-                Pan(new Vector(0, -step));
-                break;
+            case "left":  Pan(new Vector(step, 0)); break;
+            case "right": Pan(new Vector(-step, 0)); break;
+            case "up":    Pan(new Vector(0, step)); break;
+            case "down":  Pan(new Vector(0, -step)); break;
         }
     }
 
@@ -678,6 +575,7 @@ public partial class BoardViewModel : ObservableObject
         Zoom(delta, center);
     }
     
+    // --- HELPER PROCESSING RESULT ---
     private async Task HandleProcessingResultAsync(ImageNodeViewModel imgNode, List<string> newPaths, string undoName, string titleSuffix)
     {
         double gap = 300;
@@ -700,7 +598,8 @@ public partial class BoardViewModel : ObservableObject
         }
 
         newNode.Title = newTitle;
-        if (newNode is ImageNodeViewModel resNode) resNode.VisualizationMode = imgNode.VisualizationMode;
+        if (newNode is ImageNodeViewModel resNode) 
+            resNode.VisualizationMode = imgNode.VisualizationMode;
 
         var action = new DelegateAction(
             undoName,
@@ -719,7 +618,7 @@ public partial class BoardViewModel : ObservableObject
                 if (Nodes.Contains(newNode))
                 {
                     var link = Connections.FirstOrDefault(c => c.Source == imgNode && c.Target == newNode);
-                    if (link != null) Connections.Remove(link);
+                    if (link != null) { Connections.Remove(link); link.Dispose(); }
                     if (SelectedNode == newNode) DeselectAllNodes();
                     UnregisterNodeEvents(newNode);
                     Nodes.Remove(newNode);

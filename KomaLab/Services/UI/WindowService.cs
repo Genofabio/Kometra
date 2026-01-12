@@ -6,10 +6,14 @@ using KomaLab.Models.Visualization;
 using KomaLab.Services.Astrometry; // Necessario per IJplHorizonsService
 using KomaLab.Services.Data;       // IFitsIoService, IFitsMetadataService
 using KomaLab.Services.Imaging;
-using KomaLab.ViewModels;
+using KomaLab.ViewModels.Nodes;
+using KomaLab.ViewModels.Tools;
 using KomaLab.Views;
 using Microsoft.Extensions.DependencyInjection;
 using nom.tam.fits;
+using HeaderEditorToolViewModel = KomaLab.ViewModels.Tools.HeaderEditorToolViewModel;
+using PlateSolvingToolViewModel = KomaLab.ViewModels.Tools.PlateSolvingToolViewModel;
+using PosterizationToolViewModel = KomaLab.ViewModels.Tools.PosterizationToolViewModel;
 
 namespace KomaLab.Services.UI;
 
@@ -91,9 +95,9 @@ public class WindowService : IWindowService
     {
         if (_mainWindow == null) return null;
         
-        // HeaderEditorViewModel prende solo il nodo, le dipendenze interne 
+        // HeaderEditorToolViewModel prende solo il nodo, le dipendenze interne 
         // le recupera dal nodo o sono parser statici.
-        var editorVm = new HeaderEditorViewModel(node);
+        var editorVm = new HeaderEditorToolViewModel(node);
         var editorView = new HeaderEditorView
         {
             DataContext = editorVm
@@ -111,7 +115,7 @@ public class WindowService : IWindowService
     {
         if (_mainWindow == null) return;
 
-        var plateVm = new PlateSolvingViewModel(node);
+        var plateVm = new PlateSolvingToolViewModel(node);
         var plateView = new PlateSolvingView
         {
             DataContext = plateVm

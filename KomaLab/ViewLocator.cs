@@ -1,7 +1,7 @@
 using System;
 using Avalonia.Controls;
 using Avalonia.Controls.Templates;
-using KomaLab.ViewModels;
+using CommunityToolkit.Mvvm.ComponentModel;
 
 namespace KomaLab;
 
@@ -12,7 +12,12 @@ public class ViewLocator : IDataTemplate
         if (param is null)
             return null;
 
+        // Logica di sostituzione nome: BoardViewModel -> BoardView
         var name = param.GetType().FullName!.Replace("ViewModel", "View", StringComparison.Ordinal);
+        
+        // (Opzionale) Se le View sono in un namespace diverso (es. .Views), potresti dover aggiustare 'name' qui.
+        // Ma di solito la struttura di default di Avalonia le mette in parallelo o gestisce i namespace in modo semplice.
+        
         var type = Type.GetType(name);
 
         if (type != null)
@@ -25,6 +30,10 @@ public class ViewLocator : IDataTemplate
 
     public bool Match(object? data)
     {
-        return data is ViewModelBase;
+        // MODIFICA QUI:
+        // Prima controllava se era un "ViewModelBase". 
+        // Ora controlliamo se è un oggetto osservabile del Toolkit, 
+        // dato che tutti i tuoi VM ereditano da ObservableObject.
+        return data is ObservableObject; 
     }
 }

@@ -6,6 +6,7 @@ using KomaLab.ViewModels;
 using System;
 using System.Globalization;
 using System.Threading.Tasks;
+using PosterizationToolViewModel = KomaLab.ViewModels.Tools.PosterizationToolViewModel;
 
 namespace KomaLab.Views
 {

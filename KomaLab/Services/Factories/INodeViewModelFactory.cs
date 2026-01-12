@@ -2,6 +2,7 @@
 using System.Threading.Tasks;
 using KomaLab.Models.Fits;
 using KomaLab.ViewModels;
+using KomaLab.ViewModels.Nodes;
 
 namespace KomaLab.Services.Factories;
 
@@ -21,12 +22,12 @@ public interface INodeViewModelFactory
     Task<SingleImageNodeViewModel> CreateSingleImageNodeAsync(string path, double x, double y, bool centerOnPosition = false);
     
     /// <summary>
-    /// Crea un nodo immagine singola partendo da dati già in memoria (es. risultato di uno stack o elaborazione).
+    /// Crea un nodo immagine singola partendo da dati già in memoria.
     /// </summary>
     Task<SingleImageNodeViewModel> CreateSingleImageNodeFromDataAsync(FitsImageData data, string title, double x, double y);
     
     /// <summary>
-    /// Crea un nodo multi-immagine (stacking/video), scansionando preventivamente gli header.
+    /// Crea un nodo multi-immagine (stacking/video).
     /// </summary>
     Task<MultipleImagesNodeViewModel> CreateMultipleImagesNodeAsync(List<string> paths, double x, double y, bool centerOnPosition = false);
 }
