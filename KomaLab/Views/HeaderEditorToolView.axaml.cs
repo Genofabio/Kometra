@@ -1,18 +1,16 @@
-﻿using Avalonia;
-using Avalonia.Controls;
+﻿using Avalonia.Controls;
 using Avalonia.Interactivity;
 using Avalonia.Threading; // Necessario per il Dispatcher
-using KomaLab.ViewModels;
 using System;
 using HeaderEditorToolViewModel = KomaLab.ViewModels.Tools.HeaderEditorToolViewModel;
 
 namespace KomaLab.Views;
 
-public partial class HeaderEditorView : Window
+public partial class HeaderEditorToolView : Window
 {
     public bool IsSaved { get; private set; } = false;
 
-    public HeaderEditorView()
+    public HeaderEditorToolView()
     {
         InitializeComponent();
     }

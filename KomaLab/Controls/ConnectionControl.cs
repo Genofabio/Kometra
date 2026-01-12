@@ -3,9 +3,7 @@ using System.Collections.Generic;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Media;
-using KomaLab.ViewModels;
-using KomaLab.ViewModels.Nodes;
-using ConnectionViewModel = KomaLab.ViewModels.Nodes.ConnectionViewModel;
+using KomaLab.ViewModels.Nodes; // Namespace corretto per ConnectionViewModel
 
 namespace KomaLab.Controls;
 
@@ -13,16 +11,16 @@ public class ConnectionControl : Control
 {
     private ConnectionViewModel? _vm;
 
-    // --- COSTANTI ---
-    private const double ThicknessNormal = 12.0;
-    private const double ThicknessHighlight = 14.0;
-    private const string InactiveColorKey = "ConnectionInactiveColor";
+    // --- COSTANTI (VALORI ORIGINALI RIPRISTINATI) ---
+    private const double ThicknessNormal = 12.0;    // Ripristinato a 12
+    private const double ThicknessHighlight = 14.0; // Ripristinato a 14
     
-    // Costante per la categoria unica attuale
-    private const string DefaultCategory = "Image"; 
+    // --- CHIAVI RISORSE (Mappate su AppPalette.axaml) ---
+    private const string InactiveColorKey = "Color.Grey.50";      // Era ConnectionInactiveColor
+    private const string MainColorKey = "Color.Purple.Deep";      // Era ImageMainColor
+    private const string SelectionColorKey = "Color.Purple.Base"; // Era ImageSelectionColor
 
     // --- CACHE ---
-    // La chiave è solo 'bool' (isSelected) perché la categoria è sempre "Image"
     private static readonly Dictionary<bool, Color> _resourceCache = new();
     private static Color? _cachedInactiveColor;
     private static IPen? _cachedDefaultPen;
@@ -47,18 +45,20 @@ public class ConnectionControl : Control
     {
         base.OnDataContextChanged(e);
         
+        // Disiscrizione vecchi eventi
         if (_vm != null)
         {
-            _vm.Source.PropertyChanged -= OnNodePositionChanged;
-            _vm.Target.PropertyChanged -= OnNodePositionChanged;
+            if (_vm.Source != null) _vm.Source.PropertyChanged -= OnNodePositionChanged;
+            if (_vm.Target != null) _vm.Target.PropertyChanged -= OnNodePositionChanged;
         }
 
         _vm = DataContext as ConnectionViewModel;
 
+        // Iscrizione nuovi eventi
         if (_vm != null)
         {
-            _vm.Source.PropertyChanged += OnNodePositionChanged;
-            _vm.Target.PropertyChanged += OnNodePositionChanged;
+            if (_vm.Source != null) _vm.Source.PropertyChanged += OnNodePositionChanged;
+            if (_vm.Target != null) _vm.Target.PropertyChanged += OnNodePositionChanged;
         }
         
         InvalidateVisual();
@@ -72,12 +72,10 @@ public class ConnectionControl : Control
 
     private void OnNodePositionChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
     {
-        // Controllo generico sulle proprietà che influenzano il disegno
-        if (e.PropertyName == nameof(BaseNodeViewModel.X) ||
-            e.PropertyName == nameof(BaseNodeViewModel.Y) ||
-            e.PropertyName == nameof(BaseNodeViewModel.VisualOffsetX) ||
-            e.PropertyName == nameof(BaseNodeViewModel.VisualOffsetY) ||
-            e.PropertyName == nameof(BaseNodeViewModel.EstimatedTotalSize))
+        // Ridisegna se cambiano posizione o dimensione
+        if (e.PropertyName == "X" || e.PropertyName == "Y" || 
+            e.PropertyName == "VisualOffsetX" || e.PropertyName == "VisualOffsetY" ||
+            e.PropertyName == "EstimatedTotalSize")
         {
             InvalidateVisual();
         }
@@ -98,17 +96,15 @@ public class ConnectionControl : Control
     }
 
     /// <summary>
-    /// Recupera il colore per la categoria fissa "Image".
+    /// Recupera il colore usando le nuove chiavi della Palette, mantenendo la logica originale.
     /// </summary>
     private Color GetImageCategoryColor(bool isSelected)
     {
-        // Cache molto più semplice
         if (_resourceCache.TryGetValue(isSelected, out var cachedColor))
             return cachedColor;
 
-        // Cerca sempre "ImageSelectionColor" o "ImageMainColor"
-        string suffix = isSelected ? "SelectionColor" : "MainColor";
-        string resourceKey = $"{DefaultCategory}{suffix}";
+        // Mappa la logica originale sulle nuove chiavi
+        string resourceKey = isSelected ? SelectionColorKey : MainColorKey;
 
         if (Application.Current!.TryFindResource(resourceKey, out var res) && res is Color color)
         {
@@ -126,11 +122,11 @@ public class ConnectionControl : Control
         _cachedDefaultPen = null; 
     }
 
-    // --- RENDERING ---
+    // --- RENDERING (LOGICA ORIGINALE) ---
 
     public override void Render(DrawingContext context)
     {
-        if (_vm == null) return;
+        if (_vm == null || _vm.Source == null || _vm.Target == null) return;
 
         Color neutralColor = GetInactiveColor();
 
@@ -143,7 +139,7 @@ public class ConnectionControl : Control
         var source = _vm.Source;
         var target = _vm.Target;
         
-        // (Nota: qui assumiamo che EstimatedTotalSize sia calcolato correttamente nel VM)
+        // Calcolo punti centrali
         var p1 = new Point(
             source.X + source.VisualOffsetX + (source.EstimatedTotalSize.Width / 2),
             source.Y + source.VisualOffsetY + (source.EstimatedTotalSize.Height / 2)
@@ -180,10 +176,11 @@ public class ConnectionControl : Control
                 EndPoint = new RelativePoint(p2, RelativeUnit.Absolute)
             };
 
-            // SEMPLIFICAZIONE: Usiamo sempre la logica "Image"
+            // Recupera colori in base allo stato di selezione
             var sourceColor = GetImageCategoryColor(_vm.Source.IsSelected);
             var targetColor = GetImageCategoryColor(_vm.Target.IsSelected);
             
+            // LOGICA GRADIENTE ORIGINALE (0.0 -> 0.45 -> 0.55 -> 1.0)
             if (_vm.Source.IsSelected)
             {
                 gradient.GradientStops.Add(new GradientStop(sourceColor, 0.0));

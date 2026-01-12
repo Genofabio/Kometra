@@ -2,14 +2,13 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
-        xmlns:vm="clr-namespace:KomaLab.ViewModels"
-        xmlns:models="clr-namespace:KomaLab.Models"
         xmlns:avalonia="clr-namespace:Material.Icons.Avalonia;assembly=Material.Icons.Avalonia"
         xmlns:fits="clr-namespace:KomaLab.Models.Fits"
         xmlns:tools="clr-namespace:KomaLab.ViewModels.Tools"
         mc:Ignorable="d" d:DesignWidth="1000" d:DesignHeight="650"
-        x:Class="KomaLab.Views.HeaderEditorView"
+        x:Class="KomaLab.Views.HeaderEditorToolView"
         x:DataType="tools:HeaderEditorToolViewModel"
+        
         Title="Editor Metadati FITS"
         Width="1000" Height="608"
         MinWidth="920" MinHeight="600"
@@ -18,76 +17,7 @@
         Background="{DynamicResource ToolWindowBackgroundBrush}">
 
     <Window.Styles>
-        <Style Selector="Button.apply">
-            <Setter Property="Background" Value="{DynamicResource ActionSuccessBackgroundBrush}"/>
-            <Setter Property="Foreground" Value="White"/>
-            <Setter Property="BorderThickness" Value="0"/>
-            <Setter Property="CornerRadius" Value="4"/>
-            <Setter Property="Padding" Value="24,8"/>
-            <Setter Property="Cursor" Value="Hand"/>
-            <Setter Property="FontWeight" Value="SemiBold"/>
-        </Style>
-        <Style Selector="Button.apply:pointerover /template/ ContentPresenter">
-            <Setter Property="Background" Value="{DynamicResource ActionSuccessHoverBrush}"/>
-            <Setter Property="Foreground" Value="White"/>
-        </Style>
-        <Style Selector="Button.apply:pressed /template/ ContentPresenter">
-            <Setter Property="Background" Value="{DynamicResource ActionSuccessPressedBrush}"/>
-            <Setter Property="Foreground" Value="White"/>
-        </Style>
-
-        <Style Selector="Button.cancel">
-            <Setter Property="Background" Value="{DynamicResource ActionDestructiveBackgroundBrush}"/>
-            <Setter Property="Foreground" Value="White"/>
-            <Setter Property="BorderThickness" Value="0"/>
-            <Setter Property="CornerRadius" Value="4"/>
-            <Setter Property="Padding" Value="16,8"/>
-            <Setter Property="Cursor" Value="Hand"/>
-        </Style>
-        <Style Selector="Button.cancel:pointerover /template/ ContentPresenter">
-            <Setter Property="Background" Value="{DynamicResource ActionDestructiveHoverBrush}"/>
-            <Setter Property="Foreground" Value="White"/>
-        </Style>
-        <Style Selector="Button.cancel:pressed /template/ ContentPresenter">
-            <Setter Property="Background" Value="{DynamicResource ActionDestructivePressedBrush}"/>
-            <Setter Property="Foreground" Value="White"/>
-        </Style>
-        
-        <Style Selector="Button.navBtn">
-            <Setter Property="Background" Value="{DynamicResource ActionDisabledBackgroundBrush}"/>
-            <Setter Property="Foreground" Value="White"/>
-            <Setter Property="CornerRadius" Value="4"/>
-            <Setter Property="Padding" Value="8"/>
-            <Setter Property="Cursor" Value="Hand"/>
-            <Setter Property="BorderThickness" Value="0"/>
-        </Style>
-        <Style Selector="Button.navBtn:pointerover /template/ ContentPresenter">
-            <Setter Property="Background" Value="{DynamicResource ActionPrimaryHoverBrush}"/>
-        </Style>
-        
-        <Style Selector="Button.toolBtn">
-            <Setter Property="Background" Value="#333"/>
-            <Setter Property="Foreground" Value="White"/>
-            <Setter Property="CornerRadius" Value="4"/>
-            <Setter Property="Padding" Value="12,0"/>
-            <Setter Property="Cursor" Value="Hand"/>
-            <Setter Property="BorderThickness" Value="1"/>
-            <Setter Property="BorderBrush" Value="#555"/>
-            <Setter Property="VerticalContentAlignment" Value="Center"/>
-        </Style>
-        <Style Selector="Button.toolBtn:pointerover /template/ ContentPresenter">
-            <Setter Property="Background" Value="#444"/>
-        </Style>
-
-        <Style Selector="DataGridRow.modified TextBlock">
-            <Setter Property="Foreground" Value="#FFEA7B"/> 
-            <Setter Property="FontWeight" Value="Bold"/>
-        </Style>
-        
-        <Style Selector="TextBox.clearButton">
-            <Setter Property="CornerRadius" Value="4"/>
-            <Setter Property="BorderBrush" Value="{DynamicResource SystemControlForegroundBaseLowBrush}"/>
-        </Style>
+        <StyleInclude Source="/Styles/HeaderEditorToolStyles.axaml" />
     </Window.Styles>
 
     <Grid RowDefinitions="*, Auto">
@@ -104,14 +34,14 @@
                     
                     <StackPanel Grid.Row="0" Spacing="8" Margin="0,0,0,25">
                         <StackPanel Orientation="Horizontal" Spacing="6" Margin="0,0,0,8">
-                            <avalonia:MaterialIcon Kind="FileImage" Foreground="White" Width="16" Height="16"/>
-                            <TextBlock Text="File Attuale" FontSize="16" Foreground="White" FontWeight="Bold" LetterSpacing="1" VerticalAlignment="Center"/>
+                            <avalonia:MaterialIcon Kind="FileImage" Foreground="{DynamicResource Text.StaticWhiteBrush}" Width="16" Height="16"/>
+                            <TextBlock Text="File Attuale" FontSize="16" Foreground="{DynamicResource Text.StaticWhiteBrush}" FontWeight="Bold" LetterSpacing="1" VerticalAlignment="Center"/>
                         </StackPanel>
                         
                         <TextBlock Text="{Binding CurrentFileName}" 
                                    TextWrapping="Wrap" 
                                    FontWeight="SemiBold" 
-                                   Foreground="White"
+                                   Foreground="{DynamicResource Text.StaticWhiteBrush}"
                                    Opacity="0.7"/>
                     </StackPanel>
 
@@ -119,11 +49,11 @@
                         <Separator Background="{DynamicResource SystemControlForegroundBaseLowBrush}" Height="1" Margin="0,-8,0,4" Opacity="0.5"/>
                         <TextBlock Text="Integrità Metadati" 
                                    FontSize="14" 
-                                   Foreground="White" 
+                                   Foreground="{DynamicResource Text.StaticWhiteBrush}" 
                                    FontWeight="Bold"/>
                         
                         <TextBlock Text="Verifica la presenza dei parametri essenziali per l'analisi scientifica."
-                                   Foreground="White"
+                                   Foreground="{DynamicResource Text.StaticWhiteBrush}"
                                    TextWrapping="Wrap"
                                    Opacity="0.7"
                                    Margin="0,0,0,5"/>
@@ -133,7 +63,7 @@
                             <StackPanel Spacing="5">
                                 <StackPanel Orientation="Horizontal" Spacing="10">
                                     <Ellipse Width="10" Height="10" Fill="{Binding DateStatusColor}" VerticalAlignment="Center"/>
-                                    <TextBlock Text="Riferimento Temporale" FontWeight="SemiBold" FontSize="13" Foreground="White"/>
+                                    <TextBlock Text="Riferimento Temporale" FontWeight="SemiBold" FontSize="13" Foreground="{DynamicResource Text.StaticWhiteBrush}"/>
                                 </StackPanel>
                                 <TextBlock Text="{Binding DateStatusText}" 
                                            FontSize="11" 
@@ -148,7 +78,7 @@
                             <StackPanel Spacing="5">
                                 <StackPanel Orientation="Horizontal" Spacing="10">
                                     <Ellipse Width="10" Height="10" Fill="{Binding LocationStatusColor}" VerticalAlignment="Center"/>
-                                    <TextBlock Text="Geolocalizzazione Sito" FontWeight="SemiBold" FontSize="13" Foreground="White"/>
+                                    <TextBlock Text="Geolocalizzazione Sito" FontWeight="SemiBold" FontSize="13" Foreground="{DynamicResource Text.StaticWhiteBrush}"/>
                                 </StackPanel>
                                 <TextBlock Text="{Binding LocationStatusText}" 
                                            FontSize="11" 
@@ -163,7 +93,7 @@
                             <StackPanel Spacing="5">
                                 <StackPanel Orientation="Horizontal" Spacing="10">
                                     <Ellipse Width="10" Height="10" Fill="{Binding WcsStatusColor}" VerticalAlignment="Center"/>
-                                    <TextBlock Text="Soluzione Astrometrica" FontWeight="SemiBold" FontSize="13" Foreground="White"/>
+                                    <TextBlock Text="Soluzione Astrometrica" FontWeight="SemiBold" FontSize="13" Foreground="{DynamicResource Text.StaticWhiteBrush}"/>
                                 </StackPanel>
                                 <TextBlock Text="{Binding WcsStatusText}" 
                                            FontSize="11" 
@@ -185,7 +115,7 @@
                             <Border Grid.Column="1" Background="{DynamicResource ToolWindowBackgroundBrush}" CornerRadius="4" Margin="10,0" Padding="0,5" BorderBrush="{DynamicResource SystemControlForegroundBaseLowBrush}" BorderThickness="1">
                                 <TextBlock Text="{Binding ImageCounterText}" 
                                            VerticalAlignment="Center" HorizontalAlignment="Center" 
-                                           FontWeight="Bold" Foreground="White" FontSize="14"/>
+                                           FontWeight="Bold" Foreground="{DynamicResource Text.StaticWhiteBrush}" FontSize="14"/>
                             </Border>
                             
                             <Button Grid.Column="2" Classes="navBtn" Command="{Binding NextImageCommand}" ToolTip.Tip="Immagine Successiva">

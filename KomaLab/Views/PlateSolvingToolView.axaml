@@ -2,13 +2,13 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
-        xmlns:vm="clr-namespace:KomaLab.ViewModels"
         xmlns:avalonia="clr-namespace:Material.Icons.Avalonia;assembly=Material.Icons.Avalonia"
         xmlns:tools="clr-namespace:KomaLab.ViewModels.Tools"
         mc:Ignorable="d" d:DesignWidth="600" d:DesignHeight="500"
-        x:Class="KomaLab.Views.PlateSolvingView"
+        x:Class="KomaLab.Views.PlateSolvingToolView"
         x:DataType="tools:PlateSolvingToolViewModel"
         x:Name="RootWindow"
+        
         Title="Risoluzione Astrometrica"
         Width="650" Height="550"
         WindowStartupLocation="CenterOwner"
@@ -17,50 +17,23 @@
         Focusable="True">
 
     <Window.Styles>
-        <Style Selector="Button.baseBtn">
-            <Setter Property="Foreground" Value="White"/>
-            <Setter Property="CornerRadius" Value="6"/>
-            <Setter Property="Padding" Value="25,8"/>
-            <Setter Property="FontSize" Value="14"/>
-            <Setter Property="FontWeight" Value="SemiBold"/>
-            <Setter Property="HorizontalAlignment" Value="Right"/>
-            <Setter Property="VerticalContentAlignment" Value="Center"/>
-            <Setter Property="Cursor" Value="Hand"/>
-        </Style>
-        <Style Selector="Button.greenBtn">
-            <Setter Property="Background" Value="#03A077"/>
-        </Style>
-        <Style Selector="Button.greenBtn:pointerover /template/ ContentPresenter">
-            <Setter Property="Background" Value="#04B889"/>
-        </Style>
-        <Style Selector="Button.purpleBtn">
-            <Setter Property="Background" Value="#8058E8"/>
-        </Style>
-        <Style Selector="Button.purpleBtn:pointerover /template/ ContentPresenter">
-            <Setter Property="Background" Value="#9570F0"/>
-        </Style>
-        <Style Selector="Button.cancelBtn">
-            <Setter Property="Background" Value="#D9534F"/>
-        </Style>
-        <Style Selector="Button.cancelBtn:pointerover /template/ ContentPresenter">
-            <Setter Property="Background" Value="#E0706D"/>
-        </Style>
+        <StyleInclude Source="/Styles/PlateSolvingToolStyles.axaml" />
     </Window.Styles>
 
     <Border Padding="20" Background="Transparent">
         <Grid RowDefinitions="Auto, Auto, *, Auto" RowSpacing="15">
 
             <StackPanel Grid.Row="0" Spacing="10">
-                <TextBlock Text="{Binding Title}" FontSize="22" FontWeight="Bold" Foreground="White"/>
+                <TextBlock Classes="TitleText" Text="{Binding Title}"/>
                 
-                <TextBlock Text="Analizza la disposizione delle stelle per calcolare le coordinate celesti reali (WCS). Questa operazione è necessaria per l'allineamento preciso."
-                           TextWrapping="Wrap" FontSize="12" Foreground="#AAA" LineHeight="18"/>
+                <TextBlock Classes="DescriptionText" 
+                           Text="Analizza la disposizione delle stelle per calcolare le coordinate celesti reali (WCS). Questa operazione è necessaria per l'allineamento preciso."/>
 
-                <Border Height="1" Background="#444" Margin="0,5"/>
+                <Border Height="1" Background="{DynamicResource ActionDisabledBackgroundBrush}" Margin="0,5"/>
 
                 <StackPanel Orientation="Horizontal" Spacing="5">
-                    <TextBlock Text="Target:" FontWeight="Bold" Foreground="#888"/>
-                    <TextBlock Text="{Binding TargetFileName}" Foreground="#CCC"/>
+                    <TextBlock Classes="TargetLabel" Text="Target:"/>
+                    <TextBlock Classes="TargetValue" Text="{Binding TargetFileName}"/>
                 </StackPanel>
             </StackPanel>
 
@@ -68,31 +41,33 @@
                 <Grid ColumnDefinitions="*, Auto">
                     <TextBlock Text="{Binding StatusText}" Foreground="{Binding StatusColor}" FontWeight="SemiBold" FontSize="14"/>
                     <TextBlock Text="{Binding ProgressValue, StringFormat='Processati: {0}'}" 
-                               Foreground="#888" FontSize="12" IsVisible="{Binding IsBusy}" Grid.Column="1"/>
+                               Foreground="{DynamicResource Text.MediumGreyBrush}" 
+                               FontSize="12" IsVisible="{Binding IsBusy}" Grid.Column="1"/>
                 </Grid>
+                
                 <ProgressBar Height="6" Minimum="0" Maximum="{Binding ProgressMax}" Value="{Binding ProgressValue}"
                              IsIndeterminate="{Binding ProgressMax, Converter={x:Static ObjectConverters.IsNull}}"
-                             IsVisible="{Binding IsBusy}" Foreground="#8058E8" Background="#333"/>
+                             IsVisible="{Binding IsBusy}" 
+                             Foreground="{DynamicResource ActionPrimaryBackgroundBrush}" 
+                             Background="{DynamicResource MenuBackgroundBrush}"/>
             </StackPanel>
 
-            <Border Grid.Row="2" Background="#1E1E1E" BorderBrush="#444" BorderThickness="1" CornerRadius="4">
-                <TextBox Text="{Binding FullLog}" IsReadOnly="True" FontFamily="Consolas, Monospace" FontSize="12"
-                         Foreground="#DDD" Background="Transparent" BorderThickness="0" Padding="10"
-                         TextWrapping="Wrap" AcceptsReturn="True" CaretIndex="{Binding FullLog.Length}"/>
+            <Border Grid.Row="2" Classes="LogContainer">
+                <TextBox Classes="LogContent"
+                         Text="{Binding FullLog}" 
+                         IsReadOnly="True" 
+                         CaretIndex="{Binding FullLog.Length}"/>
             </Border>
 
             <Grid Grid.Row="3" ColumnDefinitions="*, Auto">
                 
                 <StackPanel Grid.Column="0" VerticalAlignment="Center" Spacing="2">
-                    
                     <StackPanel Orientation="Horizontal" Spacing="5" VerticalAlignment="Center">
-                        <avalonia:MaterialIcon Kind="AlertCircleOutline" Width="16" Height="16" Foreground="#FEC530"/>
-                        <TextBlock Text="Attenzione:" FontWeight="Bold" Foreground="#888" FontSize="12"/>
+                        <avalonia:MaterialIcon Kind="AlertCircleOutline" Width="16" Height="16" Foreground="{DynamicResource OverlaySearchBoxBrush}"/>
+                        <TextBlock Classes="WarningLabel" Text="Attenzione:"/>
                     </StackPanel>
                     
-                    <TextBlock Text="L'header originale verrà aggiornato." 
-                               Foreground="#666" FontSize="12" FontStyle="Italic"
-                               Margin="21,0,0,0"/>
+                    <TextBlock Classes="WarningBody" Text="L'header originale verrà aggiornato."/>
                 </StackPanel>
 
                 <StackPanel Grid.Column="1" Orientation="Horizontal">

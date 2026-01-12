@@ -28,28 +28,11 @@
         <DataTemplate x:Key="CoordinateItemTemplate"
                       x:DataType="items:CoordinateEntry">
             
-            <Border Classes.active="{Binding IsActive}"
-                    Background="{DynamicResource ToolPanelBackgroundBrush}"
-                    BorderBrush="{DynamicResource SystemControlForegroundBaseLowBrush}"
-                    BorderThickness="1"
-                    CornerRadius="4"
-                    ClipToBounds="True" 
-                    Margin="0,4"> <Border.Styles>
-                    <Style Selector="Border.active">
-                        <Setter Property="BorderBrush" Value="{DynamicResource ActionPrimaryBackgroundBrush}"/>
-                        <Setter Property="BorderThickness" Value="2"/>
-                        <Setter Property="Background" Value="{DynamicResource ControlFillColorSecondaryBrush}"/>
-                    </Style>
-                    <Style Selector="Border">
-                        <Setter Property="Transitions">
-                            <Transitions>
-                                <BrushTransition Property="BorderBrush" Duration="0:0:0.2"/>
-                            </Transitions>
-                        </Setter>
-                    </Style>
-                </Border.Styles>
+            <Border Classes="CoordinateEntryRow"
+                    Classes.active="{Binding IsActive}">
                 
-                <Grid ColumnDefinitions="40, *, *"> <Border Grid.Column="0" 
+                <Grid ColumnDefinitions="40, *, *"> 
+                    <Border Grid.Column="0" 
                             Background="{DynamicResource ActionPrimaryBackgroundBrush}"
                             VerticalAlignment="Stretch"
                             HorizontalAlignment="Stretch">

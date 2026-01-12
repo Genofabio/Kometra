@@ -4,9 +4,9 @@ using Avalonia.Markup.Xaml;
 
 namespace KomaLab.Views;
 
-public partial class PlateSolvingView : Window
+public partial class PlateSolvingToolView : Window
 {
-    public PlateSolvingView()
+    public PlateSolvingToolView()
     {
         InitializeComponent();
     }

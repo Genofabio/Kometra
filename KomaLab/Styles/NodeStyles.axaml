@@ -1,15 +1,18 @@
 ﻿<Styles xmlns="https://github.com/avaloniaui"
-        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:avalonia="clr-namespace:Material.Icons.Avalonia;assembly=Material.Icons.Avalonia">
     
     <Style Selector="Border.NodeFrame">
         <Setter Property="BorderThickness" Value="18"/>
         <Setter Property="ClipToBounds" Value="True"/>
-        <Setter Property="CornerRadius" Value="8,8,8,8"/> <Setter Property="Background" Value="{DynamicResource NodeFrameBackgroundBrush}"/>
+        <Setter Property="CornerRadius" Value="8,8,8,8"/> 
+        <Setter Property="Background" Value="{DynamicResource NodeFrameBackgroundBrush}"/>
         <Setter Property="BorderBrush" Value="{DynamicResource NodeFrameBorderBrush}"/>
     </Style>
 
     <Style Selector="Border.Header">
-        <Setter Property="CornerRadius" Value="8,0,0,0"/> <Setter Property="ClipToBounds" Value="True"/>
+        <Setter Property="CornerRadius" Value="8,0,0,0"/> 
+        <Setter Property="ClipToBounds" Value="True"/>
     </Style>
 
     <Style Selector="Border.Body">
@@ -43,49 +46,75 @@
         <Setter Property="Padding" Value="0,4,0,0"/>
     </Style>
 
+    <Style Selector="Border.ZoomOverlay">
+        <Setter Property="HorizontalAlignment" Value="Left"/>
+        <Setter Property="VerticalAlignment" Value="Top"/>
+        <Setter Property="IsHitTestVisible" Value="False"/>
+        <Setter Property="Background" Value="{DynamicResource OverlayTextBackgroundBrush}"/>
+        <Setter Property="Margin" Value="15"/>
+        <Setter Property="Padding" Value="16,10"/>
+        <Setter Property="CornerRadius" Value="8"/>
+    </Style>
+
+    <Style Selector="TextBlock.ZoomText">
+        <Setter Property="Foreground" Value="{DynamicResource OverlayTextForegroundBrush}"/>
+        <Setter Property="FontSize" Value="28"/>
+    </Style>
+
+    <Style Selector="Grid.NavOverlay">
+        <Setter Property="Opacity" Value="0.0"/>
+        <Setter Property="Transitions">
+            <Transitions>
+                <DoubleTransition Property="Opacity" Duration="0.2"/>
+            </Transitions>
+        </Setter>
+    </Style>
+    
+    <Style Selector="Border.Body:pointerover Grid.NavOverlay">
+        <Setter Property="Opacity" Value="1.0"/>
+    </Style>
+
+    <Style Selector="Button.NavButton">
+        <Setter Property="Background" Value="{DynamicResource NavButtonBackgroundBrush}"/>
+        <Setter Property="Foreground" Value="{DynamicResource NavButtonForegroundBrush}"/>
+        <Setter Property="BorderThickness" Value="0"/>
+    </Style>
+
+    <Style Selector="Button.NavButton avalonia|MaterialIcon">
+        <Setter Property="FontSize" Value="24"/> 
+    </Style>
+    
+    <Style Selector="Button.NavButton:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+        <Setter Property="Background" Value="{DynamicResource NavButtonHoverBackgroundBrush}"/> 
+        <Setter Property="Foreground" Value="White"/>     
+    </Style>
+
+    <Style Selector="Border.CounterBadge">
+        <Setter Property="HorizontalAlignment" Value="Right"/>
+        <Setter Property="VerticalAlignment" Value="Top"/>
+        <Setter Property="Background" Value="{DynamicResource OverlayBackgroundBrush}"/>
+        <Setter Property="Margin" Value="0,10,10,0"/>
+        <Setter Property="CornerRadius" Value="4"/>
+        <Setter Property="ClipToBounds" Value="True"/>
+    </Style>
+
+    <Style Selector="TextBlock.CounterText">
+        <Setter Property="Foreground" Value="White"/>
+        <Setter Property="Padding" Value="12,8"/>
+        <Setter Property="Margin" Value="12,8"/>
+        <Setter Property="FontSize" Value="32"/>
+    </Style>
 
     <Style Selector="Border.NodeFrame[Tag=Image]">
         <Setter Property="Background" Value="{DynamicResource ImageBodyBrush}"/>
         <Setter Property="BorderBrush" Value="{DynamicResource ImageBorderBrush}"/>
     </Style>
-    
     <Style Selector="Border.NodeFrame[Tag=Image] Border.Header">
         <Setter Property="Background" Value="{DynamicResource ImageHeaderBrush}"/>
     </Style>
-
     <Style Selector="Border.NodeFrame[Tag=Image].selected">
         <Setter Property="BorderBrush" Value="{DynamicResource ImageSelectionBrush}"/>
         <Setter Property="Background" Value="{DynamicResource ImageBodyBrush}"/>
     </Style>
 
-
-    <Style Selector="Border.NodeFrame[Tag=Process]">
-        <Setter Property="Background" Value="{DynamicResource ProcessBodyBrush}"/>
-        <Setter Property="BorderBrush" Value="{DynamicResource ProcessBorderBrush}"/>
-    </Style>
-    
-    <Style Selector="Border.NodeFrame[Tag=Process] Border.Header">
-        <Setter Property="Background" Value="{DynamicResource ProcessHeaderBrush}"/>
-    </Style>
-
-    <Style Selector="Border.NodeFrame[Tag=Process].selected">
-        <Setter Property="BorderBrush" Value="{DynamicResource ProcessSelectionBrush}"/>
-        <Setter Property="Background" Value="{DynamicResource ProcessBodyBrush}"/>
-    </Style>
-
-
-    <Style Selector="Border.NodeFrame[Tag=Output]">
-        <Setter Property="Background" Value="{DynamicResource OutputBodyBrush}"/>
-        <Setter Property="BorderBrush" Value="{DynamicResource OutputBorderBrush}"/>
-    </Style>
-    
-    <Style Selector="Border.NodeFrame[Tag=Output] Border.Header">
-        <Setter Property="Background" Value="{DynamicResource OutputHeaderBrush}"/>
-    </Style>
-
-    <Style Selector="Border.NodeFrame[Tag=Output].selected">
-        <Setter Property="BorderBrush" Value="{DynamicResource OutputSelectionBrush}"/>
-        <Setter Property="Background" Value="{DynamicResource OutputBodyBrush}"/>
-    </Style>
-    
 </Styles>

@@ -2,7 +2,6 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
-             xmlns:vm="clr-namespace:KomaLab.ViewModels"
              xmlns:avalonia="clr-namespace:Material.Icons.Avalonia;assembly=Material.Icons.Avalonia"
              xmlns:nodes="clr-namespace:KomaLab.ViewModels.Nodes"
              mc:Ignorable="d" 
@@ -14,35 +13,6 @@
              PointerMoved="OnPointerMoved"
              PointerWheelChanged="OnPointerWheelChanged">
     
-    <UserControl.Styles>
-        <Style Selector="Button.NavButton">
-            <Setter Property="Background" Value="{DynamicResource NavButtonBackgroundBrush}"/>
-            <Setter Property="Foreground" Value="{DynamicResource NavButtonForegroundBrush}"/>
-            <Setter Property="BorderThickness" Value="0"/>
-        </Style>
-
-        <Style Selector="Button.NavButton avalonia|MaterialIcon">
-            <Setter Property="FontSize" Value="24"/> 
-        </Style>
-        
-        <Style Selector="Button.NavButton:pointerover /template/ ContentPresenter#PART_ContentPresenter">
-            <Setter Property="Background" Value="{DynamicResource NavButtonHoverBackgroundBrush}"/> 
-            <Setter Property="Foreground" Value="White"/>     
-        </Style>
-        
-        <Style Selector="Grid#OverlayGrid">
-            <Setter Property="Opacity" Value="0.0"/>
-            <Setter Property="Transitions">
-                <Transitions>
-                    <DoubleTransition Property="Opacity" Duration="0.2"/>
-                </Transitions>
-            </Setter>
-        </Style>
-        <Style Selector="Border#ImageContainer:pointerover Grid#OverlayGrid">
-            <Setter Property="Opacity" Value="1.0"/>
-        </Style>
-    </UserControl.Styles>
-
     <Border Classes="NodeFrame" 
             Classes.selected="{Binding IsSelected}"
             Tag="Image">
@@ -89,30 +59,16 @@
                         </Image.RenderTransform>
                     </Image>
                     
-                    <Border HorizontalAlignment="Left" 
-                            VerticalAlignment="Top"
-                            IsHitTestVisible="False"
-                            Background="{DynamicResource OverlayTextBackgroundBrush}"
-                            Margin="15"
-                            Padding="16,10"
-                            CornerRadius="8"
+                    <Border Classes="ZoomOverlay"
                             IsVisible="{Binding Viewport.IsZoomed}">
-                        <TextBlock Text="{Binding Viewport.Scale, StringFormat='{}{0:P0}'}"
-                                   Foreground="{DynamicResource OverlayTextForegroundBrush}" 
-                                   FontSize="28"
+                        <TextBlock Classes="ZoomText"
+                                   Text="{Binding Viewport.Scale, StringFormat='{}{0:P0}'}"
                                    FontWeight="Bold"/>
                     </Border>
                     
-                    <Grid Name="OverlayGrid">
-                        
-                        <Border HorizontalAlignment="Right" VerticalAlignment="Top"
-                                Background="{DynamicResource OverlayBackgroundBrush}" 
-                                Margin="0,10,10,0"
-                                CornerRadius="4" ClipToBounds="True">
-                            
-                            <TextBlock Text="{Binding CurrentImageText}"
-                                       Foreground="White" Padding="12,8" Margin="12,8"
-                                       FontSize="32"/> 
+                    <Grid Classes="NavOverlay"> <Border Classes="CounterBadge">
+                            <TextBlock Classes="CounterText"
+                                       Text="{Binding CurrentImageText}"/> 
                         </Border>
                         
                         <Button Classes="NavButton" 

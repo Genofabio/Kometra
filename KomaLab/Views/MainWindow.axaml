@@ -1,34 +1,32 @@
 ﻿<Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        xmlns:vm="using:KomaLab.ViewModels"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
-        xmlns:controls="clr-namespace:KomaLab.Controls"
+        
+        xmlns:vm="clr-namespace:KomaLab.ViewModels"
         xmlns:views="clr-namespace:KomaLab.Views"
+        xmlns:controls="clr-namespace:KomaLab.Controls"
+        
         mc:Ignorable="d" d:DesignWidth="800" d:DesignHeight="450"
         x:Class="KomaLab.Views.MainWindow"
         x:DataType="vm:MainWindowViewModel"
+        
         Icon="/Assets/avalonia-logo.ico"
-        Title="KomaLab"
+        Title="{Binding WindowTitle}" 
         WindowState="Maximized">
         
-        <Window.KeyBindings>
-                <KeyBinding Gesture="Ctrl+Z" Command="{Binding BoardVm.UndoCommand}" />
-                <KeyBinding Gesture="Ctrl+Y" Command="{Binding BoardVm.RedoCommand}" />
+    <Window.KeyBindings>
+        <KeyBinding Gesture="Ctrl+Z" Command="{Binding BoardVm.UndoCommand}" />
+        <KeyBinding Gesture="Ctrl+Y" Command="{Binding BoardVm.RedoCommand}" />
+        <KeyBinding Gesture="Ctrl+Shift+Z" Command="{Binding BoardVm.RedoCommand}" />
+    </Window.KeyBindings>
+
+    <Grid RowDefinitions="Auto, *">
         
-                <KeyBinding Gesture="Ctrl+Shift+Z" Command="{Binding BoardVm.RedoCommand}" />
-        </Window.KeyBindings>
+        <controls:TopBarMenu Grid.Row="0" />
 
-        <Grid>
-                <Grid.RowDefinitions>
-                        <RowDefinition Height="Auto"/>
-                        <RowDefinition Height="*"/>
-                </Grid.RowDefinitions>
-
-                <controls:TopBarMenu Grid.Row="0" ZIndex="1" />
-
-                <views:BoardView Grid.Row="1" ZIndex="0" 
-                                 DataContext="{Binding BoardVm}" />
+        <views:BoardView Grid.Row="1" 
+                         DataContext="{Binding BoardVm}" />
         
-        </Grid>
+    </Grid>
 </Window>

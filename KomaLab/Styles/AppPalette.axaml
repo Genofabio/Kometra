@@ -1,81 +1,87 @@
 ﻿<ResourceDictionary xmlns="https://github.com/avaloniaui"
                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
 
-    <!-- BaseColors -->
-    <Color x:Key="NeutralFrameColor">#202020</Color>
-    <SolidColorBrush x:Key="NodeFrameBackgroundBrush" Color="{StaticResource NeutralFrameColor}" />
-    <SolidColorBrush x:Key="NodeFrameBorderBrush" Color="{StaticResource NeutralFrameColor}" />
-    
-    <Color x:Key="NeutralContentColor">#2C2C2C</Color>
-    <SolidColorBrush x:Key="NodeContentBackgroundBrush" Color="{StaticResource NeutralContentColor}" />
-    
-    <Color x:Key="ConnectionInactiveColor">#99666666</Color>
-    <SolidColorBrush x:Key="OverlayBackgroundBrush" Color="#B3353040" />
-    
-    <!-- TopBarMenu -->
-    <Color x:Key="MenuBackgroundColor">#3A3A3A</Color>
-    <SolidColorBrush x:Key="MenuBackgroundBrush" Color="{StaticResource MenuBackgroundColor}" />
-    
-    <!-- Board and Grid -->
-    <Color x:Key="AppBackgroundColor">#121212</Color>
-    <SolidColorBrush x:Key="AppBackgroundBrush" Color="{StaticResource AppBackgroundColor}" />
-    <SolidColorBrush x:Key="GridLineBrush" Color="#272727" />
-    
-    <!-- ImageCategory -->
-    <Color x:Key="ImageMainColor">#3E3454</Color>       
-    <Color x:Key="ImageDarkBaseColor">#2A2236</Color>   
-    <Color x:Key="ImageSelectionColor">#8058E8</Color>  
-    <Color x:Key="ImageCanvasBackgroundColor">#080808</Color>
-    <SolidColorBrush x:Key="ImageCanvasBackgroundBrush" Color="{StaticResource ImageCanvasBackgroundColor}" />
-    <SolidColorBrush x:Key="ImageHeaderBrush" Color="{StaticResource ImageDarkBaseColor}" />
-    <SolidColorBrush x:Key="ImageBodyBrush" Color="{StaticResource ImageDarkBaseColor}" />
-    
-    <SolidColorBrush x:Key="ImageBorderBrush" Color="{StaticResource ImageMainColor}" />
-    <SolidColorBrush x:Key="ImageSelectionBrush" Color="{StaticResource ImageSelectionColor}" />
-    
-    <!-- Multiple -->
-    <SolidColorBrush x:Key="NavButtonBackgroundBrush" Color="{StaticResource ImageMainColor}" />
-    <SolidColorBrush x:Key="NavButtonForegroundBrush" Color="#D0D0D0" />
-    <SolidColorBrush x:Key="NavButtonHoverBackgroundBrush" Color="#544869" />
+    <Color x:Key="Color.White">#FFFFFF</Color>
+    <Color x:Key="Color.White.Dim">#33FFFFFF</Color>   <Color x:Key="Color.White.Faint">#11FFFFFF</Color> <Color x:Key="Color.Black.Transparent">#99000000</Color>
 
-    <!-- ProcessCategory -->
-    <Color x:Key="ProcessMainColor">#1B5E20</Color>
-    <Color x:Key="ProcessBorderColor">#2E7D32</Color> <Color x:Key="ProcessBodyColor">#0E3311</Color>   <Color x:Key="ProcessSelectionColor">#00E676</Color>
-
-    <SolidColorBrush x:Key="ProcessHeaderBrush" Color="{StaticResource ProcessMainColor}" />
-    <SolidColorBrush x:Key="ProcessBorderBrush" Color="{StaticResource ProcessBorderColor}" />
-    <SolidColorBrush x:Key="ProcessBodyBrush" Color="{StaticResource ProcessBodyColor}" />
-    <SolidColorBrush x:Key="ProcessSelectionBrush" Color="{StaticResource ProcessSelectionColor}" />
-
-    <!-- OutputCategory -->
-    <Color x:Key="OutputMainColor">#B71C1C</Color>
-    <Color x:Key="OutputBorderColor">#D32F2F</Color> <Color x:Key="OutputBodyColor">#2B0B0B</Color>   <Color x:Key="OutputSelectionColor">#FF5252</Color>
-
-    <SolidColorBrush x:Key="OutputHeaderBrush" Color="{StaticResource OutputMainColor}" />
-    <SolidColorBrush x:Key="OutputBorderBrush" Color="{StaticResource OutputBorderColor}" />
-    <SolidColorBrush x:Key="OutputBodyBrush" Color="{StaticResource OutputBodyColor}" />
-    <SolidColorBrush x:Key="OutputSelectionBrush" Color="{StaticResource OutputSelectionColor}" />
+    <Color x:Key="Color.Grey.10">#080808</Color> 
+    <Color x:Key="Color.Grey.15">#121212</Color> 
+    <Color x:Key="Color.Grey.18">#1A1A1A</Color> 
+    <Color x:Key="Color.Grey.20">#1E1E1E</Color> 
+    <Color x:Key="Color.Grey.25">#202020</Color> 
+    <Color x:Key="Color.Grey.28">#222222</Color> 
+    <Color x:Key="Color.Grey.30">#272727</Color> 
+    <Color x:Key="Color.Grey.35">#2C2C2C</Color> 
+    <Color x:Key="Color.Grey.40">#3A3A3A</Color> 
+    <Color x:Key="Color.Grey.50">#555555</Color> 
     
+    <Color x:Key="Color.Grey.Medium">#AAAAAA</Color> <Color x:Key="Color.Grey.Light">#D0D0D0</Color> 
     
-    <!-- AlignmentTool -->
-    <SolidColorBrush x:Key="ToolWindowBackgroundBrush" Color="#1A1A1A" />
-    <SolidColorBrush x:Key="ToolPanelBackgroundBrush" Color="#2C2C2C" />
-    <SolidColorBrush x:Key="ToolPreviewBackgroundBrush" Color="#222222" />
+    <Color x:Key="Color.Purple.Base">#8058E8</Color>
+    <Color x:Key="Color.Purple.Light">#936BFF</Color>
+    <Color x:Key="Color.Purple.Dark">#704AD9</Color>
+    <Color x:Key="Color.Purple.Deep">#3E3454</Color>
+    <Color x:Key="Color.Purple.ImageBase">#2A2236</Color> 
+    <Color x:Key="Color.Purple.Muted">#544869</Color>     
+    <Color x:Key="Color.Purple.Overlay">#B3353040</Color>  
+    
+    <Color x:Key="Color.Green.Base">#03A077</Color>
+    <Color x:Key="Color.Green.Light">#04CA95</Color>
+    <Color x:Key="Color.Green.Dark">#028A64</Color>
 
-    <SolidColorBrush x:Key="OverlaySearchBoxBrush" Color="#FEC530" />    <SolidColorBrush x:Key="OverlayTargetMarkerBrush" Color="#F84B5F" /> <SolidColorBrush x:Key="OverlayTextBackgroundBrush" Color="#99000000" /> <SolidColorBrush x:Key="OverlayTextForegroundBrush" Color="#FFFFFF" />
+    <Color x:Key="Color.Red.Base">#E6606A</Color>
+    <Color x:Key="Color.Red.Light">#FF7D85</Color>
+    <Color x:Key="Color.Red.Dark">#D94B55</Color>
+    <Color x:Key="Color.Red.Marker">#F84B5F</Color>
 
-    <SolidColorBrush x:Key="ActionDisabledBackgroundBrush" Color="#555555" />
+    <Color x:Key="Color.Warning">#FEC530</Color>
 
-    <SolidColorBrush x:Key="ActionPrimaryBackgroundBrush" Color="#8058E8" />
-    <SolidColorBrush x:Key="ActionPrimaryHoverBrush" Color="#936BFF" />
-    <SolidColorBrush x:Key="ActionPrimaryPressedBrush" Color="#704AD9" />
 
-    <SolidColorBrush x:Key="ActionSuccessBackgroundBrush" Color="#03A077" />
-    <SolidColorBrush x:Key="ActionSuccessHoverBrush" Color="#04CA95" />
-    <SolidColorBrush x:Key="ActionSuccessPressedBrush" Color="#028A64" />
+    <SolidColorBrush x:Key="Text.StaticWhiteBrush" Color="{StaticResource Color.White}" />
+    <SolidColorBrush x:Key="Text.MediumGreyBrush" Color="{StaticResource Color.Grey.Medium}" />
 
-    <SolidColorBrush x:Key="ActionDestructiveBackgroundBrush" Color="#E6606A" />
-    <SolidColorBrush x:Key="ActionDestructiveHoverBrush" Color="#FF7D85" />
-    <SolidColorBrush x:Key="ActionDestructivePressedBrush" Color="#D94B55" />
+    <SolidColorBrush x:Key="Border.WhiteDimBrush" Color="{StaticResource Color.White.Dim}" />
+    <SolidColorBrush x:Key="Background.WhiteFaintBrush" Color="{StaticResource Color.White.Faint}" />
+
+    <SolidColorBrush x:Key="AppBackgroundBrush" Color="{StaticResource Color.Grey.15}" />
+    <SolidColorBrush x:Key="GridLineBrush" Color="{StaticResource Color.Grey.30}" />
+    <SolidColorBrush x:Key="MenuBackgroundBrush" Color="{StaticResource Color.Grey.40}" />
+    
+    <SolidColorBrush x:Key="NodeFrameBackgroundBrush" Color="{StaticResource Color.Grey.25}" />
+    <SolidColorBrush x:Key="NodeFrameBorderBrush" Color="{StaticResource Color.Grey.25}" />
+    <SolidColorBrush x:Key="NodeContentBackgroundBrush" Color="{StaticResource Color.Grey.35}" />
+    
+    <SolidColorBrush x:Key="ToolWindowBackgroundBrush" Color="{StaticResource Color.Grey.18}" />
+    <SolidColorBrush x:Key="ToolPanelBackgroundBrush" Color="{StaticResource Color.Grey.35}" />
+    <SolidColorBrush x:Key="ToolPreviewBackgroundBrush" Color="{StaticResource Color.Grey.28}" />
+    
+    <SolidColorBrush x:Key="ActionPrimaryBackgroundBrush" Color="{StaticResource Color.Purple.Base}" />
+    <SolidColorBrush x:Key="ActionPrimaryHoverBrush" Color="{StaticResource Color.Purple.Light}" />
+    <SolidColorBrush x:Key="ActionPrimaryPressedBrush" Color="{StaticResource Color.Purple.Dark}" />
+    <SolidColorBrush x:Key="ActionDisabledBackgroundBrush" Color="{StaticResource Color.Grey.50}" />
+
+    <SolidColorBrush x:Key="ActionSuccessBackgroundBrush" Color="{StaticResource Color.Green.Base}" />
+    <SolidColorBrush x:Key="ActionSuccessHoverBrush" Color="{StaticResource Color.Green.Light}" />
+    <SolidColorBrush x:Key="ActionSuccessPressedBrush" Color="{StaticResource Color.Green.Dark}" />
+
+    <SolidColorBrush x:Key="ActionDestructiveBackgroundBrush" Color="{StaticResource Color.Red.Base}" />
+    <SolidColorBrush x:Key="ActionDestructiveHoverBrush" Color="{StaticResource Color.Red.Light}" />
+    <SolidColorBrush x:Key="ActionDestructivePressedBrush" Color="{StaticResource Color.Red.Dark}" />
+
+    <SolidColorBrush x:Key="ImageCanvasBackgroundBrush" Color="{StaticResource Color.Grey.10}" />
+    <SolidColorBrush x:Key="ImageHeaderBrush" Color="{StaticResource Color.Purple.ImageBase}" />
+    <SolidColorBrush x:Key="ImageBodyBrush" Color="{StaticResource Color.Purple.ImageBase}" />
+    <SolidColorBrush x:Key="ImageBorderBrush" Color="{StaticResource Color.Purple.Deep}" />
+    <SolidColorBrush x:Key="ImageSelectionBrush" Color="{StaticResource Color.Purple.Base}" />
+
+    <SolidColorBrush x:Key="NavButtonBackgroundBrush" Color="{StaticResource Color.Purple.Deep}" />
+    <SolidColorBrush x:Key="NavButtonForegroundBrush" Color="{StaticResource Color.Grey.Light}" />
+    <SolidColorBrush x:Key="NavButtonHoverBackgroundBrush" Color="{StaticResource Color.Purple.Muted}" />
+
+    <SolidColorBrush x:Key="OverlayBackgroundBrush" Color="{StaticResource Color.Purple.Overlay}" />
+    <SolidColorBrush x:Key="OverlaySearchBoxBrush" Color="{StaticResource Color.Warning}" />
+    <SolidColorBrush x:Key="OverlayTargetMarkerBrush" Color="{StaticResource Color.Red.Marker}" />
+    <SolidColorBrush x:Key="OverlayTextBackgroundBrush" Color="{StaticResource Color.Black.Transparent}" />
+    <SolidColorBrush x:Key="OverlayTextForegroundBrush" Color="{StaticResource Color.White}" />
 
 </ResourceDictionary>

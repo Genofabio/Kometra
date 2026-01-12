@@ -1,0 +1,75 @@
+﻿<Styles xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <Style Selector="Button.apply">
+        <Setter Property="Background" Value="{DynamicResource ActionSuccessBackgroundBrush}"/>
+        <Setter Property="Foreground" Value="{DynamicResource Text.StaticWhiteBrush}"/>
+        <Setter Property="BorderThickness" Value="0"/>
+        <Setter Property="CornerRadius" Value="4"/>
+        <Setter Property="Padding" Value="24,8"/>
+        <Setter Property="Cursor" Value="Hand"/>
+        <Setter Property="FontWeight" Value="SemiBold"/>
+    </Style>
+    <Style Selector="Button.apply:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+        <Setter Property="Background" Value="{DynamicResource ActionSuccessHoverBrush}"/>
+        <Setter Property="Foreground" Value="{DynamicResource Text.StaticWhiteBrush}"/>
+    </Style>
+    <Style Selector="Button.apply:pressed /template/ ContentPresenter#PART_ContentPresenter">
+        <Setter Property="Background" Value="{DynamicResource ActionSuccessPressedBrush}"/>
+        <Setter Property="Foreground" Value="{DynamicResource Text.StaticWhiteBrush}"/>
+    </Style>
+
+    <Style Selector="Button.cancel">
+        <Setter Property="Background" Value="{DynamicResource ActionDestructiveBackgroundBrush}"/>
+        <Setter Property="Foreground" Value="{DynamicResource Text.StaticWhiteBrush}"/>
+        <Setter Property="BorderThickness" Value="0"/>
+        <Setter Property="CornerRadius" Value="4"/>
+        <Setter Property="Padding" Value="16,8"/>
+        <Setter Property="Cursor" Value="Hand"/>
+    </Style>
+    <Style Selector="Button.cancel:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+        <Setter Property="Background" Value="{DynamicResource ActionDestructiveHoverBrush}"/>
+        <Setter Property="Foreground" Value="{DynamicResource Text.StaticWhiteBrush}"/>
+    </Style>
+    <Style Selector="Button.cancel:pressed /template/ ContentPresenter#PART_ContentPresenter">
+        <Setter Property="Background" Value="{DynamicResource ActionDestructivePressedBrush}"/>
+        <Setter Property="Foreground" Value="{DynamicResource Text.StaticWhiteBrush}"/>
+    </Style>
+    
+    <Style Selector="Button.navBtn">
+        <Setter Property="Background" Value="{DynamicResource ActionDisabledBackgroundBrush}"/>
+        <Setter Property="Foreground" Value="{DynamicResource Text.StaticWhiteBrush}"/>
+        <Setter Property="CornerRadius" Value="4"/>
+        <Setter Property="Padding" Value="8"/>
+        <Setter Property="Cursor" Value="Hand"/>
+        <Setter Property="BorderThickness" Value="0"/>
+    </Style>
+    <Style Selector="Button.navBtn:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+        <Setter Property="Background" Value="{DynamicResource ActionPrimaryHoverBrush}"/>
+    </Style>
+    
+    <Style Selector="Button.toolBtn">
+        <Setter Property="Background" Value="{DynamicResource MenuBackgroundBrush}"/>
+        <Setter Property="Foreground" Value="{DynamicResource Text.StaticWhiteBrush}"/>
+        <Setter Property="CornerRadius" Value="4"/>
+        <Setter Property="Padding" Value="12,0"/>
+        <Setter Property="Cursor" Value="Hand"/>
+        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="BorderBrush" Value="{DynamicResource ActionDisabledBackgroundBrush}"/>
+        <Setter Property="VerticalContentAlignment" Value="Center"/>
+    </Style>
+    <Style Selector="Button.toolBtn:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+        <Setter Property="Background" Value="{DynamicResource ActionDisabledBackgroundBrush}"/>
+    </Style>
+
+    <Style Selector="DataGridRow.modified TextBlock">
+        <Setter Property="Foreground" Value="{DynamicResource OverlaySearchBoxBrush}"/> 
+        <Setter Property="FontWeight" Value="Bold"/>
+    </Style>
+    
+    <Style Selector="TextBox.clearButton">
+        <Setter Property="CornerRadius" Value="4"/>
+        <Setter Property="BorderBrush" Value="{DynamicResource SystemControlForegroundBaseLowBrush}"/>
+    </Style>
+
+</Styles>

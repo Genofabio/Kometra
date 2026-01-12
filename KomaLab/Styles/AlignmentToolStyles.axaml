@@ -1,29 +1,47 @@
 ﻿<Styles xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
 
+    <Style Selector="Border.CoordinateEntryRow">
+        <Setter Property="Background" Value="{DynamicResource ToolPanelBackgroundBrush}"/>
+        <Setter Property="BorderBrush" Value="{DynamicResource GridLineBrush}"/>
+        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="CornerRadius" Value="4"/>
+        <Setter Property="ClipToBounds" Value="True"/>
+        <Setter Property="Margin" Value="0,4"/>
+        <Setter Property="Transitions">
+            <Transitions>
+                <BrushTransition Property="BorderBrush" Duration="0:0:0.2"/>
+            </Transitions>
+        </Setter>
+    </Style>
+
+    <Style Selector="Border.CoordinateEntryRow.active">
+        <Setter Property="BorderBrush" Value="{DynamicResource ActionPrimaryBackgroundBrush}"/>
+        <Setter Property="BorderThickness" Value="2"/>
+        <Setter Property="Background" Value="{DynamicResource MenuBackgroundBrush}"/>
+    </Style>
+
     <Style Selector="StackPanel.NavControls TextBlock">
-        <Setter Property="Foreground" Value="White"/>
-        <Setter Property="HorizontalAlignment" Value="Center"/>
+        <Setter Property="Foreground" Value="{DynamicResource Text.StaticWhiteBrush}"/> <Setter Property="HorizontalAlignment" Value="Center"/>
         <Setter Property="Margin" Value="0,4"/>
     </Style>
 
     <Style Selector="Button:pointerover /template/ ContentPresenter#PART_ContentPresenter">
         <Setter Property="Background" Value="{DynamicResource MenuBackgroundBrush}"/> 
-        <Setter Property="Foreground" Value="White"/> 
-    </Style>
+        <Setter Property="Foreground" Value="{DynamicResource Text.StaticWhiteBrush}"/> </Style>
 
     <Style Selector="Button.calculate">
         <Setter Property="Background" Value="{DynamicResource ActionPrimaryBackgroundBrush}"/> 
-        <Setter Property="Foreground" Value="White"/>
+        <Setter Property="Foreground" Value="{DynamicResource Text.StaticWhiteBrush}"/>
         <Setter Property="BorderThickness" Value="0"/>
     </Style>
     <Style Selector="Button.calculate:pointerover /template/ ContentPresenter#PART_ContentPresenter">
         <Setter Property="Background" Value="{DynamicResource ActionPrimaryHoverBrush}"/> 
-        <Setter Property="TextBlock.Foreground" Value="White"/>
+        <Setter Property="TextBlock.Foreground" Value="{DynamicResource Text.StaticWhiteBrush}"/>
     </Style>
     <Style Selector="Button.calculate:pressed /template/ ContentPresenter#PART_ContentPresenter">
         <Setter Property="Background" Value="{DynamicResource ActionPrimaryPressedBrush}"/> 
-        <Setter Property="TextBlock.Foreground" Value="White"/>
+        <Setter Property="TextBlock.Foreground" Value="{DynamicResource Text.StaticWhiteBrush}"/>
     </Style>
     <Style Selector="Button.calculate:disabled">
         <Setter Property="Background" Value="{DynamicResource ActionDisabledBackgroundBrush}"/>
@@ -32,16 +50,16 @@
 
     <Style Selector="Button.apply">
         <Setter Property="Background" Value="{DynamicResource ActionSuccessBackgroundBrush}"/> 
-        <Setter Property="Foreground" Value="White"/>
+        <Setter Property="Foreground" Value="{DynamicResource Text.StaticWhiteBrush}"/>
         <Setter Property="BorderThickness" Value="0"/>
     </Style>
     <Style Selector="Button.apply:pointerover /template/ ContentPresenter#PART_ContentPresenter">
         <Setter Property="Background" Value="{DynamicResource ActionSuccessHoverBrush}"/> 
-        <Setter Property="TextBlock.Foreground" Value="White"/>
+        <Setter Property="TextBlock.Foreground" Value="{DynamicResource Text.StaticWhiteBrush}"/>
     </Style>
     <Style Selector="Button.apply:pressed /template/ ContentPresenter#PART_ContentPresenter">
         <Setter Property="Background" Value="{DynamicResource ActionSuccessPressedBrush}"/> 
-        <Setter Property="TextBlock.Foreground" Value="White"/>
+        <Setter Property="TextBlock.Foreground" Value="{DynamicResource Text.StaticWhiteBrush}"/>
     </Style>
     <Style Selector="Button.apply:disabled">
         <Setter Property="Background" Value="{DynamicResource ActionDisabledBackgroundBrush}"/>
@@ -50,16 +68,16 @@
 
     <Style Selector="Button.cancel">
         <Setter Property="Background" Value="{DynamicResource ActionDestructiveBackgroundBrush}"/> 
-        <Setter Property="Foreground" Value="White"/>
+        <Setter Property="Foreground" Value="{DynamicResource Text.StaticWhiteBrush}"/>
         <Setter Property="BorderThickness" Value="0"/>
     </Style>
     <Style Selector="Button.cancel:pointerover /template/ ContentPresenter#PART_ContentPresenter">
         <Setter Property="Background" Value="{DynamicResource ActionDestructiveHoverBrush}"/> 
-        <Setter Property="TextBlock.Foreground" Value="White"/>
+        <Setter Property="TextBlock.Foreground" Value="{DynamicResource Text.StaticWhiteBrush}"/>
     </Style>
     <Style Selector="Button.cancel:pressed /template/ ContentPresenter#PART_ContentPresenter">
         <Setter Property="Background" Value="{DynamicResource ActionDestructivePressedBrush}"/> 
-        <Setter Property="TextBlock.Foreground" Value="White"/>
+        <Setter Property="TextBlock.Foreground" Value="{DynamicResource Text.StaticWhiteBrush}"/>
     </Style>
     <Style Selector="Button.cancel:disabled">
         <Setter Property="Background" Value="{DynamicResource ActionDisabledBackgroundBrush}"/>
@@ -68,9 +86,7 @@
     
     <Style Selector="RadioButton.segmented">
         <Setter Property="Background" Value="Transparent"/>
-        <Setter Property="Foreground" Value="#AAAAAA"/>
-        <Setter Property="BorderBrush" Value="#33FFFFFF"/>
-        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="Foreground" Value="{DynamicResource Text.MediumGreyBrush}"/> <Setter Property="BorderBrush" Value="{DynamicResource Border.WhiteDimBrush}"/> <Setter Property="BorderThickness" Value="1"/>
         <Setter Property="HorizontalContentAlignment" Value="Center"/>
         <Setter Property="VerticalContentAlignment" Value="Center"/>
         <Setter Property="MinHeight" Value="32"/>
@@ -93,16 +109,15 @@
     </Style>
 
     <Style Selector="RadioButton.segmented:pointerover">
-        <Setter Property="Background" Value="#11FFFFFF"/>
-        <Setter Property="Foreground" Value="White"/>
+        <Setter Property="Background" Value="{DynamicResource Background.WhiteFaintBrush}"/> <Setter Property="Foreground" Value="{DynamicResource Text.StaticWhiteBrush}"/>
     </Style>
 
     <Style Selector="RadioButton.segmented:checked">
         <Setter Property="Background" Value="{DynamicResource ActionPrimaryBackgroundBrush}"/>
         <Setter Property="BorderBrush" Value="{DynamicResource ActionPrimaryBackgroundBrush}"/>
-        <Setter Property="Foreground" Value="White"/>
+        <Setter Property="Foreground" Value="{DynamicResource Text.StaticWhiteBrush}"/>
         <Setter Property="FontWeight" Value="SemiBold"/>
         <Setter Property="ZIndex" Value="1"/> 
     </Style>
-
+ 
 </Styles>

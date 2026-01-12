@@ -1,0 +1,90 @@
+﻿<Styles xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <Style Selector="Button.baseBtn">
+        <Setter Property="Foreground" Value="{DynamicResource Text.StaticWhiteBrush}"/>
+        <Setter Property="CornerRadius" Value="6"/>
+        <Setter Property="Padding" Value="25,8"/>
+        <Setter Property="FontSize" Value="14"/>
+        <Setter Property="FontWeight" Value="SemiBold"/>
+        <Setter Property="HorizontalAlignment" Value="Right"/>
+        <Setter Property="VerticalContentAlignment" Value="Center"/>
+        <Setter Property="Cursor" Value="Hand"/>
+    </Style>
+
+    <Style Selector="Button.greenBtn">
+        <Setter Property="Background" Value="{DynamicResource ActionSuccessBackgroundBrush}"/>
+    </Style>
+    <Style Selector="Button.greenBtn:pointerover /template/ ContentPresenter">
+        <Setter Property="Background" Value="{DynamicResource ActionSuccessHoverBrush}"/>
+    </Style>
+
+    <Style Selector="Button.purpleBtn">
+        <Setter Property="Background" Value="{DynamicResource ActionPrimaryBackgroundBrush}"/>
+    </Style>
+    <Style Selector="Button.purpleBtn:pointerover /template/ ContentPresenter">
+        <Setter Property="Background" Value="{DynamicResource ActionPrimaryHoverBrush}"/>
+    </Style>
+
+    <Style Selector="Button.cancelBtn">
+        <Setter Property="Background" Value="{DynamicResource ActionDestructiveBackgroundBrush}"/>
+    </Style>
+    <Style Selector="Button.cancelBtn:pointerover /template/ ContentPresenter">
+        <Setter Property="Background" Value="{DynamicResource ActionDestructiveHoverBrush}"/>
+    </Style>
+
+    <Style Selector="TextBlock.TitleText">
+        <Setter Property="FontSize" Value="22"/>
+        <Setter Property="FontWeight" Value="Bold"/>
+        <Setter Property="Foreground" Value="{DynamicResource Text.StaticWhiteBrush}"/>
+    </Style>
+
+    <Style Selector="TextBlock.DescriptionText">
+        <Setter Property="FontSize" Value="12"/>
+        <Setter Property="Foreground" Value="{DynamicResource Text.MediumGreyBrush}"/>
+        <Setter Property="TextWrapping" Value="Wrap"/>
+        <Setter Property="LineHeight" Value="18"/>
+    </Style>
+
+    <Style Selector="TextBlock.TargetLabel">
+        <Setter Property="FontWeight" Value="Bold"/>
+        <Setter Property="Foreground" Value="{DynamicResource Text.MediumGreyBrush}"/>
+    </Style>
+
+    <Style Selector="TextBlock.TargetValue">
+        <Setter Property="Foreground" Value="{DynamicResource NavButtonForegroundBrush}"/>
+    </Style>
+
+    <Style Selector="Border.LogContainer">
+        <Setter Property="Background" Value="{DynamicResource ToolPreviewBackgroundBrush}"/>
+        
+        <Setter Property="BorderBrush" Value="{DynamicResource ActionDisabledBackgroundBrush}"/>
+        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="CornerRadius" Value="4"/>
+    </Style>
+
+    <Style Selector="TextBox.LogContent">
+        <Setter Property="FontFamily" Value="Consolas, Monospace"/>
+        <Setter Property="FontSize" Value="12"/>
+        <Setter Property="Foreground" Value="{DynamicResource NavButtonForegroundBrush}"/>
+        <Setter Property="Background" Value="Transparent"/>
+        <Setter Property="BorderThickness" Value="0"/>
+        <Setter Property="Padding" Value="10"/>
+        <Setter Property="TextWrapping" Value="Wrap"/>
+        <Setter Property="AcceptsReturn" Value="True"/>
+    </Style>
+
+    <Style Selector="TextBlock.WarningLabel">
+        <Setter Property="FontWeight" Value="Bold"/>
+        <Setter Property="Foreground" Value="{DynamicResource Text.MediumGreyBrush}"/>
+        <Setter Property="FontSize" Value="12"/>
+    </Style>
+
+    <Style Selector="TextBlock.WarningBody">
+        <Setter Property="Foreground" Value="{DynamicResource ActionDisabledBackgroundBrush}"/>
+        <Setter Property="FontSize" Value="12"/>
+        <Setter Property="FontStyle" Value="Italic"/>
+        <Setter Property="Margin" Value="21,0,0,0"/>
+    </Style>
+
+</Styles>

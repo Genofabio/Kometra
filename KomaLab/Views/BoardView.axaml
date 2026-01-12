@@ -2,10 +2,12 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             
              xmlns:vm="clr-namespace:KomaLab.ViewModels"
+             xmlns:nodes="clr-namespace:KomaLab.ViewModels.Nodes"
              xmlns:views="clr-namespace:KomaLab.Views"
              xmlns:controls="clr-namespace:KomaLab.Controls"
-             xmlns:nodes="clr-namespace:KomaLab.ViewModels.Nodes"
+             
              mc:Ignorable="d" d:DesignWidth="800" d:DesignHeight="450"
              x:Class="KomaLab.Views.BoardView"
              x:DataType="vm:BoardViewModel"

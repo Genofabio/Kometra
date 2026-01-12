@@ -98,7 +98,7 @@ public class WindowService : IWindowService
         // HeaderEditorToolViewModel prende solo il nodo, le dipendenze interne 
         // le recupera dal nodo o sono parser statici.
         var editorVm = new HeaderEditorToolViewModel(node);
-        var editorView = new HeaderEditorView
+        var editorView = new HeaderEditorToolView
         {
             DataContext = editorVm
         };
@@ -116,7 +116,7 @@ public class WindowService : IWindowService
         if (_mainWindow == null) return;
 
         var plateVm = new PlateSolvingToolViewModel(node);
-        var plateView = new PlateSolvingView
+        var plateView = new PlateSolvingToolView
         {
             DataContext = plateVm
         };

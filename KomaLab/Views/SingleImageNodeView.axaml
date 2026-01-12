@@ -2,22 +2,22 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
-             xmlns:vm="clr-namespace:KomaLab.ViewModels"
              xmlns:nodes="clr-namespace:KomaLab.ViewModels.Nodes"
              mc:Ignorable="d" 
              x:Class="KomaLab.Views.SingleImageNodeView"
              x:DataType="nodes:SingleImageNodeViewModel"
+             
              PointerPressed="OnPointerPressed"
              PointerReleased="OnPointerReleased"
              PointerMoved="OnPointerMoved"
              PointerWheelChanged="OnPointerWheelChanged"
+             
              d:DesignWidth="200" 
              d:DesignHeight="150">
     
     <Border Classes="NodeFrame"
             Classes.selected="{Binding IsSelected}"
             Tag="Image"
-            
             Width="{Binding EstimatedTotalSize.Width}"
             MinWidth="150"
             HorizontalAlignment="Center"
@@ -27,7 +27,6 @@
             
             <Border Grid.Row="0" Classes="Header"> 
                 <Grid ColumnDefinitions="*,Auto">
-                    
                     <TextBlock Grid.Column="0" 
                                Classes="NodeTitle"
                                Text="{Binding Title}"/> 
@@ -42,12 +41,10 @@
             
             <Border Grid.Row="1" 
                     Classes="Body" 
-                    ClipToBounds="True"
                     Name="ImageContainer"
                     Background="{DynamicResource ImageCanvasBackgroundBrush}">
 
                 <Grid>
-        
                     <Image Source="{Binding FitsImage.Image}"
                            Stretch="None"
                            HorizontalAlignment="Left" 
@@ -65,23 +62,14 @@
                         </Image.RenderTransform>
                     </Image>
 
-                    <Border HorizontalAlignment="Left" 
-                            VerticalAlignment="Top"
-                            IsHitTestVisible="False"
-                            Background="{DynamicResource OverlayTextBackgroundBrush}"
-                            Margin="15"
-                            Padding="16,10"
-                            CornerRadius="8"
+                    <Border Classes="ZoomOverlay"
                             IsVisible="{Binding Viewport.IsZoomed}">
-    
-                        <TextBlock Text="{Binding Viewport.Scale, StringFormat='{}{0:P0}'}"
-                                   Foreground="{DynamicResource OverlayTextForegroundBrush}" 
-                                   FontSize="28"/>
+                        <TextBlock Classes="ZoomText"
+                                   Text="{Binding Viewport.Scale, StringFormat='{}{0:P0}'}"/>
                     </Border>
         
                 </Grid>
             </Border>
-            
         </Grid>
     </Border>
 </UserControl>

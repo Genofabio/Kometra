@@ -18,17 +18,7 @@
     </UserControl.Resources>
     
     <UserControl.Styles>
-        <Style Selector="Menu">
-            <Setter Property="Background" Value="{DynamicResource MenuBackgroundBrush}"/> 
-            <Setter Property="CornerRadius" Value="0 0 8 8"/>
-        </Style>
-        <Style Selector="Menu > MenuItem">
-            <Setter Property="CornerRadius" Value="0 0 8 8"/>
-        </Style>
-        <Style Selector="MenuItem.innerMenuItem">
-            <Setter Property="CornerRadius" Value="8"/>
-            <Setter Property="Margin" Value="5 0 5 0"/>
-        </Style>
+        <StyleInclude Source="/Styles/TopBarMenuStyles.axaml" />
     </UserControl.Styles>
 
     <Menu VerticalAlignment="Top">
@@ -62,7 +52,9 @@
             
             <Separator />
             
-            <MenuItem Header="Exit" Command="{Binding ExitAppCommand}">
+            <MenuItem Header="Exit" 
+                      Classes="innerMenuItem"
+                      Command="{Binding ExitAppCommand}">
                 <MenuItem.Icon>
                     <avalonia:MaterialIcon Kind="ExitToApp" />
                 </MenuItem.Icon>
@@ -106,12 +98,13 @@
             
             <Separator />
 
-            <MenuItem Header="Operazioni Stack">
+            <MenuItem Header="Operazioni Stack" Classes="innerMenuItem">
                 <MenuItem.Icon>
                     <avalonia:MaterialIcon Kind="Layers" />
                 </MenuItem.Icon>
 
                 <MenuItem Header="Somma"
+                          Classes="innerMenuItem"
                           Command="{Binding BoardVm.StackImagesCommand}"
                           CommandParameter="{x:Static processing:StackingMode.Sum}">
                     <MenuItem.Icon>
@@ -120,6 +113,7 @@
                 </MenuItem>
 
                 <MenuItem Header="Media"
+                          Classes="innerMenuItem"
                           Command="{Binding BoardVm.StackImagesCommand}"
                           CommandParameter="{x:Static processing:StackingMode.Average}">
                     <MenuItem.Icon>
@@ -128,6 +122,7 @@
                 </MenuItem>
         
                 <MenuItem Header="Mediana"
+                          Classes="innerMenuItem"
                           Command="{Binding BoardVm.StackImagesCommand}"
                           CommandParameter="{x:Static processing:StackingMode.Median}">
                     <MenuItem.Icon>
@@ -138,12 +133,13 @@
         </MenuItem>
 
         <MenuItem Header="_View">
-            <MenuItem Header="Modalità Visualizzazione">
+            <MenuItem Header="Modalità Visualizzazione" Classes="innerMenuItem">
                 <MenuItem.Icon>
                     <avalonia:MaterialIcon Kind="EyeSettings" />
                 </MenuItem.Icon>
 
                 <MenuItem Header="Lineare"
+                          Classes="innerMenuItem"
                           Command="{Binding BoardVm.SetVisualizationModeCommand}"
                           CommandParameter="{x:Static visualization:VisualizationMode.Linear}">
                     <MenuItem.Icon>
@@ -152,6 +148,7 @@
                 </MenuItem>
 
                 <MenuItem Header="Radice Quadrata"
+                          Classes="innerMenuItem"
                           Command="{Binding BoardVm.SetVisualizationModeCommand}"
                           CommandParameter="{x:Static visualization:VisualizationMode.SquareRoot}">
                     <MenuItem.Icon>
@@ -160,6 +157,7 @@
                 </MenuItem>
 
                 <MenuItem Header="Logaritmica"
+                          Classes="innerMenuItem"
                           Command="{Binding BoardVm.SetVisualizationModeCommand}"
                           CommandParameter="{x:Static visualization:VisualizationMode.Logarithmic}">
                     <MenuItem.Icon>
