@@ -6,7 +6,6 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using KomaLab.Models.Astrometry;
-using nom.tam.fits;
 
 namespace KomaLab.Services.Astrometry;
 
