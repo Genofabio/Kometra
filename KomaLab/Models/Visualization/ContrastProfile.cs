@@ -16,13 +16,9 @@ public abstract record ContrastProfile;
 /// <summary>
 /// Profilo Assoluto: I valori sono ESPLICITAMENTE in ADU (es. pixel values).
 /// </summary>
-/// <param name="BlackADU">Il valore del nero in unità ADU (es. 450).</param>
-/// <param name="WhiteADU">Il valore del bianco in unità ADU (es. 20000).</param>
-public record AbsoluteContrastProfile(double BlackADU, double WhiteADU) : ContrastProfile;
+/// <param name="BlackAdu">Il valore del nero in unità ADU (es. 450).</param>
+/// <param name="WhiteAdu">Il valore del bianco in unità ADU (es. 20000).</param>
+public record AbsoluteContrastProfile(double BlackAdu, double WhiteAdu) : ContrastProfile;
 
-/// <summary>
-/// Profilo Relativo: I valori sono ESPLICITAMENTE relativi (percentuali o sigma).
-/// </summary>
-/// <param name="LowerPercentile">Soglia inferiore relativa (es. 0.05 per 5%).</param>
-/// <param name="UpperPercentile">Soglia superiore relativa (es. 0.99 per 99%).</param>
-public record RelativeContrastProfile(double LowerPercentile, double UpperPercentile) : ContrastProfile;
+public record SigmaContrastProfile(double KBlack, double KWhite) : ContrastProfile;
+

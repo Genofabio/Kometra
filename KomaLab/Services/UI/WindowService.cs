@@ -17,12 +17,6 @@ namespace KomaLab.Services.UI;
 // ---------------------------------------------------------------------------
 // FILE: WindowService.cs
 // RUOLO: Orchestratore delle Finestre (UI Coordinator)
-// DESCRIZIONE:
-// Implementazione concreta del servizio finestre per Avalonia.
-// Responsabilità:
-// 1. Risoluzione delle dipendenze per i tool tramite IServiceProvider (DI).
-// 2. Iniezione dei servizi nei ViewModel dei tool (Alignment, Posterization, ecc.).
-// 3. Gestione del ciclo di vita delle finestre modali e pulizia della memoria (Dispose).
 // ---------------------------------------------------------------------------
 
 public class WindowService : IWindowService
@@ -49,12 +43,16 @@ public class WindowService : IWindowService
     {
         if (_mainWindow == null) throw new InvalidOperationException("Finestra principale non registrata.");
 
+        // Risoluzione Dipendenze
         var ioService = _serviceProvider.GetRequiredService<IFitsIoService>();
         var metadataService = _serviceProvider.GetRequiredService<IFitsMetadataService>();
         var alignmentService = _serviceProvider.GetRequiredService<IAlignmentService>();
         var converter = _serviceProvider.GetRequiredService<IFitsImageDataConverter>();
         var analysis = _serviceProvider.GetRequiredService<IImageAnalysisService>();
         var jplService = _serviceProvider.GetRequiredService<IJplHorizonsService>();
+        
+        // RECUPERO NUOVO SERVIZIO
+        var mediaExport = _serviceProvider.GetRequiredService<IMediaExportService>(); 
 
         using var viewModel = new AlignmentToolViewModel(
             sourcePaths,
@@ -64,6 +62,7 @@ public class WindowService : IWindowService
             converter,
             analysis,
             jplService,
+            mediaExport, // <--- INIEZIONE NEL COSTRUTTORE
             initialMode
         );
     
@@ -85,17 +84,14 @@ public class WindowService : IWindowService
     {
         if (_mainWindow == null) return null;
         
-        // Risoluzione servizio metadati per l'editor
         var metadataService = _serviceProvider.GetRequiredService<IFitsMetadataService>();
 
-        // Usiamo 'using' perché HeaderEditorToolViewModel è IDisposable
         using var editorVm = new HeaderEditorToolViewModel(node, metadataService);
         
         var editorView = new HeaderEditorToolView { DataContext = editorVm };
 
         await editorView.ShowDialog(_mainWindow);
 
-        // Se l'utente ha salvato (proprietà IsSaved nella View), restituiamo l'header aggiornato
         return editorView.IsSaved ? editorVm.GetUpdatedHeader() : null;
     }
     
@@ -106,10 +102,8 @@ public class WindowService : IWindowService
     {
         if (_mainWindow == null) return;
 
-        // Risoluzione servizio astrometrico
         var solverService = _serviceProvider.GetRequiredService<IPlateSolvingService>();
 
-        // PlateSolvingToolViewModel non è ancora IDisposable ma seguiamo la pratica della DI
         var plateVm = new PlateSolvingToolViewModel(node, solverService);
         
         var plateView = new PlateSolvingToolView { DataContext = plateVm };
@@ -130,8 +124,11 @@ public class WindowService : IWindowService
         var postService = _serviceProvider.GetRequiredService<IPosterizationService>();
         var converter = _serviceProvider.GetRequiredService<IFitsImageDataConverter>();
         var analysis = _serviceProvider.GetRequiredService<IImageAnalysisService>();
+        
+        // NOTA: Se anche PosterizationToolViewModel usa internamente un FitsRenderer,
+        // dovrai aggiungere IMediaExportService anche qui. Per ora lascio inalterato
+        // assumendo che PosterizationToolViewModel non sia stato ancora aggiornato.
 
-        // Usiamo 'using' per smaltire le matrici OpenCV nel ViewModel una volta chiusa la finestra
         using var vm = new PosterizationToolViewModel(
             sourcePaths, 
             ioService,

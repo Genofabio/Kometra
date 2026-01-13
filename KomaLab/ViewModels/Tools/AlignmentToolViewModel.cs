@@ -1,14 +1,14 @@
-﻿using CommunityToolkit.Mvvm.ComponentModel;
-using CommunityToolkit.Mvvm.Input;
-using System.Diagnostics;
-using System.Threading.Tasks;
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.Diagnostics;
 using System.Linq;
+using System.Threading.Tasks;
 using System.Windows.Input;
 using Avalonia.Media;     
 using Avalonia.Media.Imaging;
+using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.Input;
 using KomaLab.Models.Primitives;
 using KomaLab.Models.Processing;
 using KomaLab.Models.Visualization;
@@ -26,12 +26,6 @@ namespace KomaLab.ViewModels.Tools;
 // ---------------------------------------------------------------------------
 // FILE: AlignmentToolViewModel.cs
 // RUOLO: Orchestrator per Allineamento Immagini
-// DESCRIZIONE:
-// Gestisce il flusso di lavoro completo per allineare una stack di immagini:
-// 1. Visualizzazione interattiva (FitsRenderer).
-// 2. Selezione punti di riferimento (Manuale, Guidata o Automatica).
-// 3. Integrazione con servizi esterni (NASA JPL Horizons) per allineamento su comete.
-// 4. Integrazione con WCS (World Coordinate System) per allineamento stellare.
 // ---------------------------------------------------------------------------
 
 public partial class AlignmentToolViewModel : ObservableObject, IDisposable
@@ -45,6 +39,7 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
     private readonly IFitsImageDataConverter _converter;
     private readonly IImageAnalysisService _analysis;
     private readonly IJplHorizonsService _jplService;
+    private readonly IMediaExportService _mediaExport; // <--- NUOVA DIPENDENZA AGGIUNTA
     
     // --- Dati Interni ---
     private readonly List<string> _sourcePaths; 
@@ -54,8 +49,7 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
     private Size _viewportSize;
     private ContrastProfile? _lastContrastProfile;
     
-    // Flag validazione Astrometrica (Stelle/JPL)
-    private bool _isAstrometryValid = false;
+    private bool _isAstrometryValid;
 
     // --- Risorse Grafiche Statiche ---
     private static readonly IBrush ColorNormal = Brushes.Cyan;
@@ -96,7 +90,7 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
     
     // --- Stato Visualizzazione (Linear, Log, etc.) ---
     [ObservableProperty]
-    private VisualizationMode _visualizationMode = VisualizationMode.Linear;
+    private VisualizationMode _visualizationMode;
 
     partial void OnVisualizationModeChanged(VisualizationMode value)
     {
@@ -228,7 +222,7 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
         set => SetProperty(ref _astrometryStatusBrush, value);
     }
 
-    public ICommand VerifyJplCommand { get; init; } = null!;
+    public ICommand VerifyJplCommand { get; init; }
 
     // --- Macchina a Stati (UI Logic) ---
     [ObservableProperty]
@@ -294,6 +288,7 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
         IFitsImageDataConverter converter,      
         IImageAnalysisService analysis,
         IJplHorizonsService jplService,
+        IMediaExportService mediaExport, // <--- PARAMETRO AGGIUNTO
         VisualizationMode initialMode = VisualizationMode.Linear)
     {
         _ioService = ioService ?? throw new ArgumentNullException(nameof(ioService));
@@ -302,6 +297,7 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
         _converter = converter ?? throw new ArgumentNullException(nameof(converter));
         _analysis = analysis ?? throw new ArgumentNullException(nameof(analysis));
         _jplService = jplService ?? throw new ArgumentNullException(nameof(jplService));
+        _mediaExport = mediaExport ?? throw new ArgumentNullException(nameof(mediaExport)); // <--- ASSEGNAZIONE
         
         _sourcePaths = sourcePaths; 
         _totalStackCount = sourcePaths.Count;
@@ -317,9 +313,9 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
         Viewport.SearchRadius = this.SearchRadius;
         
         // Inizializzazione comando di verifica JPL
-        VerifyJplCommand = new RelayCommand(async () => await RefreshAstrometryStateAsync(), () => !IsVerifyingJpl && ActiveImage != null);
+        VerifyJplCommand = new RelayCommand(async void () => await RefreshAstrometryStateAsync(), () => !IsVerifyingJpl && ActiveImage != null);
 
-        // Lancio dell'inizializzazione asincrona (Fire and Forget controllato)
+        // Lancio dell'inizializzazione asincrona
         _ = InitializeAsync();
     }
 
@@ -348,7 +344,6 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
         }
         finally
         {
-            // Notifica la fine del caricamento e aggiorna lo stato dei comandi
             ImageLoadedTcs.TrySetResult();
             CalculateCentersCommand.NotifyCanExecuteChanged();
             ApplyAlignmentCommand.NotifyCanExecuteChanged();
@@ -360,12 +355,10 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
     {
         if (index < 0 || index >= _totalStackCount) return;
         
-        // Evitiamo ricaricamenti inutili se l'indice è lo stesso
         if (index == _currentStackIndex && ActiveImage != null) return;
 
         _currentStackIndex = index;
         
-        // Aggiorna lo stato visivo della lista coordinate
         for (int i = 0; i < CoordinateEntries.Count; i++)
         {
             CoordinateEntries[i].IsActive = (i == _currentStackIndex);
@@ -373,22 +366,23 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
         
         UpdateStackCounterText();
 
-        // 1. Salva il profilo di contrasto corrente (Black/White point) 
-        // per applicarlo all'immagine successiva (consistenza visiva)
         if (ActiveImage != null)
         {
             _lastContrastProfile = ActiveImage.CaptureContrastProfile();
-            ActiveImage.UnloadData(); // Libera la memoria della vecchia immagine
+            ActiveImage.UnloadData(); 
         }
 
         FitsRenderer? newRenderer = null;
         try
         {
-            // Caricamento del modello dati FITS tramite IO Service
             var newModel = await _ioService.LoadAsync(_sourcePaths[index]);
             if (newModel != null)
             {
-                newRenderer = new FitsRenderer(newModel, _ioService, _converter, _analysis);
+                // AGGIORNATO: Passiamo _mediaExport al costruttore manuale
+                // Nota: Qui non usiamo la Factory perché questo ViewModel gestisce 
+                // una logica di stack molto specifica, ma potremmo iniettarla in futuro.
+                // Per ora manteniamo coerenza con la firma del costruttore di FitsRenderer.
+                newRenderer = new FitsRenderer(newModel, _converter, _analysis, _mediaExport); // <--- _ioService rimosso, _mediaExport aggiunto
                 await newRenderer.InitializeAsync();
             }
         }
@@ -401,7 +395,6 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
 
         if (newRenderer == null) return;
 
-        // 2. Configurazione del nuovo renderer
         newRenderer.VisualizationMode = this.VisualizationMode;
 
         if (_lastContrastProfile != null) 
@@ -410,7 +403,6 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
         }
         else
         {
-            // Se è la prima immagine, resettiamo la vista per centrarla
             Viewport.ImageSize = newRenderer.ImageSize;
             Viewport.ResetView();
             OnPropertyChanged(nameof(ZoomStatusText));
@@ -418,15 +410,13 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
 
         ActiveImage = newRenderer;
         
-        // Sincronizza i valori degli slider UI con il renderer
         BlackPoint = newRenderer.BlackPoint;
         WhitePoint = newRenderer.WhitePoint;
 
         OnPropertyChanged(nameof(CorrectImageSize));
         ResetThresholdsCommand.NotifyCanExecuteChanged();
         
-        // 3. Auto-detect del nome Target dall'Header FITS (Chiave OBJECT)
-        if (SelectedTarget == AlignmentTarget.Comet && string.IsNullOrWhiteSpace(TargetName) && ActiveImage?.Data?.FitsHeader != null)
+        if (SelectedTarget == AlignmentTarget.Comet && string.IsNullOrWhiteSpace(TargetName) && ActiveImage?.Data.FitsHeader != null)
         {
             string headerObj = ActiveImage.Data.FitsHeader.GetStringValue("OBJECT");
             if (!string.IsNullOrWhiteSpace(headerObj)) 
@@ -471,7 +461,7 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
     private async Task ResetThresholds() 
     { 
         if (ActiveImage == null) return; 
-        await ActiveImage.ResetThresholdsAsync(false); 
+        await ActiveImage.ResetThresholdsAsync(); 
         BlackPoint = ActiveImage.BlackPoint; 
         WhitePoint = ActiveImage.WhitePoint; 
     }
@@ -505,20 +495,18 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
 
         try
         {
-            List<Point?> startingPointsUI;
+            List<Point?> startingPointsUi;
 
-            // 1. Strategia di Pre-Calcolo (Astrometria vs Manuale)
             if (SelectedTarget == AlignmentTarget.Stars && UseJplAstrometry)
             {
-                startingPointsUI = await PreCalculateSkyFixedPointsAsync();
+                startingPointsUi = await PreCalculateSkyFixedPointsAsync();
             }
             else if (SelectedTarget == AlignmentTarget.Comet && UseJplAstrometry && SelectedMode == AlignmentMode.Automatic)
             {
-                startingPointsUI = await PreCalculateJplCentersAsync();
+                startingPointsUi = await PreCalculateJplCentersAsync();
             }
             else if (SelectedTarget == AlignmentTarget.Comet && UseJplAstrometry && SelectedMode == AlignmentMode.Guided)
             {
-                // Interpolazione guidata basata sulla traiettoria NASA ma ancorata ai punti utente
                 var nasaTrajectory = await PreCalculateJplCentersAsync();
                 var userStart = CoordinateEntries.First().Coordinate;
                 var userEnd = CoordinateEntries.Last().Coordinate;
@@ -526,38 +514,37 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
                 if (nasaTrajectory.Count == _totalStackCount && userStart.HasValue && userEnd.HasValue &&
                     nasaTrajectory[0].HasValue && nasaTrajectory[^1].HasValue)
                 {
-                    startingPointsUI = new List<Point?>();
-                    Point startOffset = userStart.Value - nasaTrajectory[0].Value;
-                    Point endOffset = userEnd.Value - nasaTrajectory[^1].Value;
+                    startingPointsUi = new List<Point?>();
+                    Point startOffset = userStart.Value - nasaTrajectory[0]!.Value;
+                    Point endOffset = userEnd.Value - nasaTrajectory[^1]!.Value;
 
                     for (int i = 0; i < _totalStackCount; i++)
                     {
-                        if (i == 0) startingPointsUI.Add(userStart);
-                        else if (i == _totalStackCount - 1) startingPointsUI.Add(userEnd);
+                        if (i == 0) startingPointsUi.Add(userStart);
+                        else if (i == _totalStackCount - 1) startingPointsUi.Add(userEnd);
                         else if (nasaTrajectory[i].HasValue)
                         {
                             double t = (double)i / (_totalStackCount - 1);
                             double ox = startOffset.X + (endOffset.X - startOffset.X) * t;
                             double oy = startOffset.Y + (endOffset.Y - startOffset.Y) * t;
                             Point nasaPt = nasaTrajectory[i]!.Value;
-                            startingPointsUI.Add(new Point(nasaPt.X + ox, nasaPt.Y + oy));
+                            startingPointsUi.Add(new Point(nasaPt.X + ox, nasaPt.Y + oy));
                         }
-                        else startingPointsUI.Add(null);
+                        else startingPointsUi.Add(null);
                     }
                 }
-                else startingPointsUI = CoordinateEntries.Select(e => e.Coordinate).ToList();
+                else startingPointsUi = CoordinateEntries.Select(e => e.Coordinate).ToList();
             }
             else 
             {
-                startingPointsUI = CoordinateEntries.Select(e => e.Coordinate).ToList();
-                if (SelectedTarget == AlignmentTarget.Comet && startingPointsUI.All(p => p == null) && ActiveImage != null)
+                startingPointsUi = CoordinateEntries.Select(e => e.Coordinate).ToList();
+                if (SelectedTarget == AlignmentTarget.Comet && startingPointsUi.All(p => p == null) && ActiveImage != null)
                 {
-                    startingPointsUI = Enumerable.Repeat<Point?>(new Point(ActiveImage.ImageSize.Width / 2, ActiveImage.ImageSize.Height / 2), _totalStackCount).ToList();
+                    startingPointsUi = Enumerable.Repeat<Point?>(new Point(ActiveImage.ImageSize.Width / 2, ActiveImage.ImageSize.Height / 2), _totalStackCount).ToList();
                 }
             }
 
-            // 2. Esecuzione Raffinamento Centroidi via AlignmentService
-            var domainStartingPoints = startingPointsUI.Select(p => p.HasValue ? (Point2D?)new Point2D(p.Value.X, p.Value.Y) : null).ToList();
+            var domainStartingPoints = startingPointsUi.Select(p => p.HasValue ? (Point2D?)new Point2D(p.Value.X, p.Value.Y) : null).ToList();
             var progressHandler = new Progress<(int Index, Point2D? Center)>(update => {
                 if (update.Index >= 0 && update.Index < CoordinateEntries.Count)
                     CoordinateEntries[update.Index].Coordinate = update.Center.HasValue ? new Point(update.Center.Value.X, update.Center.Value.Y) : null;
@@ -567,7 +554,6 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
                 SelectedTarget, SelectedMode, CenteringMethod.LocalRegion, _sourcePaths, domainStartingPoints, SearchRadius, progressHandler 
             );
 
-            // 3. Mapping finale dei risultati
             int resultIdx = 0;
             foreach (var coord in newCoordsDomain)
             {
@@ -663,7 +649,6 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
             else if (SelectedTarget == AlignmentTarget.Comet)
             {
                 AstrometryStatusMessage = "Analisi stack...";
-                // Validazione rapida integrità metadati per tutta la stack
                 for (int i = 0; i < _sourcePaths.Count; i++)
                 {
                     var h = await _ioService.ReadHeaderOnlyAsync(_sourcePaths[i]);
@@ -706,7 +691,7 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
         CalculateCentersCommand.NotifyCanExecuteChanged();
     }
 
-    // --- HELPERS JPL / WCS (Utilizzano il nuovo motore WcsTransformation) ---
+    // --- HELPERS JPL / WCS ---
 
     private async Task<List<Point?>> PreCalculateJplCentersAsync()
     {
@@ -725,10 +710,9 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
         var wcsData = _metadataService.ExtractWcs(header);
         
         var ephem = await _jplService.GetEphemerisAsync(TargetName, obsDate!.Value, location);
-        if (ephem.HasValue && wcsData != null)
+        if (ephem.HasValue)
         {
             int height = header.GetIntValue("NAXIS2");
-            // Il motore ora gestisce internamente l'inversione Y tramite height
             var transform = new WcsTransformation(wcsData, height);
             var pixel = transform.WorldToPixel(ephem.Value.Ra, ephem.Value.Dec);
             return pixel.HasValue ? new Point(pixel.Value.X, pixel.Value.Y) : null;
@@ -739,18 +723,25 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
     private async Task<Point?> FetchSkyCoordinateForImage(int index)
     {
         var refHeader = await _ioService.ReadHeaderOnlyAsync(_sourcePaths[0]);
-        var refWcs = _metadataService.ExtractWcs(refHeader);
-        if (refWcs == null || !refWcs.IsValid) return null; 
-
-        var header = await _ioService.ReadHeaderOnlyAsync(_sourcePaths[index]);
-        var wcs = _metadataService.ExtractWcs(header);
-        if (header != null && wcs != null && wcs.IsValid) 
+        if (refHeader != null)
         {
-            int height = header.GetIntValue("NAXIS2");
-            var transform = new WcsTransformation(wcs, height);
-            var pixel = transform.WorldToPixel(refWcs.RefRaDeg, refWcs.RefDecDeg);
-            return pixel.HasValue ? new Point(pixel.Value.X, pixel.Value.Y) : null;
+            var refWcs = _metadataService.ExtractWcs(refHeader);
+            if (!refWcs.IsValid) return null; 
+
+            var header = await _ioService.ReadHeaderOnlyAsync(_sourcePaths[index]);
+            if (header != null)
+            {
+                var wcs = _metadataService.ExtractWcs(header);
+                if (wcs.IsValid) 
+                {
+                    int height = header.GetIntValue("NAXIS2");
+                    var transform = new WcsTransformation(wcs, height);
+                    var pixel = transform.WorldToPixel(refWcs.RefRaDeg, refWcs.RefDecDeg);
+                    return pixel.HasValue ? new Point(pixel.Value.X, pixel.Value.Y) : null;
+                }
+            }
         }
+
         return null;
     }
 
@@ -775,30 +766,18 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
     
     #region Metodi Pubblici
 
-    /// <summary>
-    /// Gestisce lo zoom centrato sulla posizione del mouse nel viewport.
-    /// </summary>
     public void ApplyZoomAtPoint(double scaleFactor, Point viewportZoomPoint) 
     { 
         Viewport.ApplyZoomAtPoint(scaleFactor, viewportZoomPoint); 
         OnPropertyChanged(nameof(ZoomStatusText)); 
     }
 
-    /// <summary>
-    /// Gestisce lo spostamento (panning) dell'immagine.
-    /// </summary>
     public void ApplyPan(double deltaX, double deltaY) => Viewport.ApplyPan(deltaX, deltaY);
 
-    /// <summary>
-    /// Imposta manualmente la coordinata del target sul frame attualmente visualizzato.
-    /// </summary>
     public void SetTargetCoordinate(Point imageCoordinate) 
     { 
-        // Impediamo modifiche se il processo di allineamento è già in corso
         if (CurrentState == AlignmentState.Processing) return;
 
-        // Vincolo per Allineamento Cometa Guidata: 
-        // L'utente può interagire solo con il primo e l'ultimo frame della stack.
         if (CurrentState == AlignmentState.Initial && IsStack && 
             SelectedMode == AlignmentMode.Guided && SelectedTarget == AlignmentTarget.Comet) 
         { 
@@ -812,27 +791,20 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
             CoordinateEntries[_currentStackIndex].Coordinate = imageCoordinate;
         }
 
-        // Notifica ai comandi di ricalcolare la possibilità di esecuzione (CanExecute)
         ApplyAlignmentCommand.NotifyCanExecuteChanged(); 
         CalculateCentersCommand.NotifyCanExecuteChanged(); 
     }
 
-    /// <summary>
-    /// Rimuove il punto di riferimento dal frame corrente o resetta lo stato dei calcoli.
-    /// </summary>
     public void ClearTarget() 
     { 
-        // Se i risultati sono già pronti, il tasto Clear funge da Reset dello stato per tornare all'inizio
         if (CurrentState != AlignmentState.Initial) 
         { 
             ResetAlignmentState(); 
             return; 
         }
 
-        // Impediamo la rimozione manuale in modalità automatica gestita da JPL/Astrometria
         if (SelectedMode == AlignmentMode.Automatic && SelectedTarget == AlignmentTarget.Comet) return;
 
-        // Vincolo Cometa Guidata: non è permesso pulire i frame che non siano l'inizio o la fine
         if (IsStack && SelectedMode == AlignmentMode.Guided && SelectedTarget == AlignmentTarget.Comet) 
         { 
             if (_currentStackIndex != 0 && _currentStackIndex != (_totalStackCount - 1)) return; 
@@ -853,8 +825,6 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
     
     #region Helpers
 
-    // --- Trigger per il Rendering e il Viewport ---
-
     partial void OnBlackPointChanged(double value) { if (ActiveImage != null) ActiveImage.BlackPoint = value; }
     partial void OnWhitePointChanged(double value) { if (ActiveImage != null) ActiveImage.WhitePoint = value; }
     
@@ -862,15 +832,11 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
     
     partial void OnTargetCoordinateChanged(Point? value) => Viewport.TargetCoordinate = value;
 
-    // --- Trigger per il Cambio Target (Cometa vs Stelle) ---
-
     partial void OnSelectedTargetChanged(AlignmentTarget value)
     {
-        // Reset alla modalità sicura predefinita
         SelectedMode = AlignmentMode.Automatic;
         UseJplAstrometry = false; 
         
-        // Notifichiamo la View che le opzioni disponibili e i messaggi astrometrici sono cambiati
         OnPropertyChanged(nameof(AvailableAlignmentModes));
         OnPropertyChanged(nameof(SelectedMode)); 
         OnPropertyChanged(nameof(IsJplOptionVisible));
@@ -879,15 +845,11 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(IsVerifyButtonVisible)); 
     }
 
-    // --- Trigger per il Cambio Modalità (Auto, Guided, Manual) ---
-
     partial void OnSelectedModeChanged(AlignmentMode value)
     {
         ResetAlignmentState();
         RefreshNavigationCommands();
 
-        // Se l'immagine attuale non è più accessibile nella nuova modalità (es. era la 5 ed è diventata Guided)
-        // riportiamo l'utente alla prima immagine valida.
         if (!IsIndexAccessible(_currentStackIndex)) 
         {
             _ = NavigateToImage(0); 
@@ -896,7 +858,6 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
         UpdateStackCounterText();
         OnPropertyChanged(nameof(IsJplOptionVisible)); 
         
-        // Se il JPL era attivo, ricalcoliamo la validità per la nuova modalità
         if (UseJplAstrometry) _ = RefreshAstrometryStateAsync();
     }
 
@@ -907,8 +868,6 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(IsJplOptionVisible)); 
         OnPropertyChanged(nameof(IsSearchRadiusControlsVisible));
     }
-
-    // --- Metodi Privati di Supporto ---
 
     private void ResetAlignmentState() 
     { 
@@ -949,30 +908,21 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
         SearchRadius = Math.Clamp(SearchRadius, MinSearchRadius, MaxSearchRadius); 
     }
 
-    /// <summary>
-    /// Determina se un'immagine della stack può essere visualizzata o selezionata 
-    /// in base alla modalità di allineamento scelta.
-    /// </summary>
     private bool IsIndexAccessible(int index) 
     { 
-        // Se l'allineamento è già avvenuto, tutte le immagini sono visibili per ispezione
         if (CurrentState != AlignmentState.Initial) return true;
         
         if (index < 0 || index >= _totalStackCount) return false;
         
-        // Per le stelle usiamo solo il frame 0 come riferimento WCS
         if (SelectedTarget == AlignmentTarget.Stars) return index == 0;
         
         return SelectedMode switch {
             AlignmentMode.Automatic => index == 0,
             AlignmentMode.Guided => index == 0 || index == _totalStackCount - 1,
-            _ => true // Manuale permette tutto
+            _ => true 
         };
     }
 
-    /// <summary>
-    /// Aggiorna il testo dell'HUD che mostra la posizione nella stack.
-    /// </summary>
     private void UpdateStackCounterText() 
     {
         if (CurrentState != AlignmentState.Initial || SelectedMode == AlignmentMode.Manual) 

@@ -1,12 +1,14 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Threading;
 using System.Threading.Tasks;
 using Avalonia;
 using Avalonia.Media.Imaging;
 using Avalonia.Platform;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using KomaLab.Models.Fits; // Per AbsoluteContrastProfile
 using KomaLab.Models.Visualization;
 using KomaLab.Services.Fits;
 using KomaLab.Services.Processing;
@@ -21,12 +23,7 @@ namespace KomaLab.ViewModels.Tools;
 // ---------------------------------------------------------------------------
 // FILE: PosterizationToolViewModel.cs
 // RUOLO: ViewModel Tool Interattivo
-// DESCRIZIONE:
-// Gestisce l'interfaccia di anteprima per il tool di posterizzazione.
-// Responsabilità:
-// 1. Caricamento e gestione della Matrice OpenCV sorgente.
-// 2. Rendering Real-Time dell'anteprima (Preview) richiamando il servizio.
-// 3. Applicazione batch delle impostazioni delegando la logica al PosterizationService.
+// VERSIONE: Ottimizzata (Double Buffering + DI Fix)
 // ---------------------------------------------------------------------------
 
 public partial class PosterizationToolViewModel : ObservableObject, IDisposable
@@ -43,6 +40,10 @@ public partial class PosterizationToolViewModel : ObservableObject, IDisposable
     private double _lastAutoBlack;
     private double _lastAutoWhite;
     private bool _hasLoadedFirstImage = false;
+    
+    // BACK BUFFER per riciclo memoria (come FitsRenderer)
+    private WriteableBitmap? _backBuffer;
+    private CancellationTokenSource? _previewCts;
 
     // --- Output Visuale ---
     [ObservableProperty] private Bitmap? _previewBitmap;
@@ -111,20 +112,29 @@ public partial class PosterizationToolViewModel : ObservableObject, IDisposable
         StatusText = "Caricamento...";
         try
         {
-            _sourceMat?.Dispose(); 
-            _sourceMat = null;
+            // Reset risorsa corrente
+            if (_sourceMat != null && !_sourceMat.IsDisposed) 
+            {
+                _sourceMat.Dispose();
+                _sourceMat = null;
+            }
 
             var data = await _ioService.LoadAsync(_sourcePaths[index]);
             if (data != null)
             {
                 _sourceMat = _converter.RawToMat(data);
 
+                // Calcolo min/max per gli slider
                 Cv2.MinMaxLoc(_sourceMat, out double minVal, out double maxVal);
                 SliderMin = minVal;
                 SliderMax = maxVal;
 
-                var (currentAutoBlack, currentAutoWhite) = await Task.Run(() => _analysis.CalculateAutoStretchLevels(_sourceMat));
+                // Calcolo AutoStretch usando il metodo corretto (no tuple deconstruction implicita)
+                var profile = await Task.Run(() => _analysis.CalculateAutoStretchProfile(_sourceMat));
+                double currentAutoBlack = profile.BlackAdu;
+                double currentAutoWhite = profile.WhiteAdu;
 
+                // Logica Adattiva Intelligente
                 if (!_hasLoadedFirstImage)
                 {
                     BlackPoint = currentAutoBlack;
@@ -135,6 +145,7 @@ public partial class PosterizationToolViewModel : ObservableObject, IDisposable
                 {
                     if (AutoAdaptThresholds)
                     {
+                        // Mantiene la "distanza relativa" decisa dall'utente rispetto all'auto-stretch
                         double userOffsetBlack = BlackPoint - _lastAutoBlack;
                         double userOffsetWhite = WhitePoint - _lastAutoWhite;
                         BlackPoint = Math.Clamp(currentAutoBlack + userOffsetBlack, SliderMin, SliderMax);
@@ -142,6 +153,7 @@ public partial class PosterizationToolViewModel : ObservableObject, IDisposable
                     }
                     else
                     {
+                        // Clamp dei valori vecchi, se diventano invalidi resetta
                         BlackPoint = Math.Clamp((double)BlackPoint, SliderMin, SliderMax);
                         WhitePoint = Math.Clamp((double)WhitePoint, SliderMin, SliderMax);
                         if (WhitePoint <= BlackPoint + 1)
@@ -161,7 +173,7 @@ public partial class PosterizationToolViewModel : ObservableObject, IDisposable
                     Viewport.ResetView();
                 }
 
-                UpdatePreview();
+                TriggerPreviewUpdate();
                 StatusText = "Pronto";
             }
         }
@@ -176,23 +188,24 @@ public partial class PosterizationToolViewModel : ObservableObject, IDisposable
     {
         if (_sourceMat == null) return;
         
-        var (autoB, autoW) = await Task.Run(() => _analysis.CalculateAutoStretchLevels(_sourceMat));
+        var profile = await Task.Run(() => _analysis.CalculateAutoStretchProfile(_sourceMat));
         
-        BlackPoint = Math.Clamp(autoB, SliderMin, SliderMax);
-        WhitePoint = Math.Clamp(autoW, SliderMin, SliderMax);
+        BlackPoint = Math.Clamp(profile.BlackAdu, SliderMin, SliderMax);
+        WhitePoint = Math.Clamp(profile.WhiteAdu, SliderMin, SliderMax);
         
         if (Math.Abs((double)(WhitePoint - BlackPoint)) < 1) WhitePoint = BlackPoint + 100;
         
-        UpdatePreview();
+        TriggerPreviewUpdate();
     }
 
     // --- Gestione Cambiamenti UI ---
     
-    partial void OnLevelsChanged(int value) => UpdatePreview();
-    partial void OnSelectedModeChanged(VisualizationMode value) => UpdatePreview();
+    partial void OnLevelsChanged(int value) => TriggerPreviewUpdate();
+    partial void OnSelectedModeChanged(VisualizationMode value) => TriggerPreviewUpdate();
     
     partial void OnBlackPointChanged(double value)
     {
+        // Logica "Push" per evitare inversione slider
         if (value >= WhitePoint - 1)
         {
             double pushedWhite = value + 1;
@@ -202,7 +215,7 @@ public partial class PosterizationToolViewModel : ObservableObject, IDisposable
             }
             else WhitePoint = pushedWhite;
         }
-        UpdatePreview();
+        TriggerPreviewUpdate();
     }
 
     partial void OnWhitePointChanged(double value)
@@ -216,41 +229,86 @@ public partial class PosterizationToolViewModel : ObservableObject, IDisposable
             }
             else BlackPoint = pushedBlack;
         }
-        UpdatePreview();
+        TriggerPreviewUpdate();
     }
 
-    // --- Core Rendering Anteprima ---
+    // --- Core Rendering Anteprima (Double Buffered) ---
 
-    private void UpdatePreview()
+    private void TriggerPreviewUpdate()
+    {
+        _previewCts?.Cancel();
+        _previewCts = new CancellationTokenSource();
+        _ = UpdatePreviewAsync(_previewCts.Token);
+    }
+
+    private async Task UpdatePreviewAsync(CancellationToken token)
     {
         if (_sourceMat == null || _sourceMat.IsDisposed) return;
-        
-        try
+
+        // 1. Allocazione / Recupero Back Buffer
+        WriteableBitmap targetBmp;
+        bool createdNew = false;
+
+        if (_backBuffer != null && 
+            _backBuffer.PixelSize.Width == _sourceMat.Width && 
+            _backBuffer.PixelSize.Height == _sourceMat.Height)
         {
-            var writeableBmp = new WriteableBitmap(
+            targetBmp = _backBuffer;
+            _backBuffer = null;
+        }
+        else
+        {
+            targetBmp = new WriteableBitmap(
                 new PixelSize(_sourceMat.Width, _sourceMat.Height),
                 new Vector(96, 96),
                 PixelFormats.Gray8, 
                 AlphaFormat.Opaque);
-
-            using (var lockedBuffer = writeableBmp.Lock())
-            {
-                using var dstMat = Mat.FromPixelData(
-                    _sourceMat.Height, 
-                    _sourceMat.Width, 
-                    MatType.CV_8UC1, 
-                    lockedBuffer.Address, 
-                    lockedBuffer.RowBytes);
-
-                // LOGICA MIGLIORATA: Chiamata al metodo statico del servizio (DRY)
-                PosterizationService.ComputePosterization(_sourceMat, dstMat, Levels, SelectedMode, BlackPoint, WhitePoint);
-            }
-
-            var old = PreviewBitmap; 
-            PreviewBitmap = writeableBmp;
-            old?.Dispose();
+            createdNew = true;
         }
-        catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"Preview Error: {ex.Message}"); }
+
+        try
+        {
+            // 2. Rendering sul thread pool (non blocca UI)
+            await Task.Run(() => 
+            {
+                token.ThrowIfCancellationRequested();
+                using var locked = targetBmp.Lock();
+                using var dstMat = Mat.FromPixelData(
+                    _sourceMat.Height, _sourceMat.Width, MatType.CV_8UC1, locked.Address, locked.RowBytes);
+                
+                // CORREZIONE: Usa il Service (non statico)
+                // Nota: Assicurati che _postService esponga un metodo 'ComputePosterization' 
+                // che accetta le matrici. Se è solo statico, crea un wrapper nell'interfaccia.
+                _postService.ComputePosterizationOnMat(_sourceMat, dstMat, Levels, SelectedMode, BlackPoint, WhitePoint);
+            }, token);
+
+            // 3. Swap (Thread UI)
+            SwapPreview(targetBmp);
+        }
+        catch (OperationCanceledException)
+        {
+            // Se cancellato, rimettiamo il buffer in scorta
+            if (!createdNew) _backBuffer = targetBmp;
+            else targetBmp.Dispose();
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"Preview Error: {ex.Message}");
+            targetBmp.Dispose();
+        }
+    }
+
+    private void SwapPreview(Bitmap newBmp)
+    {
+        var old = PreviewBitmap as WriteableBitmap;
+        PreviewBitmap = newBmp;
+        
+        // Riciclo
+        if (old != null)
+        {
+            if (_backBuffer == null) _backBuffer = old;
+            else old.Dispose();
+        }
     }
 
     // --- Comandi Navigazione ---
@@ -283,13 +341,11 @@ public partial class PosterizationToolViewModel : ObservableObject, IDisposable
             string tempFolder = Path.Combine(Path.GetTempPath(), "KomaLab", "Posterized");
             if (!Directory.Exists(tempFolder)) Directory.CreateDirectory(tempFolder);
 
-            // LOGICA MIGLIORATA: Calcoliamo gli offset e deleghiamo il batch al servizio
             double offsetBlack = AutoAdaptThresholds ? (BlackPoint - _lastAutoBlack) : 0;
             double offsetWhite = AutoAdaptThresholds ? (WhitePoint - _lastAutoWhite) : 0;
 
             if (AutoAdaptThresholds)
             {
-                // Il servizio gestisce internamente il loop, l'analisi e l'applicazione degli offset
                 ResultPaths = await _postService.PosterizeBatchWithOffsetsAsync(
                     _sourcePaths, 
                     tempFolder, 
@@ -300,7 +356,6 @@ public partial class PosterizationToolViewModel : ObservableObject, IDisposable
             }
             else
             {
-                // Se non è adattivo, usiamo i punti fissi per tutti in parallelo
                 var tasks = new List<Task<string>>();
                 foreach (var path in _sourcePaths)
                 {
@@ -344,8 +399,13 @@ public partial class PosterizationToolViewModel : ObservableObject, IDisposable
 
     public void Dispose() 
     { 
+        _previewCts?.Cancel();
         _sourceMat?.Dispose(); 
-        _previewBitmap?.Dispose(); 
+        
+        // Pulisci risorse grafiche
+        (PreviewBitmap as IDisposable)?.Dispose();
+        _backBuffer?.Dispose();
+        
         GC.SuppressFinalize(this);
     }
 }

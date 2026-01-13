@@ -37,8 +37,8 @@
                     Name="ImageContainer" 
                     Classes="Body"
                     ClipToBounds="True"
-                    Width="{Binding MaxImageSize.Width}"
-                    Height="{Binding MaxImageSize.Height}"
+                    Width="{Binding NodeContentSize.Width}"
+                    Height="{Binding NodeContentSize.Height}"
                     Background="{DynamicResource ImageCanvasBackgroundBrush}">
                 
                 <Grid>

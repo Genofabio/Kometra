@@ -1,4 +1,6 @@
-﻿using KomaLab.Models.Primitives;
+﻿using KomaLab.Models.Fits;
+using KomaLab.Models.Primitives;
+using KomaLab.Models.Visualization;
 using OpenCvSharp;
 
 namespace KomaLab.Services.Processing;
@@ -8,40 +10,62 @@ namespace KomaLab.Services.Processing;
 // RUOLO: Analizzatore Matematico (Low-Level / Read-Only)
 // DESCRIZIONE:
 // Motore di calcolo puro che estrae metadati numerici dalle immagini.
-// NON modifica mai i pixel in ingresso e NON genera nuove immagini.
-// Responsabilità:
-// - Misurazioni (Statistiche, SNR, Background).
-// - Localizzazione (Centroidi, Peak Finding, Gaussian Fitting).
-// - Correlazione (Calcolo vettori di spostamento FFT).
+// Implementa la strategia "Sigma-Clipping" per la gestione del contrasto.
 // ---------------------------------------------------------------------------
 
 public interface IImageAnalysisService
 {
+    // --- Statistiche Base ---
+    
     /// <summary>
     /// Calcola Media e Deviazione Standard dell'immagine ignorando i valori NaN.
     /// Fondamentale per determinare soglie di rumore e clipping.
     /// </summary>
     (double Mean, double StdDev) ComputeStatistics(Mat image);
+
+    // --- Gestione Contrasto (Strategia Sigma/Z-Score) ---
     
     /// <summary>
-    /// Calcola i livelli di Nero e Bianco ideali per l'Auto-Stretch (contrasto automatico).
-    /// Utilizza un campionamento statistico (Quantili) per ignorare outlier e rumore.
+    /// Calcola i livelli ideali (AutoStretch) per un'immagine grezza.
+    /// Utilizza il quantile 0.3 (30%) per il nero per garantire un fondo cielo scuro
+    /// e il 0.995 per il bianco.
     /// </summary>
-    /// <param name="image">Immagine sorgente (preferibilmente Double Precision).</param>
-    /// <returns>Valori di cut-off (Black, White).</returns>
-    (double Black, double White) CalculateAutoStretchLevels(Mat image);
+    AbsoluteContrastProfile CalculateAutoStretchProfile(Mat image);
+    
+    /// <summary>
+    /// Calcola il nuovo profilo di contrasto assoluto per l'immagine target,
+    /// cercando di mantenere la percezione visiva dell'immagine sorgente
+    /// (basandosi sulla deviazione standard / Sigma).
+    /// </summary>
+    AbsoluteContrastProfile CalculateAdaptedProfile(
+        FitsImageData sourceData, 
+        FitsImageData targetData, 
+        double currentBlack, 
+        double currentWhite);
 
+    /// <summary>
+    /// Calcola un profilo SIGMA (Z-Score) basato sulla distanza statistica
+    /// tra i valori correnti (impostati dall'utente) e la media dell'immagine.
+    /// Esempio: "Il nero è a -1.5 Sigma dalla media".
+    /// </summary>
+    SigmaContrastProfile ComputeSigmaProfile(Mat image, double currentBlack, double currentWhite);
+
+    /// <summary>
+    /// Calcola i valori ASSOLUTI per una nuova immagine applicando lo stesso Z-Score
+    /// (distanza dalla media in sigma) del profilo fornito.
+    /// Questo adatta il contrasto al livello di rumore della nuova immagine.
+    /// </summary>
+    AbsoluteContrastProfile ComputeAbsoluteFromSigma(Mat image, SigmaContrastProfile profile);
+
+    // --- Astrometria & Centroiding (Invariati) ---
+    
     /// <summary>
     /// Workflow completo di centratura locale:
     /// 1. Analizza la regione fornita (crop).
     /// 2. Esegue una Blob Detection per trovare l'oggetto principale.
     /// 3. Raffina la posizione sub-pixel usando un Gaussian Fit o Momenti.
     /// </summary>
-    /// <param name="region">Matrice ritagliata attorno all'area di interesse.</param>
-    /// <returns>Le coordinate del centro relative all'immagine originale (se region conserva l'offset) o locali.</returns>
     Point2D FindCenterOfLocalRegion(Mat region);
-
-    // --- Algoritmi Core (Low Level) ---
 
     /// <summary>
     /// Calcola il baricentro (Image Moments) dell'intensità luminosa.
@@ -57,8 +81,7 @@ public interface IImageAnalysisService
 
     /// <summary>
     /// Esegue un Fit Gaussiano 2D (algoritmo Levenberg-Marquardt via MathNet).
-    /// È il metodo scientificamente più accurato per le stelle (PSF Gaussiana),
-    /// ma è computazionalmente più oneroso.
+    /// È il metodo scientificamente più accurato per le stelle (PSF Gaussiana).
     /// </summary>
     Point2D FindGaussianCenter(Mat image, double sigma = 3.0);
     
@@ -73,10 +96,6 @@ public interface IImageAnalysisService
     /// <summary>
     /// Calcola il vettore di spostamento (Shift X, Y) tra due immagini stellari
     /// utilizzando la Phase Correlation (FFT).
-    /// Include pre-processing (Sobel/TopHat) per isolare le stelle dal fondo cielo.
     /// </summary>
-    /// <param name="reference">Immagine di riferimento (solitamente la precedente).</param>
-    /// <param name="target">Immagine da allineare.</param>
-    /// <returns>Il vettore di spostamento (dx, dy).</returns>
     Point2D ComputeStarFieldShift(Mat reference, Mat target);
 }

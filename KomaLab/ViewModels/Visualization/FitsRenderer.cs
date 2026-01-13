@@ -1,12 +1,10 @@
 ﻿using System;
 using System.Diagnostics;
-using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
-using Avalonia;          
-using Avalonia.Media.Imaging; 
-using Avalonia.Platform;      
-using Avalonia.Threading;     
+using Avalonia;
+using Avalonia.Media.Imaging;
+using Avalonia.Platform;
 using CommunityToolkit.Mvvm.ComponentModel;
 using KomaLab.Models.Fits;
 using KomaLab.Models.Visualization;
@@ -17,308 +15,262 @@ using Size = Avalonia.Size;
 
 namespace KomaLab.ViewModels.Visualization;
 
-// ---------------------------------------------------------------------------
-// FILE: FitsRenderer.cs
-// RUOLO: ViewModel di Rendering (High Performance & Low Memory)
-// DESCRIZIONE:
-// Gestisce la visualizzazione FITS utilizzando una strategia a buffer unico
-// riutilizzabile per minimizzare l'impatto sulla memoria (RAM/GC).
-// Utilizza un RenderScheduler per garantire la thread-safety.
-// ---------------------------------------------------------------------------
-
 public partial class FitsRenderer : ObservableObject, IDisposable
 {
     // --- Dipendenze ---
     private readonly FitsImageData _imageData;
     private readonly IFitsImageDataConverter _converter;
     private readonly IImageAnalysisService _analysis;
-    
-    // --- Infrastruttura ---
-    private readonly RenderScheduler _scheduler = new();
+    private readonly IMediaExportService _mediaExport; 
 
-    // --- Stato Memoria (Buffer Riutilizzabili) ---
-    private Mat? _scientificMat;            // Source Data (Read-Only dopo init)
-    private byte[]? _sharedPixelBuffer;     // Intermediate RAM Buffer (Thread-Safe via Scheduler)
-    private WriteableBitmap? _renderTarget; // Video Memory (Bindata alla UI)
-    
-    private bool _disposed;
+    // --- Stato Interno ---
+    private CancellationTokenSource? _regenerationCts;
+    private Mat? _cachedScientificMat;
+    private bool _disposedValue;
 
-    // --- Proprietà Esposte ---
+    // OTTIMIZZAZIONE MEMORIA: Back Buffer per il riciclo delle Bitmap
+    // Evita di allocare nuova memoria ad ogni frame quando si usano gli slider.
+    private WriteableBitmap? _backBuffer; 
+
+    // --- Proprietà ---
     public Size ImageSize => new(_imageData.Width, _imageData.Height);
     public FitsImageData Data => _imageData;
-    public bool IsDisposed => _disposed;
 
     [ObservableProperty] private Bitmap? _image;
     [ObservableProperty] private double _blackPoint;
     [ObservableProperty] private double _whitePoint;
     [ObservableProperty] private VisualizationMode _visualizationMode = VisualizationMode.Linear;
+    
+    public bool IsDisposed => _disposedValue; 
 
     // --- Costruttore ---
     public FitsRenderer(
-        FitsImageData imageData,
-        IFitsIoService ioService,
-        IFitsImageDataConverter converter,
-        IImageAnalysisService analysis)
+        FitsImageData imageData, 
+        // RIMOSSO: IFitsIoService (non era usato)
+        IFitsImageDataConverter converter,    
+        IImageAnalysisService analysis,
+        IMediaExportService mediaExport) 
     {
         _imageData = imageData ?? throw new ArgumentNullException(nameof(imageData));
         _converter = converter ?? throw new ArgumentNullException(nameof(converter));
         _analysis = analysis ?? throw new ArgumentNullException(nameof(analysis));
+        _mediaExport = mediaExport ?? throw new ArgumentNullException(nameof(mediaExport));
     }
 
-    // --- Inizializzazione ---
     public async Task InitializeAsync()
     {
-        if (_disposed) return;
+        if (_disposedValue) return;
 
-        // 1. Allocazione Dati Sorgente (Una tantum)
-        _scientificMat = await Task.Run(() => _converter.RawToMat(_imageData)).ConfigureAwait(false);
+        // Conversione pesante (CPU Bound) in Background
+        await Task.Run(() =>
+        {
+            _cachedScientificMat = _converter.RawToMat(_imageData);
+        });
 
-        // 2. Allocazione Buffer RAM (Una tantum)
-        int pixelCount = _imageData.Width * _imageData.Height;
-        _sharedPixelBuffer = new byte[pixelCount];
-        
-        // 3. Allocazione Bitmap Video (Una tantum)
-        // Usiamo PixelFormats.Gray8 per compatibilità e performance
-        _renderTarget = new WriteableBitmap(
-            new PixelSize(_imageData.Width, _imageData.Height),
-            new Vector(96, 96),
-            PixelFormats.Gray8, 
-            AlphaFormat.Opaque);
-
-        Image = _renderTarget;
-
-        // 4. Avvio Pipeline
-        await ResetThresholdsAsync(skipRender: true).ConfigureAwait(false);
-        RequestRender();
+        await ResetThresholdsAsync(skipRegeneration: true);
+        await TriggerRegeneration();
     }
 
-    // --- Gestione Profili Contrasto ---
-    public ContrastProfile CaptureContrastProfile() => new AbsoluteContrastProfile(BlackPoint, WhitePoint);
+    public AbsoluteContrastProfile CaptureContrastProfile()
+    {
+        return new AbsoluteContrastProfile(BlackPoint, WhitePoint);
+    }
 
     public void ApplyContrastProfile(ContrastProfile profile)
     {
-        if (_disposed || _scientificMat == null) return;
+        if (_disposedValue) return;
 
-        double newBlack, newWhite;
-        switch (profile)
+        if (profile is AbsoluteContrastProfile abs)
         {
-            case AbsoluteContrastProfile abs: (newBlack, newWhite) = (abs.BlackADU, abs.WhiteADU); break;
-            case RelativeContrastProfile rel:
-                Cv2.MinMaxLoc(_scientificMat, out double min, out double max, out _, out _);
-                double r = max - min;
-                newBlack = min + (r * rel.LowerPercentile);
-                newWhite = min + (r * rel.UpperPercentile);
-                break;
-            default: return;
+            // Impostare le proprietà triggera OnChanged -> TriggerRegeneration
+            BlackPoint = abs.BlackAdu;
+            WhitePoint = abs.WhiteAdu;
         }
-        BlackPoint = newBlack;
-        WhitePoint = newWhite;
     }
 
-    #region Rendering Pipeline
+    // --- Logica Rendering Reattiva ---
 
-    // Trigger automatici
-    partial void OnBlackPointChanged(double _) => RequestRender();
-    partial void OnWhitePointChanged(double _) => RequestRender();
-    partial void OnVisualizationModeChanged(VisualizationMode _) => RequestRender();
+    partial void OnBlackPointChanged(double value) => _ = TriggerRegeneration();
+    partial void OnWhitePointChanged(double value) => _ = TriggerRegeneration();
+    partial void OnVisualizationModeChanged(VisualizationMode value) => _ = TriggerRegeneration();
 
-    private void RequestRender()
+    private async Task TriggerRegeneration()
     {
-        if (_disposed || _scientificMat == null || _sharedPixelBuffer == null || _renderTarget == null)
-            return;
-
-        // Delega allo scheduler.
-        // Il semaforo interno garantisce che _sharedPixelBuffer sia scritto da un solo thread alla volta.
-        _ = _scheduler.RunAsync(async token =>
+        if (_disposedValue) return;
+        
+        // Debounce / Cancellation del lavoro precedente
+        if (_regenerationCts != null)
         {
-            try 
-            {
-                // FASE 1: Calcolo CPU (Background)
-                await Task.Run(() =>
-                {
-                    FitsRenderPipeline.RenderToBuffer(
-                        _scientificMat,
-                        _sharedPixelBuffer,
-                        _imageData.Width,
-                        _imageData.Height,
-                        BlackPoint,
-                        WhitePoint,
-                        VisualizationMode);
-                }, token).ConfigureAwait(false);
+            _regenerationCts.Cancel();
+            _regenerationCts.Dispose();
+        }
+        
+        _regenerationCts = new CancellationTokenSource();
+        var token = _regenerationCts.Token;
 
-                if (token.IsCancellationRequested) return;
-
-                // FASE 2: Upload GPU (UI Thread)
-                await Dispatcher.UIThread.InvokeAsync(() =>
-                {
-                    if (_disposed || _renderTarget == null) return;
-
-                    using (var fb = _renderTarget.Lock())
-                    {
-                        Marshal.Copy(_sharedPixelBuffer, 0, fb.Address, _sharedPixelBuffer.Length);
-                    }
-
-                    // Notifica forzata: l'oggetto Image è lo stesso, ma il contenuto è cambiato.
-                    OnPropertyChanged(nameof(Image)); 
-                    
-                }, DispatcherPriority.Render);
-            }
-            catch (Exception ex)
-            {
-                Debug.WriteLine($"[FitsRenderer] Render Failed: {ex.Message}");
-            }
-        });
+        try 
+        {
+            await RegeneratePreviewImageAsync(token);
+        }
+        catch (OperationCanceledException) { /* Ignora cancellazioni intenzionali */ }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"[FitsRenderer] Error regenerating: {ex.Message}");
+        }
     }
 
-    #endregion
-
-    #region Analysis & Stats
-
-    public async Task ResetThresholdsAsync(bool skipRender)
+    private async Task RegeneratePreviewImageAsync(CancellationToken token)
     {
-        if (_scientificMat == null) return;
+        if (_cachedScientificMat == null || _cachedScientificMat.IsDisposed) return;
 
-        var (newBlack, newWhite) = await Task.Run(() => 
-            _analysis.CalculateAutoStretchLevels(_scientificMat))
-            .ConfigureAwait(false);
+        // 1. OTTIMIZZAZIONE: Recupera o crea il buffer di destinazione
+        WriteableBitmap targetBitmap;
+        bool createdNew = false;
 
-        if (skipRender)
+        // Se abbiamo un backbuffer della dimensione giusta, usiamolo
+        if (_backBuffer != null && 
+            _backBuffer.PixelSize.Width == _imageData.Width && 
+            _backBuffer.PixelSize.Height == _imageData.Height)
         {
-            // CORREZIONE: Aggiorniamo i campi privati (_backingFields) per EVITARE
-            // che scattino i trigger automatici (OnBlackPointChanged -> RequestRender).
-            _blackPoint = newBlack;
-            _whitePoint = newWhite;
-            
-            // Notifichiamo la UI manualmente (senza triggerare il render)
-            OnPropertyChanged(nameof(BlackPoint));
-            OnPropertyChanged(nameof(WhitePoint));
+            targetBitmap = _backBuffer;
+            _backBuffer = null; // Lo "preleviamo" dalla scorta
         }
         else
         {
-            // Qui invece usiamo le proprietà pubbliche PERCHÉ VOGLIAMO il trigger
-            BlackPoint = newBlack;
-            WhitePoint = newWhite;
+            // Altrimenti allochiamo (solo al primo avvio o se cambia size)
+            targetBitmap = new WriteableBitmap(
+                new PixelSize(_imageData.Width, _imageData.Height), 
+                new Vector(96, 96),                                 
+                PixelFormats.Gray8,                                 
+                AlphaFormat.Opaque);
+            createdNew = true;
+        }
+
+        try
+        {
+            // 2. Rendering nel Buffer (Lock memoria video)
+            using (var lockedBuffer = targetBitmap.Lock())
+            {
+                var w = _imageData.Width;
+                var h = _imageData.Height;
+                var bp = BlackPoint;
+                var wp = WhitePoint;
+                var addr = lockedBuffer.Address;
+                var rowBytes = lockedBuffer.RowBytes;
+                var mat = _cachedScientificMat;
+                var mode = VisualizationMode; 
+
+                // Eseguiamo il loop sui pixel in un thread separato per non bloccare la UI
+                await Task.Run(() =>
+                {
+                    token.ThrowIfCancellationRequested();
+                    _mediaExport.RenderToBuffer(mat, w, h, bp, wp, addr, rowBytes, mode);
+                }, token);
+            }
+
+            // 3. Swap dei Buffer (Thread UI)
+            if (!token.IsCancellationRequested)
+            {
+                SwapBuffer(targetBitmap);
+            }
+            else
+            {
+                // Se cancellato, rimettiamo il buffer nella scorta (o lo buttiamo se nuovo)
+                if (!createdNew) _backBuffer = targetBitmap;
+                else targetBitmap.Dispose();
+            }
+        }
+        catch
+        {
+            targetBitmap.Dispose();
+            throw; 
         }
     }
 
-    public (double Mean, double StdDev) GetImageStatistics()
+    private void SwapBuffer(Bitmap newImage)
     {
-        if (_scientificMat == null || _scientificMat.IsDisposed) return (0, 1);
-        return _analysis.ComputeStatistics(_scientificMat);
+        // Salva l'immagine corrente (che sta per essere tolta dallo schermo)
+        var oldImage = Image as WriteableBitmap;
+
+        // Aggiorna la UI
+        Image = newImage;
+
+        // RICICLO: La vecchia immagine diventa il nuovo BackBuffer
+        // Invece di farla morire nel GC, la teniamo per il prossimo frame.
+        if (oldImage != null)
+        {
+            if (_backBuffer == null) 
+            {
+                _backBuffer = oldImage;
+            }
+            else 
+            {
+                // Caso raro: se avevamo già un backbuffer (race condition?), puliamo il vecchio
+                oldImage.Dispose();
+            }
+        }
     }
 
-    #endregion
+    public async Task ResetThresholdsAsync(bool skipRegeneration = false)
+    {
+        if (_disposedValue || _cachedScientificMat == null) return;
 
-    #region IDisposable
+        // FIX: Nome metodo aggiornato
+        var profile = await Task.Run(() => 
+            _analysis.CalculateAutoStretchProfile(_cachedScientificMat)
+        );
+
+        if (skipRegeneration)
+        {
+            SetProperty(ref _blackPoint, profile.BlackAdu, nameof(BlackPoint));
+            SetProperty(ref _whitePoint, profile.WhiteAdu, nameof(WhitePoint));
+        }
+        else
+        {
+            // Questo triggera la rigenerazione automatica
+            BlackPoint = profile.BlackAdu;
+            WhitePoint = profile.WhiteAdu;
+        }
+    }
+    
+    public (double Mean, double StdDev) GetImageStatistics()
+    {
+        if (_cachedScientificMat == null || _cachedScientificMat.IsDisposed) 
+            return (0, 1); 
+        
+        return _analysis.ComputeStatistics(_cachedScientificMat);
+    }
 
     public void UnloadData() => Dispose();
 
-    public void Dispose()
+    protected virtual void Dispose(bool disposing)
     {
-        if (_disposed) return;
-        _disposed = true;
-
-        _scheduler.Dispose();
-        _scientificMat?.Dispose();
-        _renderTarget?.Dispose();
-        _image = null;
-        
-        GC.SuppressFinalize(this);
-    }
-
-    #endregion
-}
-
-// =========================================================
-// REGION: HELPER CLASSES (Internal)
-// =========================================================
-
-/// <summary>
-/// Gestore della concorrenza per il rendering.
-/// Implementa un meccanismo di "Debounce" e "Mutual Exclusion" per proteggere
-/// il buffer condiviso da accessi concorrenti.
-/// </summary>
-internal sealed class RenderScheduler : IDisposable
-{
-    private readonly SemaphoreSlim _semaphore = new(1, 1);
-    private CancellationTokenSource? _cts;
-
-    public async Task RunAsync(Func<CancellationToken, Task> renderAction)
-    {
-        // Cancella task precedente
-        _cts?.Cancel();
-        _cts?.Dispose();
-        _cts = new CancellationTokenSource();
-        var token = _cts.Token;
-
-        // Attende accesso esclusivo
-        try
+        if (!_disposedValue)
         {
-            await _semaphore.WaitAsync(token).ConfigureAwait(false);
-            if (!token.IsCancellationRequested)
+            if (disposing)
             {
-                await renderAction(token).ConfigureAwait(false);
+                _regenerationCts?.Cancel();
+                _regenerationCts?.Dispose();
+                
+                // Pulisci l'immagine attiva
+                Image?.Dispose();
+                
+                // Pulisci anche il buffer di scorta!
+                _backBuffer?.Dispose();
             }
-        }
-        catch (OperationCanceledException) { /* Ignora */ }
-        finally
-        {
-            // Rilascia solo se il semaforo è stato acquisito correttamente
-            if (_semaphore.CurrentCount == 0) _semaphore.Release();
+            
+            if (_cachedScientificMat != null && !_cachedScientificMat.IsDisposed)
+            {
+                _cachedScientificMat.Dispose();
+                _cachedScientificMat = null;
+            }
+            _disposedValue = true;
         }
     }
 
     public void Dispose()
     {
-        _cts?.Cancel();
-        _semaphore.Dispose();
-    }
-}
-
-/// <summary>
-/// Pipeline di elaborazione matematica pura (Stateless).
-/// Esegue le operazioni OpenCV per trasformare i dati Raw (Double) in Pixel (Byte).
-/// </summary>
-internal static class FitsRenderPipeline
-{
-    public static void RenderToBuffer(
-        Mat source,
-        byte[] destBuffer,
-        int width,
-        int height,
-        double black,
-        double white,
-        VisualizationMode mode)
-    {
-        // 1. Setup Range
-        double range = Math.Max(white - black, 1e-5);
-        double scale = 1.0 / range;
-        double offset = -black * scale;
-
-        using Mat temp = new();
-        
-        // 2. Normalizzazione (Float 32-bit)
-        source.ConvertTo(temp, MatType.CV_32FC1, scale, offset);
-        Cv2.Max(temp, 0, temp);
-        Cv2.Min(temp, 1, temp);
-
-        // 3. Stretch Non-Lineare
-        if (mode == VisualizationMode.SquareRoot) 
-        {
-            Cv2.Sqrt(temp, temp);
-        }
-        else if (mode == VisualizationMode.Logarithmic)
-        {
-            Cv2.Add(temp, 1.0, temp);
-            Cv2.Log(temp, temp);
-            Cv2.Multiply(temp, 1.442695, temp);
-        }
-
-        // 4. Quantizzazione (8-bit)
-        using Mat byteMat = new();
-        temp.ConvertTo(byteMat, MatType.CV_8UC1, 255);
-
-        // 5. Scrittura nel Buffer Condiviso
-        Marshal.Copy(byteMat.Data, destBuffer, 0, destBuffer.Length);
+        Dispose(disposing: true);
+        GC.SuppressFinalize(this);
     }
 }

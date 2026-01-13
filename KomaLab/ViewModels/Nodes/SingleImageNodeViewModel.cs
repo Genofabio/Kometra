@@ -6,245 +6,144 @@ using Avalonia;
 using CommunityToolkit.Mvvm.ComponentModel;
 using KomaLab.Models.Fits;
 using KomaLab.Models.Nodes;
-using KomaLab.Models.Visualization;
+using KomaLab.Services.Factories;
 using KomaLab.Services.Fits;
-using KomaLab.Services.Processing;
-using KomaLab.ViewModels.Visualization; // Namespace corretto per FitsRenderer
+using KomaLab.ViewModels.Visualization;
 
 namespace KomaLab.ViewModels.Nodes;
 
-// ---------------------------------------------------------------------------
-// FILE: SingleImageNodeViewModel.cs
-// RUOLO: ViewModel Nodo Immagine Singola
-// DESCRIZIONE:
-// Specializzazione di ImageNodeViewModel per gestire un singolo file FITS.
-// Orchesta il caricamento I/O e la creazione del FitsRenderer.
-// ---------------------------------------------------------------------------
-
+/// <summary>
+/// ViewModel per la gestione di una singola immagine FITS.
+/// Sfrutta la logica polimorfica della classe base per garantire inizializzazione asincrona e swap sicuri.
+/// </summary>
 public partial class SingleImageNodeViewModel : ImageNodeViewModel
 {
-    // --- Dipendenze ---
     private readonly IFitsIoService _ioService;
-    private readonly IFitsImageDataConverter _converter;
-    private readonly IImageAnalysisService _analysis;
-    
-    // --- Model ---
+    private readonly IFitsRendererFactory _rendererFactory;
     private readonly SingleImageNodeModel _imageModel;
 
-    // --- Stato Interno ---
-    // Manteniamo un riferimento ai dati grezzi per operazioni I/O (es. salvataggio temp)
     private FitsImageData? _currentData;
-    private ContrastProfile? _lastContrastProfile;
-    
-    // Shortcut per la View
-    public string ImagePath => _imageModel.ImagePath;
-
-    // --- Proprietà Observable ---
+    private Size _explicitSize; 
 
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(ActiveRenderer))] // Notifica la classe base
+    [NotifyPropertyChangedFor(nameof(ActiveRenderer))] 
     private FitsRenderer? _fitsImage;
 
-    // --- Override ImageNodeViewModel ---
-
+    // --- Implementazione Contratti Base ---
     public override FitsRenderer? ActiveRenderer => FitsImage;
-
-    protected override Size NodeContentSize
-    {
-        get
-        {
-            if (FitsImage?.Data == null || FitsImage.Data.Width == 0)
-            {
-                // Dimensione default se nessuna immagine è caricata
-                return new Size(250, 200); 
-            }
-            return new Size(FitsImage.Data.Width, FitsImage.Data.Height);
-        }
-    }
-
-    // --- Costruttore ---
+    protected override Size NodeContentSize => _explicitSize;
+    public string ImagePath => _imageModel.ImagePath;
 
     public SingleImageNodeViewModel(
         SingleImageNodeModel model,
         IFitsIoService ioService,
-        IFitsImageDataConverter converter,      
-        IImageAnalysisService analysis)    
+        IFitsRendererFactory rendererFactory,
+        Size explicitSize,         
+        FitsImageData? initialData) 
         : base(model) 
     {
         _imageModel = model ?? throw new ArgumentNullException(nameof(model));
         _ioService = ioService ?? throw new ArgumentNullException(nameof(ioService));
-        _converter = converter ?? throw new ArgumentNullException(nameof(converter));
-        _analysis = analysis ?? throw new ArgumentNullException(nameof(analysis));
+        _rendererFactory = rendererFactory ?? throw new ArgumentNullException(nameof(rendererFactory));
+        
+        _explicitSize = explicitSize;
+        _currentData = initialData;
 
-        // NOTA: Non creiamo nessun Placeholder qui. 
-        // Risparmiamo RAM e CPU lasciando FitsImage a null finché non carichiamo dati veri.
+        // Prepariamo il viewport se abbiamo già i dati
+        if (initialData != null)
+        {
+            Viewport.ImageSize = new Size(initialData.Width, initialData.Height);
+        }
     }
 
-    // --- Logica di Caricamento ---
-    
+    /// <summary>
+    /// Implementazione obbligatoria per la classe base: aggiorna il riferimento locale del renderer.
+    /// Viene chiamata internamente da ApplyNewRendererAsync sul thread UI.
+    /// </summary>
+    protected override void OnRendererSwapping(FitsRenderer newRenderer)
+    {
+        FitsImage = newRenderer;
+        _explicitSize = newRenderer.ImageSize;
+    }
+
+    /// <summary>
+    /// Inizializzazione asincrona completa tramite la classe base.
+    /// </summary>
+    public async Task InitializeAsync(bool centerOnPosition = false)
+    {
+        if (_currentData == null) await LoadDataAsync();
+        if (_currentData == null) return;
+
+        // La classe base gestisce: Init, Contrast Transfer, Swap UI e Cleanup vecchio renderer.
+        await ApplyNewRendererAsync(_rendererFactory.Create(_currentData));
+
+        if (centerOnPosition)
+        {
+            Viewport.ResetView();
+        }
+    }
+
+    /// <summary>
+    /// Applica nuovi dati elaborati (es. post-process) garantendo la continuità visiva.
+    /// </summary>
+    public override async Task ApplyProcessedDataAsync(List<FitsImageData> newProcessedData)
+    {
+        if (newProcessedData.Count == 0) return;
+        
+        _currentData = newProcessedData[0];
+        // Passiamo null come profilo per forzare la classe base ad ereditare quello esistente
+        await ApplyNewRendererAsync(_rendererFactory.Create(_currentData));
+    }
+
+    // --- Gestione I/O ---
+
     public async Task LoadDataAsync()
     {
         try
         {
             if (string.IsNullOrEmpty(_imageModel.ImagePath)) return;
-
-            // 1. Caricamento IO (Heavy I/O Bound)
-            var imageData = await _ioService.LoadAsync(_imageModel.ImagePath);
-            if (imageData == null)
-            {
-                throw new IOException($"Impossibile caricare i dati FITS da: {_imageModel.ImagePath}");
-            }
-
-            // 2. Applicazione al ViewModel (passando per il metodo standard)
-            await ApplyProcessedDataAsync(new List<FitsImageData> { imageData });
+            var data = await _ioService.LoadAsync(_imageModel.ImagePath);
+            if (data != null) _currentData = data;
         }
         catch (Exception ex)
         {
-            // Visualizza l'errore nel titolo del nodo per feedback immediato
-            Title = $"ERR: {ex.Message}";
-            System.Diagnostics.Debug.WriteLine($"[SingleImageNode] Load Error: {ex}");
+            Title = $"ERR: {Path.GetFileName(_imageModel.ImagePath)}";
+            System.Diagnostics.Debug.WriteLine($"[SingleImageNode] Load Error: {ex.Message}");
         }
     }
-
-    /// <summary>
-    /// Metodo centrale per l'aggiornamento dell'immagine.
-    /// Gestisce la creazione del renderer e la migrazione dello stato (contrasto/zoom).
-    /// </summary>
-    private async Task SetFitsData(FitsImageData newData)
-    {
-        // 1. Cattura stato precedente (Contrasto)
-        if (FitsImage != null && !_isDisposed) 
-        {
-            _lastContrastProfile = FitsImage.CaptureContrastProfile();
-        }
-
-        _currentData = newData;
-
-        // 2. Creazione Nuovo Renderer (Allocazione RAM/VRAM)
-        var newFitsImage = new FitsRenderer(
-            newData,
-            _ioService,
-            _converter,
-            _analysis);
-        
-        // 3. Inizializzazione Pipeline (Calcolo Auto-Stretch)
-        await newFitsImage.InitializeAsync(); 
-
-        // 4. Ripristino Configurazione Visuale
-        // Applichiamo la modalità (Log/Linear) definita nel ViewModel
-        newFitsImage.VisualizationMode = this.VisualizationMode;
-
-        // Applichiamo il vecchio contrasto se esisteva, altrimenti teniamo l'Auto-Stretch calcolato in init
-        if (_lastContrastProfile != null)
-        {
-            newFitsImage.ApplyContrastProfile(_lastContrastProfile);
-        }
-
-        // 5. Swap e Cleanup
-        var oldFitsImage = FitsImage;
-        FitsImage = newFitsImage;
-
-        // Liberiamo SUBITO la memoria vecchia per ridurre il picco (RAM Spike)
-        oldFitsImage?.Dispose();
-
-        // 6. Aggiornamento Viewport e UI
-        Viewport.ImageSize = newFitsImage.ImageSize;
-        
-        // Reset vista solo se è il primo caricamento
-        if (oldFitsImage == null)
-        {
-            Viewport.ResetView();
-        }
-
-        // Sincronizza gli slider UI con i valori del nuovo renderer
-        BlackPoint = newFitsImage.BlackPoint;
-        WhitePoint = newFitsImage.WhitePoint;
-
-        // Notifica cambiamento dimensioni al sistema di layout dei nodi
-        OnPropertyChanged(nameof(NodeContentSize));
-        OnPropertyChanged(nameof(EstimatedTotalSize));
-    }
-
-    // --- Implementazione Contratti Astratti ---
 
     public override async Task<List<FitsImageData?>> GetCurrentDataAsync()
     {
-        if (_currentData == null)
-        {
-            await LoadDataAsync();
-        }
+        if (_currentData == null) await LoadDataAsync();
         return new List<FitsImageData?> { _currentData };
     }
 
-    public override async Task ApplyProcessedDataAsync(List<FitsImageData> newProcessedData)
-    {
-        if (newProcessedData == null || newProcessedData.Count == 0) return;
+    public override FitsImageData? GetActiveImageData() => _currentData;
 
-        var newData = newProcessedData[0];
-        if (newData != null)
-        {
-            await SetFitsData(newData);
-        }
-    }
-
-    public override FitsImageData? GetActiveImageData()
-    {
-        return _currentData;
-    }
-    
     public override async Task<List<string>> PrepareInputPathsAsync(IFitsIoService ioService)
     {
-        // A. File su disco esistente: ritorniamo il path originale
         if (!string.IsNullOrEmpty(_imageModel.ImagePath) && File.Exists(_imageModel.ImagePath))
-        {
             return new List<string> { _imageModel.ImagePath };
-        }
-
-        // B. Dati in memoria (senza file): creiamo un temporaneo
-        if (_currentData != null)
-        {
-            string tempPath = Path.Combine(Path.GetTempPath(), $"KomaLab_Node_{Guid.NewGuid()}.fits");
-            try 
-            {
-                await ioService.SaveAsync(_currentData, tempPath);
-                return new List<string> { tempPath };
-            }
-            catch (Exception ex)
-            {
-                System.Diagnostics.Debug.WriteLine($"[SingleImageNode] Temp Save Error: {ex.Message}");
-                return new List<string>();
-            }
-        }
-
+        
+        // Logica per dati in memoria (salvataggio temporaneo se necessario)
         return new List<string>();
     }
-    
+
     public override async Task RefreshDataFromDiskAsync()
     {
-        await LoadDataAsync(); 
+        _currentData = null;
+        await InitializeAsync(centerOnPosition: true);
     }
-    
-    // --- Gestione Risorse (IDisposable) ---
 
-    // Flag per evitare chiamate multiple durante il dispose
-    private bool _isDisposed;
+    // --- Cleanup ---
 
     protected override void Dispose(bool disposing)
     {
-        if (!_isDisposed)
+        if (disposing)
         {
-            if (disposing)
-            {
-                // Dispose del renderer attivo (libera VRAM e Mat OpenCV)
-                FitsImage?.Dispose();
-                FitsImage = null;
-                
-                // Dereferencing dei dati raw (libera RAM Managed)
-                _currentData = null;
-            }
-            _isDisposed = true;
+            FitsImage?.Dispose();
+            _currentData = null;
         }
-        
         base.Dispose(disposing);
     }
 }

@@ -6,10 +6,9 @@ using KomaLab.Views;
 using Microsoft.Extensions.DependencyInjection;
 using System;
 using KomaLab.Services.Astrometry;
-// Contiene FitsIoService, FitsMetadataService
-using KomaLab.Services.Factories;
+using KomaLab.Services.Factories; // Namespace Factories
 using KomaLab.Services.Fits;
-using KomaLab.Services.Processing; // Contiene MediaExportService, ImageAnalysisService, etc.
+using KomaLab.Services.Processing;
 using KomaLab.Services.UI;
 using KomaLab.Services.Undo;
 
@@ -43,7 +42,6 @@ public class App : Application
             };
              
             // Registrazione dell'istanza della finestra nel WindowService
-            // Questo permette ai ViewModel di aprire dialoghi modali.
             var windowService = Services.GetRequiredService<IWindowService>();
             windowService.RegisterMainWindow(desktop.MainWindow);
             
@@ -72,9 +70,6 @@ public class App : Application
         services.AddSingleton<IUndoService, UndoService>();
 
         // --- 3. Servizi Dati (IO & Metadati) ---
-        // RIMOSSO: services.AddSingleton<IFitsService, FitsService>();
-        
-        // AGGIUNTO: Nuovi servizi Enterprise
         services.AddSingleton<IFitsIoService, FitsIoService>();
         services.AddSingleton<IFitsMetadataService, FitsMetadataService>();
         services.AddSingleton<IFitsImageDataConverter, FitsImageDataConverter>();
@@ -82,16 +77,17 @@ public class App : Application
         // --- 4. Servizi Imaging & Processing ---
         services.AddSingleton<IImageAnalysisService, ImageAnalysisService>();
         services.AddSingleton<IImageOperationService, ImageOperationService>();
-        services.AddSingleton<IMediaExportService, MediaExportService>(); // Export Video/Render
+        services.AddSingleton<IMediaExportService, MediaExportService>();
         services.AddSingleton<IPosterizationService, PosterizationService>();
         services.AddSingleton<IPlateSolvingService, PlateSolvingService>();
         services.AddSingleton<IAlignmentService, AlignmentService>();
 
         // --- 5. Factories ---
         services.AddSingleton<INodeViewModelFactory, NodeViewModelFactory>();
+        // AGGIUNTO: Registrazione della Factory per i Renderer (Mancante)
+        services.AddSingleton<IFitsRendererFactory, FitsRendererFactory>();
         
         // --- 6. ViewModels ---
-        // BoardViewModel è Singleton perché mantiene lo stato globale dei nodi
         services.AddSingleton<BoardViewModel>();
         services.AddSingleton<MainWindowViewModel>();
 
@@ -102,9 +98,7 @@ public class App : Application
     {
         try
         {
-            // Pulizia ricorsiva della cartella temporanea dell'app
             string tempRoot = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "Komalab");
-            
             if (System.IO.Directory.Exists(tempRoot))
             {
                 System.IO.Directory.Delete(tempRoot, true);
