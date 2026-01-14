@@ -40,7 +40,7 @@ public abstract partial class ImageNodeViewModel : BaseNodeViewModel
 
     // --- Abstract API (Contratto per le sottoclassi) ---
     public abstract FitsRenderer? ActiveRenderer { get; }
-    protected abstract Size NodeContentSize { get; }
+    public abstract Size NodeContentSize { get; }
     public VisualizationMode[] AvailableVisualizationModes => Enum.GetValues<VisualizationMode>();
 
     // --- Override BaseNodeViewModel ---

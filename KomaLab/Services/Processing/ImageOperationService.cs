@@ -182,144 +182,97 @@ public class ImageOperationService : IImageOperationService
         var refData = sources[0];
         int width = refData.Width;
         int height = refData.Height;
-        
-        // Risultato in Double Precision (Accumulatore)
         using Mat resultMat = new Mat(height, width, MatType.CV_64FC1, new Scalar(0));
 
         await Task.Run(() =>
         {
-            // --- SOMMA E MEDIA (Veloci, usano primitive OpenCV) ---
             if (mode == StackingMode.Sum || mode == StackingMode.Average)
             {
+                // ... (Logica Somma/Media invariata, funziona correttamente) ...
                 using Mat validCountMat = new Mat(height, width, MatType.CV_64FC1, new Scalar(0));
-                
                 foreach (var sourceData in sources)
                 {
                     using Mat currentMat = _converter.RawToMat(sourceData);
                     using Mat nonNanMask = new Mat();
-                    
-                    // Crea maschera dei pixel validi (Ignora NaN generati dall'allineamento)
                     Cv2.Compare(currentMat, currentMat, nonNanMask, CmpType.EQ);
-                    
-                    // Accumula valori solo dove validi
                     Cv2.Add(resultMat, currentMat, resultMat, mask: nonNanMask);
-                    
-                    // Incrementa contatore validità
                     using Mat onesMat = new Mat(height, width, MatType.CV_64FC1, new Scalar(1));
                     Cv2.Add(validCountMat, onesMat, validCountMat, mask: nonNanMask);
                 }
-
                 if (mode == StackingMode.Average)
                 {
-                    // Media pesata sui pixel validi
                     using Mat safeDivisor = validCountMat.Clone();
-                    Cv2.Max(safeDivisor, 1.0, safeDivisor); // Evita divisione per zero
-                    
+                    Cv2.Max(safeDivisor, 1.0, safeDivisor);
                     Cv2.Divide(resultMat, safeDivisor, resultMat, scale: 1, dtype: MatType.CV_64FC1);
                 }
             }
-            // --- MEDIANA (Lento, richiede sorting) ---
             else if (mode == StackingMode.Median)
             {
-                // Elaborazione a strisce orizzontali per risparmiare RAM su immagini grandi
                 int stripHeight = 50; 
-                
                 for (int yStart = 0; yStart < height; yStart += stripHeight)
                 {
                     int currentStripH = Math.Min(stripHeight, height - yStart);
-                    
-                    // Array di matrici (Strip) per ogni sorgente
                     Mat[] stripStack = new Mat[sources.Count];
                     
                     try
                     {
-                        var start = yStart;
-                        // Caricamento Parallelo Strisce (Conversione Raw -> Mat)
-                        Parallel.For(0, sources.Count, i => stripStack[i] = _converter.RawToMatRect(sources[i], start, currentStripH));
+                        Parallel.For(0, sources.Count, i => stripStack[i] = _converter.RawToMatRect(sources[i], yStart, currentStripH));
                         
-                        // Elaborazione Parallela Righe (Safe context con Marshal.Copy)
                         Parallel.For(0, currentStripH, 
-                            // Init Thread-Local State
                             () => new 
                             { 
+                                // FIX: Inizializziamo correttamente gli array di supporto
                                 SrcRows = new double[sources.Count][], 
                                 DestRow = new double[width],
                                 PixelValues = new double[sources.Count]
                             },
-                            
-                            // Loop Body
                             (yRel, _, buffers) =>
                             {
-                                // 1. Copia dati da OpenCV (Unmanaged) a C# (Managed) per la riga corrente
                                 for(int k = 0; k < sources.Count; k++)
                                 {
-                                    if(buffers.SrcRows[k].Length < width)
+                                    // FIX: Controllo nullità prima di accedere a Length
+                                    if(buffers.SrcRows[k] == null || buffers.SrcRows[k].Length < width)
                                         buffers.SrcRows[k] = new double[width];
 
                                     IntPtr srcPtr = stripStack[k].Ptr(yRel);
                                     Marshal.Copy(srcPtr, buffers.SrcRows[k], 0, width);
                                 }
 
-                                // 2. Calcolo Mediana pixel per pixel
                                 for (int x = 0; x < width; x++)
                                 {
                                     int validCount = 0;
                                     for (int k = 0; k < sources.Count; k++)
                                     {
                                         double val = buffers.SrcRows[k][x];
-                                        if (!double.IsNaN(val)) 
-                                        {
-                                            buffers.PixelValues[validCount++] = val;
-                                        }
+                                        if (!double.IsNaN(val)) buffers.PixelValues[validCount++] = val;
                                     }
 
-                                    if (validCount == 0) 
-                                    {
+                                    if (validCount == 0) {
                                         buffers.DestRow[x] = double.NaN;
                                         continue;
                                     }
 
-                                    // Sorting parziale (QuickSelect sarebbe meglio, ma Array.Sort è ottimizzato)
+                                    // Calcolo mediana
                                     Array.Sort(buffers.PixelValues, 0, validCount);
-
-                                    double median;
-                                    if (validCount % 2 == 0)
-                                        median = (buffers.PixelValues[validCount / 2 - 1] + buffers.PixelValues[validCount / 2]) / 2.0;
-                                    else
-                                        median = buffers.PixelValues[validCount / 2];
-
-                                    buffers.DestRow[x] = median;
+                                    buffers.DestRow[x] = (validCount % 2 == 0) 
+                                        ? (buffers.PixelValues[validCount / 2 - 1] + buffers.PixelValues[validCount / 2]) / 2.0 
+                                        : buffers.PixelValues[validCount / 2];
                                 }
 
-                                // 3. Scrittura risultato nella matrice finale
-                                IntPtr destPtr = resultMat.Ptr(start + yRel);
+                                IntPtr destPtr = resultMat.Ptr(yStart + yRel);
                                 Marshal.Copy(buffers.DestRow, 0, destPtr, width);
-
                                 return buffers;
                             },
                             _ => { }
                         );
                     }
-                    finally 
-                    { 
-                        foreach (var m in stripStack) m.Dispose(); 
-                    }
+                    finally { foreach (var m in stripStack) m?.Dispose(); }
                 }
             }
         });
 
-        // --- CONVERSIONE FINALE & METADATA ---
-        
-        // 1. Crea oggetto FITS con dati raw e header tecnico
         var resultData = _converter.MatToFitsData(resultMat);
-        
-        // 2. Trasferisci i metadati astronomici dall'immagine di riferimento
-        //    (es. Data, Osservatorio, Coordinate WCS originali se non ruotate)
-        //    Nota: Se c'è stata rotazione/scaling, WCS dovrebbe essere ricalcolato o rimosso.
-        //    Qui copiamo tutto, sarà responsabilità del chiamante aggiornare WCS se necessario.
         _metadataService.TransferMetadata(refData.FitsHeader, resultData.FitsHeader);
-        
-        // Aggiungi nota sulla storia
         resultData.FitsHeader.AddCard(new nom.tam.fits.HeaderCard("HISTORY", $"Stacked using {mode} method from {sources.Count} frames", null));
 
         return resultData;

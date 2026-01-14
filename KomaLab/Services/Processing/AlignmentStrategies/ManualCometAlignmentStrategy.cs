@@ -4,28 +4,24 @@ using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using KomaLab.Models.Primitives;
-using KomaLab.Models.Processing;
+using KomaLab.Models.Processing; 
 using KomaLab.Services.Fits;
 using OpenCvSharp;
-// Namespace per IFitsIoService
 
 namespace KomaLab.Services.Processing.AlignmentStrategies;
 
 // ---------------------------------------------------------------------------
 // FILE: ManualCometAlignmentStrategy.cs
-// RUOLO: Strategia Allineamento (Raffinamento ROI)
-// DESCRIZIONE:
-// Strategia per l'allineamento basato su input utente (Point & Click).
-// Non si limita a usare il punto cliccato, ma ritaglia una piccola area (ROI)
-// attorno ad esso e calcola il centroide matematico per garantire precisione sub-pixel.
+// RUOLO: Strategia Allineamento Manuale (Raffinamento ROI)
+// AGGIORNAMENTO: Refactoring con AlignmentStrategyBase per resilienza (Retry).
 // ---------------------------------------------------------------------------
 
-public class ManualCometAlignmentStrategy : IAlignmentStrategy
+public class ManualCometAlignmentStrategy : AlignmentStrategyBase
 {
-    private readonly IFitsIoService _ioService;      // Sostituisce il vecchio FitsService
+    private readonly IFitsIoService _ioService;
     private readonly IFitsImageDataConverter _converter;
     private readonly IImageAnalysisService _analysis;
-    private readonly CenteringMethod _method; // Algoritmo scelto (Gaussian, Centroid, ecc.)
+    private readonly CenteringMethod _method; 
 
     public ManualCometAlignmentStrategy(
         IFitsIoService ioService, 
@@ -39,7 +35,7 @@ public class ManualCometAlignmentStrategy : IAlignmentStrategy
         _method = method;
     }
 
-    public async Task<Point2D?[]> CalculateAsync(
+    public override async Task<Point2D?[]> CalculateAsync(
         List<string> sourcePaths, 
         List<Point2D?> guesses, 
         int searchRadius, 
@@ -48,14 +44,8 @@ public class ManualCometAlignmentStrategy : IAlignmentStrategy
         int n = sourcePaths.Count;
         var results = new Point2D?[n];
 
-        // Configurazione Concorrenza
-        long firstFileSize = 0;
-        try { if (n > 0) firstFileSize = new FileInfo(sourcePaths[0]).Length; } catch { }
-        
-        int maxConcurrency = (firstFileSize > 100 * 1024 * 1024) 
-            ? 1 
-            : Math.Clamp(Environment.ProcessorCount / 2, 2, 4);
-
+        // 1. Concorrenza ottimizzata (Dalla classe base)
+        int maxConcurrency = GetOptimalConcurrency(sourcePaths.Count > 0 ? sourcePaths[0] : "");
         using var semaphore = new SemaphoreSlim(maxConcurrency);
         var tasks = new List<Task>();
 
@@ -64,14 +54,14 @@ public class ManualCometAlignmentStrategy : IAlignmentStrategy
             int index = i;
             string path = sourcePaths[index];
             
-            // In modalità manuale il GUESS è OBBLIGATORIO (è il click dell'utente).
+            // In manuale, il guess (click utente) è fondamentale.
             // Se manca per un frame (es. utente ha saltato un frame), quel frame non viene allineato.
             var guess = (index < guesses.Count) ? guesses[index] : null;
 
             if (guess == null) 
             {
                 results[index] = null;
-                continue;
+                continue; 
             }
 
             tasks.Add(Task.Run(async () =>
@@ -79,8 +69,24 @@ public class ManualCometAlignmentStrategy : IAlignmentStrategy
                 await semaphore.WaitAsync();
                 try
                 {
-                    // Tenta di raffinare il punto cliccato cercando il picco luminoso vicino
-                    Point2D? result = await RefineCenterInRoiAsync(path, guess.Value, searchRadius);
+                    // OTTIMIZZAZIONE "FAST PATH":
+                    // Se il raggio è <= 0, l'utente vuole "Fiducia Totale" nel suo click.
+                    // Non serve caricare il file FITS né attivare i retry.
+                    // Ritorniamo subito il punto e risparmiamo I/O.
+                    if (searchRadius <= 0)
+                    {
+                        results[index] = guess;
+                        progress?.Report((index, guess));
+                        return;
+                    }
+
+                    // RETRY LOGIC (Classe Base):
+                    // Se dobbiamo fare calcoli, proteggiamo il caricamento file con il retry.
+                    Point2D? result = await ExecuteWithRetryAsync(
+                        operation: async () => await RefineCenterCoreAsync(path, guess.Value, searchRadius),
+                        fallbackValue: guess, // Se fallisce I/O dopo N tentativi, usiamo il click originale
+                        itemIndex: index
+                    );
                     
                     results[index] = result;
                     progress?.Report((index, result));
@@ -93,34 +99,38 @@ public class ManualCometAlignmentStrategy : IAlignmentStrategy
         return results;
     }
 
-    private async Task<Point2D?> RefineCenterInRoiAsync(string path, Point2D guess, int radius)
+    /// <summary>
+    /// Logica Core: Carica file -> Ritaglia ROI -> Trova Centroide.
+    /// Ritorna null SOLO per errori di I/O (per scatenare il retry).
+    /// Ritorna guess se il calcolo matematico fallisce (es. ROI nera/piccola), per fermare i retry.
+    /// </summary>
+    private async Task<Point2D?> RefineCenterCoreAsync(string path, Point2D guess, int radius)
     {
         try
         {
-            // 1. Caricamento Dati (Resilienza I/O gestita dal provider)
+            // 1. Caricamento Dati
             var fitsData = await _ioService.LoadAsync(path);
-            if (fitsData == null) return guess; // Fallback al click grezzo
+            if (fitsData == null) return null; // Trigger Retry (errore disco/lock)
 
             using var fullMat = _converter.RawToMat(fitsData);
 
             // 2. Calcolo Coordinate ROI (Region Of Interest)
-            // Definiamo un quadrato di lato (radius * 2) centrato sul guess
             int size = radius * 2;
             int x = (int)(guess.X - radius);
             int y = (int)(guess.Y - radius);
             
-            // Clipping sicuro sui bordi dell'immagine (evita crash OpenCV)
+            // Clipping sicuro sui bordi dell'immagine
             int roiX = Math.Max(0, x);
             int roiY = Math.Max(0, y);
             int roiW = Math.Min(fullMat.Width, x + size) - roiX;
             int roiH = Math.Min(fullMat.Height, y + size) - roiY;
 
-            // Se la ROI è degenere (troppo piccola o fuori immagine), ritorniamo il click originale
+            // Se la ROI è degenere (troppo piccola o fuori immagine), 
+            // ritorniamo il click originale. NON ritorniamo null (inutile riprovare).
             if (roiW <= 4 || roiH <= 4) return guess;
 
             // 3. Analisi Locale
-            // Creiamo una "vista" (sotto-matrice) senza copiare dati se possibile
-            using var roiMat = new Mat(fullMat, new Rect(roiX, roiY, roiW, roiH));
+            using var roiMat = new Mat(fullMat, new OpenCvSharp.Rect(roiX, roiY, roiW, roiH));
             
             Point2D localCenter;
             switch (_method)
@@ -144,8 +154,8 @@ public class ManualCometAlignmentStrategy : IAlignmentStrategy
         }
         catch (Exception)
         {
-            // Se qualcosa va storto nell'analisi (es. NaN, immagine nera),
-            // fidiamoci del click dell'utente piuttosto che non ritornare nulla.
+            // Se qualcosa va storto nell'analisi matematica (es. eccezione OpenCV su dati corrotti),
+            // fidiamoci del click dell'utente piuttosto che riprovare inutilmente.
             return guess;
         }
     }

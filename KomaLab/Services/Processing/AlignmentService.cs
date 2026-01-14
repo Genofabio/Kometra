@@ -308,65 +308,69 @@ public class AlignmentService : IAlignmentService
     
     private async Task<Size2D> CalculatePerfectCanvasSizeAsync(List<string> paths, List<Point2D?> centers)
     {
-        // Obiettivo: Trovare la dimensione minima del canvas quadrato che garantisca
-        // che l'oggetto (la cometa) sia sempre al centro e che i bordi del sensore
-        // non vengano tagliati troppo bruscamente.
-        
-        // Logica "Intersezione/Crop": Vogliamo il massimo raggio utile dal centro
-        // che sia coperto da TUTTI i frame (o dalla maggior parte).
-        
-        double maxDistFromCenterLeft = 0;
-        double maxDistFromCenterRight = 0;
-        double maxDistFromCenterTop = 0;
-        double maxDistFromCenterBottom = 0;
+        double maxRadiusX = 0;
+        double maxRadiusY = 0;
 
-        bool hasData = false;
+        // Configurazione Concorrenza per l'analisi (qui dobbiamo caricare i file!)
+        long firstFileSize = 0;
+        try { if (paths.Count > 0) firstFileSize = new FileInfo(paths[0]).Length; } catch { }
+        int maxConcurrency = (firstFileSize > 50 * 1024 * 1024) ? 2 : 4; 
+
+        using var semaphore = new SemaphoreSlim(maxConcurrency);
+        var tasks = new List<Task<(double Rx, double Ry)>>();
 
         for (int i = 0; i < paths.Count; i++)
         {
-            // Se non abbiamo un centro per questo frame, lo saltiamo
             if (i >= centers.Count || centers[i] == null) continue;
-            Point2D c = centers[i]!.Value;
-
-            // OTTIMIZZAZIONE: Leggiamo solo l'header (pochi byte) invece dell'immagine intera (megabyte).
-            // Assumiamo che l'immagine raw sia piena (senza bordi neri pre-esistenti).
-            var header = await _ioService.ReadHeaderOnlyAsync(paths[i]);
             
-            if (header != null)
-            {
-                hasData = true;
-                double w = header.GetIntValue("NAXIS1");
-                double h = header.GetIntValue("NAXIS2");
+            int index = i;
+            Point2D center = centers[i]!.Value;
+            string path = paths[i];
 
-                // Calcoliamo quanto spazio c'è dal centro dell'oggetto ai 4 bordi del sensore
-                double distLeft = c.X;          // Distanza dal bordo sinistro
-                double distRight = w - c.X;     // Distanza dal bordo destro
-                double distTop = c.Y;           // Distanza dal bordo superiore
-                double distBottom = h - c.Y;    // Distanza dal bordo inferiore
-                
-                // Nota: Qui la logica dipende se vuoi "Intersezione" (Crop stretto) o "Unione" (Tutto visibile).
-                // Per le comete, solitamente si vuole evitare che il soggetto esca dal quadro, 
-                // quindi si cerca di mantenere la dimensione che accomoda il movimento.
-                
-                // Prendiamo il massimo delle distanze: questo allargherà il canvas se la cometa
-                // si trova molto vicina a un bordo in uno dei frame, garantendo che ci sia "aria" attorno.
-                if (distLeft > maxDistFromCenterLeft) maxDistFromCenterLeft = distLeft;
-                if (distRight > maxDistFromCenterRight) maxDistFromCenterRight = distRight;
-                if (distTop > maxDistFromCenterTop) maxDistFromCenterTop = distTop;
-                if (distBottom > maxDistFromCenterBottom) maxDistFromCenterBottom = distBottom;
-            }
+            tasks.Add(Task.Run(async () =>
+            {
+                await semaphore.WaitAsync();
+                try
+                {
+                    // DOBBIAMO caricare l'immagine per sapere dove sono i dati validi
+                    // (Esattamente come il vecchio codice)
+                    var data = await _ioService.LoadAsync(path);
+                    if (data == null) return (0, 0);
+
+                    using Mat mat = _converter.RawToMat(data);
+                    
+                    // Qui usiamo la versione FIXATA di FindValidDataBox (che include i neri ma esclude i NaN)
+                    Rect2D validBox = _analysis.FindValidDataBox(mat);
+
+                    if (validBox.Width > 0 && validBox.Height > 0)
+                    {
+                        double distLeft = center.X - validBox.X;
+                        double distRight = (validBox.X + validBox.Width) - center.X;
+                        double distTop = center.Y - validBox.Y;
+                        double distBottom = (validBox.Y + validBox.Height) - center.Y;
+
+                        double myRadiusX = Math.Max(distLeft, distRight);
+                        double myRadiusY = Math.Max(distTop, distBottom);
+                        return (myRadiusX, myRadiusY);
+                    }
+                    return (0.0, 0.0);
+                }
+                finally { semaphore.Release(); }
+            }));
         }
 
-        if (!hasData) return new Size2D(1000, 1000); // Fallback
+        var results = await Task.WhenAll(tasks);
 
-        // Creiamo un canvas che possa contenere l'escursione massima in ogni direzione
-        // Moltiplichiamo per 2 perché il target sarà esattamente al centro
-        // Usiamo il Max tra Left/Right e Top/Bottom per fare un canvas simmetrico o rettangolare centrato.
+        foreach (var res in results)
+        {
+            if (res.Rx > maxRadiusX) maxRadiusX = res.Rx;
+            if (res.Ry > maxRadiusY) maxRadiusY = res.Ry;
+        }
+
+        // Calcolo finale identico al vecchio codice
+        int finalW = (int)Math.Ceiling(maxRadiusX * 2);
+        int finalH = (int)Math.Ceiling(maxRadiusY * 2);
         
-        // Approccio conservativo: Canvas grande abbastanza da contenere il frame più "spostato"
-        double finalW = Math.Max(maxDistFromCenterLeft, maxDistFromCenterRight) * 2.0;
-        double finalH = Math.Max(maxDistFromCenterTop, maxDistFromCenterBottom) * 2.0;
-        
-        return new Size2D(Math.Ceiling(finalW), Math.Ceiling(finalH));
+        return (finalW > 0 && finalH > 0) ? new Size2D(finalW, finalH) : new Size2D(1000, 1000);
     }
 }

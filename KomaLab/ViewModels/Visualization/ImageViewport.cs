@@ -59,7 +59,7 @@ public partial class ImageViewport : ObservableObject
         OffsetY += deltaY;
     }
 
-    public void ResetView()
+    public virtual void ResetView()
     {
         if (ImageSize.Width <= 0 || ImageSize.Height <= 0 || 
             ViewportSize.Width <= 0 || ViewportSize.Height <= 0)

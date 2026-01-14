@@ -7,27 +7,20 @@ using System.Threading.Tasks;
 using KomaLab.Models.Primitives;
 using KomaLab.Services.Fits;
 using OpenCvSharp;
-// Namespace corretto per IFitsIoService
 
 namespace KomaLab.Services.Processing.AlignmentStrategies;
 
 // ---------------------------------------------------------------------------
 // FILE: GuidedCometAlignmentStrategy.cs
 // RUOLO: Strategia Allineamento (Tracking)
-// DESCRIZIONE:
-// Allinea le immagini su un oggetto in movimento (cometa/asteroide) usando
-// un approccio ibrido:
-// 1. Predizione: Stima la posizione usando interpolazione lineare tra Start/End
-//    o dati esterni (es. lista 'guesses' pre-popolata da JPL).
-// 2. Correzione: Esegue un Template Matching locale attorno alla stima per
-//    centrare esattamente il nucleo della cometa.
+// AGGIORNAMENTO: Refactoring con AlignmentStrategyBase per resilienza (Retry).
 // ---------------------------------------------------------------------------
 
-public class GuidedCometAlignmentStrategy : IAlignmentStrategy
+public class GuidedCometAlignmentStrategy : AlignmentStrategyBase
 {
-    private readonly IFitsIoService _ioService;      // Sostituisce il vecchio FitsService
+    private readonly IFitsIoService _ioService;
     private readonly IFitsImageDataConverter _converter;
-    private readonly IImageOperationService _operations; // Servizio per Template Matching
+    private readonly IImageOperationService _operations;
 
     public GuidedCometAlignmentStrategy(
         IFitsIoService ioService, 
@@ -39,7 +32,7 @@ public class GuidedCometAlignmentStrategy : IAlignmentStrategy
         _operations = operations ?? throw new ArgumentNullException(nameof(operations));
     }
 
-    public async Task<Point2D?[]> CalculateAsync(
+    public override async Task<Point2D?[]> CalculateAsync(
         List<string> sourcePaths, 
         List<Point2D?> guesses, 
         int searchRadius, 
@@ -48,55 +41,79 @@ public class GuidedCometAlignmentStrategy : IAlignmentStrategy
         int n = sourcePaths.Count;
         var results = new Point2D?[n];
 
-        // Validazione Input: Servono almeno Frame 0 e Frame N (o input utente su questi)
+        // Validazione Input
         var p1Guess = guesses.FirstOrDefault();
         var pNGuess = guesses.LastOrDefault();
 
         if (n < 2 || !p1Guess.HasValue || !pNGuess.HasValue) 
         {
-            // Senza estremi, non possiamo interpolare. Ritorniamo quello che abbiamo.
             return guesses.ToArray();
         }
 
-        // Configurazione Concorrenza (per evitare OutOfMemory su batch grandi)
-        long firstFileSize = 0;
-        try { if (n > 0) firstFileSize = new FileInfo(sourcePaths[0]).Length; } catch { }
-        
-        int maxConcurrency;
-        if (firstFileSize > 100 * 1024 * 1024) maxConcurrency = 1; 
-        else if (firstFileSize > 20 * 1024 * 1024) maxConcurrency = Math.Clamp(Environment.ProcessorCount / 2, 2, 3);
-        else maxConcurrency = Math.Clamp(Environment.ProcessorCount, 2, 4);
-
+        // 1. Concorrenza ottimizzata (Dalla classe base)
+        int maxConcurrency = GetOptimalConcurrency(sourcePaths[0]);
         using var semaphore = new SemaphoreSlim(maxConcurrency);
+        
         Mat? templateMat = null;
 
         try
         {
-            // --- FASE 1: Inizializzazione (Frame 0) ---
-            // Carichiamo il primo frame per estrarre il "Modello" (Template) della cometa
-            var data0 = await _ioService.LoadAsync(sourcePaths[0]);
-            if (data0 == null) return results;
+            // ---------------------------------------------------------
+            // FASE 1: Inizializzazione Estremi (Protetta da Retry)
+            // ---------------------------------------------------------
 
-            // Estrazione Template: Ritagliamo un box attorno al punto iniziale.
-            // _operations.ExtractRefinedTemplate si occupa di normalizzare e preparare il piccolo Mat.
-            var t0 = _operations.ExtractRefinedTemplate(data0, p1Guess.Value, searchRadius);
-            templateMat = t0.Template; 
-            
-            // Impostiamo il risultato del primo frame
-            Point2D centerStart = p1Guess.Value;
+            // A. FRAME 0 (START) - Estrazione Template
+            // Usiamo ExecuteWithRetryAsync per essere resilienti ai lock del file system
+            var t0Result = await ExecuteWithRetryAsync(
+                operation: async () => 
+                {
+                    var data = await _ioService.LoadAsync(sourcePaths[0]);
+                    if (data == null) return null; // Triggera retry
+                    // Nota: ExtractRefinedTemplate non è asincrono ma è pesante, ok nel Task
+                    return (Result?)_operations.ExtractRefinedTemplate(data, p1Guess.Value, searchRadius);
+                },
+                fallbackValue: null,
+                itemIndex: 0
+            );
+
+            if (t0Result == null) return results; // Fallimento critico su Frame 0
+
+            templateMat = t0Result.Value.Template;
+            Point2D centerStart = t0Result.Value.RefinedCenter;
             results[0] = centerStart;
             progress?.Report((0, centerStart));
 
-            // Impostiamo il risultato dell'ultimo frame
+            // B. FRAME N (END) - Calcolo Traiettoria
             Point2D centerEnd = pNGuess.Value;
+            
+            var tEndResult = await ExecuteWithRetryAsync(
+                operation: async () =>
+                {
+                    var data = await _ioService.LoadAsync(sourcePaths[n - 1]);
+                    if (data == null) return null;
+                    
+                    var t = _operations.ExtractRefinedTemplate(data, pNGuess.Value, searchRadius);
+                    t.Template?.Dispose(); // Non ci serve il template finale, solo il punto
+                    return (Point2D?)t.RefinedCenter;
+                },
+                fallbackValue: pNGuess.Value, // Fallback al guess se il file è illeggibile
+                itemIndex: n - 1
+            );
+
+            if (tEndResult.HasValue) centerEnd = tEndResult.Value;
+            
             results[n - 1] = centerEnd;
             progress?.Report((n - 1, centerEnd));
 
-            // --- FASE 2: Calcolo Traiettoria (Lineare) ---
+            // ---------------------------------------------------------
+            // FASE 2: Calcolo Traiettoria (Lineare)
+            // ---------------------------------------------------------
             double stepX = (centerEnd.X - centerStart.X) / (n - 1);
             double stepY = (centerEnd.Y - centerStart.Y) / (n - 1);
 
-            // --- FASE 3: Tracking (Parallelo) ---
+            // ---------------------------------------------------------
+            // FASE 3: Tracking Parallelo (Protetto da Retry)
+            // ---------------------------------------------------------
             var tasks = new List<Task>();
 
             for (int i = 1; i < n - 1; i++)
@@ -104,7 +121,7 @@ public class GuidedCometAlignmentStrategy : IAlignmentStrategy
                 int index = i;
                 string path = sourcePaths[index];
 
-                // A. Calcolo Posizione Attesa (Priority: NASA Guess > Interpolazione Lineare)
+                // Calcolo Posizione Attesa
                 Point2D expectedPoint;
                 if (index < guesses.Count && guesses[index].HasValue)
                 {
@@ -122,35 +139,15 @@ public class GuidedCometAlignmentStrategy : IAlignmentStrategy
                     await semaphore.WaitAsync();
                     try
                     {
-                        var fitsData = await _ioService.LoadAsync(path);
-                        if (fitsData == null) 
-                        { 
-                            results[index] = null; 
-                            return; 
-                        }
-
-                        using Mat fullImage = _converter.RawToMat(fitsData);
-
-                        // B. Template Matching Locale
-                        // Cerchiamo il templateMat dentro fullImage, ma SOLO nel raggio di 'searchRadius'
-                        // attorno a 'expectedPoint'. Questo corregge gli errori della traiettoria lineare.
-                        Point2D? foundMatch = _operations.FindTemplatePosition(
-                            fullImage, 
-                            templateMat, 
-                            expectedPoint, 
-                            searchRadius);
-                            
-                        // Se il matching fallisce (es. nuvola), usiamo la stima lineare come fallback.
-                        var finalPoint = foundMatch ?? expectedPoint;
+                        // Eseguiamo la logica core con resilienza
+                        Point2D? result = await ExecuteWithRetryAsync(
+                            operation: async () => await ProcessFrameCoreAsync(path, templateMat, expectedPoint, searchRadius),
+                            fallbackValue: expectedPoint, // Se fallisce I/O, usiamo la stima lineare
+                            itemIndex: index
+                        );
                         
-                        results[index] = finalPoint;
-                        progress?.Report((index, finalPoint));
-                    }
-                    catch
-                    {
-                        // Fallback difensivo
-                        results[index] = expectedPoint;
-                        progress?.Report((index, expectedPoint));
+                        results[index] = result;
+                        progress?.Report((index, result));
                     }
                     finally
                     {
@@ -163,10 +160,38 @@ public class GuidedCometAlignmentStrategy : IAlignmentStrategy
         }
         finally
         {
-            // Importante: Dispose del template Mat creato manualmente
             templateMat?.Dispose();
         }
 
         return results;
+    }
+
+    /// <summary>
+    /// Logica Core per singolo frame: Carica -> Cerca Template.
+    /// Ritorna null solo se c'è un errore di I/O (per scatenare il retry).
+    /// Ritorna expectedPoint se l'I/O va bene ma il template non viene trovato.
+    /// </summary>
+    private async Task<Point2D?> ProcessFrameCoreAsync(string path, Mat templateMat, Point2D expectedPoint, int radius)
+    {
+        var fitsData = await _ioService.LoadAsync(path);
+        if (fitsData == null) return null; // Trigger Retry (errore disco/lock)
+
+        using Mat fullImage = _converter.RawToMat(fitsData);
+
+        // Template Matching Locale
+        Point2D? foundMatch = _operations.FindTemplatePosition(
+            fullImage, 
+            templateMat, 
+            expectedPoint, 
+            radius);
+            
+        // Se matching fallisce (nuvole/rumore), ritorniamo il punto stimato.
+        // NON ritorniamo null, altrimenti il sistema riproverebbe inutilmente per un problema non di I/O.
+        return foundMatch ?? expectedPoint;
+    }
+
+    // Helper struct per gestire il ritorno della tupla nel wrapper del retry
+    private struct Result { public Mat Template; public Point2D RefinedCenter; 
+        public static implicit operator Result((Mat t, Point2D p) tuple) => new Result { Template = tuple.t, RefinedCenter = tuple.p };
     }
 }

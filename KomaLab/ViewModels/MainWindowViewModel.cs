@@ -25,7 +25,7 @@ public partial class MainWindowViewModel : ObservableObject
     
     // --- Proprietà della Finestra ---
     [ObservableProperty]
-    private string _windowTitle = "KomaLab - Astro Node Editor";
+    private string _windowTitle = "KomaLab";
 
     // --- Costruttore ---
     // BoardViewModel viene iniettato dal container DI (App.axaml.cs o Program.cs)

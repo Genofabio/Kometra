@@ -31,7 +31,7 @@ public partial class SingleImageNodeViewModel : ImageNodeViewModel
 
     // --- Implementazione Contratti Base ---
     public override FitsRenderer? ActiveRenderer => FitsImage;
-    protected override Size NodeContentSize => _explicitSize;
+    public override Size NodeContentSize => _explicitSize;
     public string ImagePath => _imageModel.ImagePath;
 
     public SingleImageNodeViewModel(

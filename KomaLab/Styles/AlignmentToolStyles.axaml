@@ -3,7 +3,7 @@
 
     <Style Selector="Border.CoordinateEntryRow">
         <Setter Property="Background" Value="{DynamicResource ToolPanelBackgroundBrush}"/>
-        <Setter Property="BorderBrush" Value="{DynamicResource GridLineBrush}"/>
+        <Setter Property="BorderBrush" Value="{DynamicResource Border.WhiteDimBrush}"/>
         <Setter Property="BorderThickness" Value="1"/>
         <Setter Property="CornerRadius" Value="4"/>
         <Setter Property="ClipToBounds" Value="True"/>
@@ -21,14 +21,29 @@
         <Setter Property="Background" Value="{DynamicResource MenuBackgroundBrush}"/>
     </Style>
 
+    <Style Selector="Border.IndexBox">
+        <Setter Property="CornerRadius" Value="3.5,0,0,3.5"/>
+        <Setter Property="Transitions">
+            <Transitions>
+                <CornerRadiusTransition Property="CornerRadius" Duration="0:0:0.2"/>
+            </Transitions>
+        </Setter>
+    </Style>
+
+    <Style Selector="Border.CoordinateEntryRow.active Border.IndexBox">
+        <Setter Property="CornerRadius" Value="2,0,0,2"/>
+    </Style>
+
     <Style Selector="StackPanel.NavControls TextBlock">
-        <Setter Property="Foreground" Value="{DynamicResource Text.StaticWhiteBrush}"/> <Setter Property="HorizontalAlignment" Value="Center"/>
+        <Setter Property="Foreground" Value="{DynamicResource Text.StaticWhiteBrush}"/> 
+        <Setter Property="HorizontalAlignment" Value="Center"/>
         <Setter Property="Margin" Value="0,4"/>
     </Style>
 
     <Style Selector="Button:pointerover /template/ ContentPresenter#PART_ContentPresenter">
         <Setter Property="Background" Value="{DynamicResource MenuBackgroundBrush}"/> 
-        <Setter Property="Foreground" Value="{DynamicResource Text.StaticWhiteBrush}"/> </Style>
+        <Setter Property="Foreground" Value="{DynamicResource Text.StaticWhiteBrush}"/> 
+    </Style>
 
     <Style Selector="Button.calculate">
         <Setter Property="Background" Value="{DynamicResource ActionPrimaryBackgroundBrush}"/> 
@@ -86,7 +101,9 @@
     
     <Style Selector="RadioButton.segmented">
         <Setter Property="Background" Value="Transparent"/>
-        <Setter Property="Foreground" Value="{DynamicResource Text.MediumGreyBrush}"/> <Setter Property="BorderBrush" Value="{DynamicResource Border.WhiteDimBrush}"/> <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="Foreground" Value="{DynamicResource Text.MediumGreyBrush}"/> 
+        <Setter Property="BorderBrush" Value="{DynamicResource Border.WhiteDimBrush}"/> 
+        <Setter Property="BorderThickness" Value="1"/>
         <Setter Property="HorizontalContentAlignment" Value="Center"/>
         <Setter Property="VerticalContentAlignment" Value="Center"/>
         <Setter Property="MinHeight" Value="32"/>
@@ -109,7 +126,8 @@
     </Style>
 
     <Style Selector="RadioButton.segmented:pointerover">
-        <Setter Property="Background" Value="{DynamicResource Background.WhiteFaintBrush}"/> <Setter Property="Foreground" Value="{DynamicResource Text.StaticWhiteBrush}"/>
+        <Setter Property="Background" Value="{DynamicResource Background.WhiteFaintBrush}"/> 
+        <Setter Property="Foreground" Value="{DynamicResource Text.StaticWhiteBrush}"/>
     </Style>
 
     <Style Selector="RadioButton.segmented:checked">

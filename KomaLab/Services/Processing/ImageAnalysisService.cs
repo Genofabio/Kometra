@@ -4,7 +4,7 @@ using System.Runtime.InteropServices;
 using KomaLab.Models.Fits;
 using KomaLab.Models.Primitives;
 using KomaLab.Models.Visualization;
-using KomaLab.Services.Fits; // Necessario per IFitsImageDataConverter
+using KomaLab.Services.Fits;
 using MathNet.Numerics;
 using MathNet.Numerics.LinearAlgebra;
 using MathNet.Numerics.Statistics;
@@ -15,14 +15,13 @@ namespace KomaLab.Services.Processing;
 // ---------------------------------------------------------------------------
 // FILE: ImageAnalysisService.cs
 // RUOLO: Compute Engine (Matematica Pura)
+// VERSIONE: Finale (Fixed Logic Parity)
 // ---------------------------------------------------------------------------
 
 public class ImageAnalysisService : IImageAnalysisService
 {
-    // --- Dipendenze ---
     private readonly IFitsImageDataConverter _converter;
 
-    // --- Costruttore (Dependency Injection) ---
     public ImageAnalysisService(IFitsImageDataConverter converter)
     {
         _converter = converter ?? throw new ArgumentNullException(nameof(converter));
@@ -40,7 +39,7 @@ public class ImageAnalysisService : IImageAnalysisService
         using Mat stdDevMat = new Mat();
         using Mat mask = new Mat();
         
-        // Maschera per ignorare NaN (comuni dopo rotazioni/allineamenti)
+        // Maschera per ignorare NaN
         Cv2.Compare(image, image, mask, CmpType.EQ);
         Cv2.MeanStdDev(image, meanMat, stdDevMat, mask);
         
@@ -56,15 +55,15 @@ public class ImageAnalysisService : IImageAnalysisService
     public Rect2D FindValidDataBox(Mat image)
     {
         using Mat mask = new Mat();
+        
+        // FIX APPLICATO: Usiamo solo Compare per trovare i non-NaN.
+        // Rimosso il Threshold che tagliava i pixel neri (valore 0).
         Cv2.Compare(image, image, mask, CmpType.EQ); 
-        Cv2.Threshold(image, mask, 0, 255, ThresholdTypes.Binary);
-        mask.ConvertTo(mask, MatType.CV_8UC1);
 
         var rect = Cv2.BoundingRect(mask);
         return new Rect2D(rect.X, rect.Y, rect.Width, rect.Height);
     }
     
-    // RENAMED: Da CalculateAutoStretch a CalculateAutoStretchProfile per consistenza
     public AbsoluteContrastProfile CalculateAutoStretchProfile(Mat image)
     {
         if (image.Empty()) return new AbsoluteContrastProfile(0, 65535);
@@ -123,7 +122,7 @@ public class ImageAnalysisService : IImageAnalysisService
         }
     }
     
-    // --- METODI PER ADATTAMENTO CONTRASTO (Business Logic Spostata Qui) ---
+    // --- METODI CONTRASTO ---
 
     public AbsoluteContrastProfile CalculateAdaptedProfile(
         FitsImageData sourceData, 
@@ -131,7 +130,6 @@ public class ImageAnalysisService : IImageAnalysisService
         double currentBlack, 
         double currentWhite)
     {
-        // Ora _converter è disponibile grazie al costruttore
         using var sourceMat = _converter.RawToMat(sourceData);
         var sigmaProfile = ComputeSigmaProfile(sourceMat, currentBlack, currentWhite);
 
@@ -230,7 +228,7 @@ public class ImageAnalysisService : IImageAnalysisService
     }
 
     // =======================================================================
-    // 3. ALGORITMI CORE (GAUSSIAN FITTING / PEAK / MOMENTS)
+    // 3. ALGORITMI CORE
     // =======================================================================
 
     public Point2D FindGaussianCenter(Mat rawMat, double sigma = 3.0)
@@ -287,15 +285,7 @@ public class ImageAnalysisService : IImageAnalysisService
         double[][] xData = xDataList.ToArray();
         double[] yData = yDataList.ToArray();
         
-        var initialGuess = Vector<double>.Build.Dense([
-            1.0, 
-            xoInitNum / weightSum, 
-            yoInitNum / weightSum, 
-            3.0, 
-            3.0, 
-            0.0
-        ]);
-        
+        var initialGuess = Vector<double>.Build.Dense([1.0, xoInitNum / weightSum, yoInitNum / weightSum, 3.0, 3.0, 0.0]);
         var lowerBounds = Vector<double>.Build.Dense([0.0, 0, 0, 0.1, 0.1, -0.2]);
         var upperBounds = Vector<double>.Build.Dense([1.5, smoothedMat.Width, smoothedMat.Height, smoothedMat.Width, smoothedMat.Height, 0.5]);
 
@@ -412,6 +402,8 @@ public class ImageAnalysisService : IImageAnalysisService
         using var hanningWin = new Mat();
         Cv2.CreateHanningWindow(hanningWin, new Size(cellW, cellH), MatType.CV_32FC1);
 
+        using var meanMat = new Mat();
+        using var stdDevMat = new Mat();
         using var cellRef32 = new Mat();
         using var cellTgt32 = new Mat();
 
@@ -430,8 +422,22 @@ public class ImageAnalysisService : IImageAnalysisService
                 if (cellRef.Type() != MatType.CV_32FC1) cellRef.ConvertTo(cellRef32, MatType.CV_32FC1); else cellRef.CopyTo(cellRef32);
                 if (cellTgt.Type() != MatType.CV_32FC1) cellTgt.ConvertTo(cellTgt32, MatType.CV_32FC1); else cellTgt.CopyTo(cellTgt32);
 
+                // --- LOGICA ADATTIVA RIPRISTINATA (FIX PER PARITÀ) ---
+                
+                Cv2.MeanStdDev(cellRef32, meanMat, stdDevMat);
+                double cellMean = meanMat.Get<double>(0, 0);
+                double cellStd = stdDevMat.Get<double>(0, 0);
+
                 Cv2.MinMaxLoc(cellRef32, out _, out double maxVal);
-                if (maxVal < 0.1) continue; 
+
+                // Scartiamo la cella se non contiene picchi significativi rispetto al fondo
+                double noiseThreshold = cellMean + (4.0 * cellStd);
+
+                if (maxVal < noiseThreshold) 
+                {
+                    continue; 
+                }
+                // -----------------------------------------------------
 
                 Point2d shift = Cv2.PhaseCorrelate(cellRef32, cellTgt32, hanningWin, out double response);
                 
@@ -449,7 +455,9 @@ public class ImageAnalysisService : IImageAnalysisService
         return new Point2D(finalShift.X, finalShift.Y); 
     }
 
-    // --- HELPER PRIVATI ---
+    // =======================================================================
+    // 5. HELPER PRIVATI (MANCANTI NELLA TUA VERSIONE PRECEDENTE)
+    // =======================================================================
 
     private Mat ApplySobelFilter(Mat input)
     {

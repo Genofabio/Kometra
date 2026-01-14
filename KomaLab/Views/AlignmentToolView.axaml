@@ -2,10 +2,8 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
-        xmlns:vm="clr-namespace:KomaLab.ViewModels"
         xmlns:avalonia="clr-namespace:Material.Icons.Avalonia;assembly=Material.Icons.Avalonia"
         xmlns:converters="clr-namespace:KomaLab.Converters"
-        xmlns:models="clr-namespace:KomaLab.Models"
         xmlns:av="clr-namespace:Avalonia.Data.Converters;assembly=Avalonia.Base"
         xmlns:processing="clr-namespace:KomaLab.Models.Processing"
         xmlns:tools="clr-namespace:KomaLab.ViewModels.Tools"
@@ -32,7 +30,9 @@
                     Classes.active="{Binding IsActive}">
                 
                 <Grid ColumnDefinitions="40, *, *"> 
+                    
                     <Border Grid.Column="0" 
+                            Classes="IndexBox"
                             Background="{DynamicResource ActionPrimaryBackgroundBrush}"
                             VerticalAlignment="Stretch"
                             HorizontalAlignment="Stretch">
@@ -44,21 +44,27 @@
                                    VerticalAlignment="Center"/>
                     </Border>
 
-                    <Border Grid.Column="1" BorderBrush="{DynamicResource SystemControlForegroundBaseLowBrush}" BorderThickness="0,0,1,0">
+                    <Border Grid.Column="1" 
+                            BorderBrush="{DynamicResource Border.WhiteDimBrush}" 
+                            BorderThickness="0,0,1,0">
                         <StackPanel Orientation="Horizontal" Spacing="6" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="5,6">
-                            <TextBlock Text="X" Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}" FontSize="11" VerticalAlignment="Bottom" Opacity="0.7"/>
+                            <TextBlock Text="X" Foreground="{DynamicResource Text.MediumGreyBrush}" FontSize="11" VerticalAlignment="Bottom" Opacity="0.7"/>
                             <TextBlock Text="{Binding FormattedX}" FontWeight="SemiBold" FontSize="13" />
                         </StackPanel>
                     </Border>
 
                     <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="6" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="5,6">
-                        <TextBlock Text="Y" Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}" FontSize="11" VerticalAlignment="Bottom" Opacity="0.7"/>
+                        <TextBlock Text="Y" Foreground="{DynamicResource Text.MediumGreyBrush}" FontSize="11" VerticalAlignment="Bottom" Opacity="0.7"/>
                         <TextBlock Text="{Binding FormattedY}" FontWeight="SemiBold" FontSize="13" />
                     </StackPanel>
                 </Grid>
             </Border>
         </DataTemplate>
     </Window.Resources>
+
+    <Window.Styles>
+        <StyleInclude Source="/Styles/AlignmentToolStyles.axaml" />
+    </Window.Styles>
     
     <Grid ColumnDefinitions="300, *">
         

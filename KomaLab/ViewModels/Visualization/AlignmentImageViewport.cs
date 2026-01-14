@@ -1,4 +1,5 @@
-﻿using Avalonia;
+﻿using System;
+using Avalonia;
 using CommunityToolkit.Mvvm.ComponentModel;
 
 namespace KomaLab.ViewModels.Visualization;
@@ -22,6 +23,37 @@ public partial class AlignmentImageViewport : ImageViewport
 
     [ObservableProperty] 
     private double _searchRadius; 
+    
+    // --- Override per Zoom Iniziale ---
+    
+    /// <summary>
+    /// Reimposta la vista adattando l'immagine al viewport.
+    /// A differenza della classe base (che usa il 100%), qui lasciamo un margine (90%).
+    /// </summary>
+    public override void ResetView()
+    {
+        // Controlli di sicurezza standard
+        if (ImageSize.Width <= 0 || ImageSize.Height <= 0 || 
+            ViewportSize.Width <= 0 || ViewportSize.Height <= 0)
+        {
+            base.ResetView();
+            return;
+        }
+
+        // --- DIFFERENZA PRINCIPALE ---
+        // Usiamo 0.90 invece di 1.0 per lasciare un po' di "respiro" attorno all'immagine.
+        double paddingFactor = 0.95; 
+        
+        double scaleX = (ViewportSize.Width * paddingFactor) / ImageSize.Width;
+        double scaleY = (ViewportSize.Height * paddingFactor) / ImageSize.Height;
+
+        // "Uniform": scegliamo la scala minore per far stare tutto dentro
+        Scale = Math.Min(scaleX, scaleY);
+
+        // Centriamo l'immagine
+        OffsetX = (ViewportSize.Width - (ImageSize.Width * Scale)) / 2.0;
+        OffsetY = (ViewportSize.Height - (ImageSize.Height * Scale)) / 2.0;
+    }
 
     // --- Proiezioni Schermo (Binding Read-Only) ---
 

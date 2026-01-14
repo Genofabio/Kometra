@@ -54,7 +54,7 @@ public partial class MultipleImagesNodeViewModel : ImageNodeViewModel
 
     // --- Implementazione ImageNodeViewModel ---
     public override FitsRenderer? ActiveRenderer => ActiveFitsImage;
-    protected override Size NodeContentSize => _maxImageSize;
+    public override Size NodeContentSize => _maxImageSize;
 
     protected override void OnRendererSwapping(FitsRenderer newRenderer) 
         => ActiveFitsImage = newRenderer;
