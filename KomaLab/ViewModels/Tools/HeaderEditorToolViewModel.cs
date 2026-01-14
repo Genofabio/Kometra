@@ -8,10 +8,10 @@ using System.Threading.Tasks;
 using Avalonia.Media;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
-using KomaLab.Models.Fits;
+using KomaLab.Models.Fits; // <--- NUOVO HEADER
 using KomaLab.Services.Fits;
+using KomaLab.ViewModels.Items;
 using KomaLab.ViewModels.Nodes;
-using nom.tam.fits;
 
 namespace KomaLab.ViewModels.Tools;
 
@@ -20,19 +20,14 @@ namespace KomaLab.ViewModels.Tools;
 // RUOLO: ViewModel Editor Metadati
 // DESCRIZIONE:
 // Gestisce l'interfaccia per la visualizzazione e modifica dell'header FITS.
-// 
-// MIGLIORAMENTI APPLICATI:
-// 1. Memory Safety: Implementa IDisposable per sganciare gli eventi dal SourceNode.
-// 2. Dependency Injection: Il servizio viene iniettato tramite interfaccia.
-// 3. Robustezza: Gestione dei task asincroni con CancellationToken per evitare race conditions.
-// 4. Separation of Concerns: Logica di ricostruzione header delegata interamente al Service.
+// Aggiornato per usare FitsHeader interno (No nom.tam.fits).
 // ---------------------------------------------------------------------------
 
 public partial class HeaderEditorToolViewModel : ObservableObject, IDisposable
 {
     private readonly ImageNodeViewModel _sourceNode;
-    private readonly IFitsMetadataService _metadataService; // Iniettato tramite interfaccia
-    private readonly List<FitsHeaderItem> _allItems = new();
+    private readonly IFitsMetadataService _metadataService; 
+    private readonly List<FitsHeaderEditorRow> _allItems = new();
     private CancellationTokenSource? _healthCheckCts;
     private bool _isDisposed;
 
@@ -45,8 +40,8 @@ public partial class HeaderEditorToolViewModel : ObservableObject, IDisposable
 
     // --- PROPRIETÀ OBSERVABLE ---
 
-    [ObservableProperty] private ObservableCollection<FitsHeaderItem> _filteredItems = new();
-    [ObservableProperty] private FitsHeaderItem? _selectedItem;
+    [ObservableProperty] private ObservableCollection<FitsHeaderEditorRow> _filteredItems = new();
+    [ObservableProperty] private FitsHeaderEditorRow? _selectedItem;
     [ObservableProperty] private string _currentFileName = "N/A";
     [ObservableProperty] private string _imageCounterText = "";
     [ObservableProperty] private bool _isMultipleImages;
@@ -71,16 +66,13 @@ public partial class HeaderEditorToolViewModel : ObservableObject, IDisposable
 
         IsMultipleImages = _sourceNode is MultipleImagesNodeViewModel;
         
-        // Sottoscrizione eventi (da sganciare nel Dispose)
         _sourceNode.PropertyChanged += OnSourceNodePropertyChanged;
         
-        // Inizializzazione asincrona sicura
         _ = LoadCurrentHeaderAsync();
     }
 
     private async void OnSourceNodePropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
     {
-        // Monitoriamo i cambi di indice (per MultipleImages) o di renderer
         if (e.PropertyName == nameof(ImageNodeViewModel.ActiveRenderer) || 
             e.PropertyName == "CurrentIndex" || 
             e.PropertyName == "CurrentImageText")
@@ -99,7 +91,6 @@ public partial class HeaderEditorToolViewModel : ObservableObject, IDisposable
 
         var header = _sourceNode.ActiveRenderer?.Data?.FitsHeader;
 
-        // Gestione Identificativi UI
         if (_sourceNode is SingleImageNodeViewModel single) 
         { 
             CurrentFileName = single.Title ?? "N/A"; 
@@ -121,7 +112,7 @@ public partial class HeaderEditorToolViewModel : ObservableObject, IDisposable
             return; 
         }
 
-        // DELEGA: Il parsing dell'header è logica di business del Service
+        // DELEGA: Il servizio ora ritorna List<FitsHeaderEditorRow> usando il tuo modello
         var parsedItems = await Task.Run(() => _metadataService.ParseForEditor(header));
 
         _allItems.Clear();
@@ -131,9 +122,6 @@ public partial class HeaderEditorToolViewModel : ObservableObject, IDisposable
         await RefreshHealthCheckAsync();
     }
 
-    /// <summary>
-    /// Esegue un'analisi di integrità (Health Check) sui dati astronomici attuali.
-    /// </summary>
     public async Task RefreshHealthCheckAsync()
     {
         _healthCheckCts?.Cancel();
@@ -143,7 +131,7 @@ public partial class HeaderEditorToolViewModel : ObservableObject, IDisposable
 
         try
         {
-            await Task.Delay(150, token); // Debounce per non sovraccaricare durante la digitazione
+            await Task.Delay(150, token); 
             
             var currentHeader = _sourceNode.ActiveRenderer?.Data?.FitsHeader;
             if (currentHeader == null || _allItems.Count == 0) 
@@ -153,7 +141,6 @@ public partial class HeaderEditorToolViewModel : ObservableObject, IDisposable
                 return; 
             }
 
-            // Analisi in background tramite i parser del Service
             var result = await Task.Run(() => 
             {
                 token.ThrowIfCancellationRequested();
@@ -183,7 +170,6 @@ public partial class HeaderEditorToolViewModel : ObservableObject, IDisposable
 
             if (token.IsCancellationRequested) return;
 
-            // Aggiornamento visuale degli indicatori
             UpdateStatusIndicator(result.DateMsg, result.DateError, m => DateStatusText = m, c => DateStatusColor = c);
             UpdateStatusIndicator(result.LocMsg, result.LocError, m => LocationStatusText = m, c => LocationStatusColor = c);
             UpdateStatusIndicator(result.WcsMsg, result.WcsError, m => WcsStatusText = m, c => WcsStatusColor = c);
@@ -211,7 +197,7 @@ public partial class HeaderEditorToolViewModel : ObservableObject, IDisposable
         var query = SearchText?.Trim();
         if (string.IsNullOrWhiteSpace(query))
         {
-            FilteredItems = new ObservableCollection<FitsHeaderItem>(_allItems);
+            FilteredItems = new ObservableCollection<FitsHeaderEditorRow>(_allItems);
         }
         else
         {
@@ -222,19 +208,19 @@ public partial class HeaderEditorToolViewModel : ObservableObject, IDisposable
                     (item.Comment?.Contains(query, StringComparison.OrdinalIgnoreCase) ?? false))
                 .OrderBy(item => item.Key?.StartsWith(query, StringComparison.OrdinalIgnoreCase) == true ? 0 : 1);
             
-            FilteredItems = new ObservableCollection<FitsHeaderItem>(results);
+            FilteredItems = new ObservableCollection<FitsHeaderEditorRow>(results);
         }
     }
 
     /// <summary>
-    /// Restituisce un nuovo Header FITS basato sulle modifiche apportate nella UI.
+    /// Restituisce un nuovo Header FITS (Tuo Modello) basato sulle modifiche.
     /// </summary>
-    public Header GetUpdatedHeader()
+    // MODIFICATO: Return type aggiornato a FitsHeader
+    public FitsHeader GetUpdatedHeader()
     {
         var activeHeader = _sourceNode.ActiveRenderer?.Data?.FitsHeader;
-        if (activeHeader == null) return new Header();
+        if (activeHeader == null) return new FitsHeader(); // Usiamo costruttore interno
 
-        // DELEGA: Il servizio sa come iniettare correttamente i dati nell'oggetto FITS
         return _metadataService.ReconstructHeader(activeHeader, _allItems);
     }
 
@@ -242,9 +228,13 @@ public partial class HeaderEditorToolViewModel : ObservableObject, IDisposable
     private void AddNewKey()
     {
         string newKeyName = !string.IsNullOrWhiteSpace(SearchText) ? SearchText.Trim().ToUpper() : "NEW_KEY";
-        var newItem = new FitsHeaderItem { Key = newKeyName, Value = "0", Comment = "Aggiunta manuale", IsModified = true };
         
-        // Logica di inserimento: cerchiamo di stare prima della chiave END
+        // MODIFICATO: Uso costruttore specifico di FitsHeaderEditorRow
+        // che abbiamo creato nello Step 1 (imposta _isModified = true internamente se modifichi le proprietà, 
+        // ma qui lo inizializziamo già modificato).
+        var newItem = new FitsHeaderEditorRow(newKeyName, "0", "Aggiunta manuale", false);
+        newItem.IsModified = true; // Forziamo il flag per abilitare il salvataggio
+        
         var endIndex = _allItems.FindIndex(x => x.Key.Trim().ToUpper() == "END");
         if (endIndex >= 0) _allItems.Insert(endIndex, newItem);
         else _allItems.Add(newItem);
@@ -271,7 +261,6 @@ public partial class HeaderEditorToolViewModel : ObservableObject, IDisposable
     [RelayCommand] 
     private void PreviousImage() => (_sourceNode as MultipleImagesNodeViewModel)?.PreviousImageCommand.Execute(null);
 
-    // --- GESTIONE MEMORIA (IDisposable) ---
     public void Dispose()
     {
         if (_isDisposed) return;

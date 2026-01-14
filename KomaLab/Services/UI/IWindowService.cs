@@ -1,9 +1,9 @@
 ﻿using System.Collections.Generic;
 using System.Threading.Tasks;
 using Avalonia.Controls;
+using KomaLab.Models.Fits;
 using KomaLab.Models.Visualization;
 using KomaLab.ViewModels.Nodes;
-using nom.tam.fits;
 
 namespace KomaLab.Services.UI;
 
@@ -30,11 +30,11 @@ public interface IWindowService
     Task<List<string>?> ShowAlignmentWindowAsync(
         List<string> inputPaths, 
         VisualizationMode initialMode = VisualizationMode.Linear);
-    
+
     /// <summary>
     /// Apre l'editor per la modifica dei metadati FITS.
     /// </summary>
-    Task<Header?> ShowHeaderEditorAsync(ImageNodeViewModel node);
+    Task<FitsHeader?> ShowHeaderEditorAsync(ImageNodeViewModel node);
     
     /// <summary>
     /// Apre il pannello di controllo per il Plate Solving (Astrometria).

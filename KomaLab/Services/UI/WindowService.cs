@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Threading.Tasks;
 using Avalonia.Controls;
+using KomaLab.Models.Fits; // <--- NUOVO: Sostituisce nom.tam.fits per FitsHeader
 using KomaLab.Models.Visualization;
 using KomaLab.Services.Astrometry;
 using KomaLab.Services.Fits;
@@ -10,7 +11,7 @@ using KomaLab.ViewModels.Nodes;
 using KomaLab.ViewModels.Tools;
 using KomaLab.Views;
 using Microsoft.Extensions.DependencyInjection;
-using nom.tam.fits;
+// RIMOSSO: using nom.tam.fits; 
 
 namespace KomaLab.Services.UI;
 
@@ -51,7 +52,6 @@ public class WindowService : IWindowService
         var analysis = _serviceProvider.GetRequiredService<IImageAnalysisService>();
         var jplService = _serviceProvider.GetRequiredService<IJplHorizonsService>();
         
-        // RECUPERO NUOVO SERVIZIO
         var mediaExport = _serviceProvider.GetRequiredService<IMediaExportService>(); 
 
         using var viewModel = new AlignmentToolViewModel(
@@ -62,7 +62,7 @@ public class WindowService : IWindowService
             converter,
             analysis,
             jplService,
-            mediaExport, // <--- INIEZIONE NEL COSTRUTTORE
+            mediaExport,
             initialMode
         );
     
@@ -80,12 +80,14 @@ public class WindowService : IWindowService
     /// <summary>
     /// Apre l'editor dell'header in modalità modale.
     /// </summary>
-    public async Task<Header?> ShowHeaderEditorAsync(ImageNodeViewModel node)
+    // MODIFICATO: Return type da Header? a FitsHeader?
+    public async Task<FitsHeader?> ShowHeaderEditorAsync(ImageNodeViewModel node)
     {
         if (_mainWindow == null) return null;
         
         var metadataService = _serviceProvider.GetRequiredService<IFitsMetadataService>();
 
+        // Assumiamo che HeaderEditorToolViewModel sia stato aggiornato per usare FitsHeader
         using var editorVm = new HeaderEditorToolViewModel(node, metadataService);
         
         var editorView = new HeaderEditorToolView { DataContext = editorVm };
@@ -125,10 +127,7 @@ public class WindowService : IWindowService
         var converter = _serviceProvider.GetRequiredService<IFitsImageDataConverter>();
         var analysis = _serviceProvider.GetRequiredService<IImageAnalysisService>();
         
-        // NOTA: Se anche PosterizationToolViewModel usa internamente un FitsRenderer,
-        // dovrai aggiungere IMediaExportService anche qui. Per ora lascio inalterato
-        // assumendo che PosterizationToolViewModel non sia stato ancora aggiornato.
-
+        // Se PosterizationToolViewModel crea renderer internamente, servirà mediaExport anche qui in futuro.
         using var vm = new PosterizationToolViewModel(
             sourcePaths, 
             ioService,

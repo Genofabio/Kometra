@@ -7,7 +7,6 @@ using KomaLab.Models.Primitives;
 using KomaLab.Models.Processing;
 using KomaLab.Services.Fits;
 using OpenCvSharp;
-// Per IFitsMetadataService
 
 namespace KomaLab.Services.Processing;
 
@@ -24,7 +23,7 @@ namespace KomaLab.Services.Processing;
 public class ImageOperationService : IImageOperationService
 {
     private readonly IFitsImageDataConverter _converter;
-    private readonly IFitsMetadataService _metadataService; // Nuovo servizio necessario
+    private readonly IFitsMetadataService _metadataService; 
     private readonly IImageAnalysisService _analysis;
 
     public ImageOperationService(
@@ -72,7 +71,6 @@ public class ImageOperationService : IImageOperationService
         try
         {
             // Lanczos4: Interpolazione di alta qualità che preserva i dettagli stellari
-            // BorderConstant + NaN permette di identificare i pixel "fuori campo" nello stack
             Cv2.WarpAffine(
                 sourceDouble, 
                 result, 
@@ -188,7 +186,6 @@ public class ImageOperationService : IImageOperationService
         {
             if (mode == StackingMode.Sum || mode == StackingMode.Average)
             {
-                // ... (Logica Somma/Media invariata, funziona correttamente) ...
                 using Mat validCountMat = new Mat(height, width, MatType.CV_64FC1, new Scalar(0));
                 foreach (var sourceData in sources)
                 {
@@ -221,7 +218,6 @@ public class ImageOperationService : IImageOperationService
                         Parallel.For(0, currentStripH, 
                             () => new 
                             { 
-                                // FIX: Inizializziamo correttamente gli array di supporto
                                 SrcRows = new double[sources.Count][], 
                                 DestRow = new double[width],
                                 PixelValues = new double[sources.Count]
@@ -230,7 +226,6 @@ public class ImageOperationService : IImageOperationService
                             {
                                 for(int k = 0; k < sources.Count; k++)
                                 {
-                                    // FIX: Controllo nullità prima di accedere a Length
                                     if(buffers.SrcRows[k] == null || buffers.SrcRows[k].Length < width)
                                         buffers.SrcRows[k] = new double[width];
 
@@ -252,7 +247,6 @@ public class ImageOperationService : IImageOperationService
                                         continue;
                                     }
 
-                                    // Calcolo mediana
                                     Array.Sort(buffers.PixelValues, 0, validCount);
                                     buffers.DestRow[x] = (validCount % 2 == 0) 
                                         ? (buffers.PixelValues[validCount / 2 - 1] + buffers.PixelValues[validCount / 2]) / 2.0 
@@ -271,10 +265,13 @@ public class ImageOperationService : IImageOperationService
             }
         });
 
-        var resultData = _converter.MatToFitsData(resultMat);
-        _metadataService.TransferMetadata(refData.FitsHeader, resultData.FitsHeader);
-        resultData.FitsHeader.AddCard(new nom.tam.fits.HeaderCard("HISTORY", $"Stacked using {mode} method from {sources.Count} frames", null));
+        // MODIFICATO:
+        // Usiamo il nuovo parametro 'templateHeader' per copiare i metadati dall'immagine di riferimento.
+        // Il convertitore gestirà BITPIX e NAXIS, e copierà il resto (WCS, DATE, ecc.) da refData.FitsHeader.
+        var resultData = _converter.MatToFitsData(resultMat, FitsBitDepth.Double, refData.FitsHeader);
 
+        // Non aggiungiamo nulla di nuovo all'header, come richiesto.
+        
         return resultData;
     }
 

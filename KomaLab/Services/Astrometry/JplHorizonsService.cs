@@ -175,7 +175,7 @@ public class JplHorizonsService : IJplHorizonsService
 
             // --- FIX: Uso del parser statico centralizzato ---
             // Sostituisce la vecchia chiamata extension p.ParseAsCoordinate()
-            double? val = GeographicParser.ParseCoordinateString(p); 
+            double? val = GeographicParser.ParseCoordinateString(p);
             // ------------------------------------------------
 
             if (val.HasValue)

@@ -70,6 +70,7 @@ public class App : Application
         services.AddSingleton<IUndoService, UndoService>();
 
         // --- 3. Servizi Dati (IO & Metadati) ---
+        services.AddSingleton<KomaLab.Services.Fits.Engine.FitsReader>();
         services.AddSingleton<IFitsIoService, FitsIoService>();
         services.AddSingleton<IFitsMetadataService, FitsMetadataService>();
         services.AddSingleton<IFitsImageDataConverter, FitsImageDataConverter>();
@@ -84,7 +85,6 @@ public class App : Application
 
         // --- 5. Factories ---
         services.AddSingleton<INodeViewModelFactory, NodeViewModelFactory>();
-        // AGGIUNTO: Registrazione della Factory per i Renderer (Mancante)
         services.AddSingleton<IFitsRendererFactory, FitsRendererFactory>();
         
         // --- 6. ViewModels ---

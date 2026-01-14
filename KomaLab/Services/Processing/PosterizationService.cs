@@ -2,10 +2,9 @@
 using System.Collections.Generic;
 using System.IO;
 using System.Threading.Tasks;
-using KomaLab.Models.Fits; // Per AbsoluteContrastProfile
+using KomaLab.Models.Fits; 
 using KomaLab.Models.Visualization;
 using KomaLab.Services.Fits;
-using nom.tam.fits;
 using OpenCvSharp;
 
 namespace KomaLab.Services.Processing;
@@ -13,7 +12,7 @@ namespace KomaLab.Services.Processing;
 // ---------------------------------------------------------------------------
 // FILE: PosterizationService.cs
 // RUOLO: Servizio Effetti (Image Processing)
-// VERSIONE: Aggiornata (Esposizione Mat logic + Fix Tuple)
+// VERSIONE: Aggiornata (No nom.tam.fits, No Header Modifiers)
 // ---------------------------------------------------------------------------
 
 public class PosterizationService : IPosterizationService
@@ -64,11 +63,11 @@ public class PosterizationService : IPosterizationService
             // Riutilizzo logica centrale
             ComputePosterization(srcMat, resultMat, levels, mode, blackPoint, whitePoint);
 
-            var resultData = _converter.MatToFitsData(resultMat, FitsBitDepth.UInt8);
-            _metadataService.TransferMetadata(fitsData.FitsHeader, resultData.FitsHeader);
+            // CORREZIONE: Usiamo l'header originale come template per la deep copy dei metadati.
+            // Impostiamo l'output a UInt8 (8-bit) perché la posterizzazione produce valori 0-255.
+            var resultData = _converter.MatToFitsData(resultMat, FitsBitDepth.UInt8, fitsData.FitsHeader);
             
-            resultData.FitsHeader.AddCard(new HeaderCard("HISTORY", $"KomaLab Posterization: {levels} levels", null));
-            resultData.FitsHeader.AddCard(new HeaderCard("HISTORY", $"Stretch Mode: {mode}", null));
+            // RIMOSSO: Aggiunta manuale di HISTORY (come richiesto, header intatto)
 
             string fileName = Path.GetFileNameWithoutExtension(inputPath);
             string outputPath = Path.Combine(outputFolder, $"{fileName}_Posterized.fits");
@@ -97,7 +96,7 @@ public class PosterizationService : IPosterizationService
 
             using Mat srcMat = _converter.RawToMat(fitsData);
 
-            // CORREZIONE: CalculateAutoStretchProfile restituisce un oggetto, non una tupla
+            // Calcolo profilo automatico
             var profile = await Task.Run(() => _analysisService.CalculateAutoStretchProfile(srcMat));
 
             // Applichiamo l'offset dinamico
@@ -107,8 +106,8 @@ public class PosterizationService : IPosterizationService
             using Mat resultMat = new Mat();
             ComputePosterization(srcMat, resultMat, levels, mode, finalBlack, finalWhite);
 
-            var resultData = _converter.MatToFitsData(resultMat, FitsBitDepth.UInt8);
-            _metadataService.TransferMetadata(fitsData.FitsHeader, resultData.FitsHeader);
+            // CORREZIONE: Uso del template header per copiare i metadati
+            var resultData = _converter.MatToFitsData(resultMat, FitsBitDepth.UInt8, fitsData.FitsHeader);
             
             string fileName = Path.GetFileNameWithoutExtension(path);
             string outputPath = Path.Combine(outputFolder, $"{fileName}_Posterized.fits");

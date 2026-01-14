@@ -35,5 +35,5 @@ public interface IFitsImageDataConverter
     /// Formato di destinazione. 
     /// Default: Double (-64) per massima precisione scientifica.
     /// </param>
-    FitsImageData MatToFitsData(Mat mat, FitsBitDepth targetDepth = FitsBitDepth.Double);
+    FitsImageData MatToFitsData(Mat mat, FitsBitDepth targetDepth = FitsBitDepth.Double, FitsHeader? templateHeader = null);
 }

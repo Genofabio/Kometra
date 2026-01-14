@@ -2,10 +2,12 @@
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Linq; // Necessario per .Any()
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using KomaLab.Models.Astrometry;
+using KomaLab.Services.Fits; // <--- Namespace del tuo servizio I/O
 
 namespace KomaLab.Services.Astrometry;
 
@@ -13,22 +15,22 @@ namespace KomaLab.Services.Astrometry;
 // FILE: PlateSolvingService.cs
 // RUOLO: Wrapper Processo Esterno & Logica Astrometrica
 // DESCRIZIONE:
-// Gestisce l'interazione con il motore di risoluzione astrometrica ASTAP e 
-// fornisce strumenti di diagnostica sui file FITS per identificare cause di fallimento.
-//
-// RESPONSABILITÀ:
-// 1. Discovery: Trova l'eseguibile ASTAP (CLI o GUI) nel sistema.
-// 2. Esecuzione: Lancia il processo con parametri ottimizzati per il blind solve.
-// 3. Monitoraggio: Gestisce timeout, cancellazione e ridirezione dei log.
-// 4. Diagnostica: Analizza l'header FITS per verificare la presenza di metadati 
-//    critici (RA, DEC, Focale) necessari al solver.
+// Gestisce l'interazione con il motore di risoluzione astrometrica ASTAP.
+// Aggiornato per usare IFitsIoService per la diagnostica (No external libs).
 // ---------------------------------------------------------------------------
 
 public class PlateSolvingService : IPlateSolvingService
 {
+    private readonly IFitsIoService _ioService; // <--- Dipendenza aggiunta
     private string? _cachedExePath;
     private bool _isCliVersion;
     private bool _hasSearched;
+
+    // Costruttore per Iniezione Dipendenze
+    public PlateSolvingService(IFitsIoService ioService)
+    {
+        _ioService = ioService ?? throw new ArgumentNullException(nameof(ioService));
+    }
 
     public async Task<PlateSolvingResult> SolveAsync(
         string fitsFilePath, 
@@ -125,56 +127,48 @@ public class PlateSolvingService : IPlateSolvingService
 
     /// <summary>
     /// Analizza il file FITS per trovare mancanze nei metadati che impediscono la risoluzione.
-    /// (Logica spostata dal ViewModel per rispettare MVVM e SoC).
+    /// Aggiornato per usare IFitsIoService e FitsHeader interno.
     /// </summary>
     public async Task<string> DiagnoseIssuesAsync(string fitsFilePath)
     {
-        return await Task.Run(() =>
+        // 1. Leggiamo solo l'header in modo asincrono (molto veloce)
+        var header = await _ioService.ReadHeaderOnlyAsync(fitsFilePath);
+
+        if (header == null) 
+            return ">> DIAGNOSI: File FITS corrotto, non leggibile o header mancante.";
+
+        var issues = new List<string>();
+
+        // Helper locale per verificare esistenza chiave
+        // header.Cards è una lista, Any è veloce
+        bool Has(string key) => header.Cards.Any(c => c.Key == key);
+
+        // Verifica Coordinate
+        bool hasRa = Has("RA") || Has("OBJCTRA");
+        bool hasDec = Has("DEC") || Has("OBJCTDEC");
+        
+        // Verifica Scala/Ottica
+        bool hasFocal = Has("FOCALLEN") || Has("FOCAL");
+        bool hasPixel = Has("XPIXSZ") || Has("PIXSIZE");
+        
+        // PLTSCALE o CDELT1 indicano che la scala è già nota
+        bool hasScale = Has("PLTSCALE") || Has("CDELT1"); 
+
+        if (!hasRa || !hasDec) 
+            issues.Add("Coordinate approssimative (RA/DEC) mancanti nell'header.");
+        
+        if (!hasScale && (!hasFocal || !hasPixel)) 
+            issues.Add("Dati ottici insufficienti: mancano Focale o Dimensione Pixel (necessari per calcolare la scala).");
+
+        if (issues.Count > 0)
         {
-            var issues = new List<string>();
-            nom.tam.fits.Fits? f = null;
-            try
-            {
-                f = new nom.tam.fits.Fits(fitsFilePath);
-                var hdu = f.ReadHDU();
-                if (hdu == null) return ">> DIAGNOSI: File FITS corrotto o non leggibile.";
-
-                var header = hdu.Header;
-                
-                // Verifica Coordinate
-                bool hasRa = header.ContainsKey("RA") || header.ContainsKey("OBJCTRA");
-                bool hasDec = header.ContainsKey("DEC") || header.ContainsKey("OBJCTDEC");
-                
-                // Verifica Scala/Ottica
-                bool hasFocal = header.ContainsKey("FOCALLEN") || header.ContainsKey("FOCAL");
-                bool hasPixel = header.ContainsKey("XPIXSZ") || header.ContainsKey("PIXSIZE");
-                bool hasScale = header.ContainsKey("PLTSCALE"); 
-
-                if (!hasRa || !hasDec) 
-                    issues.Add("Coordinate approssimative (RA/DEC) mancanti nell'header.");
-                
-                if (!hasScale && (!hasFocal || !hasPixel)) 
-                    issues.Add("Dati ottici insufficienti: mancano Focale o Dimensione Pixel (necessari per calcolare la scala).");
-            }
-            catch (Exception ex)
-            { 
-                return $">> DIAGNOSI FALLITA: {ex.Message}"; 
-            }
-            finally 
-            { 
-                f?.Close(); 
-            }
-
-            if (issues.Count > 0)
-            {
-                var sb = new StringBuilder();
-                sb.AppendLine(">> DIAGNOSI PROBABILE:");
-                foreach (var issue in issues) sb.AppendLine($"   - {issue}");
-                return sb.ToString().TrimEnd();
-            }
-            
-            return ">> DIAGNOSI: Metadati header corretti. Il fallimento potrebbe dipendere da scarsa qualità dell'immagine, troppe poche stelle o catalogo ASTAP non installato.";
-        });
+            var sb = new StringBuilder();
+            sb.AppendLine(">> DIAGNOSI PROBABILE:");
+            foreach (var issue in issues) sb.AppendLine($"   - {issue}");
+            return sb.ToString().TrimEnd();
+        }
+        
+        return ">> DIAGNOSI: Metadati header corretti. Il fallimento potrebbe dipendere da scarsa qualità dell'immagine, troppe poche stelle o catalogo ASTAP non installato.";
     }
 
     private void EnsureExecutableFound()

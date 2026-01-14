@@ -1,6 +1,6 @@
 ﻿using System.Globalization;
 using KomaLab.Models.Astrometry;
-using nom.tam.fits;
+using KomaLab.Models.Fits;
 
 namespace KomaLab.Services.Fits.Parsers;
 
@@ -15,53 +15,51 @@ namespace KomaLab.Services.Fits.Parsers;
 
 public static class WcsParser
 {
-    public static WcsData Parse(Header header)
+    public static WcsData Parse(FitsHeader header)
     {
         var data = new WcsData();
         string ctype1 = "";
 
-        var cursor = header.GetCursor();
-        
-        // Loop singolo su tutte le card
-        while (cursor.MoveNext())
+        foreach (var card in header.Cards)
         {
-            if (cursor.Current is not HeaderCard card) continue;
+            // Key è già Upper e Trimmed grazie al FitsReader
+            string key = card.Key;
+            
+            // Ottimizzazione: se la chiave è vuota o il valore nullo, salta
+            if (string.IsNullOrEmpty(key) || string.IsNullOrWhiteSpace(card.Value)) continue;
 
-            string key = card.Key?.ToUpper().Trim() ?? "";
-            string val = card.Value ?? "";
-
-            // Switch su stringa è efficiente in C# moderno (hash jump)
+            // Switch su stringa è compilato in una Hash Table (molto veloce)
             switch (key)
             {
                 case "CTYPE1": 
-                    // Rileva proiezione solo se valida
-                    if (val.Contains("TAN") || val.Contains("TPV")) ctype1 = val; 
+                    // CTYPE è una stringa, quindi avrà gli apici (es 'RA---TAN'). Li rimuoviamo.
+                    string valStr = card.Value.Replace("'", "").Trim();
+                    if (valStr.Contains("TAN") || valStr.Contains("TPV")) ctype1 = valStr; 
                     break;
 
-                case "CRVAL1": data.RefRaDeg = ParseFitsDouble(val); break;
-                case "CRVAL2": data.RefDecDeg = ParseFitsDouble(val); break;
+                // Per i numeri usiamo un helper locale inline o statico
+                case "CRVAL1": data.RefRaDeg = ParseDouble(card.Value); break;
+                case "CRVAL2": data.RefDecDeg = ParseDouble(card.Value); break;
+                case "CRPIX1": data.RefPixelX = ParseDouble(card.Value); break;
+                case "CRPIX2": data.RefPixelY = ParseDouble(card.Value); break;
                 
-                case "CRPIX1": data.RefPixelX = ParseFitsDouble(val); break;
-                case "CRPIX2": data.RefPixelY = ParseFitsDouble(val); break;
-                
-                case "CD1_1": data.Cd1_1 = ParseFitsDouble(val); break;
-                case "CD1_2": data.Cd1_2 = ParseFitsDouble(val); break;
-                case "CD2_1": data.Cd2_1 = ParseFitsDouble(val); break;
-                case "CD2_2": data.Cd2_2 = ParseFitsDouble(val); break;
+                case "CD1_1": data.Cd1_1 = ParseDouble(card.Value); break;
+                case "CD1_2": data.Cd1_2 = ParseDouble(card.Value); break;
+                case "CD2_1": data.Cd2_1 = ParseDouble(card.Value); break;
+                case "CD2_2": data.Cd2_2 = ParseDouble(card.Value); break;
             }
 
-            // Gestione chiavi dinamiche PV (Distorsioni)
-            if (key.StartsWith("PV") && TryParsePvKey(key, out int ax, out int k))
+            // Gestione Distorsioni PV (es. PV1_1, PV2_3)
+            // Controllo rapido: deve iniziare con PV e avere lunghezza minima
+            if (key.Length >= 5 && key.StartsWith("PV") && TryParsePvKey(key, out int ax, out int k))
             {
-                data.PvCoefficients[(ax, k)] = ParseFitsDouble(val);
+                data.PvCoefficients[(ax, k)] = ParseDouble(card.Value);
             }
         }
 
-        // Validazione finale
         if (string.IsNullOrEmpty(ctype1))
         {
             data.IsValid = false;
-            // ProjectionType rimane Unknown di default
             return data;
         }
 
@@ -70,35 +68,23 @@ public static class WcsParser
         return data;
     }
 
-    // --- Helpers Interni ---
-
-    /// <summary>
-    /// Parsa un double FITS pulendo commenti inline e apici.
-    /// </summary>
-    private static double ParseFitsDouble(string val)
+    // Helper snellito: FitsReader ha già tolto i commenti, dobbiamo solo togliere gli apici
+    private static double ParseDouble(string val)
     {
-        if (string.IsNullOrWhiteSpace(val)) return 0.0;
-        
-        int slashIndex = val.IndexOf('/');
-        if (slashIndex > -1) val = val.Substring(0, slashIndex);
-        
+        // Rimuove apici se presenti (alcuni software scrivono numeri come stringhe '123.45')
+        // Usiamo Span/Memory se volessimo ultra-performance, ma Replace qui va bene.
         val = val.Replace("'", "").Trim();
-        
-        return double.TryParse(val, NumberStyles.Any, CultureInfo.InvariantCulture, out double result) ? result : 0.0;
+        return double.TryParse(val, NumberStyles.Any, CultureInfo.InvariantCulture, out double res) ? res : 0.0;
     }
 
-    /// <summary>
-    /// Estrae indici da chiavi PVj_m (es. PV1_2).
-    /// </summary>
     private static bool TryParsePvKey(string key, out int axis, out int k)
     {
+        // Formato atteso: PVj_m (es. PV1_2)
         axis = 0; k = 0;
-        if (key.Length < 4) return false; // Minimo "PV1_0"
-        
         int underscore = key.IndexOf('_');
         if (underscore == -1) return false;
 
-        // Sottostringa sicura
+        // Parsing sicuro delle sottostringhe numeriche
         return int.TryParse(key.Substring(2, underscore - 2), out axis) && 
                int.TryParse(key.Substring(underscore + 1), out k);
     }

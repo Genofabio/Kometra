@@ -1,7 +1,6 @@
 ﻿using System.Collections.Generic;
 using System.Threading.Tasks;
 using KomaLab.Models.Fits;
-using nom.tam.fits;
 
 namespace KomaLab.Services.Fits;
 
@@ -27,7 +26,7 @@ public interface IFitsIoService
     /// Legge esclusivamente l'header FITS. 
     /// Ideale per scansioni rapide di directory o estrazione metadati senza overhead.
     /// </summary>
-    Task<Header?> ReadHeaderOnlyAsync(string path);
+    Task<FitsHeader?> ReadHeaderOnlyAsync(string path);
 
     /// <summary>
     /// Salva i dati immagine preservando l'integrità scientifica.
