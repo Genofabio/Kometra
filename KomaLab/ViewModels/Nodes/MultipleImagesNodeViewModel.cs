@@ -2,10 +2,11 @@
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.IO;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Avalonia;
-using Avalonia.Threading; 
+using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using KomaLab.Models.Fits;
@@ -14,67 +15,70 @@ using KomaLab.Models.Visualization;
 using KomaLab.Services.Factories;
 using KomaLab.Services.Fits;
 using KomaLab.Services.Processing;
-using KomaLab.Services.Utilities;
 using KomaLab.ViewModels.Visualization;
 
 namespace KomaLab.ViewModels.Nodes;
 
-/// <summary>
-/// ViewModel per la gestione di stack di immagini FITS.
-/// Gestisce l'animazione, la cache LRU e l'adattamento scientifico del contrasto tra frame.
-/// </summary>
 public partial class MultipleImagesNodeViewModel : ImageNodeViewModel
 {
     private const int AnimationIntervalMs = 250;
 
     private readonly IFitsIoService _ioService;
-    private readonly IFitsImageDataConverter _converter;
+    private readonly IFitsOpenCvConverter _converter;
     private readonly IImageAnalysisService _analysis;
-    private readonly IFitsRendererFactory _rendererFactory; 
+    private readonly IFitsRendererFactory _rendererFactory;
     private readonly MultipleImagesNodeModel _multiModel;
 
-    private readonly int _imageCount;
-    private readonly LruCache<int, FitsImageData> _dataCache = new(3);
+    // --- Stato Dati ---
+    private FitsCollection _collection; 
     private readonly DispatcherTimer _animationTimer;
     private CancellationTokenSource? _loadingCts;
     private Size _maxImageSize;
 
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(ActiveRenderer))] 
+    [NotifyPropertyChangedFor(nameof(ActiveRenderer))]
     private FitsRenderer? _activeFitsImage;
-    
+
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(CanShowPrevious), nameof(CanShowNext))]
     [NotifyCanExecuteChangedFor(nameof(PreviousImageCommand), nameof(NextImageCommand))]
     private bool _isAnimating;
 
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(CurrentImageText), nameof(CanShowPrevious), nameof(CanShowNext))]
+    [NotifyPropertyChangedFor(nameof(CurrentImageText), nameof(CanShowPrevious), nameof(CanShowNext), nameof(ActiveFile))]
     private int _currentIndex;
 
     // --- Implementazione ImageNodeViewModel ---
     public override FitsRenderer? ActiveRenderer => ActiveFitsImage;
     public override Size NodeContentSize => _maxImageSize;
 
-    protected override void OnRendererSwapping(FitsRenderer newRenderer) 
-        => ActiveFitsImage = newRenderer;
+    // Contratti Base
+    public override FitsCollection? OutputCollection => _collection;
+    public override FitsFileReference? ActiveFile => (_collection != null && _currentIndex >= 0 && _currentIndex < _collection.Count)
+        ? _collection[_currentIndex]
+        : null;
 
-    // --- Proprietà UI ---
+    protected override void OnRendererSwapping(FitsRenderer newRenderer) => ActiveFitsImage = newRenderer;
+
+    // --- Proprietà UI e Compatibilità ---
     public ObservableCollection<string> ImageNames { get; } = new();
-    public List<string> ImagePaths => _multiModel.ImagePaths;
-    public string CurrentImageText => $"{CurrentIndex + 1} / {_imageCount}";
+    
+    // [FIX CRITICO] Espone i path per BoardViewModel e altri consumatori
+    public List<string> ImagePaths => _collection?.Files.Select(f => f.FilePath).ToList() ?? new List<string>();
+
+    public string CurrentImageText => $"{CurrentIndex + 1} / {_collection.Count}";
     public bool CanShowPrevious => !IsAnimating && CurrentIndex > 0;
-    public bool CanShowNext => !IsAnimating && CurrentIndex < _imageCount - 1;
+    public bool CanShowNext => !IsAnimating && CurrentIndex < _collection.Count - 1;
     public string? TemporaryFolderPath { get; set; }
 
     public MultipleImagesNodeViewModel(
         MultipleImagesNodeModel model,
         IFitsIoService ioService,
-        IFitsImageDataConverter converter,
+        IFitsOpenCvConverter converter,
         IImageAnalysisService analysis,
         IFitsRendererFactory rendererFactory,
-        Size maxSize, 
-        FitsImageData? initialData) 
+        Size maxSize,
+        FitsCollection? initialCollection = null) 
         : base(model)
     {
         _ioService = ioService;
@@ -84,30 +88,36 @@ public partial class MultipleImagesNodeViewModel : ImageNodeViewModel
         _multiModel = model;
         
         _maxImageSize = maxSize;
-        _imageCount = model.ImagePaths.Count; 
-        
-        foreach (var path in model.ImagePaths)
-            ImageNames.Add(Path.GetFileName(path));
 
-        _currentIndex = 0;
+        // 1. Inizializzazione Collezione
+        // Se non viene passata (es. caricamento da disco), la creiamo dai path nel Modello
+        _collection = initialCollection ?? new FitsCollection(model.ImagePaths, cacheSize: 5);
         
-        // Inizializzazione timer senza auto-start
+        RefreshUiLists();
+        _currentIndex = 0;
+
+        // 2. Timer Animazione
         _animationTimer = new DispatcherTimer(DispatcherPriority.Render);
         _animationTimer.Interval = TimeSpan.FromMilliseconds(AnimationIntervalMs);
         _animationTimer.Tick += OnAnimationTick;
-        
-        if (initialData != null)
-            _dataCache.Add(0, initialData);
+    }
+
+    private void RefreshUiLists()
+    {
+        ImageNames.Clear();
+        foreach (var fileRef in _collection.Files)
+        {
+            ImageNames.Add(fileRef.FileName);
+        }
     }
 
     public async Task InitializeAsync(bool centerOnPosition = false)
     {
-        var cachedData = await GetOrLoadDataAtIndex(0);
-        if (cachedData == null) return;
+        if (_collection.Count == 0) return;
 
-        // Primo caricamento: usa soglie di default del renderer
-        await ApplyNewRendererAsync(_rendererFactory.Create(cachedData));
-        
+        // Carica il primo frame
+        await LoadImageAtIndexAsync(0, forceProfileReset: true);
+
         if (centerOnPosition) Viewport.ResetView();
         _ = PrefetchImageAsync(1);
     }
@@ -117,9 +127,10 @@ public partial class MultipleImagesNodeViewModel : ImageNodeViewModel
         if (!IsAnimating) _ = LoadImageAtIndexAsync(value);
     }
 
-    private async Task LoadImageAtIndexAsync(int index)
+    // --- LOGICA CORE DI CARICAMENTO ---
+    private async Task LoadImageAtIndexAsync(int index, bool forceProfileReset = false)
     {
-        if (index < 0 || index >= _imageCount) return;
+        if (index < 0 || index >= _collection.Count) return;
 
         _loadingCts?.Cancel();
         _loadingCts = new CancellationTokenSource();
@@ -127,28 +138,48 @@ public partial class MultipleImagesNodeViewModel : ImageNodeViewModel
 
         try
         {
-            var cachedData = await GetOrLoadDataAtIndex(index);
-            if (token.IsCancellationRequested || cachedData == null) return;
-            if (ActiveFitsImage?.Data == cachedData) return;
+            // 1. Recupero Dati (Pixel da Cache/Disco + Header)
+            var (pixels, header) = await GetOrLoadDataAtIndex(index);
+            
+            if (token.IsCancellationRequested || pixels == null || header == null) return;
 
-            // --- LOGICA SCIENTIFICA SOGLIE ---
-            AbsoluteContrastProfile? adaptedProfile = null;
-            if (ActiveFitsImage != null && !ActiveFitsImage.IsDisposed)
+            // 2. Creazione Renderer (Background)
+            var newRenderer = _rendererFactory.Create(pixels, header);
+            await newRenderer.InitializeAsync();
+
+            if (token.IsCancellationRequested)
             {
-                // Adattiamo le soglie ADU dal frame corrente al nuovo
-                adaptedProfile = _analysis.CalculateAdaptedProfile(
-                    ActiveFitsImage.Data, cachedData, BlackPoint, WhitePoint);
+                newRenderer.Dispose();
+                return;
             }
 
-            var newRenderer = _rendererFactory.Create(cachedData);
-            
-            // Passiamo il profilo alla base affinché non lo sovrascriva con quello vecchio
+            // 3. Logica Scientifica Soglie
+            AbsoluteContrastProfile? adaptedProfile = null;
+
+            if (!forceProfileReset && ActiveFitsImage != null && !ActiveFitsImage.IsDisposed)
+            {
+                // Calcoliamo il profilo basandoci sulle statistiche
+                var oldStats = ActiveFitsImage.GetImageStatistics();
+                var newStats = newRenderer.GetImageStatistics();
+
+                adaptedProfile = _analysis.CalculateAdaptedProfileFromStats(
+                    oldStats,
+                    ActiveFitsImage.BlackPoint,
+                    ActiveFitsImage.WhitePoint,
+                    newStats
+                );
+            }
+
+            // 4. Swap e Applicazione Profilo
             await ApplyNewRendererAsync(newRenderer, adaptedProfile);
 
             if (token.IsCancellationRequested) return;
 
+            // 5. Aggiornamenti UI
             PreviousImageCommand.NotifyCanExecuteChanged();
             NextImageCommand.NotifyCanExecuteChanged();
+            OnPropertyChanged(nameof(ActiveFile));
+
             _ = PrefetchImageAsync(index + 1);
         }
         catch (OperationCanceledException) { }
@@ -167,7 +198,8 @@ public partial class MultipleImagesNodeViewModel : ImageNodeViewModel
 
     private void OnAnimationTick(object? sender, EventArgs e)
     {
-        int nextIndex = (CurrentIndex + 1) % _imageCount;
+        if (_collection.Count == 0) return;
+        int nextIndex = (CurrentIndex + 1) % _collection.Count;
         _ = AdvanceFrameAsync(nextIndex);
     }
 
@@ -184,59 +216,73 @@ public partial class MultipleImagesNodeViewModel : ImageNodeViewModel
     [RelayCommand(CanExecute = nameof(CanShowNext))]
     private void NextImage() => CurrentIndex++;
 
-    public override async Task ApplyProcessedDataAsync(List<FitsImageData> newProcessedData)
+    // --- Implementazione Metodi Astratti Nuovi ---
+
+    public override async Task LoadInputAsync(FitsCollection input)
     {
-        _dataCache.Clear();
-        for (int i = 0; i < newProcessedData.Count; i++)
-            _dataCache.Add(i, newProcessedData[i]);
-
-        if (newProcessedData.Count > 0)
-        {
-            var first = newProcessedData[0];
-            _maxImageSize = new Size(first.Width, first.Height);
-            await ApplyNewRendererAsync(_rendererFactory.Create(first));
-            Viewport.ResetView();
-        }
-    }
-
-    public override async Task<List<FitsImageData?>> GetCurrentDataAsync()
-    {
-        var fullList = new List<FitsImageData?>();
-        for (int i = 0; i < _imageCount; i++)
-            fullList.Add(await GetOrLoadDataAtIndex(i));
-        return fullList;
-    }
-
-    public override FitsImageData? GetActiveImageData() => ActiveFitsImage?.Data;
-
-    private async Task<FitsImageData?> GetOrLoadDataAtIndex(int index)
-    {
-        if (index < 0 || index >= _imageCount) return null;
-        if (_dataCache.TryGet(index, out var cachedData)) return cachedData;
+        _collection = input;
+        RefreshUiLists();
         
-        try
+        if (_collection.Count > 0)
         {
-            var data = await _ioService.LoadAsync(ImagePaths[index]);
-            if (data != null) _dataCache.Add(index, data);
-            return data;
+            _currentIndex = 0;
+            OnPropertyChanged(nameof(CurrentIndex));
+            OnPropertyChanged(nameof(CurrentImageText));
+            OnPropertyChanged(nameof(ImagePaths)); // Notifica cambio paths
+            
+            await LoadImageAtIndexAsync(0, forceProfileReset: true);
         }
-        catch { return null; }
+    }
+
+    public override async Task RefreshDataFromDiskAsync()
+    {
+        _collection.PixelCache.Clear();
+        await LoadImageAtIndexAsync(CurrentIndex);
+    }
+
+    // --- Helpers Gestione Dati ---
+
+    private async Task<(Array? Pixels, FitsHeader? Header)> GetOrLoadDataAtIndex(int index)
+    {
+        if (index < 0 || index >= _collection.Count) return (null, null);
+        
+        var fileRef = _collection[index];
+        Array? pixels = null;
+        FitsHeader? header = null;
+
+        if (fileRef.HasUnsavedChanges)
+            header = fileRef.UnsavedHeader;
+        else
+            header = await _ioService.ReadHeaderAsync(fileRef.FilePath);
+
+        if (_collection.PixelCache.TryGet(fileRef.FilePath, out var cachedPixels))
+        {
+            pixels = cachedPixels;
+        }
+        else
+        {
+            pixels = await _ioService.ReadPixelDataAsync(fileRef.FilePath);
+            if (pixels != null)
+                _collection.PixelCache.Add(fileRef.FilePath, pixels);
+        }
+
+        return (pixels, header);
     }
 
     private async Task PrefetchImageAsync(int nextIndex)
     {
-        if (nextIndex >= _imageCount || _dataCache.TryGet(nextIndex, out _)) return;
-        await Task.Run(() => GetOrLoadDataAtIndex(nextIndex));
-    }
-    
-    public override async Task RefreshDataFromDiskAsync()
-    {
-        _dataCache.Clear();
-        await LoadImageAtIndexAsync(CurrentIndex);
-    }
+        if (nextIndex >= _collection.Count) nextIndex = 0;
+        
+        var fileRef = _collection[nextIndex];
+        if (_collection.PixelCache.TryGet(fileRef.FilePath, out _)) return;
 
-    public override Task<List<string>> PrepareInputPathsAsync(IFitsIoService ioService) 
-        => Task.FromResult(new List<string>(ImagePaths));
+        await Task.Run(async () => 
+        {
+            var pixels = await _ioService.ReadPixelDataAsync(fileRef.FilePath);
+            if (pixels != null)
+                _collection.PixelCache.Add(fileRef.FilePath, pixels);
+        });
+    }
 
     protected override void Dispose(bool disposing)
     {
@@ -245,7 +291,7 @@ public partial class MultipleImagesNodeViewModel : ImageNodeViewModel
             _animationTimer.Stop();
             _loadingCts?.Cancel();
             ActiveFitsImage?.Dispose();
-            _dataCache.Clear(); 
+            _collection.PixelCache.Clear();
             
             if (!string.IsNullOrEmpty(TemporaryFolderPath) && Directory.Exists(TemporaryFolderPath))
             {

@@ -1,11 +1,12 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Linq; // Aggiunto per LINQ
 using System.Threading.Tasks;
 using Avalonia;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
-using KomaLab.Models.Nodes;
+using KomaLab.Models.Nodes; // Assumo BaseNodeViewModel sia qui
 using KomaLab.Models.Fits;
 using KomaLab.Models.Visualization;
 using KomaLab.Services.Fits;
@@ -39,8 +40,13 @@ public abstract partial class ImageNodeViewModel : BaseNodeViewModel
     private double _whitePoint;
 
     // --- Abstract API (Contratto per le sottoclassi) ---
+    
+    // Il Renderer attivo che disegna i pixel (già aggiornato alla nuova architettura)
     public abstract FitsRenderer? ActiveRenderer { get; }
+    
+    // Dimensione del nodo UI
     public abstract Size NodeContentSize { get; }
+    
     public VisualizationMode[] AvailableVisualizationModes => Enum.GetValues<VisualizationMode>();
 
     // --- Override BaseNodeViewModel ---
@@ -56,14 +62,23 @@ public abstract partial class ImageNodeViewModel : BaseNodeViewModel
     /// </summary>
     protected async Task ApplyNewRendererAsync(FitsRenderer newRenderer, ContrastProfile? explicitProfile = null)
     {
+        if (newRenderer == null) throw new ArgumentNullException(nameof(newRenderer));
+
         // 1. Preparazione (Pesante, in background)
+        // Il renderer carica la matrice OpenCV qui dentro
         await newRenderer.InitializeAsync();
         newRenderer.VisualizationMode = this.VisualizationMode;
 
+        // Gestione intelligenza continuità contrasto
         if (explicitProfile != null)
+        {
             newRenderer.ApplyContrastProfile(explicitProfile);
+        }
         else if (ActiveRenderer != null)
+        {
+            // Se stiamo solo cambiando immagine nello stesso nodo, preserviamo lo stretch
             newRenderer.ApplyContrastProfile(ActiveRenderer.CaptureContrastProfile());
+        }
 
         // 2. Lo SWAP (Deve essere atomico per la UI)
         var oldRenderer = ActiveRenderer; // Salviamo il VECCHIO riferimento
@@ -71,10 +86,13 @@ public abstract partial class ImageNodeViewModel : BaseNodeViewModel
         // Eseguiamo il cambio sulla UI Thread
         await Dispatcher.UIThread.InvokeAsync(() =>
         {
+            // Template Method: La sottoclasse aggiorna la sua proprietà Observable (es. _fitsImage)
             OnRendererSwapping(newRenderer);
 
-            // Sincronizzazione parametri
+            // Sincronizzazione parametri Viewport e Istogramma
             Viewport.ImageSize = newRenderer.ImageSize;
+            
+            // Aggiorniamo le proprietà osservabili del ViewModel per riflettere il nuovo renderer
             BlackPoint = newRenderer.BlackPoint;
             WhitePoint = newRenderer.WhitePoint;
 
@@ -82,7 +100,7 @@ public abstract partial class ImageNodeViewModel : BaseNodeViewModel
             OnPropertyChanged(nameof(EstimatedTotalSize));
         });
 
-        // 3. Cleanup sicuro (Posticipato per evitare NullReference durante il Measure pass)
+        // 3. Cleanup sicuro (Posticipato)
         if (oldRenderer != null)
         {
             // Aspettiamo che il ciclo di rendering corrente finisca prima di distruggere i buffer
@@ -142,6 +160,7 @@ public abstract partial class ImageNodeViewModel : BaseNodeViewModel
         
         await ActiveRenderer.ResetThresholdsAsync(skipRegeneration: true);
         
+        // Aggiorniamo le proprietà bindate alla UI
         BlackPoint = ActiveRenderer.BlackPoint;
         WhitePoint = ActiveRenderer.WhitePoint;
     }
@@ -151,11 +170,36 @@ public abstract partial class ImageNodeViewModel : BaseNodeViewModel
         Viewport.ResetView();
     }
 
-    // --- Contratti Dati (I/O) ---
+    // --- Contratti Dati Aggiornati (No FitsImageData) ---
 
-    public abstract Task<List<FitsImageData?>> GetCurrentDataAsync();
-    public abstract FitsImageData? GetActiveImageData();
-    public abstract Task ApplyProcessedDataAsync(List<FitsImageData> newProcessedData);
-    public abstract Task<List<string>> PrepareInputPathsAsync(IFitsIoService ioService);
+    /// <summary>
+    /// Restituisce la collezione di dati gestita da questo nodo.
+    /// Sostituisce il vecchio GetCurrentDataAsync().
+    /// </summary>
+    public abstract FitsCollection? OutputCollection { get; }
+
+    /// <summary>
+    /// Restituisce il riferimento al file attualmente visualizzato nel renderer.
+    /// Sostituisce GetActiveImageData().
+    /// </summary>
+    public abstract FitsFileReference? ActiveFile { get; }
+
+    /// <summary>
+    /// Riceve una nuova collezione in input (es. dal nodo precedente) e la carica.
+    /// Sostituisce ApplyProcessedDataAsync().
+    /// </summary>
+    public abstract Task LoadInputAsync(FitsCollection input);
+    
+    /// <summary>
+    /// Forza il ricaricamento dei dati dal disco (utile se i file sono stati sovrascritti).
+    /// </summary>
     public abstract Task RefreshDataFromDiskAsync();
+
+    /// <summary>
+    /// Restituisce la lista dei path gestiti (helper per operazioni batch).
+    /// </summary>
+    public virtual List<string> GetManagedFilePaths()
+    {
+        return OutputCollection?.Files.Select(f => f.FilePath).ToList() ?? new List<string>();
+    }
 }

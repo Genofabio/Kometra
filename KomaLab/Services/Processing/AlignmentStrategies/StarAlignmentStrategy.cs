@@ -10,18 +10,18 @@ namespace KomaLab.Services.Processing.AlignmentStrategies;
 // ---------------------------------------------------------------------------
 // FILE: StarAlignmentStrategy.cs
 // RUOLO: Strategia Allineamento (Deep Sky)
-// AGGIORNAMENTO: Refactoring con AlignmentStrategyBase per resilienza I/O.
+// VERSIONE: Aggiornata per Architettura No-FitsImageData
 // ---------------------------------------------------------------------------
 
 public class StarAlignmentStrategy : AlignmentStrategyBase
 {
     private readonly IFitsIoService _ioService;
-    private readonly IFitsImageDataConverter _converter;
+    private readonly IFitsOpenCvConverter _converter;
     private readonly IImageAnalysisService _analysis;
 
     public StarAlignmentStrategy(
         IFitsIoService ioService, 
-        IFitsImageDataConverter converter, 
+        IFitsOpenCvConverter converter, 
         IImageAnalysisService analysis)
     {
         _ioService = ioService ?? throw new ArgumentNullException(nameof(ioService));
@@ -75,8 +75,7 @@ public class StarAlignmentStrategy : AlignmentStrategyBase
             // CASO B: Buco nei dati WCS -> Fallback FFT sul frame precedente
             else
             {
-                // Qui usiamo ExecuteWithRetryAsync per caricare i due frame necessari al confronto.
-                // È costoso caricare due file, ma succede solo se manca il WCS.
+                // Caricamento on-demand di due file per il calcolo shift
                 Point2D shift = await CalculateShiftWithRetryAsync(sourcePaths[i - 1], sourcePaths[i], i);
                 
                 Point2D prevCenter = results[i - 1] ?? new Point2D(0, 0);
@@ -95,10 +94,10 @@ public class StarAlignmentStrategy : AlignmentStrategyBase
         IProgress<(int Index, Point2D? Center)>? progress)
     {
         // 1. Inizializzazione Frame 0 (Centro geometrico)
-        // Usiamo il retry anche per leggere l'header, per massima sicurezza
         Point2D center0 = await ExecuteWithRetryAsync(async () => 
         {
-            var header = await _ioService.ReadHeaderOnlyAsync(sourcePaths[0]);
+            // ADATTAMENTO: ReadHeaderAsync (ex ReadHeaderOnlyAsync)
+            var header = await _ioService.ReadHeaderAsync(sourcePaths[0]);
             if (header == null) return null;
             return (Point2D?)new Point2D(header.GetIntValue("NAXIS1") / 2.0, header.GetIntValue("NAXIS2") / 2.0);
         }, new Point2D(0,0), 0) ?? new Point2D(0,0);
@@ -109,33 +108,30 @@ public class StarAlignmentStrategy : AlignmentStrategyBase
         // 2. Caricamento Iniziale Matrice 0
         Mat? prevMat = await LoadMatWithRetryAsync(sourcePaths[0], 0);
         
-        if (prevMat == null) return; // Se fallisce il frame 0 anche dopo i retry, abortiamo.
+        if (prevMat == null) return; 
 
         try
         {
             // Loop Sequenziale: Frame N vs Frame N-1
             for (int i = 1; i < sourcePaths.Count; i++)
             {
-                // Carica il frame corrente con Retry
                 Mat? currentMat = await LoadMatWithRetryAsync(sourcePaths[i], i);
 
                 if (currentMat != null)
                 {
-                    // Calcolo Shift (CPU Intensive)
-                    
                     Point2D shift = await Task.Run(() => _analysis.ComputeStarFieldShift(prevMat, currentMat));
 
                     Point2D prevCenter = results[i - 1]!.Value;
                     results[i] = new Point2D(prevCenter.X + shift.X, prevCenter.Y + shift.Y);
 
                     // --- SWAP EFFICIENTE ---
-                    prevMat.Dispose();      // Buttiamo via la vecchia (i-1)
-                    prevMat = currentMat;   // La corrente diventa la reference per il prossimo giro
-                    currentMat = null;      // Annulliamo il ref locale per evitare il Dispose nel blocco finally implicito
+                    prevMat.Dispose();      
+                    prevMat = currentMat;   
+                    currentMat = null;      
                 }
                 else
                 {
-                    // Fallimento caricamento (dopo N retry): Manteniamo posizione stabile
+                    // Fallimento caricamento: Manteniamo posizione stabile
                     results[i] = results[i - 1];
                 }
 
@@ -154,8 +150,18 @@ public class StarAlignmentStrategy : AlignmentStrategyBase
     {
         return await ExecuteWithRetryAsync(async () =>
         {
-            var data = await _ioService.LoadAsync(path);
-            return data != null ? _converter.RawToMat(data) : null;
+            // 1. Caricamento Atomico
+            var header = await _ioService.ReadHeaderAsync(path);
+            var pixels = await _ioService.ReadPixelDataAsync(path);
+            
+            if (header == null || pixels == null) return null; // Trigger Retry
+
+            // 2. Estrazione Scaling
+            double bScale = header.GetValue<double>("BSCALE") ?? 1.0;
+            double bZero = header.GetValue<double>("BZERO") ?? 0.0;
+
+            // 3. Conversione
+            return _converter.RawToMat(pixels, bScale, bZero);
         }, 
         null, // Fallback value
         index);
@@ -163,17 +169,27 @@ public class StarAlignmentStrategy : AlignmentStrategyBase
 
     private async Task<Point2D> CalculateShiftWithRetryAsync(string pathPrev, string pathCurr, int index)
     {
-        // Questo metodo è un po' più complesso perché deve caricare due file.
-        // Se uno fallisce, l'operazione fallisce.
         return await ExecuteWithRetryAsync(async () =>
         {
-            var d1 = await _ioService.LoadAsync(pathPrev);
-            var d2 = await _ioService.LoadAsync(pathCurr);
+            // Carichiamo entrambe le immagini (Header + Pixels)
+            // Se uno qualsiasi fallisce, ritorniamo null per triggerare il retry globale
+            
+            var h1 = await _ioService.ReadHeaderAsync(pathPrev);
+            var p1 = await _ioService.ReadPixelDataAsync(pathPrev);
+            if (h1 == null || p1 == null) return null;
 
-            if (d1 == null || d2 == null) return null;
+            var h2 = await _ioService.ReadHeaderAsync(pathCurr);
+            var p2 = await _ioService.ReadPixelDataAsync(pathCurr);
+            if (h2 == null || p2 == null) return null;
 
-            using var m1 = _converter.RawToMat(d1);
-            using var m2 = _converter.RawToMat(d2);
+            // Parametri scaling
+            double bs1 = h1.GetValue<double>("BSCALE") ?? 1.0;
+            double bz1 = h1.GetValue<double>("BZERO") ?? 0.0;
+            double bs2 = h2.GetValue<double>("BSCALE") ?? 1.0;
+            double bz2 = h2.GetValue<double>("BZERO") ?? 0.0;
+
+            using var m1 = _converter.RawToMat(p1, bs1, bz1);
+            using var m2 = _converter.RawToMat(p2, bs2, bz2);
             
             return (Point2D?)_analysis.ComputeStarFieldShift(m1, m2);
         }, 

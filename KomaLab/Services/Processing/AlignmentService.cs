@@ -15,26 +15,21 @@ namespace KomaLab.Services.Processing;
 
 // ---------------------------------------------------------------------------
 // FILE: AlignmentService.cs
-// RUOLO: Orchestratore Allineamento
-// DESCRIZIONE:
-// Gestisce l'intero pipeline di allineamento delle immagini astronomiche.
-// 1. Fase di Calcolo: Delega a strategie specifiche (Stelle, Cometa Blind/Guided)
-//    il calcolo dei centroidi di ogni frame.
-// 2. Fase di Applicazione: Applica lo shift (e rotazione se necessario) ai pixel,
-//    calcola il canvas ottimale (Unione/Intersezione) e salva i frame intermedi.
+// RUOLO: Orchestratore Allineamento (Engine Principale)
+// VERSIONE: Aggiornata per Architettura No-FitsImageData
 // ---------------------------------------------------------------------------
 
 public class AlignmentService : IAlignmentService
 {
-    private readonly IFitsIoService _ioService;      // Sostituisce il vecchio FitsService
-    private readonly IFitsImageDataConverter _converter;
-    private readonly IFitsMetadataService _metadataService; // Necessario per clonare gli header
+    private readonly IFitsIoService _ioService;
+    private readonly IFitsOpenCvConverter _converter;
+    private readonly IFitsMetadataService _metadataService;
     private readonly IImageAnalysisService _analysis;
     private readonly IImageOperationService _operations;
 
     public AlignmentService(
         IFitsIoService ioService,
-        IFitsImageDataConverter converter,
+        IFitsOpenCvConverter converter,
         IFitsMetadataService metadataService,
         IImageAnalysisService analysis,
         IImageOperationService operations)
@@ -59,10 +54,8 @@ public class AlignmentService : IAlignmentService
         int searchRadius,
         IProgress<(int Index, Point2D? Center)>? progress = null)
     {
-        // Factory Method interno per creare la Strategy corretta
         IAlignmentStrategy strategy = CreateStrategy(target, mode, method);
 
-        // Esecuzione incapsulata del calcolo
         var results = await strategy.CalculateAsync(
             sourcePaths, 
             currentCoordinates.ToList(), 
@@ -72,6 +65,9 @@ public class AlignmentService : IAlignmentService
         return results;
     }
 
+    // Nota: Le strategie dovranno essere aggiornate internamente per non usare FitsImageData,
+    // ma l'interfaccia pubblica IAlignmentStrategy lavora già con List<string> e Point2D,
+    // quindi questo codice non cambia.
     private IAlignmentStrategy CreateStrategy(AlignmentTarget target, AlignmentMode mode, CenteringMethod method)
     {
         if (target == AlignmentTarget.Stars)
@@ -141,23 +137,20 @@ public class AlignmentService : IAlignmentService
         // A. Calcolo Dimensioni Canvas
         if (target == AlignmentTarget.Stars)
         {
-            // Per le stelle: UNIONE (allargare il campo per includere tutte le stelle visibili)
             var result = await CalculateUnionBoundingBoxAsync(sourcePaths, centers);
             finalSize = result.Size;
             offsetCorrection = result.ShiftCorrection;
         }
         else
         {
-            // Per le comete: INTERSEZIONE OTTIMIZZATA
-            // (evitiamo di caricare tutti i file se possibile, vedi metodo sotto)
             finalSize = await CalculatePerfectCanvasSizeAsync(sourcePaths, centers);
         }
 
-        // B. Configurazione Concorrenza (Throttling)
+        // B. Configurazione Concorrenza
         long firstFileSize = 0;
         try { if (sourcePaths.Count > 0) firstFileSize = new FileInfo(sourcePaths[0]).Length; } catch { }
         
-        // Se file > 100MB, 1 alla volta. Altrimenti parallelizziamo moderatamente.
+        // Se file > 100MB, 1 alla volta. Altrimenti parallelizziamo.
         int maxConcurrency = (firstFileSize > 100 * 1024 * 1024) ? 1 : Math.Clamp(Environment.ProcessorCount / 2, 2, 4);
 
         using var semaphore = new SemaphoreSlim(maxConcurrency);
@@ -175,7 +168,6 @@ public class AlignmentService : IAlignmentService
 
             if (center == null) continue;
 
-            // Applica offset globale per l'Unione dei campi (per le comete solitamente è 0,0)
             Point2D adjustedCenter = new Point2D(center.Value.X + offsetCorrection.X, center.Value.Y + offsetCorrection.Y);
 
             tasks.Add(Task.Run(async () =>
@@ -195,53 +187,55 @@ public class AlignmentService : IAlignmentService
         return results.Where(p => p != null).Cast<string>().ToList();
     }
 
+    // --- METODO CRITICO AGGIORNATO ---
     private async Task<string?> AttemptProcessAndSaveWithRetryAsync(
         int index, string path, Point2D? center, Size2D targetSize, string tempFolderPath)
     {
         if (center == null) return null;
         int attempts = 0;
         
-        // Manteniamo il retry qui NON per problemi di file lock (già risolti dal provider),
-        // ma per problemi di allocazione memoria (OutOfMemory) durante il processing pesante.
         while (true)
         {
             attempts++;
             try
             {
-                // 1. Carica dati originali
-                FitsImageData? inputData = await _ioService.LoadAsync(path);
-                if (inputData == null) return null;
+                // 1. CARICAMENTO (I/O)
+                var oldHeader = await _ioService.ReadHeaderAsync(path);
+                var rawPixels = await _ioService.ReadPixelDataAsync(path);
+                
+                if (oldHeader == null || rawPixels == null) return null;
 
                 if (attempts > 1) { GC.Collect(); await Task.Delay(100); }
 
-                // 2. Processing (Shift)
-                FitsImageData outputData = await Task.Run(() =>
+                // 2. PROCESSING (CPU)
+                // Ora Task.Run restituisce un tipo semplice: Array. Nessuna confusione per il compilatore.
+                Array newPixels = await Task.Run(() =>
                 {
-                    using Mat originalMat = _converter.RawToMat(inputData);
-                    
-                    // Applica lo shift sub-pixel e ritaglia/estende al nuovo canvas
+                    double bScale = oldHeader.GetValue<double>("BSCALE") ?? 1.0;
+                    double bZero = oldHeader.GetValue<double>("BZERO") ?? 0.0;
+
+                    using Mat originalMat = _converter.RawToMat(rawPixels, bScale, bZero);
                     using Mat centeredMat = _operations.GetSubPixelCenteredCanvas(originalMat, center.Value, targetSize);
                     
-                    // Riconverte in oggetto FITS
-                    var resultData = _converter.MatToFitsData(centeredMat);
-                    
-                    // 3. Trasferisce i metadati originali nel nuovo risultato
-                    // Importante: FitsMetadataService gestirà la pulizia delle chiavi geometriche obsolete
-                    _metadataService.TransferMetadata(inputData.FitsHeader, resultData.FitsHeader);
-                    
-                    return resultData;
+                    // Il convertitore ora ritorna SOLO l'array dei pixel
+                    return _converter.MatToRaw(centeredMat, FitsBitDepth.Double);
                 });
 
+                // 3. COSTRUZIONE HEADER (CPU - Leggera)
+                // Usiamo il servizio di metadata per creare l'header corretto
+                var newHeader = _metadataService.CreateHeaderFromTemplate(oldHeader, newPixels, FitsBitDepth.Double);
+
+                // 4. SALVATAGGIO (I/O)
                 string fileName = $"Aligned_{index}_{Guid.NewGuid()}.fits";
                 string fullPath = Path.Combine(tempFolderPath, fileName);
                 
-                // 4. Salva risultato
-                await _ioService.SaveAsync(outputData, fullPath);
+                await _ioService.WriteFileAsync(fullPath, newPixels, newHeader);
 
                 return fullPath;
             }
-            catch (Exception)
+            catch (Exception ex)
             {
+                // Gestione errori invariata
                 if (attempts >= 3) return null;
                 await Task.Delay(300 * attempts);
             }
@@ -268,15 +262,14 @@ public class AlignmentService : IAlignmentService
             if (i >= centers.Count || centers[i] == null) continue;
             Point2D c = centers[i]!.Value;
 
-            // Leggiamo solo l'header per velocità (fondamentale!)
-            var header = await _ioService.ReadHeaderOnlyAsync(paths[i]);
+            // HeaderOnly è perfetto qui, non serve leggere i pixel
+            var header = await _ioService.ReadHeaderAsync(paths[i]);
             if (header != null)
             {
                 hasData = true;
                 double w = header.GetIntValue("NAXIS1");
                 double h = header.GetIntValue("NAXIS2");
 
-                // Calcolo bounding box relativa al centro di allineamento
                 double relLeft = -c.X;
                 double relTop = -c.Y;
                 double relRight = w - c.X;
@@ -294,7 +287,6 @@ public class AlignmentService : IAlignmentService
         double totalW = Math.Ceiling(maxRight - minLeft);
         double totalH = Math.Ceiling(maxBottom - minTop);
         
-        // Offset per centrare il tutto nel nuovo canvas
         double idealCenterX = -minLeft; 
         double idealCenterY = -minTop;  
         double canvasCenterX = totalW / 2.0;
@@ -311,7 +303,6 @@ public class AlignmentService : IAlignmentService
         double maxRadiusX = 0;
         double maxRadiusY = 0;
 
-        // Configurazione Concorrenza per l'analisi (qui dobbiamo caricare i file!)
         long firstFileSize = 0;
         try { if (paths.Count > 0) firstFileSize = new FileInfo(paths[0]).Length; } catch { }
         int maxConcurrency = (firstFileSize > 50 * 1024 * 1024) ? 2 : 4; 
@@ -332,14 +323,19 @@ public class AlignmentService : IAlignmentService
                 await semaphore.WaitAsync();
                 try
                 {
-                    // DOBBIAMO caricare l'immagine per sapere dove sono i dati validi
-                    // (Esattamente come il vecchio codice)
-                    var data = await _ioService.LoadAsync(path);
-                    if (data == null) return (0, 0);
-
-                    using Mat mat = _converter.RawToMat(data);
+                    // MODIFICA: Caricamento pixel per calcolare la box dei dati validi
+                    var header = await _ioService.ReadHeaderAsync(path); // Serve per BSCALE
+                    var rawPixels = await _ioService.ReadPixelDataAsync(path);
                     
-                    // Qui usiamo la versione FIXATA di FindValidDataBox (che include i neri ma esclude i NaN)
+                    if (header == null || rawPixels == null) return (0, 0);
+
+                    // Estrazione parametri di scala
+                    double bScale = header.GetValue<double>("BSCALE") ?? 1.0;
+                    double bZero = header.GetValue<double>("BZERO") ?? 0.0;
+
+                    using Mat mat = _converter.RawToMat(rawPixels, bScale, bZero);
+                    
+                    // Analisi Dati Solidi
                     Rect2D validBox = _analysis.FindValidDataBox(mat);
 
                     if (validBox.Width > 0 && validBox.Height > 0)
@@ -367,7 +363,6 @@ public class AlignmentService : IAlignmentService
             if (res.Ry > maxRadiusY) maxRadiusY = res.Ry;
         }
 
-        // Calcolo finale identico al vecchio codice
         int finalW = (int)Math.Ceiling(maxRadiusX * 2);
         int finalH = (int)Math.Ceiling(maxRadiusY * 2);
         

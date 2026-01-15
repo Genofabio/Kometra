@@ -64,7 +64,7 @@
                         <TextBlock Classes="WarningLabel" Text="Attenzione:"/>
                     </StackPanel>
                     
-                    <TextBlock Classes="WarningBody" Text="L'header originale verrà aggiornato."/>
+                    <TextBlock Classes="WarningBody" Text="Salva il file per rendere le modifiche all'header permanenti."/>
                 </StackPanel>
 
                 <StackPanel Grid.Column="1" Orientation="Horizontal">

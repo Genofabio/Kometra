@@ -229,7 +229,8 @@
                 
                 <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center" Margin="5,0">
                     <avalonia:MaterialIcon Kind="InformationOutline" Width="18" Height="18" Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}"/>
-                    <TextBlock Text="Le modifiche vengono applicate in memoria. Usa 'Salva Immagine' per rendere permanenti i cambiamenti." 
+                    
+                    <TextBlock Text="Modifiche applicate solo alla sessione. Salva il file per renderle permanenti." 
                                FontSize="12"
                                VerticalAlignment="Center" 
                                Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}" 
@@ -241,9 +242,10 @@
                             Click="OnCancelClick" 
                             Classes="cancel"/>
                     
-                    <Button Content="Applica Modifiche" 
+                    <Button Content="Applica" 
                             Click="OnSaveClick" 
-                            Classes="apply"/>
+                            Classes="apply"
+                            ToolTip.Tip="Aggiorna i metadati in memoria e chiude l'editor."/>
                 </StackPanel>
             </Grid>
         </Border>

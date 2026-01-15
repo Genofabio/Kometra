@@ -1,4 +1,5 @@
-﻿using KomaLab.Models.Fits;
+﻿using System;
+using KomaLab.Models.Fits;
 using KomaLab.ViewModels.Visualization;
 
 namespace KomaLab.Services.Factories;
@@ -6,7 +7,8 @@ namespace KomaLab.Services.Factories;
 public interface IFitsRendererFactory
 {
     /// <summary>
-    /// Crea una nuova istanza di FitsRenderer con le dipendenze già iniettate.
+    /// Crea una nuova istanza di FitsRenderer iniettando automaticamente i servizi necessari.
+    /// Richiede i dati grezzi (Pixel) e l'Header (per BSCALE/BZERO).
     /// </summary>
-    FitsRenderer Create(FitsImageData data);
+    FitsRenderer Create(Array pixelData, FitsHeader header);
 }

@@ -1,22 +1,19 @@
 ﻿using System;
 using System.IO;
 using System.Text;
-using KomaLab.Models.Fits;
+using KomaLab.Models.Fits; // Qui dentro c'è FitsHeader e FitsCard
 
 namespace KomaLab.Services.Fits.Engine;
 
-/// <summary>
-/// Componente responsabile della lettura fisica del formato FITS.
-/// Gestisce header, dati binari ed endianness.
-/// </summary>
 public class FitsReader
 {
     private const int BlockSize = 2880;
     private const int CardSize = 80;
     private const int CardsPerBlock = 36;
 
-    // --- PARTE 1: HEADER (Già vista, invariata) ---
-    
+    /// <summary>
+    /// Legge solo l'header.
+    /// </summary>
     public FitsHeader ReadHeader(Stream stream)
     {
         var header = new FitsHeader();
@@ -26,12 +23,10 @@ public class FitsReader
         while (true)
         {
             int bytesRead = stream.Read(buffer, 0, BlockSize);
-            if (bytesRead < BlockSize) 
+            if (bytesRead < BlockSize)
             {
                 if (endFound || (bytesRead == 0 && header.Cards.Count > 0)) break;
-                // Se il file è troncato ma abbiamo trovato END, potremmo accettarlo, 
-                // ma per ora siamo rigorosi.
-                throw new EndOfStreamException("File FITS troncato durante la lettura dell'header.");
+                throw new EndOfStreamException("File FITS troncato o incompleto.");
             }
 
             for (int i = 0; i < CardsPerBlock; i++)
@@ -41,16 +36,16 @@ public class FitsReader
                 int offset = i * CardSize;
                 string line = Encoding.ASCII.GetString(buffer, offset, CardSize);
 
-                if (line.StartsWith("END     "))
-                {
-                    endFound = true;
-                    continue; 
-                }
+                if (line.StartsWith("END     ")) endFound = true;
 
+                // Parsing usando la tua classe FitsCard esistente
                 var card = FitsFormatting.ParseLine(line);
-                if (string.IsNullOrWhiteSpace(card.Key) && string.IsNullOrWhiteSpace(card.Comment)) continue;
+                
+                if (string.IsNullOrWhiteSpace(card.Key) && 
+                    string.IsNullOrWhiteSpace(card.Value) && 
+                    string.IsNullOrWhiteSpace(card.Comment)) continue;
 
-                header.AddCard(card);
+                header.AddCard(card); // Metodo di FitsHeader che accetta FitsCard
             }
 
             if (endFound) break;
@@ -59,20 +54,20 @@ public class FitsReader
         return header;
     }
 
-    // --- PARTE 2: DATI (Nuova implementazione) ---
-
-    public FitsImageData ReadImage(Stream stream, FitsHeader header)
+    /// <summary>
+    /// Legge la matrice dei pixel.
+    /// Restituisce un Array MULTIDIMENSIONALE (es. short[,], float[,]).
+    /// </summary>
+    public Array ReadMatrix(Stream stream, FitsHeader header)
     {
-        // 1. Estrazione Metadati Essenziali
         int bitpix = header.GetIntValue("BITPIX");
         int width = header.GetIntValue("NAXIS1");
         int height = header.GetIntValue("NAXIS2");
 
-        if (width <= 0 || height <= 0) 
-            throw new InvalidDataException($"Dimensioni immagine non valide: {width}x{height}");
+        if (width <= 0 || height <= 0) return new byte[0, 0];
 
-        // 2. Lettura e Conversione in base al tipo
-        Array rawData = bitpix switch
+        // Legge la matrice in base al tipo (Switch Expression)
+        Array matrix = bitpix switch
         {
             16 => ReadInt16Pixels(stream, width, height),
             32 => ReadInt32Pixels(stream, width, height),
@@ -82,145 +77,113 @@ public class FitsReader
             _ => throw new NotSupportedException($"BITPIX {bitpix} non supportato.")
         };
 
-        // 3. Gestione Padding Finale (Dati)
-        // I dati sono seguiti da zeri fino a completare il blocco di 2880 byte.
-        // Calcoliamo quanti byte abbiamo letto e quanti ne dobbiamo saltare.
-        long bytesPerPixel = Math.Abs(bitpix) / 8;
-        long totalBytesRead = (long)width * height * bytesPerPixel;
-        long remainder = totalBytesRead % BlockSize;
-        
-        if (remainder > 0)
-        {
-            long paddingToSkip = BlockSize - remainder;
-            if (stream.CanSeek)
-            {
-                stream.Seek(paddingToSkip, SeekOrigin.Current);
-            }
-            else
-            {
-                // Se lo stream non supporta il seek (es. Network), leggiamo a vuoto
-                byte[] junk = new byte[Math.Min(paddingToSkip, 4096)];
-                while (paddingToSkip > 0)
-                {
-                    int read = stream.Read(junk, 0, (int)Math.Min(paddingToSkip, junk.Length));
-                    if (read == 0) break;
-                    paddingToSkip -= read;
-                }
-            }
-        }
+        // Gestione Padding (il file FITS è sempre a blocchi di 2880 byte)
+        SkipPadding(stream, width, height, Math.Abs(bitpix) / 8);
 
-        return new FitsImageData
-        {
-            FitsHeader = header,
-            RawData = rawData,
-            Width = width,
-            Height = height
-        };
+        return matrix;
     }
 
-    // --- Helpers Tipizzati per i Pixel ---
+    // --- Metodi di Lettura Ottimizzati (Multidimensionali) ---
 
-    private short[,] ReadInt16Pixels(Stream stream, int w, int h)
+    private short[,] ReadInt16Pixels(Stream s, int w, int h)
     {
-        var result = new short[h, w]; // Matrice 2D [Row, Col]
-        int rowBytes = w * 2;
-        byte[] buffer = new byte[rowBytes];
+        var m = new short[h, w]; // Matrice [Righe, Colonne]
+        byte[] rowBuffer = new byte[w * 2]; // Buffer per una riga intera
 
         for (int y = 0; y < h; y++)
         {
-            ReadExact(stream, buffer);
-            // Conversione BigEndian -> LittleEndian per ogni pixel della riga
-            for (int x = 0; x < w; x++)
+            ReadExact(s, rowBuffer);
+            // Conversione BigEndian -> LittleEndian per ogni pixel
+            for (int x = 0; x < w; x++) 
             {
-                // Usiamo Span per evitare allocazioni e passare i 2 byte corretti
-                result[y, x] = FitsStreamHelper.ReadInt16(buffer.AsSpan(x * 2));
+                // Span per performance (evita allocazioni)
+                m[y, x] = FitsStreamHelper.ReadInt16(rowBuffer.AsSpan(x * 2));
             }
         }
-        return result;
+        return m;
     }
 
-    private int[,] ReadInt32Pixels(Stream stream, int w, int h)
+    private int[,] ReadInt32Pixels(Stream s, int w, int h)
     {
-        var result = new int[h, w];
-        int rowBytes = w * 4;
-        byte[] buffer = new byte[rowBytes];
-
+        var m = new int[h, w];
+        byte[] rowBuffer = new byte[w * 4];
         for (int y = 0; y < h; y++)
         {
-            ReadExact(stream, buffer);
-            for (int x = 0; x < w; x++)
-            {
-                result[y, x] = FitsStreamHelper.ReadInt32(buffer.AsSpan(x * 4));
-            }
+            ReadExact(s, rowBuffer);
+            for (int x = 0; x < w; x++) m[y, x] = FitsStreamHelper.ReadInt32(rowBuffer.AsSpan(x * 4));
         }
-        return result;
+        return m;
     }
 
-    private float[,] ReadFloatPixels(Stream stream, int w, int h)
+    private float[,] ReadFloatPixels(Stream s, int w, int h)
     {
-        var result = new float[h, w];
-        int rowBytes = w * 4;
-        byte[] buffer = new byte[rowBytes];
-
+        var m = new float[h, w];
+        byte[] rowBuffer = new byte[w * 4];
         for (int y = 0; y < h; y++)
         {
-            ReadExact(stream, buffer);
-            for (int x = 0; x < w; x++)
-            {
-                result[y, x] = FitsStreamHelper.ReadFloat(buffer.AsSpan(x * 4));
-            }
+            ReadExact(s, rowBuffer);
+            for (int x = 0; x < w; x++) m[y, x] = FitsStreamHelper.ReadFloat(rowBuffer.AsSpan(x * 4));
         }
-        return result;
+        return m;
     }
 
-    private double[,] ReadDoublePixels(Stream stream, int w, int h)
+    private double[,] ReadDoublePixels(Stream s, int w, int h)
     {
-        var result = new double[h, w];
-        int rowBytes = w * 8;
-        byte[] buffer = new byte[rowBytes];
-
+        var m = new double[h, w];
+        byte[] rowBuffer = new byte[w * 8];
         for (int y = 0; y < h; y++)
         {
-            ReadExact(stream, buffer);
-            for (int x = 0; x < w; x++)
-            {
-                result[y, x] = FitsStreamHelper.ReadDouble(buffer.AsSpan(x * 8));
-            }
+            ReadExact(s, rowBuffer);
+            for (int x = 0; x < w; x++) m[y, x] = FitsStreamHelper.ReadDouble(rowBuffer.AsSpan(x * 8));
         }
-        return result;
+        return m;
     }
-    
-    private byte[,] ReadBytePixels(Stream stream, int w, int h)
-    {
-        // BITPIX 8 è unsigned byte, non serve swap endianness
-        var result = new byte[h, w];
-        int rowBytes = w;
-        byte[] buffer = new byte[rowBytes];
 
+    private byte[,] ReadBytePixels(Stream s, int w, int h)
+    {
+        var m = new byte[h, w];
+        byte[] rowBuffer = new byte[w];
         for (int y = 0; y < h; y++)
         {
-            ReadExact(stream, buffer);
-            for (int x = 0; x < w; x++)
-            {
-                result[y, x] = buffer[x];
-            }
+            ReadExact(s, rowBuffer);
+            for (int x = 0; x < w; x++) m[y, x] = rowBuffer[x];
         }
-        return result;
+        return m;
     }
 
-    /// <summary>
-    /// Helper per garantire la lettura completa del buffer richiesto.
-    /// </summary>
-    private void ReadExact(Stream s, byte[] buffer)
+    // --- Helpers ---
+
+    private void ReadExact(Stream s, byte[] b)
     {
         int offset = 0;
-        int count = buffer.Length;
+        int count = b.Length;
         while (count > 0)
         {
-            int read = s.Read(buffer, offset, count);
-            if (read == 0) throw new EndOfStreamException("Fine del file inattesa durante la lettura dei dati immagine.");
+            int read = s.Read(b, offset, count);
+            if (read == 0) throw new EndOfStreamException();
             offset += read;
             count -= read;
+        }
+    }
+
+    private void SkipPadding(Stream stream, int w, int h, int bytesPerPixel)
+    {
+        long totalBytes = (long)w * h * bytesPerPixel;
+        long remainder = totalBytes % BlockSize;
+        if (remainder > 0)
+        {
+            long padding = BlockSize - remainder;
+            if (stream.CanSeek) stream.Seek(padding, SeekOrigin.Current);
+            else 
+            {
+                byte[] junk = new byte[Math.Min(padding, 4096)];
+                while (padding > 0)
+                {
+                    int r = stream.Read(junk, 0, (int)Math.Min(padding, junk.Length));
+                    if (r == 0) break;
+                    padding -= r;
+                }
+            }
         }
     }
 }

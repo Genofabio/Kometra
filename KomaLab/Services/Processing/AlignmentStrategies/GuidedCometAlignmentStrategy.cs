@@ -1,6 +1,5 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -13,18 +12,18 @@ namespace KomaLab.Services.Processing.AlignmentStrategies;
 // ---------------------------------------------------------------------------
 // FILE: GuidedCometAlignmentStrategy.cs
 // RUOLO: Strategia Allineamento (Tracking)
-// AGGIORNAMENTO: Refactoring con AlignmentStrategyBase per resilienza (Retry).
+// VERSIONE: Aggiornata per Architettura No-FitsImageData
 // ---------------------------------------------------------------------------
 
 public class GuidedCometAlignmentStrategy : AlignmentStrategyBase
 {
     private readonly IFitsIoService _ioService;
-    private readonly IFitsImageDataConverter _converter;
+    private readonly IFitsOpenCvConverter _converter;
     private readonly IImageOperationService _operations;
 
     public GuidedCometAlignmentStrategy(
         IFitsIoService ioService, 
-        IFitsImageDataConverter converter, 
+        IFitsOpenCvConverter converter, 
         IImageOperationService operations)
     {
         _ioService = ioService ?? throw new ArgumentNullException(nameof(ioService));
@@ -41,7 +40,6 @@ public class GuidedCometAlignmentStrategy : AlignmentStrategyBase
         int n = sourcePaths.Count;
         var results = new Point2D?[n];
 
-        // Validazione Input
         var p1Guess = guesses.FirstOrDefault();
         var pNGuess = guesses.LastOrDefault();
 
@@ -50,7 +48,6 @@ public class GuidedCometAlignmentStrategy : AlignmentStrategyBase
             return guesses.ToArray();
         }
 
-        // 1. Concorrenza ottimizzata (Dalla classe base)
         int maxConcurrency = GetOptimalConcurrency(sourcePaths[0]);
         using var semaphore = new SemaphoreSlim(maxConcurrency);
         
@@ -63,20 +60,31 @@ public class GuidedCometAlignmentStrategy : AlignmentStrategyBase
             // ---------------------------------------------------------
 
             // A. FRAME 0 (START) - Estrazione Template
-            // Usiamo ExecuteWithRetryAsync per essere resilienti ai lock del file system
             var t0Result = await ExecuteWithRetryAsync(
                 operation: async () => 
                 {
-                    var data = await _ioService.LoadAsync(sourcePaths[0]);
-                    if (data == null) return null; // Triggera retry
-                    // Nota: ExtractRefinedTemplate non è asincrono ma è pesante, ok nel Task
-                    return (Result?)_operations.ExtractRefinedTemplate(data, p1Guess.Value, searchRadius);
+                    // Caricamento Separato
+                    var header = await _ioService.ReadHeaderAsync(sourcePaths[0]);
+                    var pixels = await _ioService.ReadPixelDataAsync(sourcePaths[0]);
+                    
+                    if (header == null || pixels == null) return null; // Trigger Retry
+
+                    // Estrazione parametri scala
+                    double bScale = header.GetValue<double>("BSCALE") ?? 1.0;
+                    double bZero = header.GetValue<double>("BZERO") ?? 0.0;
+
+                    // Conversione e Estrazione
+                    using var mat = _converter.RawToMat(pixels, bScale, bZero);
+                    
+                    // La ExtractRefinedTemplate crea una NUOVA Mat (copia), 
+                    // quindi possiamo disporre 'mat' (source) qui dentro tranquillamente.
+                    return (Result?)_operations.ExtractRefinedTemplate(mat, p1Guess.Value, searchRadius);
                 },
                 fallbackValue: null,
                 itemIndex: 0
             );
 
-            if (t0Result == null) return results; // Fallimento critico su Frame 0
+            if (t0Result == null) return results; // Fallimento critico
 
             templateMat = t0Result.Value.Template;
             Point2D centerStart = t0Result.Value.RefinedCenter;
@@ -89,14 +97,21 @@ public class GuidedCometAlignmentStrategy : AlignmentStrategyBase
             var tEndResult = await ExecuteWithRetryAsync(
                 operation: async () =>
                 {
-                    var data = await _ioService.LoadAsync(sourcePaths[n - 1]);
-                    if (data == null) return null;
+                    var header = await _ioService.ReadHeaderAsync(sourcePaths[n - 1]);
+                    var pixels = await _ioService.ReadPixelDataAsync(sourcePaths[n - 1]);
+                    if (header == null || pixels == null) return null;
                     
-                    var t = _operations.ExtractRefinedTemplate(data, pNGuess.Value, searchRadius);
-                    t.Template?.Dispose(); // Non ci serve il template finale, solo il punto
+                    double bScale = header.GetValue<double>("BSCALE") ?? 1.0;
+                    double bZero = header.GetValue<double>("BZERO") ?? 0.0;
+
+                    using var mat = _converter.RawToMat(pixels, bScale, bZero);
+
+                    var t = _operations.ExtractRefinedTemplate(mat, pNGuess.Value, searchRadius);
+                    t.Template?.Dispose(); // Qui ci serve solo il punto, buttiamo il template
+                    
                     return (Point2D?)t.RefinedCenter;
                 },
-                fallbackValue: pNGuess.Value, // Fallback al guess se il file è illeggibile
+                fallbackValue: pNGuess.Value, 
                 itemIndex: n - 1
             );
 
@@ -112,7 +127,7 @@ public class GuidedCometAlignmentStrategy : AlignmentStrategyBase
             double stepY = (centerEnd.Y - centerStart.Y) / (n - 1);
 
             // ---------------------------------------------------------
-            // FASE 3: Tracking Parallelo (Protetto da Retry)
+            // FASE 3: Tracking Parallelo
             // ---------------------------------------------------------
             var tasks = new List<Task>();
 
@@ -121,12 +136,9 @@ public class GuidedCometAlignmentStrategy : AlignmentStrategyBase
                 int index = i;
                 string path = sourcePaths[index];
 
-                // Calcolo Posizione Attesa
                 Point2D expectedPoint;
                 if (index < guesses.Count && guesses[index].HasValue)
-                {
                     expectedPoint = guesses[index]!.Value;
-                }
                 else
                 {
                     double linX = centerStart.X + (index * stepX);
@@ -139,20 +151,16 @@ public class GuidedCometAlignmentStrategy : AlignmentStrategyBase
                     await semaphore.WaitAsync();
                     try
                     {
-                        // Eseguiamo la logica core con resilienza
                         Point2D? result = await ExecuteWithRetryAsync(
                             operation: async () => await ProcessFrameCoreAsync(path, templateMat, expectedPoint, searchRadius),
-                            fallbackValue: expectedPoint, // Se fallisce I/O, usiamo la stima lineare
+                            fallbackValue: expectedPoint, 
                             itemIndex: index
                         );
                         
                         results[index] = result;
                         progress?.Report((index, result));
                     }
-                    finally
-                    {
-                        semaphore.Release();
-                    }
+                    finally { semaphore.Release(); }
                 }));
             }
 
@@ -167,16 +175,20 @@ public class GuidedCometAlignmentStrategy : AlignmentStrategyBase
     }
 
     /// <summary>
-    /// Logica Core per singolo frame: Carica -> Cerca Template.
-    /// Ritorna null solo se c'è un errore di I/O (per scatenare il retry).
-    /// Ritorna expectedPoint se l'I/O va bene ma il template non viene trovato.
+    /// Logica Core per singolo frame: Carica -> Converti -> Match Template.
     /// </summary>
     private async Task<Point2D?> ProcessFrameCoreAsync(string path, Mat templateMat, Point2D expectedPoint, int radius)
     {
-        var fitsData = await _ioService.LoadAsync(path);
-        if (fitsData == null) return null; // Trigger Retry (errore disco/lock)
+        // ADATTAMENTO ARCHITETTURA: Caricamento separato
+        var header = await _ioService.ReadHeaderAsync(path);
+        var pixels = await _ioService.ReadPixelDataAsync(path);
+        
+        if (header == null || pixels == null) return null; // Trigger Retry
 
-        using Mat fullImage = _converter.RawToMat(fitsData);
+        double bScale = header.GetValue<double>("BSCALE") ?? 1.0;
+        double bZero = header.GetValue<double>("BZERO") ?? 0.0;
+
+        using Mat fullImage = _converter.RawToMat(pixels, bScale, bZero);
 
         // Template Matching Locale
         Point2D? foundMatch = _operations.FindTemplatePosition(
@@ -185,13 +197,15 @@ public class GuidedCometAlignmentStrategy : AlignmentStrategyBase
             expectedPoint, 
             radius);
             
-        // Se matching fallisce (nuvole/rumore), ritorniamo il punto stimato.
-        // NON ritorniamo null, altrimenti il sistema riproverebbe inutilmente per un problema non di I/O.
+        // Se non trova il template (es. nuvole), usa la stima lineare.
+        // NON tornare null qui, altrimenti il retry loop proverebbe a ricaricare il file inutilmente.
         return foundMatch ?? expectedPoint;
     }
 
-    // Helper struct per gestire il ritorno della tupla nel wrapper del retry
-    private struct Result { public Mat Template; public Point2D RefinedCenter; 
+    // Helper struct
+    private struct Result { 
+        public Mat Template; 
+        public Point2D RefinedCenter; 
         public static implicit operator Result((Mat t, Point2D p) tuple) => new Result { Template = tuple.t, RefinedCenter = tuple.p };
     }
 }

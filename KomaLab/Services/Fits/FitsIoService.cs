@@ -10,8 +10,8 @@ using KomaLab.Services.Fits.Engine;
 namespace KomaLab.Services.Fits;
 
 /// <summary>
-/// Implementazione Enterprise del servizio I/O FITS.
-/// Esegue il FLIP VERTICALE al caricamento per normalizzare le coordinate (Top-Left 0,0).
+/// Servizio I/O FITS Implementazione.
+/// Gestisce la lettura/scrittura separata di Header e Matrici Pixel.
 /// </summary>
 public class FitsIoService : IFitsIoService
 {
@@ -29,38 +29,11 @@ public class FitsIoService : IFitsIoService
         _reader = reader ?? throw new ArgumentNullException(nameof(reader));
     }
 
-    // --- CARICAMENTO ---
+    // --------------------------------------------------------------------------
+    // 1. LETTURA (READ)
+    // --------------------------------------------------------------------------
 
-    public async Task<FitsImageData?> LoadAsync(string path)
-    {
-        return await Task.Run(() =>
-        {
-            try
-            {
-                using Stream stream = _streamProvider.Open(path);
-                var header = _reader.ReadHeader(stream);
-                var imageData = _reader.ReadImage(stream, header);
-                
-                // MODIFICA CRUCIALE: FLIP VERTICALE IMMEDIATO
-                // I dati FITS arrivano Bottom-Up (riga 0 = fondo).
-                // Li ribaltiamo subito per averli Top-Down (riga 0 = cima), 
-                // così il resto dell'app lavora in coordinate schermo naturali.
-                if (imageData != null)
-                {
-                    FlipImageDataVertical(imageData);
-                }
-
-                return imageData;
-            }
-            catch (Exception ex)
-            {
-                System.Diagnostics.Debug.WriteLine($"[FitsIoService] Errore LoadAsync {path}: {ex.Message}");
-                return null;
-            }
-        });
-    }
-
-    public async Task<FitsHeader?> ReadHeaderOnlyAsync(string path)
+    public async Task<FitsHeader?> ReadHeaderAsync(string path)
     {
         return await Task.Run(() =>
         {
@@ -69,47 +42,143 @@ public class FitsIoService : IFitsIoService
                 using var stream = _streamProvider.Open(path);
                 return _reader.ReadHeader(stream);
             }
-            catch { return null; }
+            catch 
+            { 
+                return null; 
+            }
         });
     }
 
-    // --- SALVATAGGIO ---
+    public async Task<Array?> ReadPixelDataAsync(string path)
+    {
+        return await Task.Run(() =>
+        {
+            try
+            {
+                using Stream stream = _streamProvider.Open(path);
+                
+                // 1. Leggiamo l'header (serve al reader per sapere dimensioni e bitpix)
+                var header = _reader.ReadHeader(stream);
+                
+                // 2. Leggiamo la matrice grezza
+                var rawMatrix = _reader.ReadMatrix(stream, header);
 
-    public async Task SaveAsync(FitsImageData data, string path)
+                // 3. FLIP VERTICALE (Cruciale per visualizzazione corretta)
+                // In FITS (0,0) è in basso a sinistra. A video è in alto a sinistra.
+                if (rawMatrix != null)
+                {
+                    FlipArrayVertical(rawMatrix);
+                }
+
+                return rawMatrix;
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[FitsIoService] ReadPixelData Error {path}: {ex.Message}");
+                return null;
+            }
+        });
+    }
+
+    // --------------------------------------------------------------------------
+    // 2. SCRITTURA (WRITE)
+    // --------------------------------------------------------------------------
+
+    public async Task WriteFileAsync(string path, Array pixelData, FitsHeader header)
     {
         await Task.Run(() =>
         {
+            // Usiamo FileMode.Create per sovrascrivere completamente il file
             using var fs = new FileStream(path, FileMode.Create, FileAccess.Write);
             
-            // 1. HEADER
-            WriteFitsHeader(fs, data.FitsHeader);
-
-            // 2. DATI
-            // Dato che in memoria abbiamo i dati "Dritti" (Top-Down),
-            // dobbiamo salvarli usando il ciclo inverso per rispettare lo standard FITS.
-            WriteFitsData(fs, data);
+            // 1. Scrittura Header (con padding)
+            WriteFitsHeader(fs, header);
+            
+            // 2. Scrittura Dati 
+            // Il metodo WriteFitsData gestisce il Reverse Flip (Top-Down -> Bottom-Up)
+            WriteFitsData(fs, pixelData);
         });
     }
 
-    // --- HELPER PER IL FLIP IN MEMORIA ---
-    
-    private void FlipImageDataVertical(FitsImageData data)
+    public async Task WriteHeaderAsync(string path, FitsHeader newHeader)
     {
-        // Poiché RawData è un Array generico, dobbiamo gestire i tipi concreti
-        // per poter scambiare le righe.
+        // STRATEGIA SAFE REWRITE:
+        // 1. Carica i pixel esistenti (verranno flippati in RAM).
+        // 2. Riscrive tutto il file usando il metodo generico WriteFileAsync.
         
-        if (data.RawData is byte[,] b) FlipMatrix(b, data.Width, data.Height);
-        else if (data.RawData is short[,] s) FlipMatrix(s, data.Width, data.Height);
-        else if (data.RawData is int[,] i) FlipMatrix(i, data.Width, data.Height);
-        else if (data.RawData is float[,] f) FlipMatrix(f, data.Width, data.Height);
-        else if (data.RawData is double[,] d) FlipMatrix(d, data.Width, data.Height);
-        // Se aggiungi altri tipi (es. uint16), aggiungi qui il caso
+        var pixels = await ReadPixelDataAsync(path);
+        
+        if (pixels == null) 
+            throw new FileNotFoundException("Impossibile leggere il file originale per l'aggiornamento dell'header.", path);
+
+        await WriteFileAsync(path, pixels, newHeader);
     }
 
-    private void FlipMatrix<T>(T[,] matrix, int w, int h)
+    // --------------------------------------------------------------------------
+    // 3. UTILITY BATCH (BATCH)
+    // --------------------------------------------------------------------------
+
+    public async Task<List<string>> BatchSortByDateAsync(IEnumerable<string> paths)
     {
-        // Scambia le righe speculari (0 con h-1, 1 con h-2, ecc.)
-        // Ci fermiamo a h/2 altrimenti le riscambiamo di nuovo.
+        var pathList = paths.ToList();
+        if (pathList.Count <= 1) return pathList;
+        try
+        {
+            var tasks = pathList.Select(async path =>
+            {
+                var h = await ReadHeaderAsync(path);
+                var d = h != null ? _metadataService.GetObservationDate(h) : DateTime.MinValue;
+                return new { Path = path, Date = d ?? DateTime.MinValue };
+            });
+            var res = await Task.WhenAll(tasks);
+            return res.OrderBy(x => x.Date).Select(x => x.Path).ToList();
+        }
+        catch { return pathList; }
+    }
+
+    public async Task<(bool IsCompatible, string? Error)> BatchValidateAsync(IEnumerable<string> paths)
+    {
+        int? fw = null, fh = null;
+        foreach (var path in paths)
+        {
+            var h = await ReadHeaderAsync(path);
+            if (h == null) continue;
+            int w = h.GetIntValue("NAXIS1");
+            int h_img = h.GetIntValue("NAXIS2");
+
+            if (fw == null) { fw = w; fh = h_img; }
+            else if (w != fw || h_img != fh)
+                return (false, $"Dimensioni mismatch: {Path.GetFileName(path)}");
+        }
+        return (true, null);
+    }
+
+    // --------------------------------------------------------------------------
+    // 4. PRIVATE HELPERS: MEMORY FLIP
+    // --------------------------------------------------------------------------
+    
+    
+
+    private void FlipArrayVertical(Array matrix)
+    {
+        switch (matrix)
+        {
+            case byte[,] b: FlipMatrix(b); break;
+            case short[,] s: FlipMatrix(s); break;
+            case int[,] i: FlipMatrix(i); break;
+            case float[,] f: FlipMatrix(f); break;
+            case double[,] d: FlipMatrix(d); break;
+            default: 
+                System.Diagnostics.Debug.WriteLine($"Flip non supportato per il tipo {matrix.GetType()}");
+                break;
+        }
+    }
+
+    private void FlipMatrix<T>(T[,] matrix)
+    {
+        int h = matrix.GetLength(0); 
+        int w = matrix.GetLength(1); 
+
         for (int y = 0; y < h / 2; y++)
         {
             int mirrorY = h - 1 - y;
@@ -122,59 +191,76 @@ public class FitsIoService : IFitsIoService
         }
     }
 
-    // --- LOGICA DI SCRITTURA (Invariata, è già corretta per Top-Down memory) ---
+    // --------------------------------------------------------------------------
+    // 5. PRIVATE HELPERS: LOW LEVEL WRITE
+    // --------------------------------------------------------------------------
 
     private void WriteFitsHeader(Stream stream, FitsHeader header)
     {
         int bytesWritten = 0;
-        foreach (var card in header.Cards)
+        bool endKeyWritten = false;
+
+        foreach (var card in header.Cards) 
         {
             string line = FitsFormatting.PadTo80(card);
+            
+            if (card.Key.Trim().ToUpper() == "END")
+            {
+                endKeyWritten = true;
+                line = "END".PadRight(80, ' ');
+            }
+
             byte[] bytes = Encoding.ASCII.GetBytes(line);
             stream.Write(bytes, 0, bytes.Length);
             bytesWritten += 80;
         }
 
-        string endLine = "END".PadRight(80, ' ');
-        byte[] endBytes = Encoding.ASCII.GetBytes(endLine);
-        stream.Write(endBytes, 0, endBytes.Length);
-        bytesWritten += 80;
+        if (!endKeyWritten)
+        {
+            byte[] endBytes = Encoding.ASCII.GetBytes("END".PadRight(80, ' '));
+            stream.Write(endBytes, 0, endBytes.Length);
+            bytesWritten += 80;
+        }
 
         int remainder = bytesWritten % 2880;
-        if (remainder > 0) stream.Write(new byte[2880 - remainder]);
+        if (remainder > 0)
+        {
+            stream.Write(new byte[2880 - remainder]);
+        }
     }
 
-    private void WriteFitsData(Stream stream, FitsImageData data)
+    private void WriteFitsData(Stream stream, Array matrix)
     {
-        Type type = data.PixelType;
-        int width = data.Width;
-        int height = data.Height;
+        int height = matrix.GetLength(0);
+        int width = matrix.GetLength(1);
+        Type type = matrix.GetType().GetElementType()!; 
+        
         long totalBytesWritten = 0;
 
-        // Helper che scrive dall'ultima riga alla prima (height-1 -> 0)
-        // Corretto perché in memoria abbiamo l'immagine DRITTA (0=Top),
-        // ma il FITS vuole il primo byte come FONDO.
-        void WritePixelsReverse<T>(T[,] matrix, int bytesPerPixel, Action<Span<byte>, T> writerFunc)
+        // Scrittura inversa (Bottom-Up) per rispettare standard FITS
+        // partendo da dati in memoria (Top-Down)
+        void WritePixelsReverse<T>(T[,] mat, int bytesPerPixel, Action<Span<byte>, T> writerFunc)
         {
             byte[] buffer = new byte[width * bytesPerPixel];
+            
             for (int y = height - 1; y >= 0; y--)
             {
                 for (int x = 0; x < width; x++)
                 {
-                    writerFunc(buffer.AsSpan(x * bytesPerPixel), matrix[y, x]);
+                    writerFunc(buffer.AsSpan(x * bytesPerPixel), mat[y, x]);
                 }
                 stream.Write(buffer, 0, buffer.Length);
                 totalBytesWritten += buffer.Length;
             }
         }
 
-        if (type == typeof(short)) WritePixelsReverse(data.GetData<short>(), 2, FitsStreamHelper.WriteInt16);
-        else if (type == typeof(int)) WritePixelsReverse(data.GetData<int>(), 4, FitsStreamHelper.WriteInt32);
-        else if (type == typeof(float)) WritePixelsReverse(data.GetData<float>(), 4, FitsStreamHelper.WriteFloat);
-        else if (type == typeof(double)) WritePixelsReverse(data.GetData<double>(), 8, FitsStreamHelper.WriteDouble);
+        if (type == typeof(short)) WritePixelsReverse((short[,])matrix, 2, FitsStreamHelper.WriteInt16);
+        else if (type == typeof(int)) WritePixelsReverse((int[,])matrix, 4, FitsStreamHelper.WriteInt32);
+        else if (type == typeof(float)) WritePixelsReverse((float[,])matrix, 4, FitsStreamHelper.WriteFloat);
+        else if (type == typeof(double)) WritePixelsReverse((double[,])matrix, 8, FitsStreamHelper.WriteDouble);
         else if (type == typeof(byte))
         {
-            var mat = data.GetData<byte>();
+            var mat = (byte[,])matrix;
             byte[] buffer = new byte[width];
             for (int y = height - 1; y >= 0; y--)
             {
@@ -187,42 +273,5 @@ public class FitsIoService : IFitsIoService
 
         long remainder = totalBytesWritten % 2880;
         if (remainder > 0) stream.Write(new byte[2880 - remainder]);
-    }
-
-    // --- BATCH HELPERS ---
-
-    public async Task<List<string>> PrepareBatchAsync(IEnumerable<string> paths)
-    {
-        var pathList = paths.ToList();
-        if (pathList.Count <= 1) return pathList;
-        try
-        {
-            var tasks = pathList.Select(async path =>
-            {
-                var h = await ReadHeaderOnlyAsync(path);
-                var d = h != null ? _metadataService.GetObservationDate(h) : DateTime.MinValue;
-                return new { Path = path, Date = d ?? DateTime.MinValue };
-            });
-            var res = await Task.WhenAll(tasks);
-            return res.OrderBy(x => x.Date).Select(x => x.Path).ToList();
-        }
-        catch { return pathList; }
-    }
-
-    public async Task<(bool IsCompatible, string? Error)> ValidateCompatibilityAsync(IEnumerable<string> paths)
-    {
-        int? fw = null, fh = null;
-        foreach (var path in paths)
-        {
-            var h = await ReadHeaderOnlyAsync(path);
-            if (h == null) continue;
-            int w = h.GetIntValue("NAXIS1");
-            int h_img = h.GetIntValue("NAXIS2");
-
-            if (fw == null) { fw = w; fh = h_img; }
-            else if (w != fw || h_img != fh)
-                return (false, $"Dimensioni mismatch: {Path.GetFileName(path)}");
-        }
-        return (true, null);
     }
 }

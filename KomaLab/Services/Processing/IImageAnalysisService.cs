@@ -1,5 +1,4 @@
-﻿using KomaLab.Models.Fits;
-using KomaLab.Models.Primitives;
+﻿using KomaLab.Models.Primitives;
 using KomaLab.Models.Visualization;
 using OpenCvSharp;
 
@@ -9,8 +8,8 @@ namespace KomaLab.Services.Processing;
 // FILE: IImageAnalysisService.cs
 // RUOLO: Analizzatore Matematico (Low-Level / Read-Only)
 // DESCRIZIONE:
-// Motore di calcolo puro che estrae metadati numerici dalle immagini.
-// Implementa la strategia "Sigma-Clipping" per la gestione del contrasto.
+// Motore di calcolo puro che estrae metadati numerici dalle matrici.
+// Totalmente disaccoppiato dal formato FITS.
 // ---------------------------------------------------------------------------
 
 public interface IImageAnalysisService
@@ -19,7 +18,6 @@ public interface IImageAnalysisService
     
     /// <summary>
     /// Calcola Media e Deviazione Standard dell'immagine ignorando i valori NaN.
-    /// Fondamentale per determinare soglie di rumore e clipping.
     /// </summary>
     (double Mean, double StdDev) ComputeStatistics(Mat image);
 
@@ -27,74 +25,72 @@ public interface IImageAnalysisService
     
     /// <summary>
     /// Calcola i livelli ideali (AutoStretch) per un'immagine grezza.
-    /// Utilizza il quantile 0.3 (30%) per il nero per garantire un fondo cielo scuro
-    /// e il 0.995 per il bianco.
     /// </summary>
     AbsoluteContrastProfile CalculateAutoStretchProfile(Mat image);
     
     /// <summary>
     /// Calcola il nuovo profilo di contrasto assoluto per l'immagine target,
-    /// cercando di mantenere la percezione visiva dell'immagine sorgente
-    /// (basandosi sulla deviazione standard / Sigma).
+    /// cercando di mantenere la percezione visiva dell'immagine sorgente.
     /// </summary>
     AbsoluteContrastProfile CalculateAdaptedProfile(
-        FitsImageData sourceData, 
-        FitsImageData targetData, 
+        Mat sourceMat, 
+        Mat targetMat, 
         double currentBlack, 
         double currentWhite);
 
     /// <summary>
+    /// Versione leggera: calcola l'adattamento basandosi solo sulle statistiche pre-calcolate.
+    /// Non richiede accesso alle Matrici pixel (Mat).
+    /// </summary>
+    AbsoluteContrastProfile CalculateAdaptedProfileFromStats(
+        (double Mean, double StdDev) sourceStats,
+        double sourceBlack,
+        double sourceWhite,
+        (double Mean, double StdDev) targetStats);
+
+    /// <summary>
     /// Calcola un profilo SIGMA (Z-Score) basato sulla distanza statistica
-    /// tra i valori correnti (impostati dall'utente) e la media dell'immagine.
-    /// Esempio: "Il nero è a -1.5 Sigma dalla media".
+    /// tra i valori correnti e la media dell'immagine.
     /// </summary>
     SigmaContrastProfile ComputeSigmaProfile(Mat image, double currentBlack, double currentWhite);
 
     /// <summary>
     /// Calcola i valori ASSOLUTI per una nuova immagine applicando lo stesso Z-Score
-    /// (distanza dalla media in sigma) del profilo fornito.
-    /// Questo adatta il contrasto al livello di rumore della nuova immagine.
+    /// del profilo fornito.
     /// </summary>
     AbsoluteContrastProfile ComputeAbsoluteFromSigma(Mat image, SigmaContrastProfile profile);
 
-    // --- Astrometria & Centroiding (Invariati) ---
+    // --- Astrometria & Centroiding ---
     
     /// <summary>
-    /// Workflow completo di centratura locale:
-    /// 1. Analizza la regione fornita (crop).
-    /// 2. Esegue una Blob Detection per trovare l'oggetto principale.
-    /// 3. Raffina la posizione sub-pixel usando un Gaussian Fit o Momenti.
+    /// Workflow completo di centratura locale su regione.
     /// </summary>
     Point2D FindCenterOfLocalRegion(Mat region);
 
     /// <summary>
-    /// Calcola il baricentro (Image Moments) dell'intensità luminosa.
-    /// Ottimo per oggetti diffusi, irregolari o molto sfocati (defocus).
+    /// Calcola il baricentro (Image Moments).
     /// </summary>
     Point2D FindCentroid(Mat image, double sigma = 5.0);
 
     /// <summary>
-    /// Trova il pixel più luminoso e applica un fit parabolico 3x3 per ottenere
-    /// coordinate sub-pixel. Estremamente veloce e stabile per stelle puntiformi.
+    /// Trova il pixel più luminoso (Peak) con fit parabolico.
     /// </summary>
     Point2D FindPeak(Mat image, double sigma = 1.0);
 
     /// <summary>
-    /// Esegue un Fit Gaussiano 2D (algoritmo Levenberg-Marquardt via MathNet).
-    /// È il metodo scientificamente più accurato per le stelle (PSF Gaussiana).
+    /// Esegue un Fit Gaussiano 2D (metodo scientifico accurato).
     /// </summary>
     Point2D FindGaussianCenter(Mat image, double sigma = 3.0);
     
     /// <summary>
-    /// Restituisce il rettangolo (Bounding Box) che contiene dati validi.
-    /// Utile per escludere bordi neri o aree di padding (NaN/Zero) dopo un allineamento.
+    /// Restituisce il rettangolo (Bounding Box) che contiene dati validi (non NaN).
     /// </summary>
     Rect2D FindValidDataBox(Mat image);
     
     // --- Analisi Campo Stellare (Allineamento) ---
 
     /// <summary>
-    /// Calcola il vettore di spostamento (Shift X, Y) tra due immagini stellari
+    /// Calcola il vettore di spostamento (Shift X, Y) tra due immagini
     /// utilizzando la Phase Correlation (FFT).
     /// </summary>
     Point2D ComputeStarFieldShift(Mat reference, Mat target);

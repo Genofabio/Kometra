@@ -22,7 +22,9 @@ public partial class SingleImageNodeViewModel : ImageNodeViewModel
     private readonly IFitsRendererFactory _rendererFactory;
     private readonly SingleImageNodeModel _imageModel;
 
-    private FitsImageData? _currentData;
+    // --- Stato Dati ---
+    // Usiamo una collezione di 1 elemento per compatibilità con il resto del sistema
+    private FitsCollection _collection; 
     private Size _explicitSize; 
 
     [ObservableProperty]
@@ -34,12 +36,16 @@ public partial class SingleImageNodeViewModel : ImageNodeViewModel
     public override Size NodeContentSize => _explicitSize;
     public string ImagePath => _imageModel.ImagePath;
 
+    // Nuovi contratti astratti
+    public override FitsCollection? OutputCollection => _collection;
+    public override FitsFileReference? ActiveFile => _collection.Count > 0 ? _collection[0] : null;
+
     public SingleImageNodeViewModel(
         SingleImageNodeModel model,
         IFitsIoService ioService,
         IFitsRendererFactory rendererFactory,
         Size explicitSize,         
-        FitsImageData? initialData) 
+        FitsCollection? initialCollection = null) // Ora accetta una Collection opzionale
         : base(model) 
     {
         _imageModel = model ?? throw new ArgumentNullException(nameof(model));
@@ -47,12 +53,19 @@ public partial class SingleImageNodeViewModel : ImageNodeViewModel
         _rendererFactory = rendererFactory ?? throw new ArgumentNullException(nameof(rendererFactory));
         
         _explicitSize = explicitSize;
-        _currentData = initialData;
 
-        // Prepariamo il viewport se abbiamo già i dati
-        if (initialData != null)
+        // Se non viene passata una collezione (es. nodo sorgente), ne creiamo una dal path del modello
+        if (initialCollection != null)
         {
-            Viewport.ImageSize = new Size(initialData.Width, initialData.Height);
+            _collection = initialCollection;
+        }
+        else if (!string.IsNullOrEmpty(model.ImagePath))
+        {
+            _collection = new FitsCollection(new[] { model.ImagePath }, cacheSize: 1);
+        }
+        else
+        {
+            _collection = new FitsCollection(Array.Empty<string>(), cacheSize: 1);
         }
     }
 
@@ -71,11 +84,9 @@ public partial class SingleImageNodeViewModel : ImageNodeViewModel
     /// </summary>
     public async Task InitializeAsync(bool centerOnPosition = false)
     {
-        if (_currentData == null) await LoadDataAsync();
-        if (_currentData == null) return;
+        if (_collection.Count == 0) return;
 
-        // La classe base gestisce: Init, Contrast Transfer, Swap UI e Cleanup vecchio renderer.
-        await ApplyNewRendererAsync(_rendererFactory.Create(_currentData));
+        await LoadDataAsync();
 
         if (centerOnPosition)
         {
@@ -83,27 +94,44 @@ public partial class SingleImageNodeViewModel : ImageNodeViewModel
         }
     }
 
-    /// <summary>
-    /// Applica nuovi dati elaborati (es. post-process) garantendo la continuità visiva.
-    /// </summary>
-    public override async Task ApplyProcessedDataAsync(List<FitsImageData> newProcessedData)
-    {
-        if (newProcessedData.Count == 0) return;
-        
-        _currentData = newProcessedData[0];
-        // Passiamo null come profilo per forzare la classe base ad ereditare quello esistente
-        await ApplyNewRendererAsync(_rendererFactory.Create(_currentData));
-    }
+    // --- Gestione I/O e Loading ---
 
-    // --- Gestione I/O ---
-
-    public async Task LoadDataAsync()
+    private async Task LoadDataAsync()
     {
+        if (_collection.Count == 0) return;
+        var fileRef = _collection[0];
+
         try
         {
-            if (string.IsNullOrEmpty(_imageModel.ImagePath)) return;
-            var data = await _ioService.LoadAsync(_imageModel.ImagePath);
-            if (data != null) _currentData = data;
+            // 1. Recupero Dati (Header + Pixels)
+            // Header: Priorità a quello in memoria (se modificato)
+            FitsHeader? header = fileRef.HasUnsavedChanges 
+                ? fileRef.UnsavedHeader 
+                : await _ioService.ReadHeaderAsync(fileRef.FilePath);
+
+            // Pixel: Controllo Cache Collettiva
+            Array? pixels;
+            if (_collection.PixelCache.TryGet(fileRef.FilePath, out var cachedPixels))
+            {
+                pixels = cachedPixels;
+            }
+            else
+            {
+                pixels = await _ioService.ReadPixelDataAsync(fileRef.FilePath);
+                // Popola cache se caricato con successo
+                if (pixels != null) _collection.PixelCache.Add(fileRef.FilePath, pixels);
+            }
+
+            if (header == null || pixels == null) return;
+
+            // 2. Creazione Renderer
+            var newRenderer = _rendererFactory.Create(pixels, header);
+            
+            // Inizializza statistiche e Matrice interna
+            await newRenderer.InitializeAsync();
+
+            // 3. Applicazione tramite Base (gestisce contrasto, swap UI, cleanup)
+            await ApplyNewRendererAsync(newRenderer);
         }
         catch (Exception ex)
         {
@@ -112,27 +140,32 @@ public partial class SingleImageNodeViewModel : ImageNodeViewModel
         }
     }
 
-    public override async Task<List<FitsImageData?>> GetCurrentDataAsync()
-    {
-        if (_currentData == null) await LoadDataAsync();
-        return new List<FitsImageData?> { _currentData };
-    }
+    // --- Implementazione Metodi Astratti Nuovi ---
 
-    public override FitsImageData? GetActiveImageData() => _currentData;
-
-    public override async Task<List<string>> PrepareInputPathsAsync(IFitsIoService ioService)
+    public override async Task LoadInputAsync(FitsCollection input)
     {
-        if (!string.IsNullOrEmpty(_imageModel.ImagePath) && File.Exists(_imageModel.ImagePath))
-            return new List<string> { _imageModel.ImagePath };
+        _collection = input;
         
-        // Logica per dati in memoria (salvataggio temporaneo se necessario)
-        return new List<string>();
+        // Se riceviamo nuovi dati (es. da un nodo processore), ricarichiamo la visualizzazione
+        if (_collection.Count > 0)
+        {
+            await LoadDataAsync();
+        }
+        else
+        {
+            // Gestione caso vuoto (opzionale: pulire il renderer)
+        }
     }
 
     public override async Task RefreshDataFromDiskAsync()
     {
-        _currentData = null;
-        await InitializeAsync(centerOnPosition: true);
+        // Pulisce la cache per questo file specifico
+        if (_collection.Count > 0)
+        {
+            _collection.PixelCache.Remove(_collection[0].FilePath);
+        }
+        
+        await LoadDataAsync();
     }
 
     // --- Cleanup ---
@@ -142,7 +175,7 @@ public partial class SingleImageNodeViewModel : ImageNodeViewModel
         if (disposing)
         {
             FitsImage?.Dispose();
-            _currentData = null;
+            // Nota: Non disponiamo la _collection perché potrebbe essere passata avanti
         }
         base.Dispose(disposing);
     }

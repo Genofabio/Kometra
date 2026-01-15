@@ -1,4 +1,5 @@
 ﻿using System.Collections.Generic;
+using KomaLab.Models.Fits;
 
 namespace KomaLab.Models.Nodes
 {
@@ -12,11 +13,12 @@ namespace KomaLab.Models.Nodes
 
     public class MultipleImagesNodeModel : BaseNodeModel
     {
-        /// <summary>
-        /// Elenco dei percorsi (URI) delle immagini incluse in questo nodo.
-        /// Supporta percorsi assoluti su disco o URI specifici del framework 
-        /// (es. 'avares://' per risorse incorporate in Avalonia/WPF).
-        /// </summary>
         public List<string> ImagePaths { get; set; } = new();
+
+        /// <summary>
+        /// Mappa "Percorso File" -> "Header Modificato".
+        /// Conserva le modifiche WCS/Metadata fatte in RAM per ripristinarle al caricamento del progetto.
+        /// </summary>
+        public Dictionary<string, FitsHeader> TempHeaders { get; set; } = new();
     }
 }

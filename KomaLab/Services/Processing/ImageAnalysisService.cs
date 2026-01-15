@@ -1,10 +1,8 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
-using KomaLab.Models.Fits;
 using KomaLab.Models.Primitives;
 using KomaLab.Models.Visualization;
-using KomaLab.Services.Fits;
 using MathNet.Numerics;
 using MathNet.Numerics.LinearAlgebra;
 using MathNet.Numerics.Statistics;
@@ -15,16 +13,15 @@ namespace KomaLab.Services.Processing;
 // ---------------------------------------------------------------------------
 // FILE: ImageAnalysisService.cs
 // RUOLO: Compute Engine (Matematica Pura)
-// VERSIONE: Finale (Fixed Logic Parity)
+// VERSIONE: Disaccoppiata (No FITS, No Converter dependency)
 // ---------------------------------------------------------------------------
 
 public class ImageAnalysisService : IImageAnalysisService
 {
-    private readonly IFitsImageDataConverter _converter;
-
-    public ImageAnalysisService(IFitsImageDataConverter converter)
+    // Nessuna dipendenza esterna necessaria. 
+    // Questo servizio lavora solo su oggetti OpenCV (Mat) già in memoria.
+    public ImageAnalysisService()
     {
-        _converter = converter ?? throw new ArgumentNullException(nameof(converter));
     }
 
     // =======================================================================
@@ -55,9 +52,7 @@ public class ImageAnalysisService : IImageAnalysisService
     public Rect2D FindValidDataBox(Mat image)
     {
         using Mat mask = new Mat();
-        
-        // FIX APPLICATO: Usiamo solo Compare per trovare i non-NaN.
-        // Rimosso il Threshold che tagliava i pixel neri (valore 0).
+        // Usiamo solo Compare per trovare i non-NaN.
         Cv2.Compare(image, image, mask, CmpType.EQ); 
 
         var rect = Cv2.BoundingRect(mask);
@@ -71,6 +66,7 @@ public class ImageAnalysisService : IImageAnalysisService
         Mat workingMat = image;
         bool disposeMat = false;
 
+        // Assicuriamoci di lavorare su Double
         if (image.Type() != MatType.CV_64FC1)
         {
             workingMat = new Mat();
@@ -122,18 +118,45 @@ public class ImageAnalysisService : IImageAnalysisService
         }
     }
     
+    // FILE: ImageAnalysisService.cs (Implementazione)
+
+    public AbsoluteContrastProfile CalculateAdaptedProfileFromStats(
+        (double Mean, double StdDev) sourceStats,
+        double sourceBlack,
+        double sourceWhite,
+        (double Mean, double StdDev) targetStats)
+    {
+        // Evitiamo divisioni per zero
+        if (sourceStats.StdDev < 1e-9) sourceStats.StdDev = 1.0;
+        if (targetStats.StdDev < 1e-9) targetStats.StdDev = 1.0;
+
+        // 1. Capiamo la "forma" dello stretch dell'immagine vecchia (K-Sigma)
+        // "Quanti sigma distano il nero e il bianco dalla media?"
+        double kBlack = (sourceBlack - sourceStats.Mean) / sourceStats.StdDev;
+        double kWhite = (sourceWhite - sourceStats.Mean) / sourceStats.StdDev;
+
+        // 2. Applichiamo la stessa forma alla nuova immagine
+        double newBlack = targetStats.Mean + (kBlack * targetStats.StdDev);
+        double newWhite = targetStats.Mean + (kWhite * targetStats.StdDev);
+
+        return new AbsoluteContrastProfile(newBlack, newWhite);
+    }
+    
     // --- METODI CONTRASTO ---
 
+    /// <summary>
+    /// Calcola un profilo assoluto per 'targetMat' basandosi sulla firma statistica di 'sourceMat'.
+    /// </summary>
     public AbsoluteContrastProfile CalculateAdaptedProfile(
-        FitsImageData sourceData, 
-        FitsImageData targetData, 
+        Mat sourceMat,  // EX FitsImageData
+        Mat targetMat,  // EX FitsImageData
         double currentBlack, 
         double currentWhite)
     {
-        using var sourceMat = _converter.RawToMat(sourceData);
+        // 1. Estrai la "forma" (Sigma) dell'istogramma sorgente
         var sigmaProfile = ComputeSigmaProfile(sourceMat, currentBlack, currentWhite);
 
-        using var targetMat = _converter.RawToMat(targetData);
+        // 2. Applica quella forma ai dati target
         return ComputeAbsoluteFromSigma(targetMat, sigmaProfile);
     }
 
@@ -421,8 +444,6 @@ public class ImageAnalysisService : IImageAnalysisService
                 
                 if (cellRef.Type() != MatType.CV_32FC1) cellRef.ConvertTo(cellRef32, MatType.CV_32FC1); else cellRef.CopyTo(cellRef32);
                 if (cellTgt.Type() != MatType.CV_32FC1) cellTgt.ConvertTo(cellTgt32, MatType.CV_32FC1); else cellTgt.CopyTo(cellTgt32);
-
-                // --- LOGICA ADATTIVA RIPRISTINATA (FIX PER PARITÀ) ---
                 
                 Cv2.MeanStdDev(cellRef32, meanMat, stdDevMat);
                 double cellMean = meanMat.Get<double>(0, 0);
@@ -430,14 +451,9 @@ public class ImageAnalysisService : IImageAnalysisService
 
                 Cv2.MinMaxLoc(cellRef32, out _, out double maxVal);
 
-                // Scartiamo la cella se non contiene picchi significativi rispetto al fondo
                 double noiseThreshold = cellMean + (4.0 * cellStd);
 
-                if (maxVal < noiseThreshold) 
-                {
-                    continue; 
-                }
-                // -----------------------------------------------------
+                if (maxVal < noiseThreshold) continue; 
 
                 Point2d shift = Cv2.PhaseCorrelate(cellRef32, cellTgt32, hanningWin, out double response);
                 
@@ -456,7 +472,7 @@ public class ImageAnalysisService : IImageAnalysisService
     }
 
     // =======================================================================
-    // 5. HELPER PRIVATI (MANCANTI NELLA TUA VERSIONE PRECEDENTE)
+    // 5. HELPER PRIVATI
     // =======================================================================
 
     private Mat ApplySobelFilter(Mat input)

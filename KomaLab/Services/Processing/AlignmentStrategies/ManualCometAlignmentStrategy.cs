@@ -13,19 +13,19 @@ namespace KomaLab.Services.Processing.AlignmentStrategies;
 // ---------------------------------------------------------------------------
 // FILE: ManualCometAlignmentStrategy.cs
 // RUOLO: Strategia Allineamento Manuale (Raffinamento ROI)
-// AGGIORNAMENTO: Refactoring con AlignmentStrategyBase per resilienza (Retry).
+// VERSIONE: Aggiornata per Architettura No-FitsImageData
 // ---------------------------------------------------------------------------
 
 public class ManualCometAlignmentStrategy : AlignmentStrategyBase
 {
     private readonly IFitsIoService _ioService;
-    private readonly IFitsImageDataConverter _converter;
+    private readonly IFitsOpenCvConverter _converter;
     private readonly IImageAnalysisService _analysis;
     private readonly CenteringMethod _method; 
 
     public ManualCometAlignmentStrategy(
         IFitsIoService ioService, 
-        IFitsImageDataConverter converter, 
+        IFitsOpenCvConverter converter, 
         IImageAnalysisService analysis,
         CenteringMethod method)
     {
@@ -44,7 +44,7 @@ public class ManualCometAlignmentStrategy : AlignmentStrategyBase
         int n = sourcePaths.Count;
         var results = new Point2D?[n];
 
-        // 1. Concorrenza ottimizzata (Dalla classe base)
+        // 1. Concorrenza ottimizzata
         int maxConcurrency = GetOptimalConcurrency(sourcePaths.Count > 0 ? sourcePaths[0] : "");
         using var semaphore = new SemaphoreSlim(maxConcurrency);
         var tasks = new List<Task>();
@@ -54,8 +54,7 @@ public class ManualCometAlignmentStrategy : AlignmentStrategyBase
             int index = i;
             string path = sourcePaths[index];
             
-            // In manuale, il guess (click utente) è fondamentale.
-            // Se manca per un frame (es. utente ha saltato un frame), quel frame non viene allineato.
+            // In manuale, se manca il guess (click utente), saltiamo il frame.
             var guess = (index < guesses.Count) ? guesses[index] : null;
 
             if (guess == null) 
@@ -70,9 +69,8 @@ public class ManualCometAlignmentStrategy : AlignmentStrategyBase
                 try
                 {
                     // OTTIMIZZAZIONE "FAST PATH":
-                    // Se il raggio è <= 0, l'utente vuole "Fiducia Totale" nel suo click.
-                    // Non serve caricare il file FITS né attivare i retry.
-                    // Ritorniamo subito il punto e risparmiamo I/O.
+                    // Se il raggio è <= 0, fidiamoci ciecamente del click utente.
+                    // Evitiamo caricamento e calcoli.
                     if (searchRadius <= 0)
                     {
                         results[index] = guess;
@@ -80,11 +78,11 @@ public class ManualCometAlignmentStrategy : AlignmentStrategyBase
                         return;
                     }
 
-                    // RETRY LOGIC (Classe Base):
-                    // Se dobbiamo fare calcoli, proteggiamo il caricamento file con il retry.
+                    // RETRY LOGIC:
+                    // Se dobbiamo raffinare il centro, carichiamo il file protetto da retry.
                     Point2D? result = await ExecuteWithRetryAsync(
                         operation: async () => await RefineCenterCoreAsync(path, guess.Value, searchRadius),
-                        fallbackValue: guess, // Se fallisce I/O dopo N tentativi, usiamo il click originale
+                        fallbackValue: guess, 
                         itemIndex: index
                     );
                     
@@ -102,17 +100,22 @@ public class ManualCometAlignmentStrategy : AlignmentStrategyBase
     /// <summary>
     /// Logica Core: Carica file -> Ritaglia ROI -> Trova Centroide.
     /// Ritorna null SOLO per errori di I/O (per scatenare il retry).
-    /// Ritorna guess se il calcolo matematico fallisce (es. ROI nera/piccola), per fermare i retry.
     /// </summary>
     private async Task<Point2D?> RefineCenterCoreAsync(string path, Point2D guess, int radius)
     {
         try
         {
-            // 1. Caricamento Dati
-            var fitsData = await _ioService.LoadAsync(path);
-            if (fitsData == null) return null; // Trigger Retry (errore disco/lock)
+            // 1. ADATTAMENTO ARCHITETTURA: Caricamento Separato
+            var header = await _ioService.ReadHeaderAsync(path);
+            var pixels = await _ioService.ReadPixelDataAsync(path);
+            
+            if (header == null || pixels == null) return null; // Trigger Retry
 
-            using var fullMat = _converter.RawToMat(fitsData);
+            // Estrazione parametri scala
+            double bScale = header.GetValue<double>("BSCALE") ?? 1.0;
+            double bZero = header.GetValue<double>("BZERO") ?? 0.0;
+
+            using var fullMat = _converter.RawToMat(pixels, bScale, bZero);
 
             // 2. Calcolo Coordinate ROI (Region Of Interest)
             int size = radius * 2;
@@ -125,8 +128,7 @@ public class ManualCometAlignmentStrategy : AlignmentStrategyBase
             int roiW = Math.Min(fullMat.Width, x + size) - roiX;
             int roiH = Math.Min(fullMat.Height, y + size) - roiY;
 
-            // Se la ROI è degenere (troppo piccola o fuori immagine), 
-            // ritorniamo il click originale. NON ritorniamo null (inutile riprovare).
+            // Se la ROI è degenere (troppo piccola o fuori immagine), ritorniamo il guess.
             if (roiW <= 4 || roiH <= 4) return guess;
 
             // 3. Analisi Locale
@@ -154,8 +156,7 @@ public class ManualCometAlignmentStrategy : AlignmentStrategyBase
         }
         catch (Exception)
         {
-            // Se qualcosa va storto nell'analisi matematica (es. eccezione OpenCV su dati corrotti),
-            // fidiamoci del click dell'utente piuttosto che riprovare inutilmente.
+            // Se fallisce la matematica (es. ROI corrotta), non l'I/O, usiamo il guess.
             return guess;
         }
     }

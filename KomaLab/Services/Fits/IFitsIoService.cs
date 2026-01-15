@@ -1,4 +1,5 @@
-﻿using System.Collections.Generic;
+﻿using System;
+using System.Collections.Generic;
 using System.Threading.Tasks;
 using KomaLab.Models.Fits;
 
@@ -6,45 +7,48 @@ namespace KomaLab.Services.Fits;
 
 // ---------------------------------------------------------------------------
 // INTERFACCIA: IFitsIoService
-// RUOLO: Punto di accesso unificato per l'I/O Scientifico
-// DESCRIZIONE:
-// Definisce il contratto per tutte le operazioni di lettura, scrittura e 
-// coordinamento dei file FITS, sia per operazioni su singolo file che batch.
+// RUOLO: Astrazione I/O per lettura/scrittura atomica di Header e Pixel
 // ---------------------------------------------------------------------------
 
 public interface IFitsIoService
 {
-    // --- OPERAZIONI SU SINGOLO FILE ---
+    // --- LETTURA (READ) ---
 
     /// <summary>
-    /// Carica un file FITS completo dal disco o risorsa.
-    /// Restituisce i dati pixel raw e l'header associato.
+    /// Legge SOLO i metadati (Header) dal file.
+    /// Operazione veloce, non carica la matrice pixel.
     /// </summary>
-    Task<FitsImageData?> LoadAsync(string path);
+    Task<FitsHeader?> ReadHeaderAsync(string path);
 
     /// <summary>
-    /// Legge esclusivamente l'header FITS. 
-    /// Ideale per scansioni rapide di directory o estrazione metadati senza overhead.
+    /// Legge SOLO la matrice dei pixel (Array Raw).
+    /// Esegue automaticamente il FLIP VERTICALE (Top-Down) per la visualizzazione.
     /// </summary>
-    Task<FitsHeader?> ReadHeaderOnlyAsync(string path);
+    Task<Array?> ReadPixelDataAsync(string path);
+
+    // --- SCRITTURA (WRITE) ---
 
     /// <summary>
-    /// Salva i dati immagine preservando l'integrità scientifica.
-    /// Gestisce automaticamente il trasferimento e la sanificazione dei metadati.
+    /// Aggiorna l'Header di un file esistente preservando i pixel.
+    /// Implementa la logica "Safe Rewrite" (Read Pixels -> Write New Header -> Write Pixels).
     /// </summary>
-    Task SaveAsync(FitsImageData data, string path);
-
-    // --- OPERAZIONI BATCH (Orchestrazione) ---
+    Task WriteHeaderAsync(string path, FitsHeader newHeader);
 
     /// <summary>
-    /// Riceve una lista di percorsi e li restituisce ordinati cronologicamente 
-    /// basandosi sui metadati temporali estratti dagli header.
+    /// Crea o sovrascrive un file FITS completo partendo da matrice e header separati.
+    /// Gestisce il "Reverse Flip" (Bottom-Up) dei pixel prima del salvataggio.
     /// </summary>
-    Task<List<string>> PrepareBatchAsync(IEnumerable<string> paths);
+    Task WriteFileAsync(string path, Array pixelData, FitsHeader header);
+
+    // --- UTILITY BATCH (BATCH) ---
 
     /// <summary>
-    /// Valida un insieme di file per garantire che abbiano proprietà compatibili
-    /// (es. stessa risoluzione) per operazioni di Stacking o Allineamento.
+    /// Ordina una lista di file cronologicamente (basandosi su DATE-OBS nell'header).
     /// </summary>
-    Task<(bool IsCompatible, string? Error)> ValidateCompatibilityAsync(IEnumerable<string> paths);
+    Task<List<string>> BatchSortByDateAsync(IEnumerable<string> paths);
+
+    /// <summary>
+    /// Valida che una lista di file abbia dimensioni compatibili (es. per Stacking).
+    /// </summary>
+    Task<(bool IsCompatible, string? Error)> BatchValidateAsync(IEnumerable<string> paths);
 }

@@ -73,7 +73,7 @@ public class App : Application
         services.AddSingleton<KomaLab.Services.Fits.Engine.FitsReader>();
         services.AddSingleton<IFitsIoService, FitsIoService>();
         services.AddSingleton<IFitsMetadataService, FitsMetadataService>();
-        services.AddSingleton<IFitsImageDataConverter, FitsImageDataConverter>();
+        services.AddSingleton<IFitsOpenCvConverter, FitsOpenCvConverter>();
 
         // --- 4. Servizi Imaging & Processing ---
         services.AddSingleton<IImageAnalysisService, ImageAnalysisService>();

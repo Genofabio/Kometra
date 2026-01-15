@@ -1,43 +1,44 @@
-﻿using System.Text;
+﻿using System;
+using System.Text;
 using KomaLab.Models.Fits;
-
-// Importante: Usa il modello Core
 
 namespace KomaLab.Services.Fits.Engine;
 
-/// <summary>
-/// Gestisce le regole rigide di formattazione del formato FITS (80 caratteri, padding, ecc.).
-/// </summary>
 public static class FitsFormatting
 {
     private const int CardLength = 80;
-    
-    // FITS Standard: il valore inizia tipicamente alla colonna 11 (indice 10) o 31 (indice 30)
-    // Noi cerchiamo di stare sul sicuro.
 
-    /// <summary>
-    /// Analizza una riga grezza di 80 caratteri (ASCII) e la converte in un oggetto FitsCard strutturato.
-    /// </summary>
     public static FitsCard ParseLine(string line)
     {
-        // Se la riga è troppo corta (file corrotto?), la salviamo come commento grezzo
         if (string.IsNullOrEmpty(line) || line.Length < 8) 
             return new FitsCard { Key = "", OriginalRawString = line, IsCommentStyle = true };
 
-        // 1. Estrazione Chiave (Primi 8 caratteri)
-        string key = line.Substring(0, 8).Trim();
-        string upperKey = key.ToUpper();
+        // 1. Estrazione Chiave Standard (Primi 8 caratteri)
+        string keyChunk = line.Substring(0, 8).Trim();
+        string upperKey = keyChunk.ToUpper();
 
-        // 2. Rilevamento Tipo di Card
-        // Le card di tipo commento (HISTORY, COMMENT, END o vuote) non hanno il segno '='
-        // HIERARCH è un caso speciale che gestiamo come standard per ora.
-        if (upperKey == "HISTORY" || upperKey == "COMMENT" || upperKey == "END" || string.IsNullOrWhiteSpace(key))
+        // 2. GESTIONE SPECIALE: HIERARCH (Chiavi lunghe con spazi)
+        if (upperKey == "HIERARCH")
+        {
+            // Formato: HIERARCH [Spazio] [Chiave Lunga] [=] [Valore]
+            int eqIndexH = line.IndexOf('=');
+            if (eqIndexH > 8) // L'uguale deve essere dopo "HIERARCH"
+            {
+                // La chiave è tutto ciò che sta tra l'inizio e l'uguale
+                string fullKey = line.Substring(0, eqIndexH).Trim();
+                
+                string dataPartH = line.Substring(eqIndexH + 1);
+                return ParseValueAndComment(fullKey, dataPartH, line);
+            }
+        }
+
+        // 3. Rilevamento Tipo Commento
+        if (upperKey == "HISTORY" || upperKey == "COMMENT" || upperKey == "END" || string.IsNullOrWhiteSpace(keyChunk))
         {
             string commentContent = line.Length > 8 ? line.Substring(8).TrimEnd() : "";
-            
             return new FitsCard 
             { 
-                Key = key, 
+                Key = keyChunk, 
                 Value = null, 
                 Comment = commentContent,
                 IsCommentStyle = true,
@@ -45,27 +46,35 @@ public static class FitsFormatting
             };
         }
 
-        // 3. Parsing Card Standard (KEY = VALUE / COMMENT)
+        // 4. Parsing Card Standard (KEY = VALUE / COMMENT)
         int eqIndex = line.IndexOf('=');
 
-        // Se non troviamo l'uguale, trattiamo tutto come un commento (fallback di sicurezza)
+        // Se non troviamo l'uguale (e non è HIERARCH o commento), è una riga corrotta o custom
+        // Trattiamola come commento per non perdere dati.
         if (eqIndex < 0)
         {
              return new FitsCard 
              { 
-                 Key = key, 
+                 Key = keyChunk, 
                  Comment = line.Length > 8 ? line.Substring(8).Trim() : "",
                  IsCommentStyle = true,
                  OriginalRawString = line
              };
         }
-
-        // Separiamo la parte dati (dopo l'=)
-        string dataPart = line.Substring(eqIndex + 1);
         
-        // Dobbiamo separare il VALORE dal COMMENTO.
-        // Il separatore è lo slash '/', ma attenzione: lo slash può essere contenuto tra apici (es. 'm/s').
-        // Quindi dobbiamo cercare il primo slash che è FUORI dalle virgolette.
+        // Verifica di sicurezza: l'uguale per le card standard deve essere entro i primi 8+1 caratteri?
+        // In realtà lo standard dice che l'uguale è al carattere 9 (indice 8), ma molti file non lo rispettano.
+        // Accettiamo l'uguale ovunque, ma la chiave è limitata a 8 caratteri per le card non-Hierarch.
+        // Se eqIndex > 8, tecnicamente è una violazione standard se non è HIERARCH, 
+        // ma noi usiamo keyChunk (primi 8) come chiave.
+        
+        string dataPart = line.Substring(eqIndex + 1);
+        return ParseValueAndComment(keyChunk, dataPart, line);
+    }
+
+    // Helper estratto per evitare duplicazione logica tra Standard e HIERARCH
+    private static FitsCard ParseValueAndComment(string key, string dataPart, string originalLine)
+    {
         int slashIndex = FindCommentSeparator(dataPart);
         
         string valString;
@@ -81,46 +90,56 @@ public static class FitsFormatting
             valString = dataPart.Trim();
         }
 
+        // --- CORREZIONE: Pulizia Apici (Unquote) ---
+        // Se il valore è una stringa FITS (es: 'MyValue'), rimuoviamo gli apici esterni.
+        if (valString.Length >= 2 && valString.StartsWith("'") && valString.EndsWith("'"))
+        {
+            // Rimuove primo e ultimo carattere
+            valString = valString.Substring(1, valString.Length - 2).Trim();
+            
+            // FITS standard dice che due apici consecutivi '' dentro una stringa contano come uno solo '.
+            valString = valString.Replace("''", "'"); 
+        }
+        // --------------------------------------------
+
         return new FitsCard
         {
-            Key = key,
-            Value = valString, // Nota: Manteniamo gli apici qui se presenti. Li puliremo nel FitsHeader.GetStringValue
+            Key = key, 
+            Value = valString, 
             Comment = comment,
             IsCommentStyle = false,
-            OriginalRawString = line
+            OriginalRawString = originalLine
         };
     }
 
-    /// <summary>
-    /// Genera la stringa esatta di 80 caratteri da scrivere nel file.
-    /// Fondamentale per il salvataggio.
-    /// </summary>
     public static string PadTo80(FitsCard card)
     {
         var sb = new StringBuilder(CardLength);
 
-        // 1. Chiave (8 char, allineata a sinistra)
-        sb.Append(card.Key.PadRight(8, ' '));
-
-        if (card.IsCommentStyle)
+        // Se è HIERARCH, la chiave è lunga e contiene già "HIERARCH ..."
+        // Altrimenti è standard (max 8 char)
+        if (card.Key.StartsWith("HIERARCH", StringComparison.OrdinalIgnoreCase))
         {
-            // Caso HISTORY / COMMENT: Scriviamo direttamente il contenuto
-            if (!string.IsNullOrEmpty(card.Comment)) 
-            {
-                sb.Append(card.Comment);
-            }
+            sb.Append(card.Key); // Scriviamo la chiave intera (es: "HIERARCH ESO INS...")
+            sb.Append(" = ");    // Aggiungiamo l'uguale con spazi
         }
         else
         {
-            // Caso Standard: "= VALUE / COMMENT"
-            sb.Append("= ");
+            // Standard: Chiave 8 char + "= "
+            sb.Append(card.Key.PadRight(8, ' '));
+            if (!card.IsCommentStyle) sb.Append("= ");
+        }
 
-            // Gestione Valore
+        if (card.IsCommentStyle)
+        {
+            if (!string.IsNullOrEmpty(card.Comment)) sb.Append(card.Comment);
+        }
+        else
+        {
             string v = card.Value ?? "";
             
-            // Logica di allineamento per estetica (non obbligatoria ma raccomandata)
-            // Se il valore è corto (es. numeri), lo allineiamo a destra per farlo finire circa a colonna 30
-            if (v.Length < 20)
+            // Allineamento (solo per card standard corte, per HIERARCH scriviamo di seguito)
+            if (!card.Key.StartsWith("HIERARCH", StringComparison.OrdinalIgnoreCase) && v.Length < 20)
             {
                 sb.Append(v.PadLeft(20, ' '));
             }
@@ -129,10 +148,9 @@ public static class FitsFormatting
                 sb.Append(v);
             }
 
-            // Aggiunta Commento
             if (!string.IsNullOrWhiteSpace(card.Comment))
             {
-                // Se c'è spazio, aggiungiamo il separatore
+                // Cerchiamo di mettere il commento se c'è spazio
                 if (sb.Length < CardLength - 3) 
                 {
                     sb.Append(" / ");
@@ -141,34 +159,27 @@ public static class FitsFormatting
             }
         }
 
-        // Padding finale obbligatorio a 80 caratteri
+        // Padding
         if (sb.Length < CardLength)
         {
             sb.Append(' ', CardLength - sb.Length);
         }
         else if (sb.Length > CardLength)
         {
-            // Se siamo andati lunghi, tronchiamo brutalmente (FITS non ammette >80)
             return sb.ToString().Substring(0, CardLength);
         }
 
         return sb.ToString();
     }
 
-    /// <summary>
-    /// Trova l'indice del carattere '/' che funge da separatore di commento,
-    /// ignorando gli slash contenuti tra apici singoli ('...').
-    /// </summary>
     private static int FindCommentSeparator(string text)
     {
         bool inQuote = false;
         for (int i = 0; i < text.Length; i++)
         {
-            if (text[i] == '\'') inQuote = !inQuote; // Toggle stato quote
-            
-            // Se troviamo uno slash e NON siamo tra virgolette, è lui!
+            if (text[i] == '\'') inQuote = !inQuote;
             if (text[i] == '/' && !inQuote) return i;
         }
-        return -1; // Nessun commento trovato
+        return -1;
     }
 }

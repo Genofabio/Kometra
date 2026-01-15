@@ -13,6 +13,22 @@ public class FitsHeader
 
     public void AddCard(FitsCard card) => _cards.Add(card);
 
+    /// <summary>
+    /// Verifica se una chiave esiste nell'header (case-insensitive).
+    /// </summary>
+    public bool ContainsKey(string key)
+    {
+        return _cards.Any(c => c.Key.Equals(key, StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>
+    /// Rimuove tutte le occorrenze di una chiave.
+    /// </summary>
+    public void RemoveCard(string key)
+    {
+        _cards.RemoveAll(c => c.Key.Equals(key, StringComparison.OrdinalIgnoreCase));
+    }
+
     public void Add(string key, object value, string? comment = null)
     {
         string valStr = value switch
@@ -33,12 +49,9 @@ public class FitsHeader
 
     // --- HELPERS DI LETTURA ---
 
-    /// <summary>
-    /// Metodo generico per convertire il valore.
-    /// </summary>
     public T? GetValue<T>(string key, T? defaultValue = default) where T : struct
     {
-        var card = _cards.FirstOrDefault(c => c.Key == key);
+        var card = _cards.FirstOrDefault(c => c.Key.Equals(key, StringComparison.OrdinalIgnoreCase));
         if (card == null || string.IsNullOrWhiteSpace(card.Value)) return defaultValue;
 
         try
@@ -51,15 +64,11 @@ public class FitsHeader
         }
     }
 
-    /// <summary>
-    /// Helper specifico per interi (usato dal Reader per NAXIS, BITPIX).
-    /// </summary>
     public int GetIntValue(string key, int defaultValue = 0)
     {
-        var card = _cards.FirstOrDefault(c => c.Key == key);
+        var card = _cards.FirstOrDefault(c => c.Key.Equals(key, StringComparison.OrdinalIgnoreCase));
         if (card == null || string.IsNullOrWhiteSpace(card.Value)) return defaultValue;
 
-        // Parsing robusto (Any permette spazi e segni)
         if (int.TryParse(card.Value, NumberStyles.Any, CultureInfo.InvariantCulture, out int result))
         {
             return result;
@@ -69,20 +78,15 @@ public class FitsHeader
 
     public string GetStringValue(string key)
     {
-        var card = _cards.FirstOrDefault(c => c.Key == key);
+        var card = _cards.FirstOrDefault(c => c.Key.Equals(key, StringComparison.OrdinalIgnoreCase));
         return card?.Value?.Replace("'", "").Trim() ?? string.Empty;
     }
     
-    /// <summary>
-    /// Crea una copia completa dell'header e di tutte le sue card.
-    /// Modificare il clone non influenzerà l'originale.
-    /// </summary>
     public FitsHeader Clone()
     {
         var newHeader = new FitsHeader();
         foreach (var card in _cards)
         {
-            // Fondamentale: chiamiamo Clone() sulla card, non passiamo il riferimento!
             newHeader.AddCard(card.Clone());
         }
         return newHeader;

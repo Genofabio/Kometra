@@ -1,7 +1,6 @@
 ﻿using System.Collections.Generic;
 using System.Threading.Tasks;
-using KomaLab.Models.Fits;
-using KomaLab.ViewModels;
+using KomaLab.Models.Fits; // Per FitsCollection
 using KomaLab.ViewModels.Nodes;
 
 namespace KomaLab.Services.Factories;
@@ -9,22 +8,22 @@ namespace KomaLab.Services.Factories;
 // ---------------------------------------------------------------------------
 // FILE: INodeViewModelFactory.cs
 // DESCRIZIONE:
-// Factory pattern per la creazione asincrona dei nodi (ViewModel).
-// Astrae la complessità di istanziazione (iniezione dipendenze, caricamento dati iniziale)
-// permettendo alla MainView di creare nodi senza conoscere i servizi sottostanti.
+// Factory pattern per la creazione asincrona dei nodi.
+// VERSIONE: Aggiornata per FitsCollection e caricamento Header-Only.
 // ---------------------------------------------------------------------------
 
 public interface INodeViewModelFactory
 {
     /// <summary>
-    /// Crea un nodo immagine singola caricando il file da disco.
+    /// Crea un nodo immagine singola da un percorso file.
+    /// Legge solo l'header per determinare le dimensioni iniziali.
     /// </summary>
     Task<SingleImageNodeViewModel> CreateSingleImageNodeAsync(string path, double x, double y, bool centerOnPosition = false);
     
     /// <summary>
-    /// Crea un nodo immagine singola partendo da dati già in memoria.
+    /// Crea un nodo immagine singola da una collezione esistente (es. output di un altro nodo).
     /// </summary>
-    Task<SingleImageNodeViewModel> CreateSingleImageNodeFromDataAsync(FitsImageData data, string title, double x, double y);
+    Task<SingleImageNodeViewModel> CreateNodeFromCollectionAsync(FitsCollection collection, string title, double x, double y);
     
     /// <summary>
     /// Crea un nodo multi-immagine (stacking/video).

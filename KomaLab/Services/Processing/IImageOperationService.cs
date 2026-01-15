@@ -1,6 +1,5 @@
 ﻿using System.Collections.Generic;
 using System.Threading.Tasks;
-using KomaLab.Models.Fits;
 using KomaLab.Models.Primitives;
 using KomaLab.Models.Processing;
 using OpenCvSharp;
@@ -11,12 +10,8 @@ namespace KomaLab.Services.Processing;
 // FILE: IImageOperationService.cs
 // RUOLO: Manipolatore di Immagini (Low-Level / Write)
 // DESCRIZIONE:
-// Esegue operazioni "distruttive" o trasformative sui dati grezzi.
-// A differenza dell'analisi, questo servizio genera NUOVE immagini o modifica i pixel.
-// Responsabilità:
-// - Generazione di Canvas traslati (Warping geometrico).
-// - Creazione di Crop/Template (estrazione sottomatrici).
-// - Fusione di immagini (Stacking matematico: Somma/Media/Mediana).
+// Esegue operazioni "distruttive" o trasformative sui dati pixel (Matrici).
+// Totalmente disaccoppiato dal formato FITS.
 // ---------------------------------------------------------------------------
 
 public interface IImageOperationService
@@ -33,11 +28,10 @@ public interface IImageOperationService
     // --- Template Matching ---
 
     /// <summary>
-    /// Estrae un crop (template) attorno a una posizione stimata, 
-    /// raffinando il centro usando l'analisi gaussiana.
-    /// Utile per creare il "modello" della cometa da cercare negli altri frame.
+    /// Estrae un crop (template) attorno a una posizione stimata nell'immagine sorgente,
+    /// raffinando il centro usando l'analisi gaussiana locale.
     /// </summary>
-    (Mat Template, Point2D RefinedCenter) ExtractRefinedTemplate(FitsImageData? data, Point2D roughGuess, int radius);
+    (Mat Template, Point2D RefinedCenter) ExtractRefinedTemplate(Mat sourceImage, Point2D roughGuess, int radius);
 
     /// <summary>
     /// Cerca il template all'interno dell'immagine target, limitando la ricerca 
@@ -48,8 +42,8 @@ public interface IImageOperationService
     // --- Stacking ---
 
     /// <summary>
-    /// Esegue lo stacking (integrazione) di una lista di immagini già allineate.
-    /// Supporta Somma, Media e Mediana (con gestione ottimizzata della memoria).
+    /// Esegue lo stacking (integrazione matematica) di una lista di matrici OpenCV.
+    /// Restituisce la matrice risultante (Double).
     /// </summary>
-    Task<FitsImageData> ComputeStackAsync(List<FitsImageData> sources, StackingMode mode);
+    Task<Mat> ComputeStackAsync(List<Mat> sources, StackingMode mode);
 }

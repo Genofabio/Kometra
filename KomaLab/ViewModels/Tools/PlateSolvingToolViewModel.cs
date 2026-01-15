@@ -1,13 +1,14 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Avalonia.Controls;
 using Avalonia.Media;
-using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using KomaLab.Models.Fits;
 using KomaLab.Services.Astrometry;
 using KomaLab.ViewModels.Nodes;
 
@@ -15,25 +16,20 @@ namespace KomaLab.ViewModels.Tools;
 
 // ---------------------------------------------------------------------------
 // FILE: PlateSolvingToolViewModel.cs
-// RUOLO: Orchestratore UI per Risoluzione Astrometrica
+// RUOLO: Orchestratore UI per Risoluzione Astrometrica (Versione RAM-Only)
 // DESCRIZIONE:
 // Gestisce il ciclo di vita della sessione di Plate Solving.
-// 
-// RESPONSABILITÀ:
-// 1. Controllo Flusso: Avvio, cancellazione e finalizzazione del batch.
-// 2. Feedback Visivo: Aggiornamento log, progress bar e stati colore.
-// 3. Thread Safety: Marshalling dei log provenienti dal processo esterno su UI Thread.
-// 4. Decoupling: Non conosce i dettagli dei file FITS, delega tutto al Service.
+// Applica i risultati WCS alla proprietà UnsavedHeader dei riferimenti file.
 // ---------------------------------------------------------------------------
 
 public partial class PlateSolvingToolViewModel : ObservableObject
 {
-    // --- Dipendenze & Stato ---
+    // --- Dipendenze ---
     private readonly ImageNodeViewModel _targetNode;
     private readonly IPlateSolvingService _solverService;
     private CancellationTokenSource? _cts;
 
-    // --- Risorse Statiche (Pennelli) ---
+    // --- Risorse Statiche ---
     private static readonly IBrush SuccessBrush = new SolidColorBrush(Color.Parse("#03A077"));
     private static readonly IBrush ErrorBrush = new SolidColorBrush(Color.Parse("#E6606A"));
     private static readonly IBrush PendingBrush = new SolidColorBrush(Color.Parse("#808080"));
@@ -70,7 +66,7 @@ public partial class PlateSolvingToolViewModel : ObservableObject
     private void InitializeTargetName()
     {
         if (_targetNode is SingleImageNodeViewModel s) TargetFileName = Path.GetFileName(s.ImagePath);
-        else if (_targetNode is MultipleImagesNodeViewModel m) TargetFileName = m.Title;
+        else if (_targetNode is MultipleImagesNodeViewModel m) TargetFileName = m.CurrentImageText;
     }
 
     // --- Comandi ---
@@ -88,6 +84,9 @@ public partial class PlateSolvingToolViewModel : ObservableObject
 
         try 
         {
+            // Otteniamo la collezione completa per applicare i risultati
+            var collection = _targetNode.OutputCollection;
+
             for (int i = 0; i < filesToProcess.Count; i++)
             {
                 if (_cts!.Token.IsCancellationRequested) 
@@ -96,7 +95,9 @@ public partial class PlateSolvingToolViewModel : ObservableObject
                     break; 
                 }
 
-                bool result = await ProcessSingleFileAsync(filesToProcess[i], i, filesToProcess.Count);
+                // Esecuzione del singolo file
+                // Passiamo anche l'indice per recuperare il riferimento corretto dalla collezione
+                bool result = await ProcessSingleFileAsync(filesToProcess[i], i, filesToProcess.Count, collection);
                 if (result) successCount++;
             }
         }
@@ -136,70 +137,79 @@ public partial class PlateSolvingToolViewModel : ObservableObject
         StatusText = "Inizializzazione...";
         ProgressValue = 0;
 
-        var files = new List<string>();
-        if (_targetNode is SingleImageNodeViewModel s) files.Add(s.ImagePath);
-        else if (_targetNode is MultipleImagesNodeViewModel m) files.AddRange(m.ImagePaths);
+        var files = _targetNode.GetManagedFilePaths();
 
         ProgressMax = files.Count;
         
         AppendLog($"--- INIZIO SESSIONE: {DateTime.Now:HH:mm:ss} ---");
-        AppendLog($"Motore: ASTAP");
+        AppendLog($"Motore: ASTAP (Sandbox Mode)");
         AppendLog($"Immagini totali: {files.Count}");
 
         return files;
     }
 
-    private async Task<bool> ProcessSingleFileAsync(string filePath, int index, int total)
+    private async Task<bool> ProcessSingleFileAsync(string filePath, int index, int total, FitsCollection? collection)
     {
         string fileName = Path.GetFileName(filePath);
-        
         StatusText = $"Risoluzione {index + 1}/{total}: {fileName}...";
         ProgressValue = index + 1;
-        
-        AppendLog("");
-        AppendLog($"[{index + 1}/{total}] ELABORAZIONE: {fileName}");
-        AppendLog("----------------------------------------");
+
+        var localLog = new StringBuilder();
+        localLog.AppendLine("");
+        localLog.AppendLine($"[{index + 1}/{total}] ELABORAZIONE: {fileName}");
+        localLog.AppendLine("----------------------------------------");
+
+        // 1. DIAGNOSI
+        var metadataStatus = await _solverService.DiagnoseIssuesAsync(filePath);
+        localLog.AppendLine($">> Stato Header: {metadataStatus}");
 
         try
         {
-            // Esecuzione del Service con callback per il log real-time
             var result = await _solverService.SolveAsync(filePath, _cts!.Token, (logLine) => 
             {
-                // Dispatcher necessario per aggiornare la UI da thread esterni (processo ASTAP)
-                Dispatcher.UIThread.Post(() => FullLog += logLine + Environment.NewLine);
+                localLog.AppendLine(logLine);
             });
 
-            if (result.Success)
+            if (result.Success && result.SolvedHeader != null)
             {
-                AppendLog(">> RISULTATO: SUCCESSO");
+                // AGGIORNAMENTO STATO IN MEMORIA
+                if (collection != null && index < collection.Count)
+                {
+                    // Troviamo il riferimento al file nella collezione
+                    var fileRef = collection[index];
+                    
+                    // Salviamo l'header risolto come "Modifica non salvata"
+                    fileRef.UnsavedHeader = result.SolvedHeader;
+                    
+                    localLog.AppendLine(">> RISULTATO: SUCCESSO (WCS applicato in memoria)");
+                }
+                else
+                {
+                    localLog.AppendLine(">> RISULTATO: SUCCESSO (ma riferimento file perso)");
+                }
+            
+                AppendLog(localLog.ToString());
                 return true;
             }
             else
             {
-                AppendLog(">> RISULTATO: FALLITO");
-                
-                if (!_cts.Token.IsCancellationRequested)
-                {
-                    // Diagnostica: Chiediamo al servizio perché il file non è stato risolto
-                    // (Logica spostata dal ViewModel al Service)
-                    var diagnosis = await _solverService.DiagnoseIssuesAsync(filePath);
-                    AppendLog(diagnosis);
-                }
+                localLog.AppendLine(">> RISULTATO: FALLITO");
+                if (!result.FullLog.Contains("Exception") && !_cts!.Token.IsCancellationRequested)
+                    localLog.AppendLine(">> Nota: Immagine non risolta (stelle insufficienti o parametri errati).");
+
+                AppendLog(localLog.ToString());
                 return false;
             }
         }
-        catch (OperationCanceledException)
-        {
-            return false;
-        }
         catch (Exception ex)
         {
-            AppendLog($">> ERRORE DURANTE L'ESECUZIONE: {ex.Message}");
+            localLog.AppendLine($">> ERRORE SISTEMA: {ex.Message}");
+            AppendLog(localLog.ToString());
             return false;
         }
     }
 
-    private async Task FinalizeSessionAsync(int successCount, int totalCount, bool wasCancelled)
+    private Task FinalizeSessionAsync(int successCount, int totalCount, bool wasCancelled)
     {
         IsBusy = false;
         _cts?.Dispose();
@@ -215,24 +225,21 @@ public partial class PlateSolvingToolViewModel : ObservableObject
         {
             IsFinished = true;
             UpdateFinalStatus(successCount, totalCount);
-        }
-
-        // Se almeno un'immagine è stata risolta, aggiorniamo il nodo (WCS è stato scritto su disco)
-        if (successCount > 0)
-        {
-            AppendLog("\n--- Aggiornamento Metadati Nodo ---");
-            try
+            
+            if (successCount > 0)
             {
-                await _targetNode.RefreshDataFromDiskAsync();
-                AppendLog("Metadati sincronizzati con successo.");
-            }
-            catch (Exception ex)
-            {
-                AppendLog($"Errore durante il refresh del nodo: {ex.Message}");
+                AppendLog("\n--- OPERAZIONE COMPLETATA ---");
+                AppendLog("Le coordinate celesti (WCS) sono ora attive in memoria.");
+                // Nota per l'utente: le modifiche sono nell'UnsavedHeader
+                AppendLog("ATTENZIONE: Le modifiche sono temporanee. Usa 'Salva' sul nodo per renderle permanenti.");
             }
         }
         
+        // Notifica il nodo che i dati sono cambiati (opzionale, per refresh UI immediato)
+        // Ma siccome il WCS non cambia l'immagine visibile, non serve ricaricare i pixel.
+        
         AppendLog($"\n--- FINE SESSIONE: {DateTime.Now:HH:mm:ss} ---");
+        return Task.CompletedTask;
     }
 
     private void UpdateFinalStatus(int success, int total)

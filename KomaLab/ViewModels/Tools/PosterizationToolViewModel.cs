@@ -23,7 +23,7 @@ namespace KomaLab.ViewModels.Tools;
 // ---------------------------------------------------------------------------
 // FILE: PosterizationToolViewModel.cs
 // RUOLO: ViewModel Tool Interattivo
-// VERSIONE: Ottimizzata (Double Buffering + DI Fix)
+// VERSIONE: Aggiornata per Architettura No-FitsImageData
 // ---------------------------------------------------------------------------
 
 public partial class PosterizationToolViewModel : ObservableObject, IDisposable
@@ -31,7 +31,7 @@ public partial class PosterizationToolViewModel : ObservableObject, IDisposable
     // --- Dipendenze ---
     private readonly IFitsIoService _ioService;
     private readonly IPosterizationService _postService;
-    private readonly IFitsImageDataConverter _converter;
+    private readonly IFitsOpenCvConverter _converter;
     private readonly IImageAnalysisService _analysis;
 
     // --- Stato Interno ---
@@ -41,7 +41,7 @@ public partial class PosterizationToolViewModel : ObservableObject, IDisposable
     private double _lastAutoWhite;
     private bool _hasLoadedFirstImage = false;
     
-    // BACK BUFFER per riciclo memoria (come FitsRenderer)
+    // BACK BUFFER per riciclo memoria (ottimizzazione rendering)
     private WriteableBitmap? _backBuffer;
     private CancellationTokenSource? _previewCts;
 
@@ -87,7 +87,7 @@ public partial class PosterizationToolViewModel : ObservableObject, IDisposable
         List<string> paths,
         IFitsIoService ioService,
         IPosterizationService postService,
-        IFitsImageDataConverter converter,
+        IFitsOpenCvConverter converter,
         IImageAnalysisService analysis,
         VisualizationMode initialMode)
     {
@@ -103,7 +103,7 @@ public partial class PosterizationToolViewModel : ObservableObject, IDisposable
             _ = LoadImageAtIndexAsync(0);
     }
 
-    // --- Logica Caricamento ---
+    // --- Logica Caricamento (AGGIORNATA) ---
 
     private async Task LoadImageAtIndexAsync(int index)
     {
@@ -119,22 +119,32 @@ public partial class PosterizationToolViewModel : ObservableObject, IDisposable
                 _sourceMat = null;
             }
 
-            var data = await _ioService.LoadAsync(_sourcePaths[index]);
-            if (data != null)
-            {
-                _sourceMat = _converter.RawToMat(data);
+            string path = _sourcePaths[index];
 
-                // Calcolo min/max per gli slider
+            // 1. Caricamento Separato (Header + Pixel)
+            var header = await _ioService.ReadHeaderAsync(path);
+            var pixels = await _ioService.ReadPixelDataAsync(path);
+
+            if (header != null && pixels != null)
+            {
+                // 2. Estrazione parametri scala
+                double bScale = header.GetValue<double>("BSCALE") ?? 1.0;
+                double bZero = header.GetValue<double>("BZERO") ?? 0.0;
+
+                // 3. Conversione in Matrice
+                _sourceMat = _converter.RawToMat(pixels, bScale, bZero);
+
+                // 4. Analisi Statistica per Slider
                 Cv2.MinMaxLoc(_sourceMat, out double minVal, out double maxVal);
                 SliderMin = minVal;
                 SliderMax = maxVal;
 
-                // Calcolo AutoStretch usando il metodo corretto (no tuple deconstruction implicita)
+                // 5. AutoStretch
                 var profile = await Task.Run(() => _analysis.CalculateAutoStretchProfile(_sourceMat));
                 double currentAutoBlack = profile.BlackAdu;
                 double currentAutoWhite = profile.WhiteAdu;
 
-                // Logica Adattiva Intelligente
+                // 6. Logica Adattiva Intelligente (Preserva decisioni utente)
                 if (!_hasLoadedFirstImage)
                 {
                     BlackPoint = currentAutoBlack;
@@ -145,7 +155,7 @@ public partial class PosterizationToolViewModel : ObservableObject, IDisposable
                 {
                     if (AutoAdaptThresholds)
                     {
-                        // Mantiene la "distanza relativa" decisa dall'utente rispetto all'auto-stretch
+                        // Mantiene l'offset relativo impostato dall'utente
                         double userOffsetBlack = BlackPoint - _lastAutoBlack;
                         double userOffsetWhite = WhitePoint - _lastAutoWhite;
                         BlackPoint = Math.Clamp(currentAutoBlack + userOffsetBlack, SliderMin, SliderMax);
@@ -153,9 +163,11 @@ public partial class PosterizationToolViewModel : ObservableObject, IDisposable
                     }
                     else
                     {
-                        // Clamp dei valori vecchi, se diventano invalidi resetta
-                        BlackPoint = Math.Clamp((double)BlackPoint, SliderMin, SliderMax);
-                        WhitePoint = Math.Clamp((double)WhitePoint, SliderMin, SliderMax);
+                        // Clamp base
+                        BlackPoint = Math.Clamp(BlackPoint, SliderMin, SliderMax);
+                        WhitePoint = Math.Clamp(WhitePoint, SliderMin, SliderMax);
+                        
+                        // Reset se valori incoerenti
                         if (WhitePoint <= BlackPoint + 1)
                         {
                             BlackPoint = currentAutoBlack;
@@ -167,14 +179,19 @@ public partial class PosterizationToolViewModel : ObservableObject, IDisposable
                 _lastAutoBlack = currentAutoBlack;
                 _lastAutoWhite = currentAutoWhite;
 
-                if (Viewport.ImageSize.Width != data.Width || Viewport.ImageSize.Height != data.Height)
+                // Aggiornamento Viewport se dimensioni cambiate
+                if (Viewport.ImageSize.Width != _sourceMat.Width || Viewport.ImageSize.Height != _sourceMat.Height)
                 {
-                    Viewport.ImageSize = new Size(data.Width, data.Height);
+                    Viewport.ImageSize = new Size(_sourceMat.Width, _sourceMat.Height);
                     Viewport.ResetView();
                 }
 
                 TriggerPreviewUpdate();
                 StatusText = "Pronto";
+            }
+            else
+            {
+                StatusText = "Errore: Impossibile leggere il file FITS.";
             }
         }
         catch (Exception ex)
@@ -273,12 +290,12 @@ public partial class PosterizationToolViewModel : ObservableObject, IDisposable
             {
                 token.ThrowIfCancellationRequested();
                 using var locked = targetBmp.Lock();
+                
+                // Creiamo un Mat Wrapper attorno al buffer della bitmap (Zero Copy scrittura)
                 using var dstMat = Mat.FromPixelData(
                     _sourceMat.Height, _sourceMat.Width, MatType.CV_8UC1, locked.Address, locked.RowBytes);
                 
-                // CORREZIONE: Usa il Service (non statico)
-                // Nota: Assicurati che _postService esponga un metodo 'ComputePosterization' 
-                // che accetta le matrici. Se è solo statico, crea un wrapper nell'interfaccia.
+                // Chiamata al servizio
                 _postService.ComputePosterizationOnMat(_sourceMat, dstMat, Levels, SelectedMode, BlackPoint, WhitePoint);
             }, token);
 
@@ -303,7 +320,7 @@ public partial class PosterizationToolViewModel : ObservableObject, IDisposable
         var old = PreviewBitmap as WriteableBitmap;
         PreviewBitmap = newBmp;
         
-        // Riciclo
+        // Riciclo buffer vecchio
         if (old != null)
         {
             if (_backBuffer == null) _backBuffer = old;
@@ -344,6 +361,7 @@ public partial class PosterizationToolViewModel : ObservableObject, IDisposable
             double offsetBlack = AutoAdaptThresholds ? (BlackPoint - _lastAutoBlack) : 0;
             double offsetWhite = AutoAdaptThresholds ? (WhitePoint - _lastAutoWhite) : 0;
 
+            // Delega al servizio (già aggiornato per gestire I/O internamente)
             if (AutoAdaptThresholds)
             {
                 ResultPaths = await _postService.PosterizeBatchWithOffsetsAsync(
@@ -356,6 +374,7 @@ public partial class PosterizationToolViewModel : ObservableObject, IDisposable
             }
             else
             {
+                // Fallback loop manuale (se necessario)
                 var tasks = new List<Task<string>>();
                 foreach (var path in _sourcePaths)
                 {
@@ -402,7 +421,6 @@ public partial class PosterizationToolViewModel : ObservableObject, IDisposable
         _previewCts?.Cancel();
         _sourceMat?.Dispose(); 
         
-        // Pulisci risorse grafiche
         (PreviewBitmap as IDisposable)?.Dispose();
         _backBuffer?.Dispose();
         

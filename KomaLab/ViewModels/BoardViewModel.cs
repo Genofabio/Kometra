@@ -18,6 +18,9 @@ using KomaLab.Services.Processing;
 using KomaLab.Services.UI;
 using KomaLab.Services.Undo;
 using KomaLab.ViewModels.Nodes; 
+using OpenCvSharp;
+using Point = Avalonia.Point;
+using Rect = Avalonia.Rect; // Necessario per Mat
 
 namespace KomaLab.ViewModels;
 
@@ -30,6 +33,7 @@ public partial class BoardViewModel : ObservableObject
     private readonly IFitsIoService _ioService;          
     private readonly IFitsMetadataService _metadataService; 
     private readonly IImageOperationService _opsService;
+    private readonly IFitsOpenCvConverter _converter; // <--- NUOVA DIPENDENZA FONDAMENTALE
     private readonly IUndoService _undoService;
     private readonly IMediaExportService _mediaService; 
 
@@ -71,8 +75,9 @@ public partial class BoardViewModel : ObservableObject
         IFitsIoService ioService,           
         IFitsMetadataService metadataService, 
         IImageOperationService opsService,
+        IFitsOpenCvConverter converter, // <--- Iniettato qui
         IUndoService undoService,
-        IMediaExportService mediaService) // Iniettato correttamente
+        IMediaExportService mediaService)
     {
         _nodeFactory = nodeFactory ?? throw new ArgumentNullException(nameof(nodeFactory));
         _dialogService = dialogService ?? throw new ArgumentNullException(nameof(dialogService));
@@ -80,6 +85,7 @@ public partial class BoardViewModel : ObservableObject
         _ioService = ioService ?? throw new ArgumentNullException(nameof(ioService));
         _metadataService = metadataService ?? throw new ArgumentNullException(nameof(metadataService));
         _opsService = opsService ?? throw new ArgumentNullException(nameof(opsService));
+        _converter = converter ?? throw new ArgumentNullException(nameof(converter));
         _undoService = undoService ?? throw new ArgumentNullException(nameof(undoService));
         _mediaService = mediaService ?? throw new ArgumentNullException(nameof(mediaService));
     }
@@ -92,9 +98,7 @@ public partial class BoardViewModel : ObservableObject
         var imagePaths = await _dialogService.ShowOpenFitsFileDialogAsync();
         if (imagePaths == null || !imagePaths.Any()) return;
 
-        // Utilizzo del BatchService per la preparazione (ordinamento cronologico)
-        var preparedPaths = await _ioService.PrepareBatchAsync(imagePaths);
-
+        var preparedPaths = await _ioService.BatchSortByDateAsync(imagePaths);
         Point center = GetCenterOfView();
 
         if (preparedPaths.Count == 1)
@@ -275,16 +279,16 @@ public partial class BoardViewModel : ObservableObject
     [RelayCommand(CanExecute = nameof(CanEditHeader))]
     private async Task EditSelectedNodeHeader()
     {
-        if (SelectedNode is ImageNodeViewModel imgNode)
+        if (SelectedNode is ImageNodeViewModel imgNode && imgNode.ActiveFile != null)
         {
             var updatedHeader = await _windowService.ShowHeaderEditorAsync(imgNode);
-            if (updatedHeader != null && imgNode.ActiveRenderer != null)
+            if (updatedHeader != null)
             {
-                imgNode.ActiveRenderer.Data.FitsHeader = updatedHeader;
+                imgNode.ActiveFile.UnsavedHeader = updatedHeader;
             }
         }
     }
-    private bool CanEditHeader() => SelectedNode is ImageNodeViewModel || (SelectedNode is MultipleImagesNodeViewModel m && m.ImagePaths.Count > 0);
+    private bool CanEditHeader() => SelectedNode is ImageNodeViewModel node && node.ActiveFile != null;
     
     // --- PLATE SOLVING ---
     [RelayCommand(CanExecute = nameof(CanShowPlateSolving))]
@@ -317,7 +321,8 @@ public partial class BoardViewModel : ObservableObject
         if (SelectedNode is not ImageNodeViewModel imgNode) return;
         try
         {
-            var inputPaths = await imgNode.PrepareInputPathsAsync(_ioService);
+            // FIX: Use GetManagedFilePaths
+            var inputPaths = imgNode.GetManagedFilePaths();
             if (inputPaths.Count == 0) return;
 
             var newPaths = await _windowService.ShowPosterizationWindowAsync(inputPaths, imgNode.VisualizationMode);
@@ -337,7 +342,8 @@ public partial class BoardViewModel : ObservableObject
         if (SelectedNode is not ImageNodeViewModel imgNode) return;
         try
         {
-            var inputPaths = await imgNode.PrepareInputPathsAsync(_ioService);
+            // FIX: Use GetManagedFilePaths
+            var inputPaths = imgNode.GetManagedFilePaths();
             if (inputPaths.Count == 0) return;
 
             var newPaths = await _windowService.ShowAlignmentWindowAsync(inputPaths, imgNode.VisualizationMode);
@@ -350,51 +356,86 @@ public partial class BoardViewModel : ObservableObject
     }
     private bool CanShowAlignmentWindow() => SelectedNode is ImageNodeViewModel;
 
-    // --- STACKING ---
+    // --- STACKING (CORRETTO) ---
     [RelayCommand(CanExecute = nameof(CanStackImages))]
     private async Task StackImages(StackingMode mode)
     {
         if (SelectedNode is not MultipleImagesNodeViewModel multiNode) return;
 
+        // Lista di matrici OpenCV da disporre
+        var matsToDispose = new List<Mat>();
+
         try
         {
-            // Validazione compatibilità batch prima dello stacking
-            var (isCompatible, error) = await _ioService.ValidateCompatibilityAsync(multiNode.ImagePaths);
+            var (isCompatible, error) = await _ioService.BatchValidateAsync(multiNode.ImagePaths);
             if (!isCompatible)
             {
                 Debug.WriteLine($"Stacking abortito: {error}");
                 return;
             }
 
-            var rawDataList = await multiNode.GetCurrentDataAsync();
-            var sourceImages = rawDataList.Where(d => d != null).Cast<FitsImageData>().ToList();
-            if (sourceImages.Count < 2) return;
-
-            var resultData = await _opsService.ComputeStackAsync(sourceImages, mode);
+            // 1. Caricamento e Conversione in Mats (OpenCV)
+            // L'OpsService vuole List<Mat>, non Array. Dobbiamo convertire.
+            foreach(var path in multiNode.ImagePaths)
+            {
+                var h = await _ioService.ReadHeaderAsync(path);
+                var p = await _ioService.ReadPixelDataAsync(path);
+                
+                if (h != null && p != null)
+                {
+                    double bScale = h.GetValue<double>("BSCALE") ?? 1.0;
+                    double bZero = h.GetValue<double>("BZERO") ?? 0.0;
+                    
+                    var mat = _converter.RawToMat(p, bScale, bZero);
+                    matsToDispose.Add(mat);
+                }
+            }
             
+            if (matsToDispose.Count < 2) return;
+
+            // 2. Calcolo Stack (Ritorna un Mat)
+            using var resultMat = await _opsService.ComputeStackAsync(matsToDispose, mode);
+            
+            // 3. Riconversione Mat -> Raw Array + Header
+            // Usiamo Double per lo stack per massima precisione
+            var finalPixels = _converter.MatToRaw(resultMat, FitsBitDepth.Double);
+            
+            // Creiamo un nuovo header basato sul primo frame ma con i metadati aggiornati
+            var templateHeader = await _ioService.ReadHeaderAsync(multiNode.ImagePaths[0]);
+            var finalHeader = _metadataService.CreateHeaderFromTemplate(templateHeader!, finalPixels, FitsBitDepth.Double);
+            finalHeader.Add("HISTORY", null, $"Stacked {matsToDispose.Count} frames using {mode}");
+
+            // 4. Salvataggio Temporaneo
+            string tempFileName = $"Stacked_{Guid.NewGuid()}.fits";
+            string tempFolder = Path.Combine(Path.GetTempPath(), "KomaLab", "Stacks");
+            if (!Directory.Exists(tempFolder)) Directory.CreateDirectory(tempFolder);
+            string tempPath = Path.Combine(tempFolder, tempFileName);
+
+            await _ioService.WriteFileAsync(tempPath, finalPixels, finalHeader);
+
+            // 5. Creazione Nodo
             double gap = 300;
             double newX = multiNode.X + multiNode.EstimatedTotalSize.Width + gap;
             double newY = multiNode.Y;
             
             string currentTitle = multiNode.Title;
             string cleanTitle = Regex.Replace(currentTitle, @"\s*\(\d+\s*immagini\)", "", RegexOptions.IgnoreCase);
-            string modeString = mode switch {
-                StackingMode.Average => "Media",
-                StackingMode.Median => "Mediana",
-                StackingMode.Sum => "Somma",
-                _ => mode.ToString()
-            };
+            string modeString = mode.ToString();
             string newTitle = $"{cleanTitle.Trim()} ({modeString})";
 
-            BaseNodeViewModel newNode = await _nodeFactory.CreateSingleImageNodeFromDataAsync(
-                resultData, newTitle, newX, newY
+            var collection = new FitsCollection(new[] { tempPath });
+            
+            BaseNodeViewModel newNode = await _nodeFactory.CreateNodeFromCollectionAsync(
+                collection, newTitle, newX, newY
             );
 
             if (newNode is ImageNodeViewModel imgNode)
             {
                 imgNode.VisualizationMode = multiNode.VisualizationMode;
+                if (newNode is MultipleImagesNodeViewModel m) m.TemporaryFolderPath = tempFolder;
             }
 
+            // 6. Undo/Redo
             var action = new DelegateAction(
                 "Stacking Immagini",
                 execute: () =>
@@ -425,7 +466,15 @@ public partial class BoardViewModel : ObservableObject
             _undoService.RecordAction(action);
             SetSelectedNode(newNode);
         }
-        catch (Exception ex) { Debug.WriteLine($"Stacking error: {ex.Message}"); }
+        catch (Exception ex) 
+        { 
+            Debug.WriteLine($"Stacking error: {ex.Message}"); 
+        }
+        finally
+        {
+            // Pulizia Matrici OpenCV
+            foreach (var mat in matsToDispose) mat.Dispose();
+        }
     }
     private bool CanStackImages(StackingMode mode) => SelectedNode is MultipleImagesNodeViewModel;
     
@@ -436,7 +485,7 @@ public partial class BoardViewModel : ObservableObject
         var runningNode = Nodes.OfType<MultipleImagesNodeViewModel>().FirstOrDefault(n => n.IsAnimating);
 
         if (runningNode != null) runningNode.ToggleAnimation(); 
-        else if (SelectedNode is MultipleImagesNodeViewModel selectedMulti && selectedMulti.ImagePaths.Count > 1)
+        else if (SelectedNode is MultipleImagesNodeViewModel selectedMulti && selectedMulti.OutputCollection != null && selectedMulti.OutputCollection.Count > 1)
         {
             selectedMulti.ToggleAnimation();
         }
@@ -447,7 +496,10 @@ public partial class BoardViewModel : ObservableObject
     private bool CanToggleAnimation()
     {
         bool isAnyAnimating = Nodes.OfType<MultipleImagesNodeViewModel>().Any(n => n.IsAnimating);
-        bool isSelectionValid = SelectedNode is MultipleImagesNodeViewModel multi && multi.ImagePaths.Count > 1;
+        // FIX: Controllo null-safety su ImagePaths/OutputCollection
+        bool isSelectionValid = SelectedNode is MultipleImagesNodeViewModel multi 
+                                && multi.ImagePaths != null 
+                                && multi.ImagePaths.Count > 1;
         return isAnyAnimating || isSelectionValid;
     }
 
@@ -496,19 +548,42 @@ public partial class BoardViewModel : ObservableObject
         SetVisualizationModeCommand.NotifyCanExecuteChanged(); 
     }
 
-    // --- SAVE / EXPORT ---
+    // --- SAVE / EXPORT (AGGIORNATO) ---
+    
     [RelayCommand(CanExecute = nameof(CanSaveNode))]
     private async Task SaveSelectedNode()
     {
-        if (SelectedNode is not ImageNodeViewModel imgNode) return;
-        FitsImageData? dataToSave = imgNode.GetActiveImageData();
-        if (dataToSave == null) return;
-
-        string defaultName = $"{imgNode.Title}.fits";
+        if (SelectedNode is not ImageNodeViewModel imgNode || imgNode.ActiveFile == null) return;
+        
+        var fileRef = imgNode.ActiveFile;
+        string defaultName = fileRef.FileName;
+        
         var savePath = await _dialogService.ShowSaveFitsFileDialogAsync(defaultName);
-        if (!string.IsNullOrWhiteSpace(savePath)) await _ioService.SaveAsync(dataToSave, savePath);
+        if (string.IsNullOrWhiteSpace(savePath)) return;
+
+        try
+        {
+            // Se l'header è cambiato in RAM: Leggi pixel originali + Header modificato -> Salva
+            if (fileRef.HasUnsavedChanges)
+            {
+                var pixels = await _ioService.ReadPixelDataAsync(fileRef.FilePath);
+                if (pixels != null)
+                {
+                    await _ioService.WriteFileAsync(savePath, pixels, fileRef.UnsavedHeader!);
+                }
+            }
+            else
+            {
+                // Copia diretta
+                File.Copy(fileRef.FilePath, savePath, overwrite: true);
+            }
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"Error saving node: {ex.Message}");
+        }
     }
-    private bool CanSaveNode() => SelectedNode is ImageNodeViewModel;
+    private bool CanSaveNode() => SelectedNode is ImageNodeViewModel vm && vm.ActiveFile != null;
     
     [RelayCommand(CanExecute = nameof(CanSaveVideo))]
     private async Task SaveVideo()
@@ -524,6 +599,7 @@ public partial class BoardViewModel : ObservableObject
         try
         {
             var contrastProfile = multiNode.ActiveRenderer.CaptureContrastProfile();
+            
             await _mediaService.ExportVideoAsync(
                 multiNode.ImagePaths, 
                 savePath, 
@@ -577,10 +653,14 @@ public partial class BoardViewModel : ObservableObject
         double newY = imgNode.Y;
         string newTitle = $"{imgNode.Title} {titleSuffix}";
 
+        // Creazione Collection dai risultati
+        var collection = new FitsCollection(newPaths);
+        
         BaseNodeViewModel newNode;
-        if (newPaths.Count == 1)
+        
+        if (collection.Count == 1)
         {
-            newNode = await _nodeFactory.CreateSingleImageNodeAsync(newPaths[0], newX, newY, false);
+            newNode = await _nodeFactory.CreateNodeFromCollectionAsync(collection, newTitle, newX, newY);
         }
         else
         {
@@ -589,9 +669,9 @@ public partial class BoardViewModel : ObservableObject
             if (dirPath != null && dirPath.Contains("Komalab", StringComparison.OrdinalIgnoreCase))
                 multiNode.TemporaryFolderPath = dirPath;
             newNode = multiNode;
+            newNode.Title = newTitle;
         }
 
-        newNode.Title = newTitle;
         if (newNode is ImageNodeViewModel resNode) 
             resNode.VisualizationMode = imgNode.VisualizationMode;
 

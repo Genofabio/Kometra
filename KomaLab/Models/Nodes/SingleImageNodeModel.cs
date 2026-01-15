@@ -1,4 +1,6 @@
-﻿namespace KomaLab.Models.Nodes
+﻿using KomaLab.Models.Fits;
+
+namespace KomaLab.Models.Nodes
 {
     // ---------------------------------------------------------------------------
     // FILE: SingleImageNodeModel.cs
@@ -9,9 +11,12 @@
 
     public class SingleImageNodeModel : BaseNodeModel
     {
-        /// <summary>
-        /// Percorso assoluto o relativo (URI) della singola immagine associata al nodo.
-        /// </summary>
         public string ImagePath { get; set; } = string.Empty;
+
+        /// <summary>
+        /// Contiene l'header modificato durante la sessione ma non ancora applicato al file su disco.
+        /// Se null, significa che non ci sono modifiche pendenti.
+        /// </summary>
+        public FitsHeader? TempHeader { get; set; }
     }
 }

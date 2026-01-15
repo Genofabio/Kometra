@@ -11,27 +11,19 @@ namespace KomaLab.Services.Processing;
 // ---------------------------------------------------------------------------
 // FILE: MediaExportService.cs
 // RUOLO: Generatore Output Visuale (Imaging Engine)
-// DESCRIZIONE:
-// Si occupa della trasformazione "distruttiva" dai dati scientifici (Double 64-bit)
-// a formati di visualizzazione "consumer" (Video 8-bit, Buffer UI).
-// 
-// RESPONSABILITÀ:
-// 1. Applicazione Stretch/Contrasto (Linear, Log, Sqrt).
-// 2. Mapping dei livelli ADU (Black/White point) nel range visibile 0-255.
-// 3. Generazione file video (.avi) e rendering su buffer UI.
-// 4. Gestione delle differenze di coordinate (Flip cartesiano vs raster).
+// VERSIONE: Aggiornata per architettura No-FitsImageData
 // ---------------------------------------------------------------------------
 
 public class MediaExportService : IMediaExportService
 {
     private readonly IFitsIoService _ioService;
-    private readonly IFitsImageDataConverter _converter;
-    private readonly IImageAnalysisService _analysis; // NUOVO: Per statistiche Sigma
+    private readonly IFitsOpenCvConverter _converter;
+    private readonly IImageAnalysisService _analysis; 
 
     public MediaExportService(
         IFitsIoService ioService, 
-        IFitsImageDataConverter converter,
-        IImageAnalysisService analysis) // Iniettato
+        IFitsOpenCvConverter converter,
+        IImageAnalysisService analysis) 
     {
         _ioService = ioService ?? throw new ArgumentNullException(nameof(ioService));
         _converter = converter ?? throw new ArgumentNullException(nameof(converter));
@@ -55,11 +47,14 @@ public class MediaExportService : IMediaExportService
             
             try
             {
-                // 1. Inizializzazione VideoWriter
-                var firstInfo = await _ioService.LoadAsync(sourceFiles[0]);
-                if (firstInfo == null) throw new IOException($"Impossibile leggere il primo file: {sourceFiles[0]}");
+                // 1. Inizializzazione VideoWriter (Leggiamo solo l'header del primo file per le dimensioni)
+                var firstHeader = await _ioService.ReadHeaderAsync(sourceFiles[0]);
+                if (firstHeader == null) throw new IOException($"Impossibile leggere header del primo file: {sourceFiles[0]}");
 
-                var size = new Size(firstInfo.Width, firstInfo.Height);
+                int width = firstHeader.GetIntValue("NAXIS1");
+                int height = firstHeader.GetIntValue("NAXIS2");
+                var size = new Size(width, height);
+
                 int fourcc = VideoWriter.FourCC('M', 'J', 'P', 'G'); 
                 
                 writer = new VideoWriter(outputFilePath, fourcc, fps, size, isColor: false);
@@ -72,47 +67,49 @@ public class MediaExportService : IMediaExportService
                 // 2. Loop di elaborazione frame
                 foreach (string path in sourceFiles)
                 {
-                    // A. Caricamento Dati Scientifici
-                    var fitsData = await _ioService.LoadAsync(path);
-                    if (fitsData == null) continue;
-                    
-                    if (fitsData.Width != size.Width || fitsData.Height != size.Height) continue;
+                    // A. Caricamento Separato (Header + Pixel)
+                    var header = await _ioService.ReadHeaderAsync(path);
+                    var rawPixels = await _ioService.ReadPixelDataAsync(path);
 
-                    // B. Conversione in Matrice Matematica
-                    using Mat scientificMat = _converter.RawToMat(fitsData);
+                    if (header == null || rawPixels == null) continue;
                     
-                    Cv2.PatchNaNs(scientificMat);       
-                    Cv2.Flip(scientificMat, scientificMat, FlipMode.X); 
+                    // Verifica dimensioni (tramite array per sicurezza)
+                    if (rawPixels.GetLength(1) != width || rawPixels.GetLength(0) != height) continue;
 
-                    // C. Calcolo Livelli di Contrasto (Stretch)
+                    // B. Estrazione Scaling dall'Header
+                    double bScale = header.GetValue<double>("BSCALE") ?? 1.0;
+                    double bZero = header.GetValue<double>("BZERO") ?? 0.0;
+
+                    // C. Conversione in Matrice Matematica (già flippata correttamente dal loader)
+                    using Mat scientificMat = _converter.RawToMat(rawPixels, bScale, bZero);
+                    
+                    Cv2.PatchNaNs(scientificMat);
+                    
+                    // NOTA: Rimossa Cv2.Flip. FitsIoService fornisce già l'array orientato Top-Left.
+
+                    // D. Calcolo Livelli di Contrasto (Stretch)
                     double black, white;
 
                     if (profile is AbsoluteContrastProfile abs)
                     {
-                        // Copia valori assoluti (ADU fissi per tutto il video)
                         black = abs.BlackAdu;
                         white = abs.WhiteAdu;
                     }
                     else if (profile is SigmaContrastProfile sigmaProf)
                     {
-                        // Adattamento Dinamico (Sigma-based)
-                        // Calcola statistiche per QUESTO frame
                         var (mean, std) = _analysis.ComputeStatistics(scientificMat);
-    
-                        // Applica K-Sigma
                         black = mean + (sigmaProf.KBlack * std);
                         white = mean + (sigmaProf.KWhite * std);
                     }
                     else
                     {
-                        // Fallback
                         black = 0; white = 65535;
                     }
 
-                    // D. Rendering Visuale
+                    // E. Rendering Visuale
                     RenderFrameTo8Bit(scientificMat, frame8Bit, black, white, mode);
 
-                    // E. Scrittura su disco
+                    // F. Scrittura su disco
                     writer.Write(frame8Bit);
                 }
             }

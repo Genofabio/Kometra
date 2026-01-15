@@ -17,6 +17,13 @@ public interface IFitsMetadataService
     /// </summary>
     void TransferMetadata(FitsHeader source, FitsHeader destination);
     
+    /// <summary>
+    /// Crea un nuovo Header combinando:
+    /// 1. I dati tecnici (Dimensioni, BitDepth) presi dall'array di pixel.
+    /// 2. I metadati descrittivi (Osservatore, Telescopio) copiati dal template.
+    /// </summary>
+    FitsHeader CreateHeaderFromTemplate(FitsHeader template, Array newPixels, FitsBitDepth depth);
+    
     // --- Metodi di Estrazione Dati (Delegati ai Parser) ---
 
     /// <summary>
@@ -33,6 +40,10 @@ public interface IFitsMetadataService
     /// Tenta di estrarre la data di osservazione standardizzando i vari formati FITS.
     /// </summary>
     DateTime? GetObservationDate(FitsHeader header);
+    
+    double? GetFocalLength(FitsHeader header);
+    
+    double? GetPixelSize(FitsHeader header);
     
     // --- Metodi per l'Editor ---
 

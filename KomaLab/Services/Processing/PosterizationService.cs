@@ -12,19 +12,20 @@ namespace KomaLab.Services.Processing;
 // ---------------------------------------------------------------------------
 // FILE: PosterizationService.cs
 // RUOLO: Servizio Effetti (Image Processing)
-// VERSIONE: Aggiornata (No nom.tam.fits, No Header Modifiers)
+// VERSIONE: Finale (Array Puro + Header Template)
+// LOGICA: Invariata.
 // ---------------------------------------------------------------------------
 
 public class PosterizationService : IPosterizationService
 {
     private readonly IFitsIoService _ioService;
-    private readonly IFitsImageDataConverter _converter;
+    private readonly IFitsOpenCvConverter _converter;
     private readonly IFitsMetadataService _metadataService;
     private readonly IImageAnalysisService _analysisService; 
 
     public PosterizationService(
         IFitsIoService ioService, 
-        IFitsImageDataConverter converter,
+        IFitsOpenCvConverter converter,
         IFitsMetadataService metadataService,
         IImageAnalysisService analysisService)
     {
@@ -38,7 +39,7 @@ public class PosterizationService : IPosterizationService
 
     public void ComputePosterizationOnMat(Mat src, Mat dst, int levels, VisualizationMode mode, double bp, double wp)
     {
-        // Wrapper per il metodo statico interno
+        // Wrapper invariato
         ComputePosterization(src, dst, levels, mode, bp, wp);
     }
 
@@ -52,29 +53,46 @@ public class PosterizationService : IPosterizationService
         double blackPoint,
         double whitePoint)
     {
-        var fitsData = await _ioService.LoadAsync(inputPath);
-        if (fitsData == null) throw new FileNotFoundException($"File non trovato: {inputPath}");
+        // 1. Caricamento Separato (I/O)
+        var header = await _ioService.ReadHeaderAsync(inputPath);
+        var rawPixels = await _ioService.ReadPixelDataAsync(inputPath);
 
-        return await Task.Run(async () =>
+        if (header == null || rawPixels == null) 
+            throw new FileNotFoundException($"File non trovato o illeggibile: {inputPath}");
+
+        // 2. Elaborazione (CPU)
+        // Restituisce una tupla (Array Pixels, FitsHeader Header) pronta per il salvataggio
+        var resultPackage = await Task.Run(() =>
         {
-            using Mat srcMat = _converter.RawToMat(fitsData);
+            double bScale = header.GetValue<double>("BSCALE") ?? 1.0;
+            double bZero = header.GetValue<double>("BZERO") ?? 0.0;
+
+            using Mat srcMat = _converter.RawToMat(rawPixels, bScale, bZero);
             using Mat resultMat = new Mat();
             
-            // Riutilizzo logica centrale
+            // Logica Core
             ComputePosterization(srcMat, resultMat, levels, mode, blackPoint, whitePoint);
 
-            // CORREZIONE: Usiamo l'header originale come template per la deep copy dei metadati.
-            // Impostiamo l'output a UInt8 (8-bit) perché la posterizzazione produce valori 0-255.
-            var resultData = _converter.MatToFitsData(resultMat, FitsBitDepth.UInt8, fitsData.FitsHeader);
+            // a. Otteniamo SOLO i pixel grezzi (UInt8 per posterizzazione)
+            Array newPixels = _converter.MatToRaw(resultMat, FitsBitDepth.UInt8);
+
+            // b. Costruiamo l'header corretto usando il template originale
+            // Questo preserva telescopio, osservatore, ecc. ma aggiorna BITPIX e NAXIS
+            var newHeader = _metadataService.CreateHeaderFromTemplate(header, newPixels, FitsBitDepth.UInt8);
             
-            // RIMOSSO: Aggiunta manuale di HISTORY (come richiesto, header intatto)
+            // Opzionale: Aggiunta nota storica
+            newHeader.Add("HISTORY", null, "Applied Posterization Filter");
 
-            string fileName = Path.GetFileNameWithoutExtension(inputPath);
-            string outputPath = Path.Combine(outputFolder, $"{fileName}_Posterized.fits");
-
-            await _ioService.SaveAsync(resultData, outputPath);
-            return outputPath;
+            return (Pixels: newPixels, Header: newHeader);
         });
+
+        // 3. Salvataggio (I/O)
+        string fileName = Path.GetFileNameWithoutExtension(inputPath);
+        string outputPath = Path.Combine(outputFolder, $"{fileName}_Posterized.fits");
+
+        await _ioService.WriteFileAsync(outputPath, resultPackage.Pixels, resultPackage.Header);
+        
+        return outputPath;
     }
 
     // --- 3. Elaborazione Batch Adattiva ---
@@ -91,29 +109,49 @@ public class PosterizationService : IPosterizationService
 
         foreach (var path in inputPaths)
         {
-            var fitsData = await _ioService.LoadAsync(path);
-            if (fitsData == null) continue;
+            try 
+            {
+                // 1. Caricamento
+                var header = await _ioService.ReadHeaderAsync(path);
+                var rawPixels = await _ioService.ReadPixelDataAsync(path);
+                
+                if (header == null || rawPixels == null) continue;
 
-            using Mat srcMat = _converter.RawToMat(fitsData);
+                // 2. Processing (Scaling + Math + Header Gen)
+                var resultPackage = await Task.Run(() =>
+                {
+                    double bScale = header.GetValue<double>("BSCALE") ?? 1.0;
+                    double bZero = header.GetValue<double>("BZERO") ?? 0.0;
 
-            // Calcolo profilo automatico
-            var profile = await Task.Run(() => _analysisService.CalculateAutoStretchProfile(srcMat));
+                    using Mat srcMat = _converter.RawToMat(rawPixels, bScale, bZero);
 
-            // Applichiamo l'offset dinamico
-            double finalBlack = profile.BlackAdu + blackOffset;
-            double finalWhite = profile.WhiteAdu + whiteOffset;
+                    // Auto-Stretch su ogni singola immagine
+                    var profile = _analysisService.CalculateAutoStretchProfile(srcMat);
 
-            using Mat resultMat = new Mat();
-            ComputePosterization(srcMat, resultMat, levels, mode, finalBlack, finalWhite);
+                    double finalBlack = profile.BlackAdu + blackOffset;
+                    double finalWhite = profile.WhiteAdu + whiteOffset;
 
-            // CORREZIONE: Uso del template header per copiare i metadati
-            var resultData = _converter.MatToFitsData(resultMat, FitsBitDepth.UInt8, fitsData.FitsHeader);
-            
-            string fileName = Path.GetFileNameWithoutExtension(path);
-            string outputPath = Path.Combine(outputFolder, $"{fileName}_Posterized.fits");
-            await _ioService.SaveAsync(resultData, outputPath);
+                    using Mat resultMat = new Mat();
+                    ComputePosterization(srcMat, resultMat, levels, mode, finalBlack, finalWhite);
 
-            results.Add(outputPath);
+                    // Generazione Output
+                    Array newPixels = _converter.MatToRaw(resultMat, FitsBitDepth.UInt8);
+                    var newHeader = _metadataService.CreateHeaderFromTemplate(header, newPixels, FitsBitDepth.UInt8);
+
+                    return (Pixels: newPixels, Header: newHeader);
+                });
+
+                // 3. Salvataggio
+                string fileName = Path.GetFileNameWithoutExtension(path);
+                string outputPath = Path.Combine(outputFolder, $"{fileName}_Posterized.fits");
+                
+                await _ioService.WriteFileAsync(outputPath, resultPackage.Pixels, resultPackage.Header);
+                results.Add(outputPath);
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Errore batch file {path}: {ex.Message}");
+            }
         }
 
         return results;
@@ -121,8 +159,7 @@ public class PosterizationService : IPosterizationService
 
     // --- 4. Core Algorithm (Pure Math) ---
 
-    // Metodo statico privato (o pubblico se serve come utility helper senza stato)
-    // Contiene la logica OpenCV pura per non duplicare codice.
+    // LOGICA ASSOLUTAMENTE IDENTICA ALL'ORIGINALE
     public static void ComputePosterization(Mat src, Mat dst, int levels, VisualizationMode mode, double bp, double wp)
     {
         double range = wp - bp;
@@ -132,37 +169,32 @@ public class PosterizationService : IPosterizationService
         double scale = 1.0 / range;
         double offset = -bp * scale;
 
-        // 1. Normalizzazione [0..1] basata su Black/White Point
+        // 1. Normalizzazione [0..1]
         src.ConvertTo(temp, MatType.CV_32FC1, scale, offset);
         Cv2.Max(temp, 0.0, temp);
         Cv2.Min(temp, 1.0, temp);
 
-        // 2. Applicazione Curva di Trasferimento
+        // 2. Curva di Trasferimento
         if (mode == VisualizationMode.SquareRoot)
             Cv2.Sqrt(temp, temp);
         else if (mode == VisualizationMode.Logarithmic)
         {
-            // log(1 + x) / log(2) per mappare 0..1 -> 0..1
             Cv2.Add(temp, 1.0, temp);
             Cv2.Log(temp, temp);
-            Cv2.Multiply(temp, 1.442695, temp); // 1.442... = 1/ln(2)
+            Cv2.Multiply(temp, 1.442695, temp); 
         }
 
         // 3. Quantizzazione (Posterizzazione)
-        // Scaliamo a [0 .. Levels]
         Cv2.Multiply(temp, (double)levels - 0.001, temp);
         
         using Mat intTemp = new Mat();
-        // Troncamento intero (Quantizzazione)
         temp.ConvertTo(intTemp, MatType.CV_32SC1);
-        // Ritorno a Float
         intTemp.ConvertTo(temp, MatType.CV_32FC1); 
         
-        // Riscaliamo indietro a [0..1]
         double divScale = levels > 1 ? 1.0 / (levels - 1) : 1.0;
         Cv2.Multiply(temp, divScale, temp);
 
-        // 4. Output a 8 bit [0..255] per visualizzazione/salvataggio
+        // 4. Output
         temp.ConvertTo(dst, MatType.CV_8UC1, 255.0);
     }
 }

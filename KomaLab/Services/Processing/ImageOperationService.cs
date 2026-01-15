@@ -2,37 +2,26 @@
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using System.Threading.Tasks;
-using KomaLab.Models.Fits;
 using KomaLab.Models.Primitives;
 using KomaLab.Models.Processing;
-using KomaLab.Services.Fits;
 using OpenCvSharp;
 
 namespace KomaLab.Services.Processing;
 
 // ---------------------------------------------------------------------------
 // FILE: ImageOperationService.cs
-// RUOLO: Operatore Pixel-Level
-// DESCRIZIONE:
-// Esegue manipolazioni "distruttive" o trasformative sui dati pixel:
-// 1. Warping: Rotazione/Traslazione sub-pixel (Lanczos4).
-// 2. Template Matching: Ricerca di pattern per l'allineamento.
-// 3. Stacking: Somma/Media/Mediana di stack di immagini.
+// RUOLO: Operatore Pixel-Level (Pure Math Engine)
+// VERSIONE: Completamente disaccoppiata da FITS. Lavora solo su Mat.
 // ---------------------------------------------------------------------------
 
 public class ImageOperationService : IImageOperationService
 {
-    private readonly IFitsImageDataConverter _converter;
-    private readonly IFitsMetadataService _metadataService; 
     private readonly IImageAnalysisService _analysis;
 
-    public ImageOperationService(
-        IFitsImageDataConverter converter, 
-        IFitsMetadataService metadataService,
-        IImageAnalysisService analysis)
+    // Rimosse dipendenze IoService/Converter/Metadata. 
+    // Questo servizio ora elabora solo Matrici già pronte.
+    public ImageOperationService(IImageAnalysisService analysis)
     {
-        _converter = converter ?? throw new ArgumentNullException(nameof(converter));
-        _metadataService = metadataService ?? throw new ArgumentNullException(nameof(metadataService));
         _analysis = analysis ?? throw new ArgumentNullException(nameof(analysis));
     }
 
@@ -42,21 +31,6 @@ public class ImageOperationService : IImageOperationService
 
     public Mat GetSubPixelCenteredCanvas(Mat source, Point2D originalCenter, Size2D outputSize)
     {
-        // Calcolo matrice di traslazione (Affine 2x3) per centrare l'oggetto nel nuovo canvas
-        double destCenterX = outputSize.Width / 2.0;
-        double destCenterY = outputSize.Height / 2.0;
-        double tx = destCenterX - originalCenter.X;
-        double ty = destCenterY - originalCenter.Y;
-
-        using Mat m = new Mat(2, 3, MatType.CV_64FC1);
-        m.Set(0, 0, 1.0); m.Set(0, 1, 0.0); m.Set(0, 2, tx);
-        m.Set(1, 0, 0.0); m.Set(1, 1, 1.0); m.Set(1, 2, ty);
-
-        var cvSize = new Size((int)outputSize.Width, (int)outputSize.Height);
-        
-        // Inizializza a NaN (o 0 se preferisci bordi neri, ma NaN è meglio per lo stacking successivo)
-        Mat result = new Mat(cvSize, MatType.CV_64FC1, new Scalar(double.NaN));
-        
         // Assicura input in Double
         Mat sourceDouble = source;
         bool disposeSource = false;
@@ -70,7 +44,19 @@ public class ImageOperationService : IImageOperationService
 
         try
         {
-            // Lanczos4: Interpolazione di alta qualità che preserva i dettagli stellari
+            double destCenterX = outputSize.Width / 2.0;
+            double destCenterY = outputSize.Height / 2.0;
+            double tx = destCenterX - originalCenter.X;
+            double ty = destCenterY - originalCenter.Y;
+
+            using Mat m = new Mat(2, 3, MatType.CV_64FC1);
+            m.Set(0, 0, 1.0); m.Set(0, 1, 0.0); m.Set(0, 2, tx);
+            m.Set(1, 0, 0.0); m.Set(1, 1, 1.0); m.Set(1, 2, ty);
+
+            var cvSize = new Size((int)outputSize.Width, (int)outputSize.Height);
+            
+            Mat result = new Mat(cvSize, MatType.CV_64FC1, new Scalar(double.NaN));
+            
             Cv2.WarpAffine(
                 sourceDouble, 
                 result, 
@@ -80,42 +66,43 @@ public class ImageOperationService : IImageOperationService
                 BorderTypes.Constant, 
                 new Scalar(double.NaN)
             );
+
+            return result;
         }
         finally
         {
             if (disposeSource) sourceDouble.Dispose();
         }
-        return result;
     }
 
     // =======================================================================
     // 2. TEMPLATE MATCHING
     // =======================================================================
 
-    public (Mat Template, Point2D RefinedCenter) ExtractRefinedTemplate(FitsImageData? data, Point2D roughGuess, int radius)
+    // NOTA: Qui ricevevamo FitsImageData. Ora riceviamo Mat.
+    // Chi chiama questo metodo deve aver già convertito l'immagine.
+    public (Mat Template, Point2D RefinedCenter) ExtractRefinedTemplate(Mat fullImg, Point2D roughGuess, int radius)
     {
-        if (data == null) return (new Mat(), roughGuess);
+        if (fullImg == null || fullImg.Empty()) return (new Mat(), roughGuess);
 
-        using Mat fullImg = _converter.RawToMat(data);
-        
-        // Estrai crop iniziale grezzo attorno al guess
+        // Estrai crop iniziale
         Rect2D roi = CreateSafeRoi(fullImg, roughGuess, radius);
         if (roi.Width <= 0) throw new InvalidOperationException("ROI non valida (fuori immagine)");
 
         var cvRoi = new Rect((int)roi.X, (int)roi.Y, (int)roi.Width, (int)roi.Height);
         using Mat crop = new Mat(fullImg, cvRoi);
         
-        // Raffina il centro usando l'analisi (Gaussian/Peak) sul crop
+        // Raffina il centro
         Point2D local = _analysis.FindCenterOfLocalRegion(crop);
         Point2D global = new Point2D(local.X + roi.X, local.Y + roi.Y);
 
-        // Estrai il template definitivo centrato sul punto raffinato
+        // Estrai il template definitivo
         Rect2D templRect = CreateSafeRoi(fullImg, global, radius);
         var cvTemplRect = new Rect((int)templRect.X, (int)templRect.Y, (int)templRect.Width, (int)templRect.Height);
         
         using Mat tempRaw = new Mat(fullImg, cvTemplRect);
         
-        // Normalizza per il matching (Float 0..1)
+        // Normalizza
         Mat templateF = NormalizeAndConvertToFloat(tempRaw);
         
         return (templateF, global);
@@ -125,7 +112,6 @@ public class ImageOperationService : IImageOperationService
     {
         if (fullImage.Empty() || templateF.Empty()) return null;
 
-        // Area di ricerca limitata per velocità e robustezza (evita falsi positivi lontani)
         int searchW = searchRadius * 3;
         Rect2D searchRect = CreateSafeRoi(fullImage, expectedCenter, searchW);
         
@@ -136,19 +122,16 @@ public class ImageOperationService : IImageOperationService
         using Mat searchF = NormalizeAndConvertToFloat(searchRegion);
         
         using Mat res = new Mat();
-        // Cross Correlation Normalizzata
         Cv2.MatchTemplate(searchF, templateF, res, TemplateMatchModes.CCoeffNormed);
         Cv2.MinMaxLoc(res, out _, out double maxVal, out _, out Point maxLoc);
 
-        // Soglia di confidenza minima
         if (maxVal < 0.5) return null;
 
-        // Coordinate relative al searchRegion
         double matchCx = maxLoc.X + (templateF.Width / 2.0);
         double matchCy = maxLoc.Y + (templateF.Height / 2.0);
         Point2D roughLocal = new Point2D(matchCx, matchCy);
 
-        // Ultimo step: raffinamento sub-pixel locale sulla regione trovata
+        // Raffinamento sub-pixel
         Rect2D refineRect = CreateSafeRoi(searchRegion, roughLocal, searchRadius);
         Point2D subPixelCenter;
         
@@ -165,37 +148,45 @@ public class ImageOperationService : IImageOperationService
             subPixelCenter = roughLocal;
         }
 
-        // Coordinate globali
         return new Point2D(subPixelCenter.X + searchRect.X, subPixelCenter.Y + searchRect.Y);
     }
 
     // =======================================================================
-    // 3. STACKING
+    // 3. STACKING (PURE MATH)
     // =======================================================================
 
-    public async Task<FitsImageData> ComputeStackAsync(List<FitsImageData> sources, StackingMode mode)
+    /// <summary>
+    /// Esegue lo stacking matematico su una lista di matrici OpenCV.
+    /// Non si preoccupa di caricamento file o header. Restituisce una Matrice Result.
+    /// </summary>
+    public async Task<Mat> ComputeStackAsync(List<Mat> sources, StackingMode mode)
     {
         if (sources == null || sources.Count == 0) throw new ArgumentException("Nessuna immagine da stackare");
         
-        var refData = sources[0];
-        int width = refData.Width;
-        int height = refData.Height;
-        using Mat resultMat = new Mat(height, width, MatType.CV_64FC1, new Scalar(0));
+        int width = sources[0].Width;
+        int height = sources[0].Height;
+        Mat resultMat = new Mat(height, width, MatType.CV_64FC1, new Scalar(0)); // Restituita al chiamante
 
         await Task.Run(() =>
         {
             if (mode == StackingMode.Sum || mode == StackingMode.Average)
             {
                 using Mat validCountMat = new Mat(height, width, MatType.CV_64FC1, new Scalar(0));
-                foreach (var sourceData in sources)
+                using Mat onesMat = new Mat(height, width, MatType.CV_64FC1, new Scalar(1));
+                
+                foreach (var currentMat in sources)
                 {
-                    using Mat currentMat = _converter.RawToMat(sourceData);
+                    // Assumiamo che le matrici in input siano già Double (CV_64FC1).
+                    // Se non lo sono, il chiamante doveva convertirle.
+                    // (Opzionale: aggiungere check/conversione qui se non ci fidiamo).
+                    
                     using Mat nonNanMask = new Mat();
-                    Cv2.Compare(currentMat, currentMat, nonNanMask, CmpType.EQ);
+                    Cv2.Compare(currentMat, currentMat, nonNanMask, CmpType.EQ); // Maschera Not-NaN
+                    
                     Cv2.Add(resultMat, currentMat, resultMat, mask: nonNanMask);
-                    using Mat onesMat = new Mat(height, width, MatType.CV_64FC1, new Scalar(1));
                     Cv2.Add(validCountMat, onesMat, validCountMat, mask: nonNanMask);
                 }
+                
                 if (mode == StackingMode.Average)
                 {
                     using Mat safeDivisor = validCountMat.Clone();
@@ -205,74 +196,66 @@ public class ImageOperationService : IImageOperationService
             }
             else if (mode == StackingMode.Median)
             {
+                // Mediana Pixel-by-Pixel (Parallelizzata a strip)
+                // Nota: sources è List<Mat>, quindi accesso diretto senza RawToMatRect
+                
                 int stripHeight = 50; 
-                for (int yStart = 0; yStart < height; yStart += stripHeight)
+                Parallel.For(0, (height + stripHeight - 1) / stripHeight, stripIndex =>
                 {
+                    int yStart = stripIndex * stripHeight;
                     int currentStripH = Math.Min(stripHeight, height - yStart);
-                    Mat[] stripStack = new Mat[sources.Count];
-                    
-                    try
+                    int bufSize = width * currentStripH;
+
+                    // Buffer locali thread-safe
+                    double[][] srcBuffers = new double[sources.Count][];
+                    double[] destBuffer = new double[bufSize];
+                    double[] pixelSorter = new double[sources.Count]; // Riutilizzato per ogni pixel
+
+                    // Copia dati dalle matrici ai buffer
+                    for (int k = 0; k < sources.Count; k++)
                     {
-                        Parallel.For(0, sources.Count, i => stripStack[i] = _converter.RawToMatRect(sources[i], yStart, currentStripH));
-                        
-                        Parallel.For(0, currentStripH, 
-                            () => new 
-                            { 
-                                SrcRows = new double[sources.Count][], 
-                                DestRow = new double[width],
-                                PixelValues = new double[sources.Count]
-                            },
-                            (yRel, _, buffers) =>
-                            {
-                                for(int k = 0; k < sources.Count; k++)
-                                {
-                                    if(buffers.SrcRows[k] == null || buffers.SrcRows[k].Length < width)
-                                        buffers.SrcRows[k] = new double[width];
-
-                                    IntPtr srcPtr = stripStack[k].Ptr(yRel);
-                                    Marshal.Copy(srcPtr, buffers.SrcRows[k], 0, width);
-                                }
-
-                                for (int x = 0; x < width; x++)
-                                {
-                                    int validCount = 0;
-                                    for (int k = 0; k < sources.Count; k++)
-                                    {
-                                        double val = buffers.SrcRows[k][x];
-                                        if (!double.IsNaN(val)) buffers.PixelValues[validCount++] = val;
-                                    }
-
-                                    if (validCount == 0) {
-                                        buffers.DestRow[x] = double.NaN;
-                                        continue;
-                                    }
-
-                                    Array.Sort(buffers.PixelValues, 0, validCount);
-                                    buffers.DestRow[x] = (validCount % 2 == 0) 
-                                        ? (buffers.PixelValues[validCount / 2 - 1] + buffers.PixelValues[validCount / 2]) / 2.0 
-                                        : buffers.PixelValues[validCount / 2];
-                                }
-
-                                IntPtr destPtr = resultMat.Ptr(yStart + yRel);
-                                Marshal.Copy(buffers.DestRow, 0, destPtr, width);
-                                return buffers;
-                            },
-                            _ => { }
-                        );
+                        srcBuffers[k] = new double[bufSize];
+                        // Copia rettangolo in un colpo solo se contiguo, o riga per riga
+                        // Per semplicità qui copiamo riga per riga
+                        for(int r=0; r<currentStripH; r++)
+                        {
+                            IntPtr srcPtr = sources[k].Ptr(yStart + r);
+                            Marshal.Copy(srcPtr, srcBuffers[k], r * width, width);
+                        }
                     }
-                    finally { foreach (var m in stripStack) m?.Dispose(); }
-                }
+
+                    // Calcolo Mediana
+                    for (int i = 0; i < bufSize; i++)
+                    {
+                        int count = 0;
+                        for (int k = 0; k < sources.Count; k++)
+                        {
+                            double val = srcBuffers[k][i];
+                            if (!double.IsNaN(val)) pixelSorter[count++] = val;
+                        }
+
+                        if (count == 0) {
+                            destBuffer[i] = double.NaN;
+                        } else {
+                            Array.Sort(pixelSorter, 0, count);
+                            destBuffer[i] = (count % 2 == 0) 
+                                ? (pixelSorter[count/2 - 1] + pixelSorter[count/2]) * 0.5 
+                                : pixelSorter[count/2];
+                        }
+                    }
+
+                    // Scrittura risultato nella Matrice finale (Lock necessario se non scriviamo su zone distinte?
+                    // No, stiamo scrivendo su yStart diverse, quindi è safe).
+                    for(int r=0; r<currentStripH; r++)
+                    {
+                        IntPtr destPtr = resultMat.Ptr(yStart + r);
+                        Marshal.Copy(destBuffer, r * width, destPtr, width);
+                    }
+                });
             }
         });
 
-        // MODIFICATO:
-        // Usiamo il nuovo parametro 'templateHeader' per copiare i metadati dall'immagine di riferimento.
-        // Il convertitore gestirà BITPIX e NAXIS, e copierà il resto (WCS, DATE, ecc.) da refData.FitsHeader.
-        var resultData = _converter.MatToFitsData(resultMat, FitsBitDepth.Double, refData.FitsHeader);
-
-        // Non aggiungiamo nulla di nuovo all'header, come richiesto.
-        
-        return resultData;
+        return resultMat;
     }
 
     // --- HELPER PRIVATI ---

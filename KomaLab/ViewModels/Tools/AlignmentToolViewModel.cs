@@ -14,6 +14,7 @@ using KomaLab.Models.Primitives;
 using KomaLab.Models.Processing;
 using KomaLab.Models.Visualization;
 using KomaLab.Services.Astrometry;
+using KomaLab.Services.Factories;
 using KomaLab.Services.Fits;
 using KomaLab.Services.Processing;
 using AlignmentImageViewport = KomaLab.ViewModels.Visualization.AlignmentImageViewport;
@@ -37,10 +38,11 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
     private readonly IFitsIoService _ioService;
     private readonly IFitsMetadataService _metadataService;
     private readonly IAlignmentService _alignmentService;
-    private readonly IFitsImageDataConverter _converter;
+    private readonly IFitsOpenCvConverter _converter;
     private readonly IImageAnalysisService _analysis;
     private readonly IJplHorizonsService _jplService;
-    private readonly IMediaExportService _mediaExport; // <--- NUOVA DIPENDENZA AGGIUNTA
+    private readonly IMediaExportService _mediaExport;
+    private readonly IFitsRendererFactory _rendererFactory;
     
     // --- Dati Interni ---
     private readonly List<string> _sourcePaths; 
@@ -278,7 +280,7 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
     public TaskCompletionSource ImageLoadedTcs { get; } = new();
 
     #endregion
-
+    
     #region Costruttore
 
     public AlignmentToolViewModel(
@@ -286,10 +288,11 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
         IFitsIoService ioService,
         IFitsMetadataService metadataService,
         IAlignmentService alignmentService,
-        IFitsImageDataConverter converter,      
+        IFitsOpenCvConverter converter,      
         IImageAnalysisService analysis,
         IJplHorizonsService jplService,
-        IMediaExportService mediaExport, // <--- PARAMETRO AGGIUNTO
+        IMediaExportService mediaExport,
+        IFitsRendererFactory rendererFactory, // <--- PARAMETRO AGGIUNTO
         VisualizationMode initialMode = VisualizationMode.Linear)
     {
         _ioService = ioService ?? throw new ArgumentNullException(nameof(ioService));
@@ -298,7 +301,8 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
         _converter = converter ?? throw new ArgumentNullException(nameof(converter));
         _analysis = analysis ?? throw new ArgumentNullException(nameof(analysis));
         _jplService = jplService ?? throw new ArgumentNullException(nameof(jplService));
-        _mediaExport = mediaExport ?? throw new ArgumentNullException(nameof(mediaExport)); // <--- ASSEGNAZIONE
+        _mediaExport = mediaExport ?? throw new ArgumentNullException(nameof(mediaExport));
+        _rendererFactory = rendererFactory ?? throw new ArgumentNullException(nameof(rendererFactory)); // <--- ASSEGNAZIONE
         
         _sourcePaths = sourcePaths; 
         _totalStackCount = sourcePaths.Count;
@@ -356,15 +360,17 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
     {
         if (index < 0 || index >= _totalStackCount) return;
         
-        // Se stiamo provando a caricare la stessa immagine già attiva, usciamo
         if (index == _currentStackIndex && ActiveImage != null) return;
 
-        // 1. Carichiamo i NUOVI dati PRIMA di scaricare i vecchi.
-        // Questo è fondamentale per poter calcolare la differenza statistica tra i due frame.
-        FitsImageData? newModel = null;
+        // 1. Caricamento Separato (Header + Pixel)
+        FitsHeader? header = null;
+        Array? pixels = null;
+
         try
         {
-            newModel = await _ioService.LoadAsync(_sourcePaths[index]);
+            // Qui carichiamo l'header dal disco. CE L'ABBIAMO IN MANO ORA.
+            header = await _ioService.ReadHeaderAsync(_sourcePaths[index]);
+            pixels = await _ioService.ReadPixelDataAsync(_sourcePaths[index]);
         }
         catch (Exception ex)
         {
@@ -372,30 +378,36 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
             return;
         }
 
-        if (newModel == null) return;
+        if (header == null || pixels == null) return;
 
-        // 2. Calcolo Logica Scientifica Soglie (Adaptation)
+        // 2. Creazione Renderer
+        // La Factory si occuperà di estrarre BSCALE/BZERO dall'header e passarli al Renderer.
+        // Il Renderer NON manterrà il riferimento all'Header.
+        var newRenderer = _rendererFactory.Create(pixels, header);
+        
+        await newRenderer.InitializeAsync();
+        newRenderer.VisualizationMode = this.VisualizationMode;
+
+        // 3. Calcolo Logica Scientifica Soglie
         ContrastProfile? profileToApply = null;
 
         if (ActiveImage != null && !ActiveImage.IsDisposed)
         {
-            // Usiamo il servizio di analisi per adattare BlackPoint e WhitePoint
-            // dalla statistica della vecchia immagine a quella della nuova.
-            profileToApply = _analysis.CalculateAdaptedProfile(
-                ActiveImage.Data, // Dati Vecchi
-                newModel,         // Dati Nuovi
-                BlackPoint,       // Soglie UI Correnti
-                WhitePoint
+            var oldStats = ActiveImage.GetImageStatistics();
+            var newStats = newRenderer.GetImageStatistics();
+
+            profileToApply = _analysis.CalculateAdaptedProfileFromStats(
+                oldStats,
+                ActiveImage.BlackPoint,
+                ActiveImage.WhitePoint,
+                newStats
             );
 
-            // Solo ORA possiamo scaricare la vecchia immagine per liberare memoria
-            // (Nota: _lastContrastProfile serve solo come backup se ActiveImage fosse null)
             _lastContrastProfile = ActiveImage.CaptureContrastProfile();
-            ActiveImage.UnloadData();
+            ActiveImage.Dispose();
         }
         else
         {
-            // Se non c'è un'immagine attiva (es. primo avvio), usiamo l'ultimo profilo salvato se esiste
             profileToApply = _lastContrastProfile;
         }
 
@@ -407,41 +419,33 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
         }
         UpdateStackCounterText();
 
-        // 3. Creazione del nuovo Renderer
-        // Nota: FitsRenderer calcolerà un AutoStretch di default nel suo InitializeAsync
-        var newRenderer = new FitsRenderer(newModel, _converter, _analysis, _mediaExport);
-        await newRenderer.InitializeAsync();
-        
-        newRenderer.VisualizationMode = this.VisualizationMode;
-
-        // 4. Applicazione del Profilo Adattato
+        // 4. Applicazione Profilo
         if (profileToApply != null) 
         {
-            // Sovrascriviamo l'AutoStretch di default con il nostro profilo adattato
             newRenderer.ApplyContrastProfile(profileToApply);
         }
         else
         {
-            // Se è la primissima immagine e non c'è profilo, resettiamo la vista (Zoom/Pan)
             Viewport.ImageSize = newRenderer.ImageSize;
             Viewport.ResetView();
             OnPropertyChanged(nameof(ZoomStatusText));
         }
 
-        // 5. Swap Finale e Binding
+        // 5. Swap Finale
         ActiveImage = newRenderer;
         
-        // Aggiorniamo le proprietà bindate alla UI (Slider) con i nuovi valori calcolati
         BlackPoint = newRenderer.BlackPoint;
         WhitePoint = newRenderer.WhitePoint;
 
         OnPropertyChanged(nameof(CorrectImageSize));
         ResetThresholdsCommand.NotifyCanExecuteChanged();
         
-        // Logica Header/Target Name (Invariata)
-        if (SelectedTarget == AlignmentTarget.Comet && string.IsNullOrWhiteSpace(TargetName) && ActiveImage?.Data.FitsHeader != null)
+        // --- FIX PULITO ---
+        // Usiamo la variabile locale 'header' che abbiamo caricato al punto 1.
+        // Non tocchiamo il renderer.
+        if (SelectedTarget == AlignmentTarget.Comet && string.IsNullOrWhiteSpace(TargetName) && header != null)
         {
-            string headerObj = ActiveImage.Data.FitsHeader.GetStringValue("OBJECT");
+            string headerObj = header.GetStringValue("OBJECT");
             if (!string.IsNullOrWhiteSpace(headerObj)) 
             {
                 TargetName = headerObj.Replace("'", "").Trim();
@@ -473,7 +477,7 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
 
     #endregion
 
-#region Comandi
+    #region Comandi
 
     // --- Gestione Viewport ---
     [RelayCommand] private void ZoomIn() { Viewport.ZoomIn(); OnPropertyChanged(nameof(ZoomStatusText)); }
@@ -719,12 +723,14 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
                 AstrometryStatusMessage = "Analisi stack...";
                 for (int i = 0; i < _sourcePaths.Count; i++)
                 {
-                    var h = await _ioService.ReadHeaderOnlyAsync(_sourcePaths[i]);
+                    // ADATTAMENTO: ReadHeaderAsync
+                    var h = await _ioService.ReadHeaderAsync(_sourcePaths[i]);
                     if (h == null || _metadataService.GetObservationDate(h) == null) throw new InvalidOperationException($"Frame {i+1}: Metadati temporali mancanti.");
                     var w = _metadataService.ExtractWcs(h);
                     if (w == null || !w.IsValid) throw new InvalidOperationException($"Frame {i+1}: Astrometria mancante.");
                 }
 
+                // ... (resto della logica Comet invariata)
                 AstrometryStatusMessage = "Interrogazione NASA JPL...";
                 if (SelectedMode == AlignmentMode.Guided)
                 {
@@ -770,7 +776,8 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
 
     private async Task<Point?> FetchJplCoordinateForImage(int index)
     {
-        var header = await _ioService.ReadHeaderOnlyAsync(_sourcePaths[index]);
+        // ADATTAMENTO: ReadHeaderAsync
+        var header = await _ioService.ReadHeaderAsync(_sourcePaths[index]);
         if (header == null) return null;
 
         var obsDate = _metadataService.GetObservationDate(header);
@@ -790,13 +797,14 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
 
     private async Task<Point?> FetchSkyCoordinateForImage(int index)
     {
-        var refHeader = await _ioService.ReadHeaderOnlyAsync(_sourcePaths[0]);
+        // ADATTAMENTO: ReadHeaderAsync
+        var refHeader = await _ioService.ReadHeaderAsync(_sourcePaths[0]);
         if (refHeader != null)
         {
             var refWcs = _metadataService.ExtractWcs(refHeader);
             if (!refWcs.IsValid) return null; 
 
-            var header = await _ioService.ReadHeaderOnlyAsync(_sourcePaths[index]);
+            var header = await _ioService.ReadHeaderAsync(_sourcePaths[index]);
             if (header != null)
             {
                 var wcs = _metadataService.ExtractWcs(header);
@@ -820,7 +828,7 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
 
         if (rawPoints.Count > 0 && rawPoints[0].HasValue)
         {
-            var h0 = await _ioService.ReadHeaderOnlyAsync(_sourcePaths[0]);
+            var h0 = await _ioService.ReadHeaderAsync(_sourcePaths[0]);
             if (h0 != null)
             {
                 var offset = new Point(h0.GetIntValue("NAXIS1") / 2.0, h0.GetIntValue("NAXIS2") / 2.0) - rawPoints[0]!.Value;
