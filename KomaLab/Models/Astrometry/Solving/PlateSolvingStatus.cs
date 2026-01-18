@@ -1,4 +1,4 @@
-﻿namespace KomaLab.ViewModels.Enums;
+﻿namespace KomaLab.Models.Astrometry.Solving;
 
 public enum PlateSolvingStatus
 {

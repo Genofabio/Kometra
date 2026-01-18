@@ -3,6 +3,7 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using KomaLab.Models.Fits;
+using KomaLab.Models.Fits.Structure;
 using KomaLab.Services.Fits.Metadata;
 
 namespace KomaLab.Services.Fits.IO;

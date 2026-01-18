@@ -19,8 +19,12 @@ using KomaLab.Services.Processing.Rendering;
 using KomaLab.Services.UI;
 using KomaLab.Services.Undo;
 using KomaLab.ViewModels;
-using KomaLab.ViewModels.Tools;
+using KomaLab.ViewModels.Fits;
 using KomaLab.Views;
+using AlignmentToolViewModel = KomaLab.ViewModels.ImageProcessing.AlignmentToolViewModel;
+using HeaderEditorToolViewModel = KomaLab.ViewModels.Fits.HeaderEditorToolViewModel;
+using PlateSolvingToolViewModel = KomaLab.ViewModels.Astrometry.PlateSolvingToolViewModel;
+using PosterizationToolViewModel = KomaLab.ViewModels.ImageProcessing.PosterizationToolViewModel;
 
 namespace KomaLab;
 
@@ -105,7 +109,7 @@ public class App : Application
         // --- 6. Factories ---
         services.AddSingleton<INodeViewModelFactory, NodeViewModelFactory>();
         services.AddSingleton<IFitsRendererFactory, FitsRendererFactory>();
-        services.AddSingleton<KomaLab.ViewModels.Mappings.FitsHeaderUiMapper>();
+        services.AddSingleton<FitsHeaderUiMapper>();
         
         // --- 7. ViewModels Principali (Singleton) ---
         services.AddSingleton<MainWindowViewModel>();

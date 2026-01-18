@@ -1,8 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Linq;
 
-namespace KomaLab.Models.Fits;
+namespace KomaLab.Models.Fits.Structure;
 
 public class FitsHeader
 {

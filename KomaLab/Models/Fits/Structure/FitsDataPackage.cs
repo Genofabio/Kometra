@@ -1,6 +1,6 @@
 ﻿using System;
 
-namespace KomaLab.Models.Fits;
+namespace KomaLab.Models.Fits.Structure;
 
 /// <summary>
 /// Pacchetto atomico contenente i dati grezzi di un file FITS.

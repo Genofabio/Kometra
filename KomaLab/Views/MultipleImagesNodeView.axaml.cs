@@ -7,7 +7,7 @@ using Avalonia.Media;
 using Avalonia.VisualTree; 
 using KomaLab.ViewModels;
 using KomaLab.ViewModels.Nodes;
-using KomaLab.ViewModels.Components;
+using SequenceNavigator = KomaLab.ViewModels.Shared.SequenceNavigator;
 
 namespace KomaLab.Views;
 

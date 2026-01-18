@@ -11,15 +11,14 @@ using CommunityToolkit.Mvvm.Input;
 using KomaLab.Models.Fits;
 using KomaLab.Models.Primitives;
 using KomaLab.Models.Processing;
-using KomaLab.Models.Visualization;
-using KomaLab.Services.Fits;
 using KomaLab.Services.Factories;
+using KomaLab.Services.Fits;
 using KomaLab.Services.Processing.Coordinators;
-using KomaLab.ViewModels.Components;
-using KomaLab.ViewModels.Items;
 using KomaLab.ViewModels.Visualization;
+using CoordinateEntry = KomaLab.ViewModels.Shared.CoordinateEntry;
+using SequenceNavigator = KomaLab.ViewModels.Shared.SequenceNavigator;
 
-namespace KomaLab.ViewModels.Tools;
+namespace KomaLab.ViewModels.ImageProcessing;
 
 /// <summary>
 /// ViewModel per il Tool di Allineamento.

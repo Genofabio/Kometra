@@ -1,6 +1,6 @@
 ﻿using CommunityToolkit.Mvvm.ComponentModel;
 
-namespace KomaLab.ViewModels.Items;
+namespace KomaLab.ViewModels.Fits;
 
 // ---------------------------------------------------------------------------
 // FILE: FitsHeaderEditorRow.cs

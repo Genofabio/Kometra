@@ -1,4 +1,4 @@
-﻿namespace KomaLab.Models.Astrometry;
+﻿namespace KomaLab.Models.Astrometry.Wcs;
 
 public enum WcsProjectionType
 {

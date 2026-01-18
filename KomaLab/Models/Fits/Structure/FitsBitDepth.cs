@@ -1,4 +1,4 @@
-﻿namespace KomaLab.Models.Fits;
+﻿namespace KomaLab.Models.Fits.Structure;
 
 public enum FitsBitDepth
 {

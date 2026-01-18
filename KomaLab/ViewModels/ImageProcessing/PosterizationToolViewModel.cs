@@ -6,13 +6,13 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using KomaLab.Models.Processing;
 using KomaLab.Models.Visualization;
-using KomaLab.Services.Fits;
 using KomaLab.Services.Factories;
+using KomaLab.Services.Fits;
 using KomaLab.Services.Processing.Coordinators;
-using KomaLab.ViewModels.Components;
 using KomaLab.ViewModels.Visualization;
+using SequenceNavigator = KomaLab.ViewModels.Shared.SequenceNavigator;
 
-namespace KomaLab.ViewModels.Tools;
+namespace KomaLab.ViewModels.ImageProcessing;
 
 /// <summary>
 /// ViewModel per il Tool di Posterizzazione. 

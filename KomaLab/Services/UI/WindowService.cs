@@ -3,16 +3,20 @@ using System.Collections.Generic;
 using System.Threading.Tasks;
 using Avalonia.Controls;
 using KomaLab.Models.Fits;
+using KomaLab.Models.Fits.Structure;
 using KomaLab.Models.Visualization;
 using KomaLab.Services.Fits;
 using KomaLab.Services.Factories;
 using KomaLab.Services.Fits.Metadata;
 using KomaLab.Services.Processing.Coordinators;
+using KomaLab.ViewModels.Fits;
 using KomaLab.ViewModels.Nodes;
-using KomaLab.ViewModels.Tools;
-using KomaLab.ViewModels.Mappings;
 using KomaLab.Views;
 using Microsoft.Extensions.DependencyInjection;
+using AlignmentToolViewModel = KomaLab.ViewModels.ImageProcessing.AlignmentToolViewModel;
+using HeaderEditorToolViewModel = KomaLab.ViewModels.Fits.HeaderEditorToolViewModel;
+using PlateSolvingToolViewModel = KomaLab.ViewModels.Astrometry.PlateSolvingToolViewModel;
+using PosterizationToolViewModel = KomaLab.ViewModels.ImageProcessing.PosterizationToolViewModel;
 
 namespace KomaLab.Services.UI;
 

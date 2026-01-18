@@ -3,11 +3,10 @@
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:avalonia="clr-namespace:Material.Icons.Avalonia;assembly=Material.Icons.Avalonia"
-        xmlns:items="clr-namespace:KomaLab.ViewModels.Items" 
-        xmlns:tools="clr-namespace:KomaLab.ViewModels.Tools"
+        xmlns:fits="clr-namespace:KomaLab.ViewModels.Fits"
         mc:Ignorable="d" d:DesignWidth="1000" d:DesignHeight="650"
         x:Class="KomaLab.Views.HeaderEditorToolView"
-        x:DataType="tools:HeaderEditorToolViewModel"
+        x:DataType="fits:HeaderEditorToolViewModel"
         Title="Editor Metadati FITS"
         Width="1000" Height="608"
         MinWidth="920" MinHeight="600"
@@ -151,12 +150,12 @@
                     <DataGrid.Columns>
                         <DataGridTemplateColumn Header="KEYWORD" Width="1.2*" MinWidth="130">
                             <DataGridTemplateColumn.CellTemplate>
-                                <DataTemplate DataType="items:FitsHeaderEditorRow">
+                                <DataTemplate DataType="fits:FitsHeaderEditorRow">
                                     <TextBlock Text="{Binding Key}" VerticalAlignment="Center" Margin="10,0" FontWeight="SemiBold" FontFamily="Consolas, Monospace"/>
                                 </DataTemplate>
                             </DataGridTemplateColumn.CellTemplate>
                             <DataGridTemplateColumn.CellEditingTemplate>
-                                <DataTemplate DataType="items:FitsHeaderEditorRow">
+                                <DataTemplate DataType="fits:FitsHeaderEditorRow">
                                     <TextBox Text="{Binding Key}" IsEnabled="{Binding !IsReadOnly}" VerticalAlignment="Center"/>
                                 </DataTemplate>
                             </DataGridTemplateColumn.CellEditingTemplate>
@@ -164,12 +163,12 @@
                         
                         <DataGridTemplateColumn Header="VALORE" Width="1.5*">
                             <DataGridTemplateColumn.CellTemplate>
-                                <DataTemplate DataType="items:FitsHeaderEditorRow">
+                                <DataTemplate DataType="fits:FitsHeaderEditorRow">
                                     <TextBlock Text="{Binding Value}" VerticalAlignment="Center" Margin="10,0" TextTrimming="CharacterEllipsis"/>
                                 </DataTemplate>
                             </DataGridTemplateColumn.CellTemplate>
                             <DataGridTemplateColumn.CellEditingTemplate>
-                                <DataTemplate DataType="items:FitsHeaderEditorRow">
+                                <DataTemplate DataType="fits:FitsHeaderEditorRow">
                                     <TextBox Text="{Binding Value}" VerticalAlignment="Center"/>
                                 </DataTemplate>
                             </DataGridTemplateColumn.CellEditingTemplate>
@@ -177,12 +176,12 @@
                         
                         <DataGridTemplateColumn Header="COMMENTO" Width="2*">
                             <DataGridTemplateColumn.CellTemplate>
-                                <DataTemplate DataType="items:FitsHeaderEditorRow">
+                                <DataTemplate DataType="fits:FitsHeaderEditorRow">
                                     <TextBlock Text="{Binding Comment}" VerticalAlignment="Center" Margin="10,0" Opacity="0.6" FontStyle="Italic" TextTrimming="CharacterEllipsis"/>
                                 </DataTemplate>
                             </DataGridTemplateColumn.CellTemplate>
                             <DataGridTemplateColumn.CellEditingTemplate>
-                                <DataTemplate DataType="items:FitsHeaderEditorRow">
+                                <DataTemplate DataType="fits:FitsHeaderEditorRow">
                                     <TextBox Text="{Binding Comment}" VerticalAlignment="Center"/>
                                 </DataTemplate>
                             </DataGridTemplateColumn.CellEditingTemplate>

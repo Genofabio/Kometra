@@ -1,4 +1,4 @@
-﻿namespace KomaLab.Models.Fits;
+﻿namespace KomaLab.Models.Fits.Health;
 
 /// <summary>
 /// Rappresenta il risultato granulare di un controllo (Stato + Messaggio descrittivo).

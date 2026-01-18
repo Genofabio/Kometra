@@ -1,5 +1,6 @@
 ﻿using System;
 using System.IO;
+using KomaLab.Models.Fits.Structure;
 
 namespace KomaLab.Models.Fits;
 

@@ -6,12 +6,11 @@ using System.Threading;
 using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using KomaLab.Models.Astrometry.Solving;
 using KomaLab.Models.Fits;
-using KomaLab.Models.Processing;
 using KomaLab.Services.Processing.Coordinators;
-using KomaLab.ViewModels.Enums;
 
-namespace KomaLab.ViewModels.Tools;
+namespace KomaLab.ViewModels.Astrometry;
 
 /// <summary>
 /// ViewModel per il Tool di Plate Solving.

@@ -1,5 +1,6 @@
 ﻿using System;
 using KomaLab.Models.Fits;
+using KomaLab.Models.Fits.Structure;
 using KomaLab.ViewModels.Visualization;
 
 namespace KomaLab.Services.Factories;

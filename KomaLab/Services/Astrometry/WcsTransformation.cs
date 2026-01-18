@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using KomaLab.Models.Astrometry;
+using KomaLab.Models.Astrometry.Wcs;
 using KomaLab.Models.Primitives;
 
 namespace KomaLab.Services.Astrometry;

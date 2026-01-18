@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Runtime.InteropServices;
 using KomaLab.Models.Fits;
+using KomaLab.Models.Fits.Structure;
 using OpenCvSharp;
 
 namespace KomaLab.Services.Fits.Conversion;

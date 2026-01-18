@@ -1,7 +1,7 @@
 ﻿using Avalonia;
 using CommunityToolkit.Mvvm.ComponentModel;
 
-namespace KomaLab.ViewModels.Items;
+namespace KomaLab.ViewModels.Shared;
 
 // ---------------------------------------------------------------------------
 // FILE: CoordinateEntry.cs

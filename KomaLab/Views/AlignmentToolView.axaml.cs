@@ -6,7 +6,7 @@ using System;
 using System.Diagnostics;
 using System.Threading.Tasks;
 using Avalonia.VisualTree;
-using KomaLab.ViewModels.Tools;
+using AlignmentToolViewModel = KomaLab.ViewModels.ImageProcessing.AlignmentToolViewModel;
 
 namespace KomaLab.Views;
 

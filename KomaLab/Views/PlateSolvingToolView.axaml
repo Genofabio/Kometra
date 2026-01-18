@@ -3,10 +3,10 @@
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:avalonia="clr-namespace:Material.Icons.Avalonia;assembly=Material.Icons.Avalonia"
-        xmlns:tools="clr-namespace:KomaLab.ViewModels.Tools"
+        xmlns:astrometry="clr-namespace:KomaLab.ViewModels.Astrometry"
         mc:Ignorable="d" d:DesignWidth="600" d:DesignHeight="500"
         x:Class="KomaLab.Views.PlateSolvingToolView"
-        x:DataType="tools:PlateSolvingToolViewModel"
+        x:DataType="astrometry:PlateSolvingToolViewModel"
         x:Name="RootWindow"
         
         Title="Risoluzione Astrometrica"

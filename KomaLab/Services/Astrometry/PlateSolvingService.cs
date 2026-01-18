@@ -6,7 +6,9 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using KomaLab.Models.Astrometry;
+using KomaLab.Models.Astrometry.Solving;
 using KomaLab.Models.Fits;
+using KomaLab.Models.Fits.Structure;
 using KomaLab.Services.Fits;
 using KomaLab.Services.Fits.Metadata;
 

@@ -3,6 +3,7 @@ using System.IO;
 using System.Threading.Tasks;
 using KomaLab.Infrastructure;
 using KomaLab.Models.Fits;
+using KomaLab.Models.Fits.Structure;
 
 namespace KomaLab.Services.Fits.IO;
 

@@ -1,5 +1,6 @@
 ﻿using System;
 using KomaLab.Models.Fits;
+using KomaLab.Models.Fits.Structure;
 using KomaLab.Services.Fits.Conversion;
 using KomaLab.Services.Fits.Metadata;
 using KomaLab.Services.Processing.Rendering;

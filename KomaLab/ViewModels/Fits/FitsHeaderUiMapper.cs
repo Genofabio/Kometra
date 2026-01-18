@@ -1,11 +1,9 @@
 ﻿using System;
 using System.Collections.Generic;
-using KomaLab.Models.Fits;
-using KomaLab.Services.Fits;
+using KomaLab.Models.Fits.Structure;
 using KomaLab.Services.Fits.Metadata;
-using KomaLab.ViewModels.Items;
 
-namespace KomaLab.ViewModels.Mappings;
+namespace KomaLab.ViewModels.Fits;
 
 public class FitsHeaderUiMapper
 {

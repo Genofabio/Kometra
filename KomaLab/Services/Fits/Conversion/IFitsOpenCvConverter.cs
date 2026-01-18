@@ -1,5 +1,6 @@
 ﻿using System;
 using KomaLab.Models.Fits;
+using KomaLab.Models.Fits.Structure;
 using OpenCvSharp;
 
 // Non strettamente necessario qui, ma buona pratica nei using

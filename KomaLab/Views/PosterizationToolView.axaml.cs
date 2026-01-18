@@ -5,7 +5,7 @@ using Avalonia.Interactivity;
 using Avalonia.Media;
 using System;
 using System.Globalization;
-using PosterizationToolViewModel = KomaLab.ViewModels.Tools.PosterizationToolViewModel;
+using PosterizationToolViewModel = KomaLab.ViewModels.ImageProcessing.PosterizationToolViewModel;
 
 namespace KomaLab.Views
 {

@@ -7,15 +7,15 @@ using System.Threading;
 using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
-using KomaLab.Models.Fits; 
+using KomaLab.Models.Fits;
+using KomaLab.Models.Fits.Health;
+using KomaLab.Models.Fits.Structure;
 using KomaLab.Services.Fits;
 using KomaLab.Services.Fits.Metadata;
-using KomaLab.ViewModels.Components;
-using KomaLab.ViewModels.Items;
-using KomaLab.ViewModels.Mappings;
 using KomaLab.ViewModels.Nodes;
+using SequenceNavigator = KomaLab.ViewModels.Shared.SequenceNavigator;
 
-namespace KomaLab.ViewModels.Tools;
+namespace KomaLab.ViewModels.Fits;
 
 /// <summary>
 /// Gestisce la visualizzazione e la modifica dell'header FITS.
@@ -210,8 +210,8 @@ public partial class HeaderEditorToolViewModel : ObservableObject, IDisposable
         var results = string.IsNullOrWhiteSpace(query) 
             ? _allItems 
             : _allItems.Where(item => 
-                (item.Key?.Contains(query, StringComparison.OrdinalIgnoreCase) ?? false) ||
-                (item.Value?.Contains(query, StringComparison.OrdinalIgnoreCase) ?? false));
+                (item.Key?.Contains((string)query, StringComparison.OrdinalIgnoreCase) ?? false) ||
+                (item.Value?.Contains((string)query, StringComparison.OrdinalIgnoreCase) ?? false));
 
         FilteredItems = new ObservableCollection<FitsHeaderEditorRow>(results);
     }

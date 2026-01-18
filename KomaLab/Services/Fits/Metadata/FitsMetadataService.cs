@@ -3,7 +3,9 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
 using KomaLab.Models.Astrometry;
+using KomaLab.Models.Astrometry.Wcs;
 using KomaLab.Models.Fits;
+using KomaLab.Models.Fits.Structure;
 using KomaLab.Services.Fits.Parsers;
 
 namespace KomaLab.Services.Fits.Metadata;

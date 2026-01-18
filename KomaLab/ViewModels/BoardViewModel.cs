@@ -17,8 +17,8 @@ using KomaLab.Services.Processing.Coordinators;
 using KomaLab.Services.UI;
 using KomaLab.Services.Undo;
 using KomaLab.ViewModels.Nodes;
-using KomaLab.ViewModels.Components;
 using KomaLab.ViewModels.Visualization;
+using SequenceNavigator = KomaLab.ViewModels.Shared.SequenceNavigator;
 
 namespace KomaLab.ViewModels;
 

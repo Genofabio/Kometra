@@ -6,11 +6,11 @@
         xmlns:converters="clr-namespace:KomaLab.Converters"
         xmlns:av="clr-namespace:Avalonia.Data.Converters;assembly=Avalonia.Base"
         xmlns:processing="clr-namespace:KomaLab.Models.Processing"
-        xmlns:tools="clr-namespace:KomaLab.ViewModels.Tools"
-        xmlns:items="clr-namespace:KomaLab.ViewModels.Items"
+        xmlns:imageProcessing="clr-namespace:KomaLab.ViewModels.ImageProcessing"
+        xmlns:shared="clr-namespace:KomaLab.ViewModels.Shared"
         mc:Ignorable="d" d:DesignWidth="1000" d:DesignHeight="650"
         x:Class="KomaLab.Views.AlignmentToolView"
-        x:DataType="tools:AlignmentToolViewModel"
+        x:DataType="imageProcessing:AlignmentToolViewModel"
         Title="Allineamento"
         Width="1000" Height="650"
         MinHeight="500" MinWidth="710"
@@ -24,7 +24,7 @@
         <converters:EnumToBoolConverter x:Key="EnumToBool" />
         
         <DataTemplate x:Key="CoordinateItemTemplate"
-                      x:DataType="items:CoordinateEntry">
+                      x:DataType="shared:CoordinateEntry">
             <Border Classes="CoordinateEntryRow"
                     Classes.active="{Binding IsActive}">
                 <Grid ColumnDefinitions="40, *, *"> 

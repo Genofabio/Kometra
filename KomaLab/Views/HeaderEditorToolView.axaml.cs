@@ -2,7 +2,7 @@
 using Avalonia.Interactivity;
 using Avalonia.Threading; // Necessario per il Dispatcher
 using System;
-using HeaderEditorToolViewModel = KomaLab.ViewModels.Tools.HeaderEditorToolViewModel;
+using HeaderEditorToolViewModel = KomaLab.ViewModels.Fits.HeaderEditorToolViewModel;
 
 namespace KomaLab.Views;
 

@@ -1,6 +1,6 @@
 ﻿using System.Collections.Generic;
 
-namespace KomaLab.Models.Astrometry;
+namespace KomaLab.Models.Astrometry.Solving;
 
 // Enum che definisce COSA manca, non COME dirlo.
 public enum AstrometryPrerequisite

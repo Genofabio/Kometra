@@ -1,6 +1,4 @@
-﻿using KomaLab.Models.Astrometry;
-
-namespace KomaLab.Models.Processing;
+﻿namespace KomaLab.Models.Astrometry.Solving;
 
 /// <summary>
 /// Oggetto di trasporto per il progresso dell'astrometria.

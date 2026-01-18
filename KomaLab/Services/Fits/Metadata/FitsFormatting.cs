@@ -2,6 +2,7 @@
 using System.Globalization;
 using System.Text;
 using KomaLab.Models.Fits;
+using KomaLab.Models.Fits.Structure;
 
 namespace KomaLab.Services.Fits.Metadata;
 

@@ -1,4 +1,6 @@
 ﻿using KomaLab.Models.Fits;
+using KomaLab.Models.Fits.Health;
+using KomaLab.Models.Fits.Structure;
 
 namespace KomaLab.Services.Fits.Metadata;
 

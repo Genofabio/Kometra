@@ -9,8 +9,8 @@ using KomaLab.Models.Fits;
 using KomaLab.Models.Nodes;
 using KomaLab.Services.Factories;
 using KomaLab.Services.Fits;
-using KomaLab.ViewModels.Components;
 using KomaLab.ViewModels.Visualization;
+using SequenceNavigator = KomaLab.ViewModels.Shared.SequenceNavigator;
 
 namespace KomaLab.ViewModels.Nodes;
 

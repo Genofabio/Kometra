@@ -2,6 +2,7 @@
 using System.Threading;
 using System.Threading.Tasks;
 using KomaLab.Models.Astrometry;
+using KomaLab.Models.Astrometry.Solving;
 using KomaLab.Models.Fits;
 
 namespace KomaLab.Services.Astrometry;

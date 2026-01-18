@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Threading.Tasks;
 using KomaLab.Models.Fits;
+using KomaLab.Models.Fits.Structure;
 
 namespace KomaLab.Services.Fits.IO;
 

@@ -1,7 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 
-namespace KomaLab.Models.Astrometry;
+namespace KomaLab.Models.Astrometry.Wcs;
 
 // ---------------------------------------------------------------------------
 // FILE: WcsData.cs

@@ -1,6 +1,8 @@
 ﻿using System;
 using KomaLab.Models.Astrometry;
+using KomaLab.Models.Astrometry.Wcs;
 using KomaLab.Models.Fits;
+using KomaLab.Models.Fits.Structure;
 using KomaLab.Services.Fits.Metadata;
 
 namespace KomaLab.Services.Fits.Parsers;

@@ -1,7 +1,9 @@
 ﻿using System;
 using System.Collections.Generic;
 using KomaLab.Models.Astrometry;
+using KomaLab.Models.Astrometry.Wcs;
 using KomaLab.Models.Fits;
+using KomaLab.Models.Fits.Structure;
 
 namespace KomaLab.Services.Fits.Metadata;
 

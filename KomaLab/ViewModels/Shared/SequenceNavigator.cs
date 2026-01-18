@@ -4,7 +4,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using KomaLab.ViewModels.Nodes;
 
-namespace KomaLab.ViewModels.Components;
+namespace KomaLab.ViewModels.Shared;
 
 public partial class SequenceNavigator : ObservableObject, IImageNavigator
 {

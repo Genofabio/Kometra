@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using KomaLab.Models.Fits;
+using KomaLab.Models.Fits.Structure;
 using KomaLab.Models.Processing;
 using KomaLab.Services.Fits;
 using KomaLab.Services.Fits.Conversion;

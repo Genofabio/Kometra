@@ -1,4 +1,4 @@
-﻿namespace KomaLab.Models.Fits;
+﻿namespace KomaLab.Models.Fits.Health;
 
 /// <summary>
 /// Rappresenta lo stato di salute di uno specifico gruppo di metadati FITS.

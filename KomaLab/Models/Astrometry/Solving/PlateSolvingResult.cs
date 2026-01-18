@@ -1,6 +1,7 @@
 ﻿using KomaLab.Models.Fits;
+using KomaLab.Models.Fits.Structure;
 
-namespace KomaLab.Models.Astrometry;
+namespace KomaLab.Models.Astrometry.Solving;
 
 // ---------------------------------------------------------------------------
 // FILE: PlateSolvingResult.cs
