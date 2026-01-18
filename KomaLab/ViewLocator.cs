@@ -30,10 +30,6 @@ public class ViewLocator : IDataTemplate
 
     public bool Match(object? data)
     {
-        // MODIFICA QUI:
-        // Prima controllava se era un "ViewModelBase". 
-        // Ora controlliamo se è un oggetto osservabile del Toolkit, 
-        // dato che tutti i tuoi VM ereditano da ObservableObject.
         return data is ObservableObject; 
     }
 }

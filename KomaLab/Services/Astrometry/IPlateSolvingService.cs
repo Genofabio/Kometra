@@ -2,29 +2,25 @@
 using System.Threading;
 using System.Threading.Tasks;
 using KomaLab.Models.Astrometry;
+using KomaLab.Models.Fits;
 
 namespace KomaLab.Services.Astrometry;
-
-// ---------------------------------------------------------------------------
-// FILE: IPlateSolvingService.cs
-// DESCRIZIONE:
-// Interfaccia che definisce il contratto per i servizi di risoluzione astrometrica (Plate Solving).
-// Permette di disaccoppiare la logica di business dall'implementazione specifica (es. ASTAP, local/remote).
-// ---------------------------------------------------------------------------
 
 public interface IPlateSolvingService
 {
     /// <summary>
-    /// Avvia il processo di risoluzione delle coordinate per un'immagine FITS.
+    /// Esegue una diagnosi preventiva sui metadati del file.
+    /// Restituisce un oggetto strutturato, non una stringa.
     /// </summary>
-    /// <param name="fitsFilePath">Percorso completo del file FITS.</param>
-    /// <param name="token">Token per la cancellazione dell'operazione.</param>
-    /// <param name="onLogReceived">Callback opzionale per ricevere i log in tempo reale.</param>
-    /// <returns>Oggetto risultato contenente stato (Success/Fail) e log.</returns>
-    Task<PlateSolvingResult> SolveAsync(
-        string fitsFilePath, 
+    Task<AstrometryDiagnosis> DiagnoseIssuesAsync(string fitsFilePath);
+
+    /// <summary>
+    /// Esegue il Plate Solving.
+    /// In caso di successo, aggiorna automaticamente la proprietà ModifiedHeader di fileRef.
+    /// </summary>
+    /// <param name="liveLog">Interfaccia standard per il report dei progressi testuali.</param>
+    Task<PlateSolvingResult> SolveFileAsync(
+        FitsFileReference fileRef, 
         CancellationToken token = default, 
-        Action<string>? onLogReceived = null);
-    
-    Task<string> DiagnoseIssuesAsync(string fitsFilePath);
+        IProgress<string>? liveLog = null);
 }

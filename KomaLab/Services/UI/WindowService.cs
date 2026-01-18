@@ -4,23 +4,22 @@ using System.Threading.Tasks;
 using Avalonia.Controls;
 using KomaLab.Models.Fits;
 using KomaLab.Models.Visualization;
-using KomaLab.Services.Astrometry;
-using KomaLab.Services.Factories; // <--- NUOVO: Necessario per IFitsRendererFactory
 using KomaLab.Services.Fits;
-using KomaLab.Services.Processing;
+using KomaLab.Services.Factories;
+using KomaLab.Services.Fits.Metadata;
+using KomaLab.Services.Processing.Coordinators;
 using KomaLab.ViewModels.Nodes;
 using KomaLab.ViewModels.Tools;
+using KomaLab.ViewModels.Mappings;
 using KomaLab.Views;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace KomaLab.Services.UI;
 
-// ---------------------------------------------------------------------------
-// FILE: WindowService.cs
-// RUOLO: Orchestratore delle Finestre (UI Coordinator)
-// VERSIONE: Aggiornata per Dependency Injection (Factory in AlignmentTool)
-// ---------------------------------------------------------------------------
-
+/// <summary>
+/// Orchestratore delle Finestre. 
+/// Risolve i Coordinatori e i DataManager per inizializzare i ToolViewModel.
+/// </summary>
 public class WindowService : IWindowService
 {
     private Window? _mainWindow;
@@ -36,38 +35,26 @@ public class WindowService : IWindowService
         _mainWindow = window;
     }
 
-    /// <summary>
-    /// Mostra il tool di allineamento risolvendo tutte le dipendenze scientifiche necessarie.
-    /// </summary>
+    // =======================================================================
+    // 1. TOOL DI ALLINEAMENTO
+    // =======================================================================
+
     public async Task<List<string>?> ShowAlignmentWindowAsync(
         List<string> sourcePaths, 
         VisualizationMode initialMode = VisualizationMode.Linear) 
     {
         if (_mainWindow == null) throw new InvalidOperationException("Finestra principale non registrata.");
 
-        // Risoluzione Dipendenze
-        var ioService = _serviceProvider.GetRequiredService<IFitsIoService>();
-        var metadataService = _serviceProvider.GetRequiredService<IFitsMetadataService>();
-        var alignmentService = _serviceProvider.GetRequiredService<IAlignmentService>();
-        var converter = _serviceProvider.GetRequiredService<IFitsOpenCvConverter>();
-        var analysis = _serviceProvider.GetRequiredService<IImageAnalysisService>();
-        var jplService = _serviceProvider.GetRequiredService<IJplHorizonsService>();
-        var mediaExport = _serviceProvider.GetRequiredService<IMediaExportService>(); 
-        
-        // NUOVO: Factory per creare i Renderer all'interno del tool
+        // Risoluzione Dipendenze per AlignmentToolViewModel
+        var coordinator = _serviceProvider.GetRequiredService<IAlignmentCoordinator>();
+        var dataManager = _serviceProvider.GetRequiredService<IFitsDataManager>();
         var rendererFactory = _serviceProvider.GetRequiredService<IFitsRendererFactory>();
 
         using var viewModel = new AlignmentToolViewModel(
             sourcePaths,
-            ioService,
-            metadataService,
-            alignmentService,
-            converter,
-            analysis,
-            jplService,
-            mediaExport,
-            rendererFactory, // <--- Parametro Aggiunto
-            initialMode
+            coordinator,
+            dataManager,
+            rendererFactory
         );
     
         var alignmentWindow = new AlignmentToolView { DataContext = viewModel };
@@ -81,62 +68,82 @@ public class WindowService : IWindowService
         return viewModel.DialogResult ? viewModel.FinalProcessedPaths : null; 
     }
     
-    /// <summary>
-    /// Apre l'editor dell'header in modalità modale.
-    /// </summary>
-    public async Task<FitsHeader?> ShowHeaderEditorAsync(ImageNodeViewModel node)
+    // =======================================================================
+    // 2. EDITOR DELL'HEADER
+    // =======================================================================
+
+    public async Task<FitsHeader?> ShowHeaderEditorAsync(
+        IReadOnlyList<FitsFileReference> files, 
+        IImageNavigator navigator)
     {
         if (_mainWindow == null) return null;
         
-        var metadataService = _serviceProvider.GetRequiredService<IFitsMetadataService>();
-        var ioService = _serviceProvider.GetRequiredService<IFitsIoService>();
+        // Risoluzione dipendenze per l'editor
+        var dataManager = _serviceProvider.GetRequiredService<IFitsDataManager>();
+        var healthEvaluator = _serviceProvider.GetRequiredService<IFitsHeaderHealthEvaluator>();
+        var mapper = _serviceProvider.GetRequiredService<FitsHeaderUiMapper>();
 
-        using var editorVm = new HeaderEditorToolViewModel(node, metadataService, ioService);
+        // Usiamo il costruttore a 5 argomenti di HeaderEditorToolViewModel
+        using var editorVm = new HeaderEditorToolViewModel(
+            files, 
+            navigator, 
+            dataManager, 
+            healthEvaluator, 
+            mapper);
         
         var editorView = new HeaderEditorToolView { DataContext = editorVm };
 
         await editorView.ShowDialog(_mainWindow);
 
-        return editorView.IsSaved ? editorVm.GetUpdatedHeader() : null;
+        // Poiché l'editor modifica i file in-place, restituiamo l'header del file attivo nel navigatore
+        return navigator.CurrentIndex < files.Count ? files[navigator.CurrentIndex].ModifiedHeader : null;
     }
     
-    /// <summary>
-    /// Mostra il tool di Plate Solving.
-    /// </summary>
+    // =======================================================================
+    // 3. PLATE SOLVING
+    // =======================================================================
+
     public async Task ShowPlateSolvingWindowAsync(ImageNodeViewModel node)
     {
         if (_mainWindow == null) return;
 
-        var solverService = _serviceProvider.GetRequiredService<IPlateSolvingService>();
+        // Risoluzione del nuovo AstrometryCoordinator
+        var astrometryCoordinator = _serviceProvider.GetRequiredService<IAstrometryCoordinator>();
+        
+        // Deriviamo il nome target dai metadati del file attivo se disponibile
+        string targetName = node.ActiveFile?.FileName ?? "Sorgente Ignota";
 
-        var plateVm = new PlateSolvingToolViewModel(node, solverService);
+        // Usiamo il costruttore a 3 argomenti: (files, targetName, coordinator)
+        var plateVm = new PlateSolvingToolViewModel(
+            node.CurrentFiles, 
+            targetName, 
+            astrometryCoordinator);
         
         var plateView = new PlateSolvingToolView { DataContext = plateVm };
 
         await plateView.ShowDialog(_mainWindow);
     }
     
-    /// <summary>
-    /// Mostra il tool di posterizzazione artistica.
-    /// </summary>
+    // =======================================================================
+    // 4. POSTERIZZAZIONE
+    // =======================================================================
+
     public async Task<List<string>?> ShowPosterizationWindowAsync(
         List<string> sourcePaths, 
         VisualizationMode initialMode)
     {
         if (_mainWindow == null) throw new InvalidOperationException("Finestra principale non registrata.");
 
-        var ioService = _serviceProvider.GetRequiredService<IFitsIoService>();
-        var postService = _serviceProvider.GetRequiredService<IPosterizationService>();
-        var converter = _serviceProvider.GetRequiredService<IFitsOpenCvConverter>();
-        var analysis = _serviceProvider.GetRequiredService<IImageAnalysisService>();
+        // Risoluzione Dipendenze per PosterizationToolViewModel
+        var dataManager = _serviceProvider.GetRequiredService<IFitsDataManager>();
+        var rendererFactory = _serviceProvider.GetRequiredService<IFitsRendererFactory>();
+        var coordinator = _serviceProvider.GetRequiredService<IPosterizationCoordinator>();
         
         using var vm = new PosterizationToolViewModel(
             sourcePaths, 
-            ioService,
-            postService, 
-            converter, 
-            analysis, 
-            initialMode);
+            dataManager, 
+            rendererFactory, 
+            coordinator);
             
         var view = new PosterizationToolView { DataContext = vm };
 

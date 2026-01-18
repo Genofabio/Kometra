@@ -5,6 +5,9 @@ namespace KomaLab.Services.Undo;
 public interface IUndoableAction : IDisposable
 {
     string Name { get; }
-    void Execute(); // Redo / Prima esecuzione
+    
+    bool IsExecuted { get; }
+
+    void Execute(); // Esegue o Ripristina (Redo)
     void Undo();    // Annulla
 }

@@ -1,7 +1,6 @@
 ﻿using System;
 using System.Globalization;
 using Avalonia.Data.Converters;
-using KomaLab.Models;
 using KomaLab.Models.Visualization; // Assicurati che il namespace del tuo Enum sia corretto
 
 namespace KomaLab.Converters

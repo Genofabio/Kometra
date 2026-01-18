@@ -1,90 +1,110 @@
-﻿using System.Globalization;
+﻿using System;
 using KomaLab.Models.Astrometry;
 using KomaLab.Models.Fits;
+using KomaLab.Services.Fits.Metadata;
 
 namespace KomaLab.Services.Fits.Parsers;
 
-// ---------------------------------------------------------------------------
-// FILE: WcsParser.cs
-// RUOLO: Parser
-// DESCRIZIONE:
-// Analizza l'header FITS per estrarre e costruire l'oggetto WcsData.
-// Supporta proiezioni TAN/TPV, matrice CD e coefficienti di distorsione PV.
-// Gestisce la sovrascrittura delle chiavi (comportamento standard FITS).
-// ---------------------------------------------------------------------------
-
 public static class WcsParser
 {
-    public static WcsData Parse(FitsHeader header)
+    public static WcsData Parse(FitsHeader header, IFitsMetadataService metadata)
     {
         var data = new WcsData();
-        string ctype1 = "";
+        string ctype1 = metadata.GetStringValue(header, "CTYPE1");
 
-        foreach (var card in header.Cards)
-        {
-            // Key è già Upper e Trimmed grazie al FitsReader
-            string key = card.Key;
-            
-            // Ottimizzazione: se la chiave è vuota o il valore nullo, salta
-            if (string.IsNullOrEmpty(key) || string.IsNullOrWhiteSpace(card.Value)) continue;
-
-            // Switch su stringa è compilato in una Hash Table (molto veloce)
-            switch (key)
-            {
-                case "CTYPE1": 
-                    // CTYPE è una stringa, quindi avrà gli apici (es 'RA---TAN'). Li rimuoviamo.
-                    string valStr = card.Value.Replace("'", "").Trim();
-                    if (valStr.Contains("TAN") || valStr.Contains("TPV")) ctype1 = valStr; 
-                    break;
-
-                // Per i numeri usiamo un helper locale inline o statico
-                case "CRVAL1": data.RefRaDeg = ParseDouble(card.Value); break;
-                case "CRVAL2": data.RefDecDeg = ParseDouble(card.Value); break;
-                case "CRPIX1": data.RefPixelX = ParseDouble(card.Value); break;
-                case "CRPIX2": data.RefPixelY = ParseDouble(card.Value); break;
-                
-                case "CD1_1": data.Cd1_1 = ParseDouble(card.Value); break;
-                case "CD1_2": data.Cd1_2 = ParseDouble(card.Value); break;
-                case "CD2_1": data.Cd2_1 = ParseDouble(card.Value); break;
-                case "CD2_2": data.Cd2_2 = ParseDouble(card.Value); break;
-            }
-
-            // Gestione Distorsioni PV (es. PV1_1, PV2_3)
-            // Controllo rapido: deve iniziare con PV e avere lunghezza minima
-            if (key.Length >= 5 && key.StartsWith("PV") && TryParsePvKey(key, out int ax, out int k))
-            {
-                data.PvCoefficients[(ax, k)] = ParseDouble(card.Value);
-            }
-        }
-
-        if (string.IsNullOrEmpty(ctype1))
-        {
-            data.IsValid = false;
-            return data;
-        }
+        // Se manca CTYPE1, non c'è astrometria valida
+        if (string.IsNullOrEmpty(ctype1)) return new WcsData { IsValid = false };
 
         data.ProjectionType = ctype1.Contains("TPV") ? WcsProjectionType.Tpv : WcsProjectionType.Tan;
+
+        // Coordinate di Riferimento (CRVAL / CRPIX) - Standard universale
+        data.RefRaDeg = AstroParser.ParseDegrees(metadata.GetStringValue(header, "CRVAL1")) ?? 0;
+        data.RefDecDeg = AstroParser.ParseDegrees(metadata.GetStringValue(header, "CRVAL2")) ?? 0;
+        data.RefPixelX = metadata.GetDoubleValue(header, "CRPIX1");
+        data.RefPixelY = metadata.GetDoubleValue(header, "CRPIX2");
+        
+        // --- LOGICA DI RISOLUZIONE MATRICE DI TRASFORMAZIONE ---
+        
+        // 1. Proviamo a leggere la matrice CD moderna
+        double cd11 = metadata.GetDoubleValue(header, "CD1_1");
+        double cd12 = metadata.GetDoubleValue(header, "CD1_2");
+        double cd21 = metadata.GetDoubleValue(header, "CD2_1");
+        double cd22 = metadata.GetDoubleValue(header, "CD2_2");
+
+        bool hasCdMatrix = cd11 != 0 || cd12 != 0 || cd21 != 0 || cd22 != 0;
+
+        if (hasCdMatrix)
+        {
+            data.Cd1_1 = cd11;
+            data.Cd1_2 = cd12;
+            data.Cd2_1 = cd21;
+            data.Cd2_2 = cd22;
+        }
+        else
+        {
+            // 2. Fallback: Calcoliamo la matrice CD dai vecchi parametri (CDELT + CROTA)
+            //    Questo supporta file vecchi o generati da software semplici.
+            ResolveLegacyRotation(header, metadata, data);
+        }
+
+        // --- COEFFICIENTI DI DISTORSIONE (PV) ---
+        foreach (var card in header.Cards)
+        {
+            if (card.Key.StartsWith("PV") && TryParsePvKey(card.Key, out int ax, out int k))
+            {
+                data.PvCoefficients[(ax, k)] = metadata.GetDoubleValue(header, card.Key);
+            }
+        }
+
         data.IsValid = true;
         return data;
     }
 
-    // Helper snellito: FitsReader ha già tolto i commenti, dobbiamo solo togliere gli apici
-    private static double ParseDouble(string val)
+    /// <summary>
+    /// Converte CDELT/CROTA (Legacy) in matrice CD (Standard Moderno).
+    /// </summary>
+    private static void ResolveLegacyRotation(FitsHeader header, IFitsMetadataService metadata, WcsData data)
     {
-        // Rimuove apici se presenti (alcuni software scrivono numeri come stringhe '123.45')
-        // Usiamo Span/Memory se volessimo ultra-performance, ma Replace qui va bene.
-        val = val.Replace("'", "").Trim();
-        return double.TryParse(val, NumberStyles.Any, CultureInfo.InvariantCulture, out double res) ? res : 0.0;
+        // Lettura Scala (gradi per pixel)
+        // Default a 1.0 se manca, per evitare divisioni per zero, ma segnando l'anomalia
+        double cdelt1 = metadata.GetDoubleValue(header, "CDELT1", 1.0); 
+        double cdelt2 = metadata.GetDoubleValue(header, "CDELT2", 1.0);
+
+        // Lettura Rotazione (in gradi)
+        // Nota: CROTA2 è lo standard de-facto, CROTA1 è rarissimo
+        double rotDeg = metadata.GetDoubleValue(header, "CROTA2", 0.0);
+        
+        // Conversione in radianti
+        // Nota: La rotazione WCS è definita positiva verso Nord -> Est (senso antiorario)
+        // Ma spesso nei CCD l'asse Y è invertito, quindi va gestito con attenzione.
+        // La formula standard IAU per convertire CDELT/CROTA in CD è:
+        
+        double rad = rotDeg * (Math.PI / 180.0);
+        double cos = Math.Cos(rad);
+        double sin = Math.Sin(rad);
+
+        // A volte esiste anche una matrice PC parziale (PC1_1...)
+        // Per semplicità qui assumiamo il caso classico puro (solo rotazione semplice)
+        
+        // Formule standard:
+        // CD1_1 = CDELT1 * cos(rot)
+        // CD1_2 = |CDELT2| * sin(rot)  <-- Nota: CDELT2 spesso include il segno negativo per l'asse Dec
+        // CD2_1 = |CDELT1| * -sin(rot)
+        // CD2_2 = CDELT2 * cos(rot)
+
+        // Implementazione robusta semplificata (assume assi ortogonali standard)
+        data.Cd1_1 = cdelt1 * cos;
+        data.Cd1_2 = Math.Abs(cdelt2) * Math.Sign(cdelt1) * sin; // Gestione segni incrociati
+        data.Cd2_1 = -Math.Abs(cdelt1) * Math.Sign(cdelt2) * sin;
+        data.Cd2_2 = cdelt2 * cos;
     }
 
     private static bool TryParsePvKey(string key, out int axis, out int k)
     {
-        // Formato atteso: PVj_m (es. PV1_2)
         axis = 0; k = 0;
         int underscore = key.IndexOf('_');
         if (underscore == -1) return false;
 
-        // Parsing sicuro delle sottostringhe numeriche
         return int.TryParse(key.Substring(2, underscore - 2), out axis) && 
                int.TryParse(key.Substring(underscore + 1), out k);
     }

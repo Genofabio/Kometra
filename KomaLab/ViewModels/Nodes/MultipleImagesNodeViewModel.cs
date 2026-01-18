@@ -2,11 +2,9 @@
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.IO;
-using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Avalonia;
-using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using KomaLab.Models.Fits;
@@ -14,289 +12,233 @@ using KomaLab.Models.Nodes;
 using KomaLab.Models.Visualization;
 using KomaLab.Services.Factories;
 using KomaLab.Services.Fits;
-using KomaLab.Services.Processing;
+using KomaLab.Services.Processing.Coordinators;
+using KomaLab.ViewModels.Components;
 using KomaLab.ViewModels.Visualization;
 
 namespace KomaLab.ViewModels.Nodes;
 
+/// <summary>
+/// Nodo per la gestione di sequenze di immagini FITS.
+/// Delega la logica di navigazione e animazione al SequenceNavigator.
+/// Focalizzato sul caricamento dati, adattamento radiometrico e video export.
+/// </summary>
 public partial class MultipleImagesNodeViewModel : ImageNodeViewModel
 {
-    private const int AnimationIntervalMs = 250;
-
-    private readonly IFitsIoService _ioService;
-    private readonly IFitsOpenCvConverter _converter;
-    private readonly IImageAnalysisService _analysis;
+    // --- Dipendenze ---
+    private readonly IFitsDataManager _dataManager;
     private readonly IFitsRendererFactory _rendererFactory;
-    private readonly MultipleImagesNodeModel _multiModel;
+    private readonly IVideoExportCoordinator _videoCoordinator;
 
-    // --- Stato Dati ---
-    private FitsCollection _collection; 
-    private readonly DispatcherTimer _animationTimer;
-    private CancellationTokenSource? _loadingCts;
-    private Size _maxImageSize;
+    // --- Componenti e Stato ---
+    private readonly List<FitsFileReference> _files = new();
+    private readonly SequenceNavigator _navigator = new();
+    private readonly Size _maxImageSize;
+    
+    private CancellationTokenSource? _navigationCts;
+    private CancellationTokenSource? _exportCts;
 
-    [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(ActiveRenderer))]
+    [ObservableProperty] 
+    [NotifyPropertyChangedFor(nameof(ActiveRenderer))] 
     private FitsRenderer? _activeFitsImage;
 
-    [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(CanShowPrevious), nameof(CanShowNext))]
-    [NotifyCanExecuteChangedFor(nameof(PreviousImageCommand), nameof(NextImageCommand))]
-    private bool _isAnimating;
+    [ObservableProperty] private bool _isExporting;
+    [ObservableProperty] private double _exportProgress;
 
-    [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(CurrentImageText), nameof(CanShowPrevious), nameof(CanShowNext), nameof(ActiveFile))]
-    private int _currentIndex;
-
-    // --- Implementazione ImageNodeViewModel ---
+    // ---------------------------------------------------------------------------
+    // OVERRIDES CAPABILITY & LAYOUT
+    // ---------------------------------------------------------------------------
+    
+    public override IImageNavigator Navigator => _navigator;
     public override FitsRenderer? ActiveRenderer => ActiveFitsImage;
     public override Size NodeContentSize => _maxImageSize;
+    public override IReadOnlyList<FitsFileReference> CurrentFiles => _files;
+    public override FitsFileReference? ActiveFile => (_navigator.CurrentIndex >= 0 && _navigator.CurrentIndex < _files.Count) ? _files[_navigator.CurrentIndex] : null;
 
-    // Contratti Base
-    public override FitsCollection? OutputCollection => _collection;
-    public override FitsFileReference? ActiveFile => (_collection != null && _currentIndex >= 0 && _currentIndex < _collection.Count)
-        ? _collection[_currentIndex]
-        : null;
-
-    protected override void OnRendererSwapping(FitsRenderer newRenderer) => ActiveFitsImage = newRenderer;
-
-    // --- Proprietà UI e Compatibilità ---
     public ObservableCollection<string> ImageNames { get; } = new();
+    public string CurrentImageText => $"{_navigator.DisplayIndex} / {_files.Count}";
     
-    // [FIX CRITICO] Espone i path per BoardViewModel e altri consumatori
-    public List<string> ImagePaths => _collection?.Files.Select(f => f.FilePath).ToList() ?? new List<string>();
+    public bool CanExport => !IsExporting && !_navigator.IsLooping && _files.Count > 0 && ActiveRenderer != null;
 
-    public string CurrentImageText => $"{CurrentIndex + 1} / {_collection.Count}";
-    public bool CanShowPrevious => !IsAnimating && CurrentIndex > 0;
-    public bool CanShowNext => !IsAnimating && CurrentIndex < _collection.Count - 1;
-    public string? TemporaryFolderPath { get; set; }
+    // ---------------------------------------------------------------------------
+    // COSTRUTTORE E INIZIALIZZAZIONE
+    // ---------------------------------------------------------------------------
 
     public MultipleImagesNodeViewModel(
         MultipleImagesNodeModel model,
-        IFitsIoService ioService,
-        IFitsOpenCvConverter converter,
-        IImageAnalysisService analysis,
+        IFitsDataManager dataManager,
         IFitsRendererFactory rendererFactory,
-        Size maxSize,
-        FitsCollection? initialCollection = null) 
+        IVideoExportCoordinator videoCoordinator,
+        Size maxSize) 
         : base(model)
     {
-        _ioService = ioService;
-        _converter = converter;
-        _analysis = analysis;
-        _rendererFactory = rendererFactory;
-        _multiModel = model;
-        
+        _dataManager = dataManager ?? throw new ArgumentNullException(nameof(dataManager));
+        _rendererFactory = rendererFactory ?? throw new ArgumentNullException(nameof(rendererFactory));
+        _videoCoordinator = videoCoordinator ?? throw new ArgumentNullException(nameof(videoCoordinator));
         _maxImageSize = maxSize;
 
-        // 1. Inizializzazione Collezione
-        // Se non viene passata (es. caricamento da disco), la creiamo dai path nel Modello
-        _collection = initialCollection ?? new FitsCollection(model.ImagePaths, cacheSize: 5);
-        
-        RefreshUiLists();
-        _currentIndex = 0;
-
-        // 2. Timer Animazione
-        _animationTimer = new DispatcherTimer(DispatcherPriority.Render);
-        _animationTimer.Interval = TimeSpan.FromMilliseconds(AnimationIntervalMs);
-        _animationTimer.Tick += OnAnimationTick;
-    }
-
-    private void RefreshUiLists()
-    {
-        ImageNames.Clear();
-        foreach (var fileRef in _collection.Files)
+        foreach (var path in model.ImagePaths)
         {
-            ImageNames.Add(fileRef.FileName);
+            _files.Add(new FitsFileReference(path));
+            ImageNames.Add(Path.GetFileName(path));
         }
+
+        // Configurazione Navigatore
+        _navigator.UpdateStatus(0, _files.Count);
+        _navigator.IndexChanged += OnNavigatorIndexChanged;
     }
 
-    public async Task InitializeAsync(bool centerOnPosition = false)
+    public async Task InitializeAsync()
     {
-        if (_collection.Count == 0) return;
-
-        // Carica il primo frame
-        await LoadImageAtIndexAsync(0, forceProfileReset: true);
-
-        if (centerOnPosition) Viewport.ResetView();
-        _ = PrefetchImageAsync(1);
+        if (_files.Count == 0) return;
+        await LoadImageAtIndexAsync(0, forceReset: true);
     }
 
-    partial void OnCurrentIndexChanged(int value)
+    private async void OnNavigatorIndexChanged(object? sender, int index)
     {
-        if (!IsAnimating) _ = LoadImageAtIndexAsync(value);
+        OnPropertyChanged(nameof(CurrentImageText));
+        OnPropertyChanged(nameof(ActiveFile));
+        ExportVideoCommand.NotifyCanExecuteChanged();
+        
+        await LoadImageAtIndexAsync(index);
     }
 
-    // --- LOGICA CORE DI CARICAMENTO ---
-    private async Task LoadImageAtIndexAsync(int index, bool forceProfileReset = false)
-    {
-        if (index < 0 || index >= _collection.Count) return;
+    // ---------------------------------------------------------------------------
+    // CORE RENDERING PIPELINE (Coerente con i Tool)
+    // ---------------------------------------------------------------------------
 
-        _loadingCts?.Cancel();
-        _loadingCts = new CancellationTokenSource();
-        var token = _loadingCts.Token;
+    private async Task LoadImageAtIndexAsync(int index, bool forceReset = false)
+    {
+        if (index < 0 || index >= _files.Count) return;
+
+        _navigationCts?.Cancel();
+        _navigationCts?.Dispose();
+        _navigationCts = new CancellationTokenSource();
+        var token = _navigationCts.Token;
 
         try
         {
-            // 1. Recupero Dati (Pixel da Cache/Disco + Header)
-            var (pixels, header) = await GetOrLoadDataAtIndex(index);
+            var fileRef = _files[index];
+            var data = await _dataManager.GetDataAsync(fileRef.FilePath);
+            token.ThrowIfCancellationRequested();
+
+            var newRenderer = _rendererFactory.Create(data.PixelData, fileRef.ModifiedHeader ?? data.Header);
             
-            if (token.IsCancellationRequested || pixels == null || header == null) return;
-
-            // 2. Creazione Renderer (Background)
-            var newRenderer = _rendererFactory.Create(pixels, header);
-            await newRenderer.InitializeAsync();
-
-            if (token.IsCancellationRequested)
+            // Logica Adattiva (Flicker-Free): Il Renderer corrente istruisce il nuovo
+            AbsoluteContrastProfile? profile = null;
+            if (!forceReset && ActiveFitsImage != null)
             {
-                newRenderer.Dispose();
-                return;
+                using var nextMat = newRenderer.CaptureScientificMat();
+                token.ThrowIfCancellationRequested();
+                profile = ActiveFitsImage.GetAdaptedProfileFor(nextMat);
             }
 
-            // 3. Logica Scientifica Soglie
-            AbsoluteContrastProfile? adaptedProfile = null;
+            // Swap atomico gestito dalla classe base ImageNodeViewModel
+            await ApplyNewRendererAsync(newRenderer, profile);
 
-            if (!forceProfileReset && ActiveFitsImage != null && !ActiveFitsImage.IsDisposed)
+            // Prefetch della prossima immagine (solo se non stiamo animando a raffica)
+            if (!token.IsCancellationRequested && !_navigator.IsLooping)
             {
-                // Calcoliamo il profilo basandoci sulle statistiche
-                var oldStats = ActiveFitsImage.GetImageStatistics();
-                var newStats = newRenderer.GetImageStatistics();
-
-                adaptedProfile = _analysis.CalculateAdaptedProfileFromStats(
-                    oldStats,
-                    ActiveFitsImage.BlackPoint,
-                    ActiveFitsImage.WhitePoint,
-                    newStats
-                );
+                _ = PrefetchImageAsync(index + 1, token);
             }
-
-            // 4. Swap e Applicazione Profilo
-            await ApplyNewRendererAsync(newRenderer, adaptedProfile);
-
-            if (token.IsCancellationRequested) return;
-
-            // 5. Aggiornamenti UI
-            PreviousImageCommand.NotifyCanExecuteChanged();
-            NextImageCommand.NotifyCanExecuteChanged();
-            OnPropertyChanged(nameof(ActiveFile));
-
-            _ = PrefetchImageAsync(index + 1);
         }
         catch (OperationCanceledException) { }
-        finally { if (_loadingCts?.Token == token) _loadingCts = null; }
+        catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"[MultipleImagesNode] Load Error: {ex.Message}"); }
+    }
+
+    private async Task PrefetchImageAsync(int nextIndex, CancellationToken token)
+    {
+        if (_files.Count == 0) return;
+        int idx = nextIndex % _files.Count;
+        try 
+        { 
+            await Task.Run(async () => 
+            {
+                if (token.IsCancellationRequested) return;
+                await _dataManager.GetDataAsync(_files[idx].FilePath);
+            }, token);
+        } 
+        catch { /* Ignora errori prefetch */ }
+    }
+
+    // ---------------------------------------------------------------------------
+    // VIDEO EXPORT
+    // ---------------------------------------------------------------------------
+
+    [RelayCommand(CanExecute = nameof(CanExport))]
+    public async Task ExportVideoAsync(string outputPath)
+    {
+        if (ActiveRenderer == null || _files.Count == 0) return;
+
+        IsExporting = true;
+        ExportProgress = 0;
+        _exportCts = new CancellationTokenSource();
+
+        try
+        {
+            await _videoCoordinator.ExportVideoAsync(
+                _files, 
+                outputPath, 
+                24.0, 
+                ActiveRenderer.CaptureContrastProfile(), 
+                this.VisualizationMode,
+                adaptiveStretch: true,
+                token: _exportCts.Token);
+        }
+        catch (OperationCanceledException) { }
+        finally
+        {
+            IsExporting = false;
+            _exportCts?.Dispose();
+            ExportVideoCommand.NotifyCanExecuteChanged();
+        }
     }
 
     [RelayCommand]
-    public void ToggleAnimation() => IsAnimating = !IsAnimating;
+    public void CancelExport() => _exportCts?.Cancel();
 
-    partial void OnIsAnimatingChanged(bool value)
+    // ---------------------------------------------------------------------------
+    // OVERRIDES E CLEANUP
+    // ---------------------------------------------------------------------------
+
+    protected override void OnRendererSwapping(FitsRenderer newRenderer) => ActiveFitsImage = newRenderer;
+
+    public override async Task LoadInputAsync(IEnumerable<FitsFileReference> input)
     {
-        if (value) _animationTimer.Start(); else _animationTimer.Stop();
-        OnPropertyChanged(nameof(CanShowPrevious));
-        OnPropertyChanged(nameof(CanShowNext));
-    }
-
-    private void OnAnimationTick(object? sender, EventArgs e)
-    {
-        if (_collection.Count == 0) return;
-        int nextIndex = (CurrentIndex + 1) % _collection.Count;
-        _ = AdvanceFrameAsync(nextIndex);
-    }
-
-    private async Task AdvanceFrameAsync(int index)
-    {
-        await LoadImageAtIndexAsync(index);
-        SetProperty(ref _currentIndex, index, nameof(CurrentIndex));
-        OnPropertyChanged(nameof(CurrentImageText));
-    }
-
-    [RelayCommand(CanExecute = nameof(CanShowPrevious))]
-    private void PreviousImage() => CurrentIndex--;
-    
-    [RelayCommand(CanExecute = nameof(CanShowNext))]
-    private void NextImage() => CurrentIndex++;
-
-    // --- Implementazione Metodi Astratti Nuovi ---
-
-    public override async Task LoadInputAsync(FitsCollection input)
-    {
-        _collection = input;
-        RefreshUiLists();
+        _navigator.Stop();
+        _files.Clear(); 
+        ImageNames.Clear();
         
-        if (_collection.Count > 0)
-        {
-            _currentIndex = 0;
-            OnPropertyChanged(nameof(CurrentIndex));
-            OnPropertyChanged(nameof(CurrentImageText));
-            OnPropertyChanged(nameof(ImagePaths)); // Notifica cambio paths
-            
-            await LoadImageAtIndexAsync(0, forceProfileReset: true);
+        foreach (var f in input) 
+        { 
+            _files.Add(f); 
+            ImageNames.Add(Path.GetFileName(f.FilePath)); 
         }
+        
+        _navigator.UpdateStatus(0, _files.Count);
+        await LoadImageAtIndexAsync(0, forceReset: true);
     }
 
     public override async Task RefreshDataFromDiskAsync()
     {
-        _collection.PixelCache.Clear();
-        await LoadImageAtIndexAsync(CurrentIndex);
-    }
-
-    // --- Helpers Gestione Dati ---
-
-    private async Task<(Array? Pixels, FitsHeader? Header)> GetOrLoadDataAtIndex(int index)
-    {
-        if (index < 0 || index >= _collection.Count) return (null, null);
-        
-        var fileRef = _collection[index];
-        Array? pixels = null;
-        FitsHeader? header = null;
-
-        if (fileRef.HasUnsavedChanges)
-            header = fileRef.UnsavedHeader;
-        else
-            header = await _ioService.ReadHeaderAsync(fileRef.FilePath);
-
-        if (_collection.PixelCache.TryGet(fileRef.FilePath, out var cachedPixels))
-        {
-            pixels = cachedPixels;
+        if (ActiveFile != null) 
+        { 
+            _dataManager.Invalidate(ActiveFile.FilePath); 
+            await LoadImageAtIndexAsync(_navigator.CurrentIndex); 
         }
-        else
-        {
-            pixels = await _ioService.ReadPixelDataAsync(fileRef.FilePath);
-            if (pixels != null)
-                _collection.PixelCache.Add(fileRef.FilePath, pixels);
-        }
-
-        return (pixels, header);
-    }
-
-    private async Task PrefetchImageAsync(int nextIndex)
-    {
-        if (nextIndex >= _collection.Count) nextIndex = 0;
-        
-        var fileRef = _collection[nextIndex];
-        if (_collection.PixelCache.TryGet(fileRef.FilePath, out _)) return;
-
-        await Task.Run(async () => 
-        {
-            var pixels = await _ioService.ReadPixelDataAsync(fileRef.FilePath);
-            if (pixels != null)
-                _collection.PixelCache.Add(fileRef.FilePath, pixels);
-        });
     }
 
     protected override void Dispose(bool disposing)
     {
         if (disposing)
         {
-            _animationTimer.Stop();
-            _loadingCts?.Cancel();
+            _navigator.Stop(); // Ferma il timer del navigatore
+            _navigator.IndexChanged -= OnNavigatorIndexChanged;
+            _navigationCts?.Cancel();
+            _exportCts?.Cancel();
+            _navigationCts?.Dispose();
+            _exportCts?.Dispose();
             ActiveFitsImage?.Dispose();
-            _collection.PixelCache.Clear();
-            
-            if (!string.IsNullOrEmpty(TemporaryFolderPath) && Directory.Exists(TemporaryFolderPath))
-            {
-                try { Directory.Delete(TemporaryFolderPath, true); } catch { }
-            }
         }
         base.Dispose(disposing);
     }

@@ -42,7 +42,7 @@
                     Background="{DynamicResource ImageCanvasBackgroundBrush}">
                 
                 <Grid>
-                    <Image Source="{Binding ActiveFitsImage.Image}"
+                    <Image Source="{Binding ActiveRenderer.Image}"
                            Stretch="None" 
                            HorizontalAlignment="Left"
                            VerticalAlignment="Top"
@@ -66,7 +66,8 @@
                                    FontWeight="Bold"/>
                     </Border>
                     
-                    <Grid Classes="NavOverlay"> <Border Classes="CounterBadge">
+                    <Grid Classes="NavOverlay"> 
+                        <Border Classes="CounterBadge">
                             <TextBlock Classes="CounterText"
                                        Text="{Binding CurrentImageText}"/> 
                         </Border>
@@ -76,8 +77,8 @@
                                 Margin="10,10"
                                 Padding="14,16,18,16"
                                 CornerRadius="4"
-                                Command="{Binding PreviousImageCommand}"
-                                IsVisible="{Binding CanShowPrevious}">
+                                Command="{Binding Navigator.PreviousCommand}"
+                                IsVisible="{Binding Navigator.CanMovePrevious}">
                             <avalonia:MaterialIcon Kind="ChevronLeft" />
                         </Button>
                         
@@ -86,8 +87,8 @@
                                 Margin="10,10"
                                 Padding="18,16,14,16"
                                 CornerRadius="4"
-                                Command="{Binding NextImageCommand}"
-                                IsVisible="{Binding CanShowNext}">
+                                Command="{Binding Navigator.NextCommand}"
+                                IsVisible="{Binding Navigator.CanMoveNext}">
                             <avalonia:MaterialIcon Kind="ChevronRight" />
                         </Button>
                     </Grid>

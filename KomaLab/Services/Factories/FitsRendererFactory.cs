@@ -1,7 +1,8 @@
 ﻿using System;
 using KomaLab.Models.Fits;
-using KomaLab.Services.Fits;
-using KomaLab.Services.Processing;
+using KomaLab.Services.Fits.Conversion;
+using KomaLab.Services.Fits.Metadata;
+using KomaLab.Services.Processing.Rendering;
 using KomaLab.ViewModels.Visualization;
 
 namespace KomaLab.Services.Factories;
@@ -9,22 +10,31 @@ namespace KomaLab.Services.Factories;
 public class FitsRendererFactory : IFitsRendererFactory
 {
     private readonly IFitsOpenCvConverter _converter;
-    private readonly IImageAnalysisService _analysis;
-    private readonly IMediaExportService _mediaExport;
+    private readonly IImagePresentationService _presentationService;
+    private readonly IFitsMetadataService _metadataService;
 
     public FitsRendererFactory(
         IFitsOpenCvConverter converter,
-        IImageAnalysisService analysis,
-        IMediaExportService mediaExport)
+        IImagePresentationService presentationService,
+        IFitsMetadataService metadataService)
     {
-        _converter = converter ?? throw new ArgumentNullException(nameof(converter));
-        _analysis = analysis ?? throw new ArgumentNullException(nameof(analysis));
-        _mediaExport = mediaExport ?? throw new ArgumentNullException(nameof(mediaExport));
+        _converter = converter;
+        _presentationService = presentationService;
+        _metadataService = metadataService;
     }
 
     public FitsRenderer Create(Array pixelData, FitsHeader header)
     {
-        // Iniezione delle dipendenze + Dati
-        return new FitsRenderer(pixelData, header, _converter, _analysis, _mediaExport);
+        // 1. Estrazione parametri (Responsabilità della Factory preparare i dati)
+        double bScale = _metadataService.GetDoubleValue(header, "BSCALE", 1.0);
+        double bZero = _metadataService.GetDoubleValue(header, "BZERO", 0.0);
+
+        // 2. Creazione del Renderer con le nuove dipendenze snellite
+        return new FitsRenderer(
+            pixelData, 
+            bScale, 
+            bZero, 
+            _converter, 
+            _presentationService);
     }
 }

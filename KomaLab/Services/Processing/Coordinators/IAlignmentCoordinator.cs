@@ -1,0 +1,38 @@
+﻿using System;
+using System.Collections.Generic;
+using System.Threading;
+using System.Threading.Tasks;
+using KomaLab.Models.Fits;
+using KomaLab.Models.Primitives;
+using KomaLab.Models.Processing;
+
+namespace KomaLab.Services.Processing.Coordinators;
+
+public interface IAlignmentCoordinator
+{
+    // --- 1. DISCOVERY ---
+    Task<AlignmentTargetMetadata> GetFileMetadataAsync(FitsFileReference file);
+    
+    Task<List<Point2D?>> DiscoverStartingPointsAsync(
+        IEnumerable<FitsFileReference> files,
+        AlignmentTarget target,
+        string? targetName);
+
+    // --- 2. ANALISI ---
+    Task<AlignmentMap> AnalyzeSequenceAsync(
+        IEnumerable<FitsFileReference> files,
+        IEnumerable<Point2D?> guesses,
+        AlignmentTarget target,
+        AlignmentMode mode,
+        CenteringMethod method,
+        int searchRadius,
+        IProgress<AlignmentProgressReport>? progress = null,
+        CancellationToken token = default);
+
+    // --- 3. ESECUZIONE (Usa BatchProgressReport coerentemente con Posterization) ---
+    Task<List<string>> ExecuteWarpingAsync(
+        IEnumerable<FitsFileReference> files,
+        AlignmentMap map,
+        IProgress<BatchProgressReport>? progress = null,
+        CancellationToken token = default);
+}

@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.IO;
+using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using Avalonia;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -8,174 +9,134 @@ using KomaLab.Models.Fits;
 using KomaLab.Models.Nodes;
 using KomaLab.Services.Factories;
 using KomaLab.Services.Fits;
+using KomaLab.ViewModels.Components;
 using KomaLab.ViewModels.Visualization;
 
 namespace KomaLab.ViewModels.Nodes;
 
 /// <summary>
-/// ViewModel per la gestione di una singola immagine FITS.
-/// Sfrutta la logica polimorfica della classe base per garantire inizializzazione asincrona e swap sicuri.
+/// Nodo per la gestione di una singola immagine FITS.
+/// Implementa IImageNavigator tramite un SequenceNavigator fisso (1/1) 
+/// per garantire coerenza totale con i nodi multipli e i tool.
 /// </summary>
 public partial class SingleImageNodeViewModel : ImageNodeViewModel
 {
-    private readonly IFitsIoService _ioService;
+    private readonly IFitsDataManager _dataManager;
     private readonly IFitsRendererFactory _rendererFactory;
-    private readonly SingleImageNodeModel _imageModel;
-
-    // --- Stato Dati ---
-    // Usiamo una collezione di 1 elemento per compatibilità con il resto del sistema
-    private FitsCollection _collection; 
-    private Size _explicitSize; 
+    
+    private FitsFileReference _fileReference;
+    private CancellationTokenSource? _loadingCts;
+    
+    // Componente di navigazione coerente (fisso a 1 immagine)
+    private readonly SequenceNavigator _navigator = new();
 
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(ActiveRenderer))] 
-    private FitsRenderer? _fitsImage;
+    [NotifyPropertyChangedFor(nameof(ActiveRenderer))]
+    private FitsRenderer? _activeFitsImage;
 
-    // --- Implementazione Contratti Base ---
-    public override FitsRenderer? ActiveRenderer => FitsImage;
-    public override Size NodeContentSize => _explicitSize;
-    public string ImagePath => _imageModel.ImagePath;
+    [ObservableProperty] private bool _isLoading;
+    [ObservableProperty] private string? _errorMessage;
 
-    // Nuovi contratti astratti
-    public override FitsCollection? OutputCollection => _collection;
-    public override FitsFileReference? ActiveFile => _collection.Count > 0 ? _collection[0] : null;
+    // ---------------------------------------------------------------------------
+    // OVERRIDES CAPABILITY & LAYOUT
+    // ---------------------------------------------------------------------------
+
+    public override IImageNavigator Navigator => _navigator;
+    public override FitsRenderer? ActiveRenderer => _activeFitsImage;
+    public override Size NodeContentSize => ActiveRenderer?.ImageSize ?? default;
+    public override IReadOnlyList<FitsFileReference> CurrentFiles => new[] { _fileReference };
+    public override FitsFileReference? ActiveFile => _fileReference;
+
+    // ---------------------------------------------------------------------------
+    // COSTRUTTORE E INIZIALIZZAZIONE
+    // ---------------------------------------------------------------------------
 
     public SingleImageNodeViewModel(
-        SingleImageNodeModel model,
-        IFitsIoService ioService,
-        IFitsRendererFactory rendererFactory,
-        Size explicitSize,         
-        FitsCollection? initialCollection = null) // Ora accetta una Collection opzionale
-        : base(model) 
+        SingleImageNodeModel model, 
+        IFitsDataManager dataManager, 
+        IFitsRendererFactory rendererFactory) 
+        : base(model)
     {
-        _imageModel = model ?? throw new ArgumentNullException(nameof(model));
-        _ioService = ioService ?? throw new ArgumentNullException(nameof(ioService));
+        _dataManager = dataManager ?? throw new ArgumentNullException(nameof(dataManager));
         _rendererFactory = rendererFactory ?? throw new ArgumentNullException(nameof(rendererFactory));
+        _fileReference = new FitsFileReference(model.ImagePath);
+
+        // Inizializziamo il navigatore nello stato "Single"
+        _navigator.UpdateStatus(0, 1);
+    }
+
+    public async Task InitializeAsync() => await LoadImageAsync();
+
+    // ---------------------------------------------------------------------------
+    // CORE RENDERING PIPELINE
+    // ---------------------------------------------------------------------------
+
+    private async Task LoadImageAsync()
+    {
+        IsLoading = true;
+        ErrorMessage = null;
         
-        _explicitSize = explicitSize;
-
-        // Se non viene passata una collezione (es. nodo sorgente), ne creiamo una dal path del modello
-        if (initialCollection != null)
-        {
-            _collection = initialCollection;
-        }
-        else if (!string.IsNullOrEmpty(model.ImagePath))
-        {
-            _collection = new FitsCollection(new[] { model.ImagePath }, cacheSize: 1);
-        }
-        else
-        {
-            _collection = new FitsCollection(Array.Empty<string>(), cacheSize: 1);
-        }
-    }
-
-    /// <summary>
-    /// Implementazione obbligatoria per la classe base: aggiorna il riferimento locale del renderer.
-    /// Viene chiamata internamente da ApplyNewRendererAsync sul thread UI.
-    /// </summary>
-    protected override void OnRendererSwapping(FitsRenderer newRenderer)
-    {
-        FitsImage = newRenderer;
-        _explicitSize = newRenderer.ImageSize;
-    }
-
-    /// <summary>
-    /// Inizializzazione asincrona completa tramite la classe base.
-    /// </summary>
-    public async Task InitializeAsync(bool centerOnPosition = false)
-    {
-        if (_collection.Count == 0) return;
-
-        await LoadDataAsync();
-
-        if (centerOnPosition)
-        {
-            Viewport.ResetView();
-        }
-    }
-
-    // --- Gestione I/O e Loading ---
-
-    private async Task LoadDataAsync()
-    {
-        if (_collection.Count == 0) return;
-        var fileRef = _collection[0];
+        _loadingCts?.Cancel();
+        _loadingCts?.Dispose();
+        _loadingCts = new CancellationTokenSource();
 
         try
         {
-            // 1. Recupero Dati (Header + Pixels)
-            // Header: Priorità a quello in memoria (se modificato)
-            FitsHeader? header = fileRef.HasUnsavedChanges 
-                ? fileRef.UnsavedHeader 
-                : await _ioService.ReadHeaderAsync(fileRef.FilePath);
-
-            // Pixel: Controllo Cache Collettiva
-            Array? pixels;
-            if (_collection.PixelCache.TryGet(fileRef.FilePath, out var cachedPixels))
-            {
-                pixels = cachedPixels;
-            }
-            else
-            {
-                pixels = await _ioService.ReadPixelDataAsync(fileRef.FilePath);
-                // Popola cache se caricato con successo
-                if (pixels != null) _collection.PixelCache.Add(fileRef.FilePath, pixels);
-            }
-
-            if (header == null || pixels == null) return;
-
-            // 2. Creazione Renderer
-            var newRenderer = _rendererFactory.Create(pixels, header);
+            // 1. Recupero dati tramite DataManager (Cache-aware)
+            var data = await _dataManager.GetDataAsync(_fileReference.FilePath);
             
-            // Inizializza statistiche e Matrice interna
-            await newRenderer.InitializeAsync();
-
-            // 3. Applicazione tramite Base (gestisce contrasto, swap UI, cleanup)
+            // 2. Creazione del Renderer (usa Header modificato se presente)
+            var headerToUse = _fileReference.ModifiedHeader ?? data.Header;
+            var newRenderer = _rendererFactory.Create(data.PixelData, headerToUse);
+            
+            // 3. Swap Atomico (gestito dalla classe base ImageNodeViewModel)
+            // Nota: ApplyNewRendererAsync eredita automaticamente VisualizationMode e Contrast
             await ApplyNewRendererAsync(newRenderer);
         }
-        catch (Exception ex)
-        {
-            Title = $"ERR: {Path.GetFileName(_imageModel.ImagePath)}";
-            System.Diagnostics.Debug.WriteLine($"[SingleImageNode] Load Error: {ex.Message}");
+        catch (OperationCanceledException) { }
+        catch (Exception ex) 
+        { 
+            ErrorMessage = $"Errore caricamento: {ex.Message}";
+            System.Diagnostics.Debug.WriteLine($"[SingleImageNode] Load Error: {ex}");
         }
+        finally { IsLoading = false; }
     }
 
-    // --- Implementazione Metodi Astratti Nuovi ---
+    // ---------------------------------------------------------------------------
+    // GESTIONE DATI E INPUT
+    // ---------------------------------------------------------------------------
 
-    public override async Task LoadInputAsync(FitsCollection input)
+    public override async Task LoadInputAsync(IEnumerable<FitsFileReference> input)
     {
-        _collection = input;
-        
-        // Se riceviamo nuovi dati (es. da un nodo processore), ricarichiamo la visualizzazione
-        if (_collection.Count > 0)
+        var first = input.FirstOrDefault();
+        if (first != null)
         {
-            await LoadDataAsync();
-        }
-        else
-        {
-            // Gestione caso vuoto (opzionale: pulire il renderer)
+            _fileReference = first;
+            _navigator.UpdateStatus(0, 1); // Reset navigatore se cambiamo file
+            await LoadImageAsync();
         }
     }
 
     public override async Task RefreshDataFromDiskAsync()
     {
-        // Pulisce la cache per questo file specifico
-        if (_collection.Count > 0)
-        {
-            _collection.PixelCache.Remove(_collection[0].FilePath);
-        }
-        
-        await LoadDataAsync();
+        _dataManager.Invalidate(_fileReference.FilePath);
+        await LoadImageAsync();
     }
 
-    // --- Cleanup ---
+    // ---------------------------------------------------------------------------
+    // CLEANUP
+    // ---------------------------------------------------------------------------
+
+    protected override void OnRendererSwapping(FitsRenderer newRenderer) => _activeFitsImage = newRenderer;
 
     protected override void Dispose(bool disposing)
     {
         if (disposing)
         {
-            FitsImage?.Dispose();
-            // Nota: Non disponiamo la _collection perché potrebbe essere passata avanti
+            _navigator.Stop(); // Cleanup preventivo del navigatore
+            _loadingCts?.Cancel();
+            _loadingCts?.Dispose();
+            _activeFitsImage?.Dispose();
         }
         base.Dispose(disposing);
     }

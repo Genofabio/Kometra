@@ -45,7 +45,7 @@
                         <StackPanel Spacing="6">
                             <TextBlock Classes="sectionTitle" Text="Metodo Distribuzione"/>
                             <TextBlock Classes="description" Text="Scegli come ripartire i toni per enfatizzare dettagli deboli."/>
-                            <ComboBox ItemsSource="{Binding AvailableModes}" SelectedItem="{Binding SelectedMode}" HorizontalAlignment="Stretch" Margin="0,8,0,0">
+                            <ComboBox ItemsSource="{Binding AvailableModes}" SelectedItem="{Binding ActiveRenderer.VisualizationMode}" HorizontalAlignment="Stretch" Margin="0,8,0,0">
                                 <ComboBox.ItemTemplate>
                                     <DataTemplate><TextBlock Text="{Binding Converter={StaticResource ModeConverter}}"/></DataTemplate>
                                 </ComboBox.ItemTemplate>
@@ -56,21 +56,21 @@
                         
                         <StackPanel Spacing="10">
                             <TextBlock Classes="sectionTitle" Text="Range Dinamico (Clip)"/>
-                            <TextBlock Classes="description" Text="Definisce l'intervallo di segnale ADU. I valori esterni verranno tagliati."/>
+                            <TextBlock Classes="description" Text="Definisce l'intervallo di segnale ADU (0-65535)."/>
                             
                             <StackPanel Spacing="2" Margin="0,2,0,0">
                                 <TextBlock Text="Soglia Nero" FontSize="12" Foreground="{DynamicResource Text.MediumGreyBrush}" FontWeight="SemiBold" FontStyle="Italic"/>
                                 <Grid ColumnDefinitions="*, Auto">
-                                    <Slider Grid.Column="0" Minimum="{Binding SliderMin}" Maximum="{Binding SliderMax}" Value="{Binding BlackPoint}"/>
-                                    <TextBox Name="BlackInput" Grid.Column="1" Text="{Binding BlackPoint, Mode=OneWay, StringFormat={}{0:0.0}}" LostFocus="OnValueInputLostFocus" KeyDown="OnInputKeyDown" Classes="valueInput"/>
+                                    <Slider Grid.Column="0" Minimum="0" Maximum="65535" Value="{Binding ActiveRenderer.BlackPoint}"/>
+                                    <TextBox Name="BlackInput" Grid.Column="1" Text="{Binding ActiveRenderer.BlackPoint, Mode=OneWay, StringFormat={}{0:0.0}}" LostFocus="OnValueInputLostFocus" KeyDown="OnInputKeyDown" Classes="valueInput"/>
                                 </Grid>
                             </StackPanel>
                             
                             <StackPanel Spacing="2" Margin="0,2,0,0">
                                 <TextBlock Text="Soglia Bianco" FontSize="12" Foreground="{DynamicResource Text.MediumGreyBrush}" FontWeight="SemiBold" FontStyle="Italic"/>
                                 <Grid ColumnDefinitions="*, Auto">
-                                    <Slider Grid.Column="0" Minimum="{Binding SliderMin}" Maximum="{Binding SliderMax}" Value="{Binding WhitePoint}"/>
-                                    <TextBox Name="WhiteInput" Grid.Column="1" Text="{Binding WhitePoint, Mode=OneWay, StringFormat={}{0:0.0}}" LostFocus="OnValueInputLostFocus" KeyDown="OnInputKeyDown" Classes="valueInput"/>
+                                    <Slider Grid.Column="0" Minimum="0" Maximum="65535" Value="{Binding ActiveRenderer.WhitePoint}"/>
+                                    <TextBox Name="WhiteInput" Grid.Column="1" Text="{Binding ActiveRenderer.WhitePoint, Mode=OneWay, StringFormat={}{0:0.0}}" LostFocus="OnValueInputLostFocus" KeyDown="OnInputKeyDown" Classes="valueInput"/>
                                 </Grid>
                             </StackPanel>
                         </StackPanel>
@@ -113,7 +113,7 @@
                                 <TranslateTransform X="{Binding Viewport.OffsetX}" Y="{Binding Viewport.OffsetY}"/>
                             </TransformGroup>
                         </Canvas.RenderTransform>
-                        <Image Name="PreviewImage" Source="{Binding PreviewBitmap}" Stretch="None" RenderOptions.BitmapInterpolationMode="None"/>
+                        <Image Name="PreviewImage" Source="{Binding ActiveRenderer.Image}" Stretch="None" RenderOptions.BitmapInterpolationMode="None"/>
                         <Canvas Name="InteractionCanvas" Background="Transparent" 
                                 Width="{Binding Viewport.ImageSize.Width}" 
                                 Height="{Binding Viewport.ImageSize.Height}" />
@@ -125,19 +125,13 @@
                                    Foreground="{DynamicResource OverlayTextForegroundBrush}" FontSize="14"/>
                     </Border>
 
-                    <StackPanel Orientation="Horizontal" Spacing="4" Margin="10" HorizontalAlignment="Left" VerticalAlignment="Bottom" ZIndex="1">
-                        <Button Command="{Binding GoToFirstImageCommand}" ToolTip.Tip="Prima Immagine">
-                            <avalonia:MaterialIcon Kind="ChevronDoubleLeft" Width="16" Height="16"/>
-                        </Button>
-                        <Button Command="{Binding PreviousImageCommand}" ToolTip.Tip="Immagine Precedente">
+                    <StackPanel Orientation="Horizontal" Spacing="4" Margin="10" HorizontalAlignment="Left" VerticalAlignment="Bottom" ZIndex="1" IsVisible="{Binding IsNavigationVisible}">
+                        <Button Command="{Binding Navigator.PreviousCommand}" ToolTip.Tip="Immagine Precedente">
                             <avalonia:MaterialIcon Kind="ChevronLeft" Width="16" Height="16"/>
                         </Button>
                         <TextBlock Text="{Binding CurrentImageText}" VerticalAlignment="Center" Margin="8,0" Foreground="{DynamicResource Text.StaticWhiteBrush}" FontWeight="SemiBold" FontSize="13"/>
-                        <Button Command="{Binding NextImageCommand}" ToolTip.Tip="Immagine Successiva">
+                        <Button Command="{Binding Navigator.NextCommand}" ToolTip.Tip="Immagine Successiva">
                             <avalonia:MaterialIcon Kind="ChevronRight" Width="16" Height="16"/>
-                        </Button>
-                        <Button Command="{Binding GoToLastImageCommand}" ToolTip.Tip="Ultima Immagine">
-                            <avalonia:MaterialIcon Kind="ChevronDoubleRight" Width="16" Height="16"/>
                         </Button>
                     </StackPanel>
 

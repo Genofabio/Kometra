@@ -5,113 +5,105 @@ using System.Diagnostics;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
-using Avalonia.Media;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using KomaLab.Models.Fits; 
 using KomaLab.Services.Fits;
+using KomaLab.Services.Fits.Metadata;
+using KomaLab.ViewModels.Components;
 using KomaLab.ViewModels.Items;
+using KomaLab.ViewModels.Mappings;
 using KomaLab.ViewModels.Nodes;
 
 namespace KomaLab.ViewModels.Tools;
 
+/// <summary>
+/// Gestisce la visualizzazione e la modifica dell'header FITS.
+/// Architettura disaccoppiata: comunica con i dati tramite IReadOnlyList e IImageNavigator.
+/// </summary>
 public partial class HeaderEditorToolViewModel : ObservableObject, IDisposable
 {
-    private readonly ImageNodeViewModel _sourceNode;
-    private readonly IFitsMetadataService _metadataService; 
-    private readonly IFitsIoService _ioService; // NUOVO: Necessario per leggere header
+    private readonly IReadOnlyList<FitsFileReference> _files;
+    private readonly IFitsDataManager _dataManager;
+    private readonly IFitsHeaderHealthEvaluator _healthEvaluator;
+    private readonly FitsHeaderUiMapper _mapper;
 
     private readonly List<FitsHeaderEditorRow> _allItems = new();
     private CancellationTokenSource? _healthCheckCts;
     private bool _isDisposed;
-    
-    // Cache dell'header originale per ricostruire quello modificato
-    private FitsHeader? _loadedHeader; 
 
     public event Action? RequestScrollToSelection;
 
-    // --- COLORI STATUS ---
-    private static readonly IBrush SuccessBrush = new SolidColorBrush(Color.Parse("#03A077"));
-    private static readonly IBrush ErrorBrush = new SolidColorBrush(Color.Parse("#E6606A"));
-    private static readonly IBrush PendingBrush = new SolidColorBrush(Color.Parse("#808080"));
+    // --- COMPONENTI ---
+    public IImageNavigator Navigator { get; }
 
     // --- PROPRIETÀ OBSERVABLE ---
-
     [ObservableProperty] private ObservableCollection<FitsHeaderEditorRow> _filteredItems = new();
     [ObservableProperty] private FitsHeaderEditorRow? _selectedItem;
-    [ObservableProperty] private string _currentFileName = "N/A";
-    [ObservableProperty] private string _imageCounterText = "";
-    [ObservableProperty] private bool _isMultipleImages;
     [ObservableProperty] private string _searchText = "";
     [ObservableProperty] private bool _isChecking = false;
-    
-    // --- Stato pulsanti navigazione ---
-    [ObservableProperty] [NotifyCanExecuteChangedFor(nameof(NextImageCommand))] private bool _canGoNext;
-    [ObservableProperty] [NotifyCanExecuteChangedFor(nameof(PreviousImageCommand))] private bool _canGoBack;
 
-    // --- HEALTH CHECK STATUS ---
-    [ObservableProperty] private IBrush _dateStatusColor = PendingBrush;
+    // --- STATO SALUTE HEADER ---
+    [ObservableProperty] private HeaderHealthStatus _dateStatus = HeaderHealthStatus.Pending;
     [ObservableProperty] private string _dateStatusText = "In attesa...";
-    [ObservableProperty] private IBrush _locationStatusColor = PendingBrush;
+    [ObservableProperty] private HeaderHealthStatus _locationStatus = HeaderHealthStatus.Pending;
     [ObservableProperty] private string _locationStatusText = "In attesa...";
-    [ObservableProperty] private IBrush _wcsStatusColor = PendingBrush;
+    [ObservableProperty] private HeaderHealthStatus _wcsStatus = HeaderHealthStatus.Pending;
     [ObservableProperty] private string _wcsStatusText = "In attesa...";
+
+    // Helpers per la View (Binding)
+    public string CurrentFileName => ActiveFile?.FileName ?? "N/A";
+    public string ImageCounterText => $"{Navigator.CurrentIndex + 1} / {Navigator.TotalCount}";
+    public bool IsMultipleImages => Navigator.CanMove;
+    private FitsFileReference? ActiveFile => (_files.Count > Navigator.CurrentIndex) ? _files[Navigator.CurrentIndex] : null;
 
     partial void OnSearchTextChanged(string value) => ApplyFilter();
 
     public HeaderEditorToolViewModel(
-        ImageNodeViewModel sourceNode, 
-        IFitsMetadataService metadataService,
-        IFitsIoService ioService) // Iniettato
+        IReadOnlyList<FitsFileReference> files,
+        IImageNavigator navigator,
+        IFitsDataManager dataManager,
+        IFitsHeaderHealthEvaluator healthEvaluator,
+        FitsHeaderUiMapper mapper)
     {
-        _sourceNode = sourceNode ?? throw new ArgumentNullException(nameof(sourceNode));
-        _metadataService = metadataService ?? throw new ArgumentNullException(nameof(metadataService));
-        _ioService = ioService ?? throw new ArgumentNullException(nameof(ioService));
+        _files = files ?? throw new ArgumentNullException(nameof(files));
+        Navigator = navigator ?? throw new ArgumentNullException(nameof(navigator));
+        _dataManager = dataManager ?? throw new ArgumentNullException(nameof(dataManager));
+        _healthEvaluator = healthEvaluator ?? throw new ArgumentNullException(nameof(healthEvaluator));
+        _mapper = mapper ?? throw new ArgumentNullException(nameof(mapper));
 
-        IsMultipleImages = _sourceNode is MultipleImagesNodeViewModel;
-        
-        _sourceNode.PropertyChanged += OnSourceNodePropertyChanged;
-        
+        // Sottoscrizione all'evento del navigatore (se disponibile)
+        if (Navigator is SequenceNavigator sn)
+        {
+            sn.IndexChanged += OnNavigatorIndexChanged;
+        }
+
         _ = LoadCurrentHeaderAsync();
     }
 
-    private async void OnSourceNodePropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    private async void OnNavigatorIndexChanged(object? sender, int index)
     {
-        // ADATTAMENTO: Ascoltiamo ActiveFile invece di ActiveRenderer
-        if (e.PropertyName == nameof(ImageNodeViewModel.ActiveFile) || 
-            e.PropertyName == "CurrentIndex" || 
-            e.PropertyName == "CurrentImageText")
-        {
-            await LoadCurrentHeaderAsync();
-        }
+        await LoadCurrentHeaderAsync();
     }
 
+    /// <summary>
+    /// Carica l'header basandosi sulla posizione corrente del navigatore.
+    /// </summary>
     private async Task LoadCurrentHeaderAsync()
     {
         IsChecking = true;
         ResetStatusToWaiting(); 
 
-        // 1. Identificazione File Attivo
-        var activeFile = _sourceNode.ActiveFile;
+        // Notifica alla UI che i dati del file attivo sono cambiati
+        OnPropertyChanged(nameof(CurrentFileName));
+        OnPropertyChanged(nameof(ImageCounterText));
+        OnPropertyChanged(nameof(IsMultipleImages));
 
-        // Gestione UI Navigazione
-        if (_sourceNode is SingleImageNodeViewModel single) 
-        { 
-            CurrentFileName = activeFile?.FileName ?? "N/A"; 
-            ImageCounterText = "1 / 1";
-            CanGoNext = false;
-            CanGoBack = false;
-        }
-        else if (_sourceNode is MultipleImagesNodeViewModel multi) 
-        { 
-            CurrentFileName = activeFile?.FileName ?? "N/A";
-            ImageCounterText = multi.CurrentImageText; 
-            
-            CanGoBack = multi.CanShowPrevious;
-            CanGoNext = multi.CanShowNext;
-        }
+        // Aggiorna lo stato dei comandi proxy
+        NextImageCommand.NotifyCanExecuteChanged();
+        PreviousImageCommand.NotifyCanExecuteChanged();
 
-        if (activeFile == null)
+        if (ActiveFile == null)
         {
             ClearEditor();
             return; 
@@ -119,36 +111,27 @@ public partial class HeaderEditorToolViewModel : ObservableObject, IDisposable
 
         try
         {
-            // 2. Recupero Header (Memoria o Disco)
-            // Se l'utente ha modifiche non salvate in RAM, usiamo quelle.
-            if (activeFile.HasUnsavedChanges)
-            {
-                _loadedHeader = activeFile.UnsavedHeader;
-            }
-            else
-            {
-                // Altrimenti leggiamo dal disco
-                _loadedHeader = await _ioService.ReadHeaderAsync(activeFile.FilePath);
-            }
+            // Caricamento Header (Priorità alla RAM se modificato, altrimenti disco)
+            FitsHeader? headerToMap = ActiveFile.ModifiedHeader ?? 
+                                     await _dataManager.GetHeaderOnlyAsync(ActiveFile.FilePath);
 
-            if (_loadedHeader == null)
+            if (headerToMap == null)
             {
                 ClearEditor();
                 return;
             }
 
-            // 3. Parsing per Editor
-            var parsedItems = await Task.Run(() => _metadataService.ParseForEditor(_loadedHeader));
-
+            // Mapping verso le righe dell'editor
+            var rows = await Task.Run(() => _mapper.MapToRows(headerToMap));
             _allItems.Clear();
-            _allItems.AddRange(parsedItems);
+            _allItems.AddRange(rows);
             
             ApplyFilter();
             await RefreshHealthCheckAsync();
         }
         catch (Exception ex)
         {
-            System.Diagnostics.Debug.WriteLine($"Error loading header: {ex.Message}");
+            Debug.WriteLine($"[HeaderEditor] Error: {ex.Message}");
             ClearEditor();
         }
         finally
@@ -157,15 +140,33 @@ public partial class HeaderEditorToolViewModel : ObservableObject, IDisposable
         }
     }
 
-    private void ClearEditor()
+    // --- LOGICA DI NAVIGAZIONE PROXY ---
+
+    [RelayCommand(CanExecute = nameof(CanGoNext))]
+    private async Task NextImage() => await Navigator.MoveNextAsync();
+
+    [RelayCommand(CanExecute = nameof(CanGoBack))]
+    private async Task PreviousImage() => await Navigator.MovePreviousAsync();
+
+    private bool CanGoNext => Navigator.CanMoveNext;
+    private bool CanGoBack => Navigator.CanMovePrevious;
+
+    // --- APPLICAZIONE MODIFICHE ---
+
+    [RelayCommand]
+    public void ApplyChanges()
     {
-        _loadedHeader = null;
-        _allItems.Clear();
-        ApplyFilter();
-        IsChecking = false;
+        var newHeader = _mapper.ReconstructHeader(_allItems);
+        if (ActiveFile != null && newHeader != null)
+        {
+            // Salvataggio in RAM: il nodo rifletterà i cambiamenti al prossimo ricaricamento
+            ActiveFile.ModifiedHeader = newHeader;
+            _ = RefreshHealthCheckAsync();
+        }
     }
 
-    // --- HEALTH CHECK (Usa _loadedHeader invece di ActiveRenderer) ---
+    // --- ANALISI SALUTE ---
+
     public async Task RefreshHealthCheckAsync()
     {
         _healthCheckCts?.Cancel();
@@ -175,126 +176,58 @@ public partial class HeaderEditorToolViewModel : ObservableObject, IDisposable
 
         try
         {
-            await Task.Delay(150, token); 
-            
-            // Usiamo l'header caricato localmente
-            if (_loadedHeader == null || _allItems.Count == 0) 
-            { 
-                IsChecking = false; 
-                ResetStatusToWaiting(); 
-                return; 
-            }
+            await Task.Delay(250, token); 
+            if (_allItems.Count == 0) { ResetStatusToWaiting(); return; }
 
-            // Dobbiamo ricostruire l'header temporaneo basato sulle modifiche attuali nell'editor
-            // per validare lo stato "live"
-            var liveHeader = _metadataService.ReconstructHeader(_loadedHeader, _allItems);
-
-            var result = await Task.Run(() => 
-            {
-                token.ThrowIfCancellationRequested();
-                var status = new HealthCheckResult();
-                
-                var dt = _metadataService.GetObservationDate(liveHeader);
-                status.DateMsg = dt.HasValue ? $"Acquisizione: {dt.Value:yyyy-MM-dd HH:mm:ss}" : null;
-                status.DateError = dt.HasValue ? null : "Timestamp mancante o non standard.";
-                
-                token.ThrowIfCancellationRequested();
-                var loc = _metadataService.GetObservatoryLocation(liveHeader);
-                status.LocMsg = loc != null ? $"Osservatorio: {loc.Latitude:F3}, {loc.Longitude:F3}" : null;
-                status.LocError = loc != null ? null : "Coordinate geografiche assenti.";
-                
-                token.ThrowIfCancellationRequested();
-                var wcs = _metadataService.ExtractWcs(liveHeader);
-                status.WcsMsg = (wcs != null && wcs.IsValid) ? $"Risolto ({wcs.PixelScaleArcsec:F2}\"/px)" : null;
-                status.WcsError = (wcs != null && wcs.IsValid) ? null : "Soluzione WCS non valida.";
-                
-                return status;
-            }, token);
+            var liveHeader = await Task.Run(() => _mapper.ReconstructHeader(_allItems), token);
+            var report = await Task.Run(() => _healthEvaluator.Evaluate(liveHeader), token);
 
             if (token.IsCancellationRequested) return;
-            UpdateStatusIndicator(result.DateMsg, result.DateError, m => DateStatusText = m, c => DateStatusColor = c);
-            UpdateStatusIndicator(result.LocMsg, result.LocError, m => LocationStatusText = m, c => LocationStatusColor = c);
-            UpdateStatusIndicator(result.WcsMsg, result.WcsError, m => WcsStatusText = m, c => WcsStatusColor = c);
+
+            DateStatus = report.Date.Status;
+            DateStatusText = report.Date.Message;
+            LocationStatus = report.Location.Status;
+            LocationStatusText = report.Location.Message;
+            WcsStatus = report.Wcs.Status;
+            WcsStatusText = report.Wcs.Message;
         }
         catch (OperationCanceledException) { }
-        catch (Exception ex) { Debug.WriteLine($"[HealthCheck Error] {ex.Message}"); }
         finally { IsChecking = false; }
-    }
-
-    private void UpdateStatusIndicator(string? msg, string? error, Action<string> setText, Action<IBrush> setColor)
-    {
-        if (error == null) { setText(msg ?? ""); setColor(SuccessBrush); }
-        else { setText(error); setColor(ErrorBrush); }
     }
 
     private void ResetStatusToWaiting()
     {
-        DateStatusColor = PendingBrush; DateStatusText = "Analisi...";
-        LocationStatusColor = PendingBrush; LocationStatusText = "Analisi...";
-        WcsStatusColor = PendingBrush; WcsStatusText = "Analisi...";
+        DateStatus = HeaderHealthStatus.Pending; DateStatusText = "Analisi...";
+        LocationStatus = HeaderHealthStatus.Pending; LocationStatusText = "Analisi...";
+        WcsStatus = HeaderHealthStatus.Pending; WcsStatusText = "Analisi...";
     }
+
+    // --- GESTIONE RIGHE ED EDITOR ---
 
     private void ApplyFilter()
     {
         var query = SearchText?.Trim();
-        if (string.IsNullOrWhiteSpace(query))
-        {
-            FilteredItems = new ObservableCollection<FitsHeaderEditorRow>(_allItems);
-        }
-        else
-        {
-            var results = _allItems
-                .Where(item => 
-                    (item.Key?.Contains(query, StringComparison.OrdinalIgnoreCase) ?? false) ||
-                    (item.Value?.Contains(query, StringComparison.OrdinalIgnoreCase) ?? false) ||
-                    (item.Comment?.Contains(query, StringComparison.OrdinalIgnoreCase) ?? false))
-                .OrderBy(item => item.Key?.StartsWith(query, StringComparison.OrdinalIgnoreCase) == true ? 0 : 1);
-            
-            FilteredItems = new ObservableCollection<FitsHeaderEditorRow>(results);
-        }
-    }
+        var results = string.IsNullOrWhiteSpace(query) 
+            ? _allItems 
+            : _allItems.Where(item => 
+                (item.Key?.Contains(query, StringComparison.OrdinalIgnoreCase) ?? false) ||
+                (item.Value?.Contains(query, StringComparison.OrdinalIgnoreCase) ?? false));
 
-    // --- SALVATAGGIO ---
-
-    /// <summary>
-    /// Restituisce l'header ricostruito con le modifiche.
-    /// Da chiamare quando l'utente preme "Applica" o "Salva".
-    /// </summary>
-    public FitsHeader? GetUpdatedHeader()
-    {
-        if (_loadedHeader == null) return null;
-        return _metadataService.ReconstructHeader(_loadedHeader, _allItems);
-    }
-
-    /// <summary>
-    /// Applica le modifiche all'oggetto FileReference attivo.
-    /// Non scrive su disco, ma segna il file come "Modificato in RAM".
-    /// </summary>
-    [RelayCommand]
-    public void ApplyChanges()
-    {
-        var activeFile = _sourceNode.ActiveFile;
-        var newHeader = GetUpdatedHeader();
-
-        if (activeFile != null && newHeader != null)
-        {
-            activeFile.UnsavedHeader = newHeader;
-            
-            // Opzionale: Notificare il nodo di ricaricare se necessario, 
-            // ma dato che l'immagine (pixel) non cambia, spesso basta aggiornare i metadati.
-        }
+        FilteredItems = new ObservableCollection<FitsHeaderEditorRow>(results);
     }
 
     [RelayCommand]
     private void AddNewKey()
     {
         string newKeyName = !string.IsNullOrWhiteSpace(SearchText) ? SearchText.Trim().ToUpper() : "NEW_KEY";
-        var newItem = new FitsHeaderEditorRow(newKeyName, "0", "Aggiunta manuale", false);
-        newItem.IsModified = true;
-        var endIndex = _allItems.FindIndex(x => x.Key.Trim().ToUpper() == "END");
+        var newItem = new FitsHeaderEditorRow(newKeyName, "", "", false) { IsModified = true };
+
+        int endIndex = _allItems.FindIndex(x => x.Key.Trim().ToUpper() == "END");
         if (endIndex >= 0) _allItems.Insert(endIndex, newItem);
         else _allItems.Add(newItem);
-        SearchText = ""; ApplyFilter(); SelectedItem = newItem; _ = RefreshHealthCheckAsync(); RequestScrollToSelection?.Invoke();
+
+        SearchText = ""; ApplyFilter(); SelectedItem = newItem; _ = RefreshHealthCheckAsync(); 
+        RequestScrollToSelection?.Invoke();
     }
     
     [RelayCommand]
@@ -306,40 +239,20 @@ public partial class HeaderEditorToolViewModel : ObservableObject, IDisposable
         _ = RefreshHealthCheckAsync();
     }
 
-    // --- NAVIGAZIONE ---
-
-    [RelayCommand(CanExecute = nameof(CanGoNext))]
-    private void NextImage()
+    private void ClearEditor()
     {
-        if (_sourceNode is MultipleImagesNodeViewModel multi && CanGoNext)
-        {
-            multi.NextImageCommand.Execute(null);
-        }
-    }
-
-    [RelayCommand(CanExecute = nameof(CanGoBack))]
-    private void PreviousImage()
-    {
-        if (_sourceNode is MultipleImagesNodeViewModel multi && CanGoBack)
-        {
-            multi.PreviousImageCommand.Execute(null);
-        }
+        _allItems.Clear();
+        FilteredItems.Clear();
+        IsChecking = false;
     }
 
     public void Dispose()
     {
         if (_isDisposed) return;
-        
-        _sourceNode.PropertyChanged -= OnSourceNodePropertyChanged;
+        if (Navigator is SequenceNavigator sn) sn.IndexChanged -= OnNavigatorIndexChanged;
         _healthCheckCts?.Cancel();
         _healthCheckCts?.Dispose();
-        
         _isDisposed = true;
         GC.SuppressFinalize(this);
-    }
-
-    private class HealthCheckResult
-    {
-        public string? DateMsg, DateError, LocMsg, LocError, WcsMsg, WcsError;
     }
 }

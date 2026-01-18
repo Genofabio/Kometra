@@ -28,11 +28,13 @@ public partial class ConnectionViewModel : ObservableObject, IDisposable
         Source = source;
         Target = target;
 
+        // Validazione ID (fondamentale per evitare errori di mappatura caricando da disco)
         if (source.Id != model.SourceNodeId || target.Id != model.TargetNodeId)
         {
             throw new ArgumentException("I nodi forniti non corrispondono agli ID nel ConnectionModel.");
         }
 
+        // Sottoscrizione per l'estetica della selezione
         Source.PropertyChanged += OnNodeSelectionChanged;
         Target.PropertyChanged += OnNodeSelectionChanged;
         
@@ -49,13 +51,14 @@ public partial class ConnectionViewModel : ObservableObject, IDisposable
 
     private void UpdateHighlight()
     {
+        // Se selezioni il padre o il figlio, il filo si illumina. Semplice ed efficace.
         IsHighlighted = Source.IsSelected || Target.IsSelected;
     }
     
     public void Dispose()
     {
+        // Pulizia degli eventi per non lasciare "fili appesi" in memoria
         Source.PropertyChanged -= OnNodeSelectionChanged;
         Target.PropertyChanged -= OnNodeSelectionChanged;
-        GC.SuppressFinalize(this);
     }
 }

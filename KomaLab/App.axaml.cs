@@ -1,22 +1,31 @@
+using System;
+using System.IO;
 using Avalonia;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
-using KomaLab.ViewModels;
-using KomaLab.Views;
 using Microsoft.Extensions.DependencyInjection;
-using System;
+using KomaLab.Infrastructure;
 using KomaLab.Services.Astrometry;
-using KomaLab.Services.Factories; // Namespace Factories
+using KomaLab.Services.Factories;
 using KomaLab.Services.Fits;
-using KomaLab.Services.Processing;
+using KomaLab.Services.Fits.Conversion;
+using KomaLab.Services.Fits.IO;
+using KomaLab.Services.Fits.Metadata;
+using KomaLab.Services.Processing.Alignment;
+using KomaLab.Services.Processing.Batch;
+using KomaLab.Services.Processing.Coordinators;
+using KomaLab.Services.Processing.Engines;
+using KomaLab.Services.Processing.Rendering;
 using KomaLab.Services.UI;
 using KomaLab.Services.Undo;
+using KomaLab.ViewModels;
+using KomaLab.ViewModels.Tools;
+using KomaLab.Views;
 
 namespace KomaLab;
 
 public class App : Application
 {
-    // Proprietà statica per l'accesso al container (se necessario in casi legacy/view)
     public static IServiceProvider? Services { get; private set; }
 
     public override void Initialize()
@@ -27,25 +36,17 @@ public class App : Application
 
     public override void OnFrameworkInitializationCompleted()
     {
-        // 1. Configurazione DI Container
         Services = ConfigureServices();
         
-        // 2. Risoluzione del ViewModel principale
         var mainViewModel = Services.GetRequiredService<MainWindowViewModel>();
 
-        // 3. Setup della Finestra Principale (Desktop)
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
-            desktop.MainWindow = new MainWindow
-            {
-                DataContext = mainViewModel 
-            };
-             
-            // Registrazione dell'istanza della finestra nel WindowService
+            desktop.MainWindow = new MainWindow { DataContext = mainViewModel };
+            
             var windowService = Services.GetRequiredService<IWindowService>();
             windowService.RegisterMainWindow(desktop.MainWindow);
             
-            // Cleanup alla chiusura
             desktop.Exit += (_, _) => CleanUpOrphanedTempFiles();
         }
 
@@ -56,40 +57,65 @@ public class App : Application
     {
         var services = new ServiceCollection();
         
-        // --- 1. Client HTTP (NASA JPL) ---
-        services.AddHttpClient<IJplHorizonsService, JplHorizonsService>(client => 
-        {
-            client.Timeout = TimeSpan.FromSeconds(30);
-            client.DefaultRequestHeaders.Add("User-Agent", "KomaLab/1.0");
-        });
+        // --- 0. Supporto Microsoft Extensions e Rete ---
+        services.AddMemoryCache(); 
+        services.AddHttpClient(); // Necessario per i servizi NASA/JPL
+
+        // --- 1. Infrastruttura (Risoluzione Dipendenza Circolare) ---
+        // Registriamo le classi concrete per i compiti specifici
+        services.AddSingleton<LocalFileStreamProvider>();
+        services.AddSingleton<AvaloniaAssetStreamProvider>();
         
-        // --- 2. Infrastruttura Base ---
-        services.AddSingleton<IFileStreamProvider, AvaloniaAwareStreamProvider>();
+        // Registriamo l'interfaccia usando il Resolver che coordina le due classi sopra
+        // Questo spezza il cerchio perché FileStreamResolver dipende dalle classi concrete, non dall'interfaccia stessa.
+        services.AddSingleton<IFileStreamProvider, FileStreamResolver>();
+
         services.AddSingleton<IDialogService, DialogService>(); 
         services.AddSingleton<IWindowService, WindowService>();
         services.AddSingleton<IUndoService, UndoService>();
 
-        // --- 3. Servizi Dati (IO & Metadati) ---
-        services.AddSingleton<KomaLab.Services.Fits.Engine.FitsReader>();
+        // --- 2. Dati & Metadata (Core) ---
+        services.AddSingleton<FitsReader>();
         services.AddSingleton<IFitsIoService, FitsIoService>();
         services.AddSingleton<IFitsMetadataService, FitsMetadataService>();
+        services.AddSingleton<IFitsDataManager, FitsDataManager>(); 
         services.AddSingleton<IFitsOpenCvConverter, FitsOpenCvConverter>();
 
-        // --- 4. Servizi Imaging & Processing ---
-        services.AddSingleton<IImageAnalysisService, ImageAnalysisService>();
-        services.AddSingleton<IImageOperationService, ImageOperationService>();
-        services.AddSingleton<IMediaExportService, MediaExportService>();
-        services.AddSingleton<IPosterizationService, PosterizationService>();
-        services.AddSingleton<IPlateSolvingService, PlateSolvingService>();
-        services.AddSingleton<IAlignmentService, AlignmentService>();
+        // --- 3. Engine Scientifici ---
+        services.AddSingleton<IStackingEngine, StackingEngine>();
+        services.AddSingleton<IRadiometryEngine, RadiometryEngine>();
+        services.AddSingleton<IImageEffectsEngine, ImageEffectsEngine>();
+        services.AddSingleton<IImageAnalysisEngine, ImageAnalysisEngine>();
+        services.AddSingleton<IGeometricEngine, GeometricEngine>(); 
+        services.AddSingleton<IImagePresentationService, ImagePresentationService>();
 
-        // --- 5. Factories ---
+        // --- 4. Servizi di Dominio ---
+        services.AddSingleton<IPlateSolvingService, PlateSolvingService>();
+        services.AddSingleton<IAlignmentService, AlignmentService>(); 
+        services.AddSingleton<IBatchProcessingService, BatchProcessingService>(); 
+        services.AddSingleton<IJplHorizonsService, JplHorizonsService>();
+
+        // --- 5. Coordinatori ---
+        services.AddSingleton<IAstrometryCoordinator, AstrometryCoordinator>();
+        services.AddSingleton<IPosterizationCoordinator, PosterizationCoordinator>();
+        services.AddSingleton<IAlignmentCoordinator, AlignmentCoordinator>(); 
+        services.AddSingleton<IVideoExportCoordinator, VideoExportCoordinator>();
+        services.AddSingleton<IStackingCoordinator, StackingCoordinator>();
+
+        // --- 6. Factories ---
         services.AddSingleton<INodeViewModelFactory, NodeViewModelFactory>();
         services.AddSingleton<IFitsRendererFactory, FitsRendererFactory>();
+        services.AddSingleton<KomaLab.ViewModels.Mappings.FitsHeaderUiMapper>();
         
-        // --- 6. ViewModels ---
-        services.AddSingleton<BoardViewModel>();
+        // --- 7. ViewModels Principali (Singleton) ---
         services.AddSingleton<MainWindowViewModel>();
+        services.AddSingleton<BoardViewModel>();
+
+        // --- 8. Tool ViewModels (Transient) ---
+        services.AddTransient<HeaderEditorToolViewModel>();
+        services.AddTransient<PosterizationToolViewModel>();
+        services.AddTransient<PlateSolvingToolViewModel>();
+        services.AddTransient<AlignmentToolViewModel>();
 
         return services.BuildServiceProvider();
     }
@@ -98,15 +124,9 @@ public class App : Application
     {
         try
         {
-            string tempRoot = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "Komalab");
-            if (System.IO.Directory.Exists(tempRoot))
-            {
-                System.IO.Directory.Delete(tempRoot, true);
-            }
+            string tempRoot = Path.Combine(Path.GetTempPath(), "Komalab");
+            if (Directory.Exists(tempRoot)) Directory.Delete(tempRoot, true);
         }
-        catch 
-        { 
-            // Ignora errori di file in uso
-        }
+        catch { /* File in uso o già eliminati */ }
     }
 }

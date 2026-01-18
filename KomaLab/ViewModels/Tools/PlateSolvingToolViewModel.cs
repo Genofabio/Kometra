@@ -1,269 +1,178 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.IO;
+using System.Linq;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
-using Avalonia.Controls;
-using Avalonia.Media;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using KomaLab.Models.Fits;
-using KomaLab.Services.Astrometry;
-using KomaLab.ViewModels.Nodes;
+using KomaLab.Models.Processing;
+using KomaLab.Services.Processing.Coordinators;
+using KomaLab.ViewModels.Enums;
 
 namespace KomaLab.ViewModels.Tools;
 
-// ---------------------------------------------------------------------------
-// FILE: PlateSolvingToolViewModel.cs
-// RUOLO: Orchestratore UI per Risoluzione Astrometrica (Versione RAM-Only)
-// DESCRIZIONE:
-// Gestisce il ciclo di vita della sessione di Plate Solving.
-// Applica i risultati WCS alla proprietà UnsavedHeader dei riferimenti file.
-// ---------------------------------------------------------------------------
-
+/// <summary>
+/// ViewModel per il Tool di Plate Solving.
+/// Agisce come puro osservatore del processo coordinato dall'AstrometryCoordinator.
+/// </summary>
 public partial class PlateSolvingToolViewModel : ObservableObject
 {
     // --- Dipendenze ---
-    private readonly ImageNodeViewModel _targetNode;
-    private readonly IPlateSolvingService _solverService;
+    private readonly IAstrometryCoordinator _coordinator;
+    private readonly List<FitsFileReference> _targetFiles;
+    
+    // --- Stato Interno ---
+    private readonly StringBuilder _logBuilder = new();
     private CancellationTokenSource? _cts;
+    private int _successCount;
 
-    // --- Risorse Statiche ---
-    private static readonly IBrush SuccessBrush = new SolidColorBrush(Color.Parse("#03A077"));
-    private static readonly IBrush ErrorBrush = new SolidColorBrush(Color.Parse("#E6606A"));
-    private static readonly IBrush PendingBrush = new SolidColorBrush(Color.Parse("#808080"));
-    private static readonly IBrush RunningTextBrush = new SolidColorBrush(Color.Parse("#E0E0E0")); 
-
-    // --- Proprietà Observable ---
+    // --- Proprietà UI ---
     [ObservableProperty] private string _title = "Risoluzione Astrometrica";
-    [ObservableProperty] private string _targetFileName = "";
+    [ObservableProperty] private string _targetName = "";
     
     [ObservableProperty] 
     [NotifyPropertyChangedFor(nameof(CanInteract))]
     private bool _isBusy;
     
-    [ObservableProperty] private bool _isFinished;
-    
-    [ObservableProperty] private string _statusText = "Pronto per l'analisi.";
-    [ObservableProperty] private IBrush _statusColor = PendingBrush;
+    [ObservableProperty] private PlateSolvingStatus _currentStatus = PlateSolvingStatus.Idle;
+    [ObservableProperty] private string _statusText = "Pronto.";
     [ObservableProperty] private string _fullLog = ""; 
     [ObservableProperty] private int _progressValue = 0;
     [ObservableProperty] private int _progressMax = 100;
 
     public bool CanInteract => !IsBusy;
+    public event Action? RequestClose;
 
-    // --- Costruttore ---
-    public PlateSolvingToolViewModel(ImageNodeViewModel targetNode, IPlateSolvingService solverService)
+    public PlateSolvingToolViewModel(
+        IEnumerable<FitsFileReference> files, 
+        string targetName,
+        IAstrometryCoordinator coordinator) // Riceve il coordinatore, non più il servizio
     {
-        _targetNode = targetNode ?? throw new ArgumentNullException(nameof(targetNode));
-        _solverService = solverService ?? throw new ArgumentNullException(nameof(solverService));
+        if (files == null) throw new ArgumentNullException(nameof(files));
+        _coordinator = coordinator ?? throw new ArgumentNullException(nameof(coordinator));
         
-        IsFinished = false;
-        InitializeTargetName();
+        _targetFiles = files.ToList();
+        TargetName = targetName;
+        ProgressMax = _targetFiles.Count;
+        
+        if (_targetFiles.Count == 0)
+            StatusText = "Nessun file selezionato.";
     }
 
-    private void InitializeTargetName()
-    {
-        if (_targetNode is SingleImageNodeViewModel s) TargetFileName = Path.GetFileName(s.ImagePath);
-        else if (_targetNode is MultipleImagesNodeViewModel m) TargetFileName = m.CurrentImageText;
-    }
-
-    // --- Comandi ---
+    // =======================================================================
+    // ESECUZIONE SESSIONE
+    // =======================================================================
 
     [RelayCommand]
     private async Task StartSolving()
     {
-        if (IsBusy) return;
-
-        var filesToProcess = PrepareSession();
-        if (filesToProcess.Count == 0) return;
-
-        int successCount = 0;
-        bool wasCancelled = false;
-
-        try 
-        {
-            // Otteniamo la collezione completa per applicare i risultati
-            var collection = _targetNode.OutputCollection;
-
-            for (int i = 0; i < filesToProcess.Count; i++)
-            {
-                if (_cts!.Token.IsCancellationRequested) 
-                { 
-                    wasCancelled = true; 
-                    break; 
-                }
-
-                // Esecuzione del singolo file
-                // Passiamo anche l'indice per recuperare il riferimento corretto dalla collezione
-                bool result = await ProcessSingleFileAsync(filesToProcess[i], i, filesToProcess.Count, collection);
-                if (result) successCount++;
-            }
-        }
-        catch (Exception ex)
-        {
-            AppendLog($"\n!!! ERRORE CRITICO DI SISTEMA: {ex.Message}");
-        }
-        finally
-        {
-            await FinalizeSessionAsync(successCount, filesToProcess.Count, wasCancelled);
-        }
-    }
-
-    [RelayCommand]
-    private void CancelOperation()
-    {
-        if (_cts != null && !_cts.IsCancellationRequested)
-        {
-            AppendLog("\n>> Arresto del processo in corso...");
-            _cts.Cancel();
-        }
-    }
-
-    [RelayCommand]
-    private void CloseWindow(Window window) => window?.Close();
-
-    // --- Logica Ausiliaria ---
-
-    private List<string> PrepareSession()
-    {
+        if (IsBusy || _targetFiles.Count == 0) return;
+        
+        // 1. Setup Iniziale
         IsBusy = true;
-        IsFinished = false; 
+        CurrentStatus = PlateSolvingStatus.Running;
+        _successCount = 0;
+        _logBuilder.Clear();
+        FullLog = ""; 
+
         _cts = new CancellationTokenSource();
-        
-        FullLog = "";
-        StatusColor = RunningTextBrush; 
-        StatusText = "Inizializzazione...";
-        ProgressValue = 0;
+        var token = _cts.Token;
 
-        var files = _targetNode.GetManagedFilePaths();
+        // 2. Definizione del Reporting strutturato
+        var progressHandler = new Progress<AstrometryProgressReport>(report => 
+        {
+            // Gestione Avanzamento e Testi
+            if (report.IsStarting)
+            {
+                StatusText = $"[{report.CurrentFileIndex}/{report.TotalFiles}] {report.FileName}";
+                ProgressValue = report.CurrentFileIndex;
+            }
 
-        ProgressMax = files.Count;
-        
-        AppendLog($"--- INIZIO SESSIONE: {DateTime.Now:HH:mm:ss} ---");
-        AppendLog($"Motore: ASTAP (Sandbox Mode)");
-        AppendLog($"Immagini totali: {files.Count}");
+            // Gestione Messaggi di Log
+            if (!string.IsNullOrEmpty(report.Message))
+            {
+                AppendLog(report.Message);
+            }
 
-        return files;
-    }
-
-    private async Task<bool> ProcessSingleFileAsync(string filePath, int index, int total, FitsCollection? collection)
-    {
-        string fileName = Path.GetFileName(filePath);
-        StatusText = $"Risoluzione {index + 1}/{total}: {fileName}...";
-        ProgressValue = index + 1;
-
-        var localLog = new StringBuilder();
-        localLog.AppendLine("");
-        localLog.AppendLine($"[{index + 1}/{total}] ELABORAZIONE: {fileName}");
-        localLog.AppendLine("----------------------------------------");
-
-        // 1. DIAGNOSI
-        var metadataStatus = await _solverService.DiagnoseIssuesAsync(filePath);
-        localLog.AppendLine($">> Stato Header: {metadataStatus}");
+            // Monitoraggio Successi
+            if (report.IsCompleted && report.Success)
+            {
+                _successCount++;
+            }
+        });
 
         try
         {
-            var result = await _solverService.SolveAsync(filePath, _cts!.Token, (logLine) => 
-            {
-                localLog.AppendLine(logLine);
-            });
+            AppendLog("--- INIZIO SESSIONE ASTROMETRICA ---");
+            AppendLog($"Target: {TargetName} | Sequenza: {_targetFiles.Count} file");
 
-            if (result.Success && result.SolvedHeader != null)
-            {
-                // AGGIORNAMENTO STATO IN MEMORIA
-                if (collection != null && index < collection.Count)
-                {
-                    // Troviamo il riferimento al file nella collezione
-                    var fileRef = collection[index];
-                    
-                    // Salviamo l'header risolto come "Modifica non salvata"
-                    fileRef.UnsavedHeader = result.SolvedHeader;
-                    
-                    localLog.AppendLine(">> RISULTATO: SUCCESSO (WCS applicato in memoria)");
-                }
-                else
-                {
-                    localLog.AppendLine(">> RISULTATO: SUCCESSO (ma riferimento file perso)");
-                }
-            
-                AppendLog(localLog.ToString());
-                return true;
-            }
-            else
-            {
-                localLog.AppendLine(">> RISULTATO: FALLITO");
-                if (!result.FullLog.Contains("Exception") && !_cts!.Token.IsCancellationRequested)
-                    localLog.AppendLine(">> Nota: Immagine non risolta (stelle insufficienti o parametri errati).");
+            // 3. DELEGA TOTALE: Il coordinatore gestisce diagnosi, loop e ASTAP
+            await _coordinator.SolveSequenceAsync(_targetFiles, progressHandler, token);
 
-                AppendLog(localLog.ToString());
-                return false;
-            }
+            FinalizeSession(token.IsCancellationRequested);
+        }
+        catch (OperationCanceledException)
+        {
+            FinalizeSession(true);
         }
         catch (Exception ex)
         {
-            localLog.AppendLine($">> ERRORE SISTEMA: {ex.Message}");
-            AppendLog(localLog.ToString());
-            return false;
+            AppendLog($"\n!!! ERRORE FATALE: {ex.Message}");
+            CurrentStatus = PlateSolvingStatus.Error;
+            StatusText = "Errore durante il processo.";
+        }
+        finally
+        {
+            IsBusy = false;
+            _cts.Dispose();
+            _cts = null;
         }
     }
 
-    private Task FinalizeSessionAsync(int successCount, int totalCount, bool wasCancelled)
+    private void FinalizeSession(bool cancelled)
     {
-        IsBusy = false;
-        _cts?.Dispose();
-        _cts = null;
-
-        if (wasCancelled)
+        if (cancelled)
         {
-            AppendLog("\n>> SESSIONE ANNULLATA DALL'UTENTE.");
-            StatusText = "Operazione interrotta.";
-            StatusColor = ErrorBrush;
+            StatusText = "Operazione annullata.";
+            CurrentStatus = PlateSolvingStatus.Cancelled;
+            AppendLog("\n--- SESSIONE INTERROTTA DALL'UTENTE ---");
         }
         else
         {
-            IsFinished = true;
-            UpdateFinalStatus(successCount, totalCount);
-            
-            if (successCount > 0)
-            {
-                AppendLog("\n--- OPERAZIONE COMPLETATA ---");
-                AppendLog("Le coordinate celesti (WCS) sono ora attive in memoria.");
-                // Nota per l'utente: le modifiche sono nell'UnsavedHeader
-                AppendLog("ATTENZIONE: Le modifiche sono temporanee. Usa 'Salva' sul nodo per renderle permanenti.");
-            }
-        }
-        
-        // Notifica il nodo che i dati sono cambiati (opzionale, per refresh UI immediato)
-        // Ma siccome il WCS non cambia l'immagine visibile, non serve ricaricare i pixel.
-        
-        AppendLog($"\n--- FINE SESSIONE: {DateTime.Now:HH:mm:ss} ---");
-        return Task.CompletedTask;
-    }
+            // Determiniamo lo stato finale basandoci sui successi riportati dal coordinatore
+            CurrentStatus = _successCount == _targetFiles.Count ? PlateSolvingStatus.Success 
+                          : _successCount > 0 ? PlateSolvingStatus.PartialSuccess 
+                          : PlateSolvingStatus.Failed;
 
-    private void UpdateFinalStatus(int success, int total)
-    {
-        if (success == total && success > 0)
-        {
-            StatusText = "Risoluzione completata con successo!";
-            StatusColor = SuccessBrush;
-            ProgressValue = ProgressMax;
-        }
-        else if (success > 0)
-        {
-            StatusText = $"Risoluzione parziale: {success} su {total}.";
-            StatusColor = PendingBrush;
-        }
-        else
-        {
-            StatusText = "Impossibile risolvere le immagini.";
-            StatusColor = ErrorBrush;
+            StatusText = $"Sessione conclusa ({_successCount}/{_targetFiles.Count} risolti).";
+            AppendLog($"\n--- FINE SESSIONE: {_successCount} successi ---");
         }
     }
 
-    private void AppendLog(string message)
+    private void AppendLog(string msg)
     {
-        FullLog += message + Environment.NewLine;
+        if (string.IsNullOrEmpty(msg)) return;
+
+        // Aggiungiamo il timestamp per un look professionale se non è un messaggio vuoto
+        _logBuilder.AppendLine(msg);
+        
+        // Aggiornamento della proprietà per il Binding XAML
+        FullLog = _logBuilder.ToString();
+    }
+    
+    // =======================================================================
+    // COMANDI NAVIGAZIONE
+    // =======================================================================
+
+    [RelayCommand] 
+    private void Cancel() => _cts?.Cancel();
+    
+    [RelayCommand] 
+    private void Close() 
+    {
+        if (IsBusy) _cts?.Cancel();
+        RequestClose?.Invoke();
     }
 }

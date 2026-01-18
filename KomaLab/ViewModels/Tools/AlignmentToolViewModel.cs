@@ -1,11 +1,10 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
-using System.Diagnostics;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
-using System.Windows.Input;
-using Avalonia.Media;     
+using Avalonia;
 using Avalonia.Media.Imaging;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -13,1031 +12,349 @@ using KomaLab.Models.Fits;
 using KomaLab.Models.Primitives;
 using KomaLab.Models.Processing;
 using KomaLab.Models.Visualization;
-using KomaLab.Services.Astrometry;
-using KomaLab.Services.Factories;
 using KomaLab.Services.Fits;
-using KomaLab.Services.Processing;
-using AlignmentImageViewport = KomaLab.ViewModels.Visualization.AlignmentImageViewport;
-using CoordinateEntry = KomaLab.ViewModels.Items.CoordinateEntry;
-using FitsRenderer = KomaLab.ViewModels.Visualization.FitsRenderer;
-using Point = Avalonia.Point;
-using Size = Avalonia.Size; 
+using KomaLab.Services.Factories;
+using KomaLab.Services.Processing.Coordinators;
+using KomaLab.ViewModels.Components;
+using KomaLab.ViewModels.Items;
+using KomaLab.ViewModels.Visualization;
 
-namespace KomaLab.ViewModels.Tools; 
+namespace KomaLab.ViewModels.Tools;
 
-// ---------------------------------------------------------------------------
-// FILE: AlignmentToolViewModel.cs
-// RUOLO: Orchestrator per Allineamento Immagini
-// ---------------------------------------------------------------------------
-
+/// <summary>
+/// ViewModel per il Tool di Allineamento.
+/// Gestisce la logica di analisi dei centroidi e warping delle immagini.
+/// </summary>
 public partial class AlignmentToolViewModel : ObservableObject, IDisposable
 {
-    #region Campi e Costanti
-    
-    // --- Dipendenze Enterprise ---
-    private readonly IFitsIoService _ioService;
-    private readonly IFitsMetadataService _metadataService;
-    private readonly IAlignmentService _alignmentService;
-    private readonly IFitsOpenCvConverter _converter;
-    private readonly IImageAnalysisService _analysis;
-    private readonly IJplHorizonsService _jplService;
-    private readonly IMediaExportService _mediaExport;
+    private readonly IAlignmentCoordinator _coordinator;
+    private readonly IFitsDataManager _dataManager;
     private readonly IFitsRendererFactory _rendererFactory;
-    
-    // --- Dati Interni ---
-    private readonly List<string> _sourcePaths; 
-    private int _currentStackIndex;
-    private readonly int _totalStackCount;
-    
-    private Size _viewportSize;
-    private ContrastProfile? _lastContrastProfile;
-    
-    private bool _isAstrometryValid;
 
-    // --- Risorse Grafiche Statiche ---
-    private static readonly IBrush ColorNormal = Brushes.Cyan;
-    private static readonly IBrush ColorSuccess = new SolidColorBrush(Color.Parse("#03A077")); 
-    private static readonly IBrush ColorError = new SolidColorBrush(Color.Parse("#E6606A"));   
-    private static readonly IBrush ColorLoading = new SolidColorBrush(Color.Parse("#8058E8")); 
-
-    #endregion
-
-    #region Proprietà
-    
-    public List<string>? FinalProcessedPaths { get; private set; }
+    // --- Componenti ---
+    public SequenceNavigator Navigator { get; } = new();
     public AlignmentImageViewport Viewport { get; } = new();
     public ObservableCollection<CoordinateEntry> CoordinateEntries { get; } = new();
 
-    public Size ViewportSize
-    {
-        get => _viewportSize;
-        set { _viewportSize = value; Viewport.ViewportSize = value; }
-    }
-    
-    // --- Gestione Immagine Attiva ---
+    private readonly List<FitsFileReference> _files;
+    private CancellationTokenSource? _navigationCts;
+
+    // TCS richiesto dal code-behind per sincronizzare il primo caricamento
+    public TaskCompletionSource<bool> ImageLoadedTcs { get; } = new();
+
+    #region Stato UI e Binding
+
     [ObservableProperty] 
-    [NotifyPropertyChangedFor(nameof(CorrectImageSize))]
-    [NotifyPropertyChangedFor(nameof(SafeImage))]       
-    [NotifyPropertyChangedFor(nameof(SafeImageWidth))]  
-    [NotifyPropertyChangedFor(nameof(SafeImageHeight))] 
-    private FitsRenderer? _activeImage; 
-    
-    public Size CorrectImageSize => ActiveImage?.ImageSize ?? default;
-    public Bitmap? SafeImage => ActiveImage?.Image;
-    public double SafeImageWidth => ActiveImage?.ImageSize.Width ?? 100;
-    public double SafeImageHeight => ActiveImage?.ImageSize.Height ?? 100;
+    [NotifyPropertyChangedFor(nameof(IsCalculateButtonVisible), nameof(IsApplyCancelButtonsVisible), nameof(IsProcessingVisible), nameof(IsNavigationVisible))]
+    private AlignmentState _currentState = AlignmentState.Initial;
 
-    // --- Radiometria ---
-    [ObservableProperty] private double _blackPoint;
-    [ObservableProperty] private double _whitePoint;
-    
-    // --- Stato Visualizzazione (Linear, Log, etc.) ---
-    [ObservableProperty]
-    private VisualizationMode _visualizationMode;
+    [ObservableProperty] private AlignmentStatus _status = AlignmentStatus.Idle;
+    [ObservableProperty] private string _statusMessage = string.Empty;
 
-    partial void OnVisualizationModeChanged(VisualizationMode value)
-    {
-        if (ActiveImage != null) ActiveImage.VisualizationMode = value;
-    }
-
-    // --- UI Info ---
-    public string ZoomStatusText => $"{Viewport.Scale:P0}";
-    public bool IsTargetMarkerVisible => TargetCoordinate.HasValue;
-    
     [ObservableProperty] 
-    [NotifyPropertyChangedFor(nameof(IsTargetMarkerVisible))]
-    [NotifyPropertyChangedFor(nameof(IsSearchBoxVisible))]
-    private Point? _targetCoordinate;
+    [NotifyPropertyChangedFor(nameof(IsInteractionEnabled))]
+    private bool _isBusy;
 
-    [ObservableProperty] private bool _isStack;
-    [ObservableProperty] private string _stackCounterText = "";
-    
-    // --- Selezione Target e Modalità ---
-    public IEnumerable<AlignmentTarget> AvailableTargets => Enum.GetValues<AlignmentTarget>();
-
-    [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(AvailableAlignmentModes))]
-    [NotifyPropertyChangedFor(nameof(IsSearchRadiusVisible))]
-    [NotifyPropertyChangedFor(nameof(IsSearchRadiusControlsVisible))]
-    [NotifyPropertyChangedFor(nameof(IsRefinementMessageVisible))]
-    [NotifyPropertyChangedFor(nameof(IsNavigationVisible))]
-    [NotifyPropertyChangedFor(nameof(IsJplOptionVisible))]
-    [NotifyPropertyChangedFor(nameof(AstrometryOptionLabel))]      
-    [NotifyPropertyChangedFor(nameof(IsTargetNameInputVisible))]   
-    [NotifyPropertyChangedFor(nameof(IsVerifyButtonVisible))] 
+    [ObservableProperty] 
+    [NotifyPropertyChangedFor(nameof(IsTargetNameInputVisible), nameof(AstrometryOptionLabel))]
     private AlignmentTarget _selectedTarget = AlignmentTarget.Comet;
 
-    public IEnumerable<AlignmentMode> AvailableAlignmentModes 
-    {
-        get
-        {
-            if (SelectedTarget == AlignmentTarget.Comet)
-            {
-                if (IsStack) return new[] { AlignmentMode.Automatic, AlignmentMode.Guided, AlignmentMode.Manual };
-                return new[] { AlignmentMode.Automatic, AlignmentMode.Manual };
-            }
-            return new[] { AlignmentMode.Automatic };
-        }
-    }
-
-    [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(IsSearchRadiusVisible))]
-    [NotifyPropertyChangedFor(nameof(IsSearchRadiusControlsVisible))]
-    [NotifyPropertyChangedFor(nameof(IsRefinementMessageVisible))]
+    [ObservableProperty] 
     [NotifyPropertyChangedFor(nameof(IsNavigationVisible))]
-    [NotifyPropertyChangedFor(nameof(IsJplOptionVisible))] 
     private AlignmentMode _selectedMode = AlignmentMode.Automatic;
-    
-    // --- Parametri di Ricerca ---
-    public bool IsSearchRadiusVisible => SelectedTarget == AlignmentTarget.Comet && SelectedMode != AlignmentMode.Automatic;
 
-    [ObservableProperty] private int _minSearchRadius;
-    [ObservableProperty] private int _maxSearchRadius = 100;
     [ObservableProperty] private int _searchRadius = 100;
+    [ObservableProperty] private bool _useJplAstrometry;
+    [ObservableProperty] private string _targetName = string.Empty;
 
-    // --- Logica Astrometria / JPL ---
-    public bool IsJplOptionVisible => 
-        CurrentState == AlignmentState.Initial &&
-        (
-            (SelectedTarget == AlignmentTarget.Comet && SelectedMode != AlignmentMode.Manual) || 
-            (SelectedTarget == AlignmentTarget.Stars) 
-        );
+    [ObservableProperty] 
+    [NotifyPropertyChangedFor(nameof(SafeImage), nameof(BlackPoint), nameof(WhitePoint))]
+    private FitsRenderer? _activeRenderer;
 
-    public string AstrometryOptionLabel => SelectedTarget == AlignmentTarget.Stars 
-        ? "Usa allineamento WCS (Header)" 
-        : "Usa riferimento NASA/JPL";
-
-    public bool IsTargetNameInputVisible => SelectedTarget == AlignmentTarget.Comet;
-    public bool IsVerifyButtonVisible => SelectedTarget == AlignmentTarget.Comet;
-
-    private bool _useJplAstrometry;
-    public bool UseJplAstrometry
-    {
-        get => _useJplAstrometry;
-        set
-        {
-            if (SetProperty(ref _useJplAstrometry, value))
-            {
-                if (value) _ = RefreshAstrometryStateAsync();
-                else 
-                { 
-                    AstrometryStatusMessage = ""; 
-                    AstrometryStatusBrush = ColorNormal;
-                    CalculateCentersCommand.NotifyCanExecuteChanged();
-                }
-            }
-        }
-    }
-
-    private string _targetName = "";
-    public string TargetName
-    {
-        get => _targetName;
-        set => SetProperty(ref _targetName, value);
-    }
-
-    private bool _isVerifyingJpl;
-    public bool IsVerifyingJpl
-    {
-        get => _isVerifyingJpl;
-        set 
-        {
-            if (SetProperty(ref _isVerifyingJpl, value))
-            {
-                ((RelayCommand)VerifyJplCommand).NotifyCanExecuteChanged();
-                CalculateCentersCommand.NotifyCanExecuteChanged();
-                if (value) AstrometryStatusBrush = ColorLoading;
-            }
-        }
-    }
+    // --- Proprietà richieste espressamente dallo XAML e dal Code-behind ---
+    public Bitmap? SafeImage => ActiveRenderer?.Image;
+    public bool IsInteractionEnabled => !IsBusy;
+    public int MinSearchRadius => 5;
+    public int MaxSearchRadius => 500;
+    public AlignmentMode[] AvailableModes => Enum.GetValues<AlignmentMode>();
     
-    private string _astrometryStatusMessage = "";
-    public string AstrometryStatusMessage
+    // Contatore per la barra di navigazione
+    public string CurrentImageText => $"{Navigator.DisplayIndex} / {Navigator.TotalCount}";
+
+    // Proxy per soglie radiometriche (richiesti dai binding e code-behind)
+    public double BlackPoint
     {
-        get => _astrometryStatusMessage;
-        set => SetProperty(ref _astrometryStatusMessage, value);
+        get => ActiveRenderer?.BlackPoint ?? 0;
+        set { if (ActiveRenderer != null) ActiveRenderer.BlackPoint = value; OnPropertyChanged(); }
     }
 
-    private IBrush _astrometryStatusBrush = ColorNormal;
-    public IBrush AstrometryStatusBrush
+    public double WhitePoint
     {
-        get => _astrometryStatusBrush;
-        set => SetProperty(ref _astrometryStatusBrush, value);
+        get => ActiveRenderer?.WhitePoint ?? 65535;
+        set { if (ActiveRenderer != null) ActiveRenderer.WhitePoint = value; OnPropertyChanged(); }
     }
 
-    public ICommand VerifyJplCommand { get; init; }
-
-    // --- Macchina a Stati (UI Logic) ---
-    [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(IsCalculateButtonVisible))]
-    [NotifyPropertyChangedFor(nameof(IsApplyCancelButtonsVisible))]
-    [NotifyPropertyChangedFor(nameof(ProcessingStatusText))]
-    [NotifyPropertyChangedFor(nameof(IsProcessingVisible))]
-    [NotifyPropertyChangedFor(nameof(IsSearchBoxVisible))]
-    [NotifyPropertyChangedFor(nameof(IsSearchRadiusControlsVisible))]
-    [NotifyPropertyChangedFor(nameof(IsRefinementMessageVisible))]
-    [NotifyCanExecuteChangedFor(nameof(ApplyAlignmentCommand))]
-    [NotifyPropertyChangedFor(nameof(IsCoordinateListVisible))]
-    [NotifyPropertyChangedFor(nameof(IsNavigationVisible))]
-    [NotifyPropertyChangedFor(nameof(IsInteractionEnabled))]
-    [NotifyPropertyChangedFor(nameof(IsJplOptionVisible))] 
-    private AlignmentState _currentState = AlignmentState.Initial;
-    
+    public List<string>? FinalProcessedPaths { get; private set; }
     public bool DialogResult { get; private set; }
     public event Action? RequestClose;
 
+    // Helpers per la visibilità dei controlli
     public bool IsCalculateButtonVisible => CurrentState == AlignmentState.Initial;
     public bool IsApplyCancelButtonsVisible => CurrentState == AlignmentState.ResultsReady;
-    public bool IsSearchBoxVisible => IsTargetMarkerVisible && CurrentState == AlignmentState.Initial;
-    public bool IsSearchRadiusControlsVisible => IsSearchRadiusVisible && CurrentState == AlignmentState.Initial;
-    public bool IsRefinementMessageVisible => IsSearchRadiusVisible && CurrentState != AlignmentState.Initial;
     public bool IsProcessingVisible => CurrentState == AlignmentState.Processing || CurrentState == AlignmentState.Calculating;
-    public bool IsInteractionEnabled => !IsProcessingVisible;
-    
+    public bool IsTargetNameInputVisible => SelectedTarget == AlignmentTarget.Comet;
+    public string AstrometryOptionLabel => SelectedTarget == AlignmentTarget.Stars ? "Usa WCS Header" : "Usa NASA/JPL";
+
+    // Mostra il navigatore solo se non stiamo calcolando e se la modalità lo permette
+    public bool IsNavigationVisible => CurrentState != AlignmentState.Calculating && 
+                                       (CurrentState != AlignmentState.Initial || SelectedMode != AlignmentMode.Automatic);
+
     public string ProcessingStatusText => CurrentState switch
     {
-        AlignmentState.Calculating => UseJplAstrometry 
-            ? (SelectedTarget == AlignmentTarget.Stars ? "Analisi coordinate WCS..." : "Scaricamento dati NASA...") 
-            : "Calcolo centroidi...",
-        AlignmentState.Processing => "Salvataggio immagini allineate...",
-        _ => "Elaborazione..."
+        AlignmentState.Calculating => "Analisi centroidi...",
+        AlignmentState.Processing => "Salvataggio immagini...",
+        _ => "In corso..."
     };
 
-    public bool IsNavigationVisible
-    {
-        get
-        {
-            if (!IsStack) return false;
-            if (CurrentState == AlignmentState.Calculating) return false;
-            if (CurrentState == AlignmentState.ResultsReady || CurrentState == AlignmentState.Processing) 
-                return true;
-
-            return SelectedTarget == AlignmentTarget.Comet && SelectedMode != AlignmentMode.Automatic;
-        }
-    }
-    
-    public bool IsCoordinateListVisible => CurrentState == AlignmentState.ResultsReady || CurrentState == AlignmentState.Processing;
-    public TaskCompletionSource ImageLoadedTcs { get; } = new();
-
     #endregion
-    
-    #region Costruttore
 
     public AlignmentToolViewModel(
-        List<string> sourcePaths, 
-        IFitsIoService ioService,
-        IFitsMetadataService metadataService,
-        IAlignmentService alignmentService,
-        IFitsOpenCvConverter converter,      
-        IImageAnalysisService analysis,
-        IJplHorizonsService jplService,
-        IMediaExportService mediaExport,
-        IFitsRendererFactory rendererFactory, // <--- PARAMETRO AGGIUNTO
-        VisualizationMode initialMode = VisualizationMode.Linear)
+        List<string> sourcePaths,
+        IAlignmentCoordinator coordinator,
+        IFitsDataManager dataManager,
+        IFitsRendererFactory rendererFactory)
     {
-        _ioService = ioService ?? throw new ArgumentNullException(nameof(ioService));
-        _metadataService = metadataService ?? throw new ArgumentNullException(nameof(metadataService));
-        _alignmentService = alignmentService ?? throw new ArgumentNullException(nameof(alignmentService));
-        _converter = converter ?? throw new ArgumentNullException(nameof(converter));
-        _analysis = analysis ?? throw new ArgumentNullException(nameof(analysis));
-        _jplService = jplService ?? throw new ArgumentNullException(nameof(jplService));
-        _mediaExport = mediaExport ?? throw new ArgumentNullException(nameof(mediaExport));
-        _rendererFactory = rendererFactory ?? throw new ArgumentNullException(nameof(rendererFactory)); // <--- ASSEGNAZIONE
-        
-        _sourcePaths = sourcePaths; 
-        _totalStackCount = sourcePaths.Count;
-        _currentStackIndex = 0;
-        IsStack = _totalStackCount > 1;
+        _coordinator = coordinator ?? throw new ArgumentNullException(nameof(coordinator));
+        _dataManager = dataManager ?? throw new ArgumentNullException(nameof(dataManager));
+        _rendererFactory = rendererFactory ?? throw new ArgumentNullException(nameof(rendererFactory));
 
-        _visualizationMode = initialMode;
-
-        SelectedTarget = AlignmentTarget.Comet;
-        SelectedMode = AlignmentMode.Automatic;
-        UseJplAstrometry = false; 
+        _files = sourcePaths.Select(p => new FitsFileReference(p)).ToList();
         
-        Viewport.SearchRadius = this.SearchRadius;
-        
-        // Inizializzazione comando di verifica JPL
-        VerifyJplCommand = new RelayCommand(async void () => await RefreshAstrometryStateAsync(), () => !IsVerifyingJpl && ActiveImage != null);
+        Navigator.UpdateStatus(0, _files.Count);
+        Navigator.IndexChanged += OnNavigatorIndexChanged;
 
-        // Lancio dell'inizializzazione asincrona
-        _ = InitializeAsync();
+        _ = InitializeToolAsync();
     }
 
-    private async Task InitializeAsync()
+    private async Task InitializeToolAsync()
     {
+        IsBusy = true;
         try
         {
             CoordinateEntries.Clear();
-            for (int i = 0; i < _totalStackCount; i++)
-            {
-                string fileName = System.IO.Path.GetFileName(_sourcePaths[i]);
-                CoordinateEntries.Add(new CoordinateEntry { Index = i, DisplayName = fileName });
-            }
+            foreach (var f in _files)
+                CoordinateEntries.Add(new CoordinateEntry { DisplayName = System.IO.Path.GetFileName(f.FilePath) });
+
+            var metadata = await _coordinator.GetFileMetadataAsync(_files[0]);
+            TargetName = metadata.ObjectName;
             
-            await LoadStackImageAtIndexAsync(_currentStackIndex);
-            
-            if (ActiveImage != null)
-            {
-                double h = ActiveImage.ImageSize.Height;
-                foreach (var entry in CoordinateEntries) entry.ImageHeight = h;
-            }
+            await LoadImageAsync(0);
+            ImageLoadedTcs.TrySetResult(true);
         }
-        catch (Exception ex) 
+        catch 
         { 
-            Debug.WriteLine($"AlgnVM.InitializeAsync Error: {ex}"); 
+            Status = AlignmentStatus.Error; 
+            StatusMessage = "Errore caricamento dati iniziali.";
+            ImageLoadedTcs.TrySetException(new Exception("Load failed"));
         }
-        finally
-        {
-            ImageLoadedTcs.TrySetResult();
-            CalculateCentersCommand.NotifyCanExecuteChanged();
-            ApplyAlignmentCommand.NotifyCanExecuteChanged();
-            RefreshNavigationCommands();
-        }
+        finally { IsBusy = false; }
     }
 
-    private async Task LoadStackImageAtIndexAsync(int index)
+    private async void OnNavigatorIndexChanged(object? sender, int index)
     {
-        if (index < 0 || index >= _totalStackCount) return;
-        
-        if (index == _currentStackIndex && ActiveImage != null) return;
+        OnPropertyChanged(nameof(CurrentImageText));
+        await LoadImageAsync(index);
+    }
 
-        // 1. Caricamento Separato (Header + Pixel)
-        FitsHeader? header = null;
-        Array? pixels = null;
+    // ---------------------------------------------------------------------------
+    // CORE RENDERING & VIEWPORT PROXIES
+    // ---------------------------------------------------------------------------
+
+    private async Task LoadImageAsync(int index)
+    {
+        if (index < 0 || index >= _files.Count) return;
+
+        _navigationCts?.Cancel();
+        _navigationCts?.Dispose();
+        _navigationCts = new CancellationTokenSource();
+        var token = _navigationCts.Token;
 
         try
         {
-            // Qui carichiamo l'header dal disco. CE L'ABBIAMO IN MANO ORA.
-            header = await _ioService.ReadHeaderAsync(_sourcePaths[index]);
-            pixels = await _ioService.ReadPixelDataAsync(_sourcePaths[index]);
-        }
-        catch (Exception ex)
-        {
-            Debug.WriteLine($"Errore caricamento immagine {index}: {ex.Message}");
-            return;
-        }
+            var file = _files[index];
+            var data = await _dataManager.GetDataAsync(file.FilePath);
+            token.ThrowIfCancellationRequested();
 
-        if (header == null || pixels == null) return;
+            var newRenderer = _rendererFactory.Create(data.PixelData, file.ModifiedHeader ?? data.Header);
 
-        // 2. Creazione Renderer
-        // La Factory si occuperà di estrarre BSCALE/BZERO dall'header e passarli al Renderer.
-        // Il Renderer NON manterrà il riferimento all'Header.
-        var newRenderer = _rendererFactory.Create(pixels, header);
-        
-        await newRenderer.InitializeAsync();
-        newRenderer.VisualizationMode = this.VisualizationMode;
-
-        // 3. Calcolo Logica Scientifica Soglie
-        ContrastProfile? profileToApply = null;
-
-        if (ActiveImage != null && !ActiveImage.IsDisposed)
-        {
-            var oldStats = ActiveImage.GetImageStatistics();
-            var newStats = newRenderer.GetImageStatistics();
-
-            profileToApply = _analysis.CalculateAdaptedProfileFromStats(
-                oldStats,
-                ActiveImage.BlackPoint,
-                ActiveImage.WhitePoint,
-                newStats
-            );
-
-            _lastContrastProfile = ActiveImage.CaptureContrastProfile();
-            ActiveImage.Dispose();
-        }
-        else
-        {
-            profileToApply = _lastContrastProfile;
-        }
-
-        // Aggiornamento indici UI
-        _currentStackIndex = index;
-        for (int i = 0; i < CoordinateEntries.Count; i++)
-        {
-            CoordinateEntries[i].IsActive = (i == _currentStackIndex);
-        }
-        UpdateStackCounterText();
-
-        // 4. Applicazione Profilo
-        if (profileToApply != null) 
-        {
-            newRenderer.ApplyContrastProfile(profileToApply);
-        }
-        else
-        {
-            Viewport.ImageSize = newRenderer.ImageSize;
-            Viewport.ResetView();
-            OnPropertyChanged(nameof(ZoomStatusText));
-        }
-
-        // 5. Swap Finale
-        ActiveImage = newRenderer;
-        
-        BlackPoint = newRenderer.BlackPoint;
-        WhitePoint = newRenderer.WhitePoint;
-
-        OnPropertyChanged(nameof(CorrectImageSize));
-        ResetThresholdsCommand.NotifyCanExecuteChanged();
-        
-        // --- FIX PULITO ---
-        // Usiamo la variabile locale 'header' che abbiamo caricato al punto 1.
-        // Non tocchiamo il renderer.
-        if (SelectedTarget == AlignmentTarget.Comet && string.IsNullOrWhiteSpace(TargetName) && header != null)
-        {
-            string headerObj = header.GetStringValue("OBJECT");
-            if (!string.IsNullOrWhiteSpace(headerObj)) 
+            if (ActiveRenderer != null)
             {
-                TargetName = headerObj.Replace("'", "").Trim();
+                using var nextMat = newRenderer.CaptureScientificMat();
+                token.ThrowIfCancellationRequested();
+                var profile = ActiveRenderer.GetAdaptedProfileFor(nextMat);
+                newRenderer.ApplyContrastProfile(profile);
+                ActiveRenderer.Dispose();
             }
+
+            ActiveRenderer = newRenderer;
+            await ActiveRenderer.InitializeAsync();
+
+            Viewport.ImageSize = ActiveRenderer.ImageSize;
+            Viewport.SearchRadius = SearchRadius; // Sincronizza il raggio con il viewport
+            Viewport.TargetCoordinate = CoordinateEntries[index].Coordinate;
+            
+            OnPropertyChanged(nameof(BlackPoint));
+            OnPropertyChanged(nameof(WhitePoint));
+            OnPropertyChanged(nameof(SafeImage));
         }
-
-        UpdateReticleVisibilityForCurrentState();
-        UpdateSearchRadiusRange();
-        
-        ((RelayCommand)VerifyJplCommand).NotifyCanExecuteChanged();
-        RefreshNavigationCommands();
+        catch (OperationCanceledException) { }
+        catch (Exception ex) { Status = AlignmentStatus.Error; StatusMessage = $"Errore rendering: {ex.Message}"; }
     }
 
-    public void Dispose()
-    {
-        ActiveImage?.UnloadData();
-        ActiveImage = null; 
-        RequestClose = null; 
-        GC.SuppressFinalize(this);
-    }
-    
-    private void RefreshNavigationCommands() 
-    { 
-        PreviousImageCommand.NotifyCanExecuteChanged(); 
-        NextImageCommand.NotifyCanExecuteChanged(); 
-        GoToFirstImageCommand.NotifyCanExecuteChanged(); 
-        GoToLastImageCommand.NotifyCanExecuteChanged(); 
-    }
-
-    #endregion
+    // Metodi proxy per il code-behind della View
+    public void ApplyPan(double dx, double dy) => Viewport.ApplyPan(dx, dy);
+    public void ApplyZoomAtPoint(double factor, Point pivot) => Viewport.ApplyZoomAtPoint(factor, pivot);
 
     #region Comandi
 
-    // --- Gestione Viewport ---
-    [RelayCommand] private void ZoomIn() { Viewport.ZoomIn(); OnPropertyChanged(nameof(ZoomStatusText)); }
-    [RelayCommand] private void ZoomOut() { Viewport.ZoomOut(); OnPropertyChanged(nameof(ZoomStatusText)); }
-    [RelayCommand] private void ResetView() { Viewport.ResetView(); OnPropertyChanged(nameof(ZoomStatusText)); }
-    
-    [RelayCommand(CanExecute = nameof(CanResetThresholds))] 
-    private async Task ResetThresholds() 
-    { 
-        if (ActiveImage == null) return; 
-        await ActiveImage.ResetThresholdsAsync(); 
-        BlackPoint = ActiveImage.BlackPoint; 
-        WhitePoint = ActiveImage.WhitePoint; 
-    }
-    private bool CanResetThresholds() => ActiveImage != null;
+    [RelayCommand]
+    private void ResetView() => Viewport.ResetView();
 
-    // --- Navigazione Stack ---
-    private async Task NavigateToImage(int newIndex) 
-    { 
-        if (newIndex < 0 || newIndex >= _totalStackCount || newIndex == _currentStackIndex) return; 
-        TargetCoordinate = null; 
-        await LoadStackImageAtIndexAsync(newIndex); 
+    [RelayCommand]
+    private async Task ResetThresholds()
+    {
+        if (ActiveRenderer != null)
+        {
+            await ActiveRenderer.ResetThresholdsAsync();
+            OnPropertyChanged(nameof(BlackPoint));
+            OnPropertyChanged(nameof(WhitePoint));
+        }
     }
 
-    private int? GetPreviousAccessibleIndex() { for (int i = _currentStackIndex - 1; i >= 0; i--) if (IsIndexAccessible(i)) return i; return null; }
-    private int? GetNextAccessibleIndex() { for (int i = _currentStackIndex + 1; i < _totalStackCount; i++) if (IsIndexAccessible(i)) return i; return null; }
-    private bool CanShowPrevious() => IsStack && GetPreviousAccessibleIndex().HasValue;
-    private bool CanShowNext() => IsStack && GetNextAccessibleIndex().HasValue;
-
-    [RelayCommand(CanExecute = nameof(CanShowPrevious))] private async Task PreviousImage() { var prev = GetPreviousAccessibleIndex(); if (prev.HasValue) await NavigateToImage(prev.Value); }
-    [RelayCommand(CanExecute = nameof(CanShowNext))] private async Task NextImage() { var next = GetNextAccessibleIndex(); if (next.HasValue) await NavigateToImage(next.Value); }
-    [RelayCommand(CanExecute = nameof(CanShowPrevious))] private async Task GoToFirstImage() => await NavigateToImage(0);
-    [RelayCommand(CanExecute = nameof(CanShowNext))] private async Task GoToLastImage() => await NavigateToImage(_totalStackCount - 1);
-    
-    // --- Allineamento (Logica Core) ---
-
-    [RelayCommand(CanExecute = nameof(CanCalculateCenters))]
+    [RelayCommand(CanExecute = nameof(CanCalculate))]
     private async Task CalculateCenters()
     {
-        CurrentState = AlignmentState.Calculating; 
-        OnPropertyChanged(nameof(ProcessingStatusText)); 
+        CurrentState = AlignmentState.Calculating;
+        Status = AlignmentStatus.Running;
+        IsBusy = true;
 
         try
         {
-            List<Point?> startingPointsUi;
-
-            // CASO A: STELLE + WCS (Priorità Dati Header)
-            if (SelectedTarget == AlignmentTarget.Stars && UseJplAstrometry)
-            {
-                startingPointsUi = await PreCalculateSkyFixedPointsAsync();
-            }
-            // CASO B: COMETA + JPL + AUTOMATICO (Priorità Effemeridi)
-            else if (SelectedTarget == AlignmentTarget.Comet && UseJplAstrometry && SelectedMode == AlignmentMode.Automatic)
-            {
-                startingPointsUi = await PreCalculateJplCentersAsync();
-            }
-            // CASO C: COMETA + JPL + GUIDATO (Interpolazione Traiettoria NASA)
-            else if (SelectedTarget == AlignmentTarget.Comet && UseJplAstrometry && SelectedMode == AlignmentMode.Guided)
-            {
-                var nasaTrajectory = await PreCalculateJplCentersAsync();
-                var userStart = CoordinateEntries.First().Coordinate;
-                var userEnd = CoordinateEntries.Last().Coordinate;
-
-                // Se abbiamo trajectory completa E i click dell'utente su Start/End
-                if (nasaTrajectory.Count == _totalStackCount && userStart.HasValue && userEnd.HasValue &&
-                    nasaTrajectory[0].HasValue && nasaTrajectory[^1].HasValue)
-                {
-                    startingPointsUi = new List<Point?>();
-                    // Calcolo offset tra click utente e dato NASA per correggere l'errore sistematico
-                    Point startOffset = userStart.Value - nasaTrajectory[0]!.Value;
-                    Point endOffset = userEnd.Value - nasaTrajectory[^1]!.Value;
-
-                    for (int i = 0; i < _totalStackCount; i++)
-                    {
-                        if (i == 0) startingPointsUi.Add(userStart);
-                        else if (i == _totalStackCount - 1) startingPointsUi.Add(userEnd);
-                        else if (nasaTrajectory[i].HasValue)
-                        {
-                            // Interpolazione lineare dell'offset di correzione
-                            double t = (double)i / (_totalStackCount - 1);
-                            double ox = startOffset.X + (endOffset.X - startOffset.X) * t;
-                            double oy = startOffset.Y + (endOffset.Y - startOffset.Y) * t;
-                            
-                            Point nasaPt = nasaTrajectory[i]!.Value;
-                            startingPointsUi.Add(new Point(nasaPt.X + ox, nasaPt.Y + oy));
-                        }
-                        else startingPointsUi.Add(null);
-                    }
-                }
-                else 
-                {
-                    // Fallback: se i dati NASA sono incompleti, usiamo solo i click utente (interpolazione lineare standard)
-                    startingPointsUi = CoordinateEntries.Select(e => e.Coordinate).ToList();
-                }
-            }
-            // CASO D: STANDARD (Nessun dato esterno / Allineamento visuale puro)
-            else 
-            {
-                startingPointsUi = CoordinateEntries.Select(e => e.Coordinate).ToList();
-                
-                // --- FIX LOGICA GUESSES ---
-                
-                if (SelectedTarget == AlignmentTarget.Comet)
-                {
-                    // 1. SE AUTOMATICO: Vogliamo "Blind Mode". 
-                    // Passiamo esplicitamente NULL per evitare che la Strategy usi il centro come "Suggerimento" e restringa il raggio.
-                    if (SelectedMode == AlignmentMode.Automatic)
-                    {
-                        startingPointsUi = new List<Point?>(new Point?[_totalStackCount]);
-                    }
-                    // 2. SE MANUALE/GUIDATA: Se l'utente non ha cliccato nulla, offriamo il centro come fallback di comodità.
-                    else if (startingPointsUi.All(p => p == null) && ActiveImage != null)
-                    {
-                        startingPointsUi = Enumerable.Repeat<Point?>(
-                            new Point(ActiveImage.ImageSize.Width / 2, ActiveImage.ImageSize.Height / 2), 
-                            _totalStackCount
-                        ).ToList();
-                    }
-                }
-            }
-
-            // Conversione Domain Model (Point -> Point2D)
-            var domainStartingPoints = startingPointsUi
-                .Select(p => p.HasValue ? (Point2D?)new Point2D(p.Value.X, p.Value.Y) : null)
-                .ToList();
+            var guesses = CoordinateEntries.Select(e => e.Coordinate.HasValue 
+                ? new Point2D(e.Coordinate.Value.X, e.Coordinate.Value.Y) 
+                : (Point2D?)null).ToList();
             
-            // Handler per aggiornare la UI in tempo reale
-            var progressHandler = new Progress<(int Index, Point2D? Center)>(update => {
-                if (update.Index >= 0 && update.Index < CoordinateEntries.Count)
-                    CoordinateEntries[update.Index].Coordinate = update.Center.HasValue 
-                        ? new Point(update.Center.Value.X, update.Center.Value.Y) 
-                        : null;
+            if (UseJplAstrometry)
+            {
+                guesses = await _coordinator.DiscoverStartingPointsAsync(_files, SelectedTarget, TargetName);
+            }
+
+            var progress = new Progress<AlignmentProgressReport>(p => {
+                StatusMessage = p.Message;
+                if (p.CurrentIndex <= CoordinateEntries.Count && p.FoundCenter.HasValue)
+                {
+                    CoordinateEntries[p.CurrentIndex - 1].Coordinate = new Point(p.FoundCenter.Value.X, p.FoundCenter.Value.Y);
+                    
+                    if (Navigator.CurrentIndex == p.CurrentIndex - 1)
+                        Viewport.TargetCoordinate = CoordinateEntries[Navigator.CurrentIndex].Coordinate;
+                }
             });
 
-            // Chiamata al Servizio
-            var newCoordsDomain = await _alignmentService.CalculateCentersAsync(
-                SelectedTarget, 
-                SelectedMode, 
-                CenteringMethod.LocalRegion, 
-                _sourcePaths, 
-                domainStartingPoints, 
-                SearchRadius, 
-                progressHandler 
-            );
-
-            // Aggiornamento finale UI (per sicurezza, nel caso il progress saltasse l'ultimo)
-            int resultIdx = 0;
-            foreach (var coord in newCoordsDomain)
-            {
-                if (resultIdx < CoordinateEntries.Count)
-                    CoordinateEntries[resultIdx].Coordinate = coord.HasValue 
-                        ? new Point(coord.Value.X, coord.Value.Y) 
-                        : null;
-                resultIdx++;
-            }
+            await _coordinator.AnalyzeSequenceAsync(_files, guesses, SelectedTarget, SelectedMode, CenteringMethod.LocalRegion, SearchRadius, progress);
 
             CurrentState = AlignmentState.ResultsReady;
-            UpdateReticleVisibilityForCurrentState();
-            ApplyAlignmentCommand.NotifyCanExecuteChanged();
-        }
-        catch (Exception ex)
-        {
-            AstrometryStatusMessage = $"Errore: {ex.Message}";
-            AstrometryStatusBrush = ColorError;
-            CurrentState = AlignmentState.Initial;
-        }
-    }
-
-    private bool CanCalculateCenters()
-    {
-        if (UseJplAstrometry)
-        {
-            if (IsVerifyingJpl || !_isAstrometryValid) return false;
-        }
-        var currentCoordsDomain = CoordinateEntries.Select(e => e.Coordinate.HasValue ? new Point2D(e.Coordinate.Value.X, e.Coordinate.Value.Y) : (Point2D?)null).ToList();
-        return _alignmentService.CanCalculate(SelectedTarget, SelectedMode, currentCoordsDomain, _totalStackCount);
-    }
-
-    [RelayCommand(CanExecute = nameof(CanApplyAlignment))]
-    private async Task ApplyAlignment()
-    {
-        CurrentState = AlignmentState.Processing;
-        try
-        {
-            var centersDomain = CoordinateEntries.Select(e => e.Coordinate.HasValue ? new Point2D(e.Coordinate.Value.X, e.Coordinate.Value.Y) : (Point2D?)null).ToList();
-            string tempFolder = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "Komalab", "Aligned");
-            
-            FinalProcessedPaths = await _alignmentService.ApplyCenteringAndSaveAsync(_sourcePaths, centersDomain, tempFolder, SelectedTarget);
-            DialogResult = true; 
-            RequestClose?.Invoke();
+            Status = AlignmentStatus.Success;
+            StatusMessage = "Analisi completata.";
         }
         catch (Exception ex) 
         { 
-            Debug.WriteLine($"Apply fallito: {ex.Message}"); 
+            StatusMessage = ex.Message; 
+            Status = AlignmentStatus.Error;
             CurrentState = AlignmentState.Initial; 
         }
+        finally { IsBusy = false; }
     }
-    
-    [RelayCommand] 
-    private void CancelCalculation() 
+
+    [RelayCommand(CanExecute = nameof(CanApply))]
+    private async Task ApplyAlignment()
     {
-        ResetAlignmentState();
-        if (UseJplAstrometry) _ = RefreshAstrometryStateAsync();
-    }
-    
-    private bool CanApplyAlignment() => CurrentState == AlignmentState.ResultsReady;
-
-    // --- AGGIORNAMENTO STATO ASTROMETRICO ---
-
-    private async Task RefreshAstrometryStateAsync()
-    {
-        IsVerifyingJpl = true;
-        _isAstrometryValid = false;
-        CalculateCentersCommand.NotifyCanExecuteChanged();
-
-        if (SelectedTarget == AlignmentTarget.Comet && SelectedMode == AlignmentMode.Manual)
-        {
-            AstrometryStatusMessage = ""; IsVerifyingJpl = false; return; 
-        }
-
-        if (ActiveImage == null || _sourcePaths.Count == 0)
-        {
-            AstrometryStatusMessage = "Nessuna immagine caricata.";
-            AstrometryStatusBrush = ColorError; IsVerifyingJpl = false; return;
-        }
-
-        AstrometryStatusBrush = ColorLoading;
+        CurrentState = AlignmentState.Processing;
+        Status = AlignmentStatus.Running;
+        IsBusy = true;
         try
         {
-            if (SelectedTarget == AlignmentTarget.Stars)
-            {
-                AstrometryStatusMessage = "Verifica WCS...";
-                var p = await FetchSkyCoordinateForImage(_currentStackIndex);
-                if (p.HasValue)
-                {
-                    if (IsTargetMarkerVisible) TargetCoordinate = null; 
-                    AstrometryStatusMessage = "WCS valido."; AstrometryStatusBrush = ColorSuccess; _isAstrometryValid = true;
-                }
-                else throw new InvalidOperationException("Dati WCS non validi.");
-            }
-            else if (SelectedTarget == AlignmentTarget.Comet)
-            {
-                AstrometryStatusMessage = "Analisi stack...";
-                for (int i = 0; i < _sourcePaths.Count; i++)
-                {
-                    // ADATTAMENTO: ReadHeaderAsync
-                    var h = await _ioService.ReadHeaderAsync(_sourcePaths[i]);
-                    if (h == null || _metadataService.GetObservationDate(h) == null) throw new InvalidOperationException($"Frame {i+1}: Metadati temporali mancanti.");
-                    var w = _metadataService.ExtractWcs(h);
-                    if (w == null || !w.IsValid) throw new InvalidOperationException($"Frame {i+1}: Astrometria mancante.");
-                }
+            var centers = CoordinateEntries.Select(e => e.Coordinate.HasValue 
+                ? new Point2D(e.Coordinate.Value.X, e.Coordinate.Value.Y) 
+                : (Point2D?)null).ToList();
 
-                // ... (resto della logica Comet invariata)
-                AstrometryStatusMessage = "Interrogazione NASA JPL...";
-                if (SelectedMode == AlignmentMode.Guided)
-                {
-                    var pStart = await FetchJplCoordinateForImage(0);
-                    var pEnd = await FetchJplCoordinateForImage(_totalStackCount - 1);
-                    if (pStart.HasValue && pEnd.HasValue)
-                    {
-                        CoordinateEntries[0].Coordinate = pStart;
-                        CoordinateEntries[_totalStackCount - 1].Coordinate = pEnd;
-                        TargetCoordinate = (_currentStackIndex == 0) ? pStart : ((_currentStackIndex == _totalStackCount - 1) ? pEnd : null);
-                        AstrometryStatusMessage = "Traiettoria caricata."; AstrometryStatusBrush = ColorSuccess; _isAstrometryValid = true;
-                    }
-                    else throw new InvalidOperationException("Target fuori campo.");
-                }
-                else
-                {
-                    var p = await FetchJplCoordinateForImage(_currentStackIndex);
-                    if (p.HasValue) { AstrometryStatusMessage = "Dati JPL pronti."; AstrometryStatusBrush = ColorSuccess; _isAstrometryValid = true; }
-                    else throw new InvalidOperationException("Target non trovato.");
-                }
-            }
+            var map = await _coordinator.AnalyzeSequenceAsync(_files, centers, SelectedTarget, SelectedMode, CenteringMethod.LocalRegion, 0);
+            FinalProcessedPaths = await _coordinator.ExecuteWarpingAsync(_files, map);
+            
+            DialogResult = true;
+            RequestClose?.Invoke();
         }
-        catch (Exception ex) { AstrometryStatusMessage = ex.Message; AstrometryStatusBrush = ColorError; }
-        finally { IsVerifyingJpl = false; CalculateCentersCommand.NotifyCanExecuteChanged(); }
+        catch 
+        { 
+            Status = AlignmentStatus.Error; 
+            StatusMessage = "Errore durante il salvataggio."; 
+            CurrentState = AlignmentState.Initial; 
+        }
+        finally { IsBusy = false; }
     }
 
-    private void UpdateReticle(Point point)
+    [RelayCommand] private void Cancel() => RequestClose?.Invoke();
+
+    private bool CanCalculate() => !IsBusy && _files.Count > 0;
+    private bool CanApply() => CurrentState == AlignmentState.ResultsReady && !IsBusy;
+
+    #endregion
+
+    #region Interazione Viewport
+
+    public void SetTargetCoordinate(Point pt)
     {
-        TargetCoordinate = point;
-        CoordinateEntries[_currentStackIndex].Coordinate = point;
-        ApplyAlignmentCommand.NotifyCanExecuteChanged();
+        if (CurrentState != AlignmentState.Initial) return;
+        
+        if (SelectedMode == AlignmentMode.Guided && Navigator.CurrentIndex > 0 && Navigator.CurrentIndex < _files.Count - 1) 
+            return;
+
+        CoordinateEntries[Navigator.CurrentIndex].Coordinate = pt;
+        Viewport.TargetCoordinate = pt;
         CalculateCentersCommand.NotifyCanExecuteChanged();
     }
 
-    // --- HELPERS JPL / WCS ---
-
-    private async Task<List<Point?>> PreCalculateJplCentersAsync()
+    public void ClearTarget()
     {
-        var results = new List<Point?>();
-        for (int i = 0; i < _sourcePaths.Count; i++) results.Add(await FetchJplCoordinateForImage(i));
-        return results;
-    }
-
-    private async Task<Point?> FetchJplCoordinateForImage(int index)
-    {
-        // ADATTAMENTO: ReadHeaderAsync
-        var header = await _ioService.ReadHeaderAsync(_sourcePaths[index]);
-        if (header == null) return null;
-
-        var obsDate = _metadataService.GetObservationDate(header);
-        var location = _metadataService.GetObservatoryLocation(header);
-        var wcsData = _metadataService.ExtractWcs(header);
+        if (CurrentState != AlignmentState.Initial) { ResetToInitial(); return; }
         
-        var ephem = await _jplService.GetEphemerisAsync(TargetName, obsDate!.Value, location);
-        if (ephem.HasValue)
-        {
-            int height = header.GetIntValue("NAXIS2");
-            var transform = new WcsTransformation(wcsData, height);
-            var pixel = transform.WorldToPixel(ephem.Value.Ra, ephem.Value.Dec);
-            return pixel.HasValue ? new Point(pixel.Value.X, pixel.Value.Y) : null;
-        }
-        return null;
+        CoordinateEntries[Navigator.CurrentIndex].Coordinate = null;
+        Viewport.TargetCoordinate = null;
+        CalculateCentersCommand.NotifyCanExecuteChanged();
     }
 
-    private async Task<Point?> FetchSkyCoordinateForImage(int index)
+    private void ResetToInitial()
     {
-        // ADATTAMENTO: ReadHeaderAsync
-        var refHeader = await _ioService.ReadHeaderAsync(_sourcePaths[0]);
-        if (refHeader != null)
-        {
-            var refWcs = _metadataService.ExtractWcs(refHeader);
-            if (!refWcs.IsValid) return null; 
-
-            var header = await _ioService.ReadHeaderAsync(_sourcePaths[index]);
-            if (header != null)
-            {
-                var wcs = _metadataService.ExtractWcs(header);
-                if (wcs.IsValid) 
-                {
-                    int height = header.GetIntValue("NAXIS2");
-                    var transform = new WcsTransformation(wcs, height);
-                    var pixel = transform.WorldToPixel(refWcs.RefRaDeg, refWcs.RefDecDeg);
-                    return pixel.HasValue ? new Point(pixel.Value.X, pixel.Value.Y) : null;
-                }
-            }
-        }
-
-        return null;
+        CurrentState = AlignmentState.Initial;
+        foreach (var e in CoordinateEntries) e.Coordinate = null;
+        Viewport.TargetCoordinate = null;
+        Status = AlignmentStatus.Idle;
+        StatusMessage = string.Empty;
     }
 
-    private async Task<List<Point?>> PreCalculateSkyFixedPointsAsync()
+    // Aggiornamento dinamico del raggio nel viewport al cambio dello slider
+    partial void OnSearchRadiusChanged(int value)
     {
-        var rawPoints = new List<Point?>();
-        for (int i = 0; i < _sourcePaths.Count; i++) rawPoints.Add(await FetchSkyCoordinateForImage(i));
-
-        if (rawPoints.Count > 0 && rawPoints[0].HasValue)
-        {
-            var h0 = await _ioService.ReadHeaderAsync(_sourcePaths[0]);
-            if (h0 != null)
-            {
-                var offset = new Point(h0.GetIntValue("NAXIS1") / 2.0, h0.GetIntValue("NAXIS2") / 2.0) - rawPoints[0]!.Value;
-                return rawPoints.Select(p => p.HasValue ? (Point?)(p.Value + offset) : null).ToList();
-            }
-        }
-        return rawPoints;
+        Viewport.SearchRadius = value;
     }
 
     #endregion
-    
-    #region Metodi Pubblici
 
-    public void ApplyZoomAtPoint(double scaleFactor, Point viewportZoomPoint) 
-    { 
-        Viewport.ApplyZoomAtPoint(scaleFactor, viewportZoomPoint); 
-        OnPropertyChanged(nameof(ZoomStatusText)); 
-    }
-
-    public void ApplyPan(double deltaX, double deltaY) => Viewport.ApplyPan(deltaX, deltaY);
-
-    public void SetTargetCoordinate(Point imageCoordinate) 
-    { 
-        // 1. Se sta calcolando/salvando, ignora tutto.
-        if (CurrentState == AlignmentState.Processing || CurrentState == AlignmentState.Calculating) return;
-
-        // 2. LOGICA FASE INIZIALE (SETUP)
-        // Qui applichiamo le restrizioni per guidare l'utente nell'input corretto.
-        if (CurrentState == AlignmentState.Initial)
-        {
-            // In Automatico, durante il setup, non si clicca nulla.
-            if (SelectedMode == AlignmentMode.Automatic) return;
-
-            // In Guidato (Cometa), durante il setup, si clicca solo Start ed End.
-            if (IsStack && SelectedMode == AlignmentMode.Guided && SelectedTarget == AlignmentTarget.Comet) 
-            { 
-                if (_currentStackIndex != 0 && _currentStackIndex != (_totalStackCount - 1)) return; 
-            }
-        }
-
-        // --- APPLICAZIONE COORDINATA ---
-        
-        TargetCoordinate = imageCoordinate; 
-        
-        if (_currentStackIndex >= 0 && _currentStackIndex < CoordinateEntries.Count) 
-        {
-            CoordinateEntries[_currentStackIndex].Coordinate = imageCoordinate;
-        }
-
-        // Se siamo in fase iniziale, sblocchiamo il tasto "Calcola" se i requisiti sono soddisfatti.
-        // Se siamo in fase risultati, sblocchiamo "Applica" (anche se è sempre attivo in teoria).
-        ApplyAlignmentCommand.NotifyCanExecuteChanged(); 
-        CalculateCentersCommand.NotifyCanExecuteChanged(); 
-    }
-
-    public void ClearTarget() 
-    { 
-        if (CurrentState != AlignmentState.Initial) 
-        { 
-            ResetAlignmentState(); 
-            return; 
-        }
-
-        if (SelectedMode == AlignmentMode.Automatic && SelectedTarget == AlignmentTarget.Comet) return;
-
-        if (IsStack && SelectedMode == AlignmentMode.Guided && SelectedTarget == AlignmentTarget.Comet) 
-        { 
-            if (_currentStackIndex != 0 && _currentStackIndex != (_totalStackCount - 1)) return; 
-        }
-
-        TargetCoordinate = null; 
-        
-        if (_currentStackIndex >= 0 && _currentStackIndex < CoordinateEntries.Count) 
-        {
-            CoordinateEntries[_currentStackIndex].Coordinate = null;
-        }
-
-        ApplyAlignmentCommand.NotifyCanExecuteChanged(); 
-        CalculateCentersCommand.NotifyCanExecuteChanged(); 
-    }
-
-    #endregion
-    
-    #region Helpers
-
-    partial void OnBlackPointChanged(double value) { if (ActiveImage != null) ActiveImage.BlackPoint = value; }
-    partial void OnWhitePointChanged(double value) { if (ActiveImage != null) ActiveImage.WhitePoint = value; }
-    
-    partial void OnSearchRadiusChanged(int value) => Viewport.SearchRadius = value;
-    
-    partial void OnTargetCoordinateChanged(Point? value) => Viewport.TargetCoordinate = value;
-
-    partial void OnSelectedTargetChanged(AlignmentTarget value)
+    public void Dispose()
     {
-        SelectedMode = AlignmentMode.Automatic;
-        UseJplAstrometry = false; 
-        
-        OnPropertyChanged(nameof(AvailableAlignmentModes));
-        OnPropertyChanged(nameof(SelectedMode)); 
-        OnPropertyChanged(nameof(IsJplOptionVisible));
-        OnPropertyChanged(nameof(AstrometryOptionLabel));
-        OnPropertyChanged(nameof(IsTargetNameInputVisible));
-        OnPropertyChanged(nameof(IsVerifyButtonVisible)); 
+        Navigator.IndexChanged -= OnNavigatorIndexChanged;
+        _navigationCts?.Cancel();
+        _navigationCts?.Dispose();
+        ActiveRenderer?.Dispose();
+        GC.SuppressFinalize(this);
     }
-
-    partial void OnSelectedModeChanged(AlignmentMode value)
-    {
-        ResetAlignmentState();
-        RefreshNavigationCommands();
-
-        if (!IsIndexAccessible(_currentStackIndex)) 
-        {
-            _ = NavigateToImage(0); 
-        }
-
-        UpdateStackCounterText();
-        OnPropertyChanged(nameof(IsJplOptionVisible)); 
-        
-        if (UseJplAstrometry) _ = RefreshAstrometryStateAsync();
-    }
-
-    partial void OnCurrentStateChanged(AlignmentState value) 
-    { 
-        RefreshNavigationCommands(); 
-        UpdateStackCounterText();
-        OnPropertyChanged(nameof(IsJplOptionVisible)); 
-        OnPropertyChanged(nameof(IsSearchRadiusControlsVisible));
-    }
-
-    private void ResetAlignmentState() 
-    { 
-        CurrentState = AlignmentState.Initial; 
-        foreach (var entry in CoordinateEntries) 
-        {
-            entry.Coordinate = null; 
-        }
-        TargetCoordinate = null; 
-        CalculateCentersCommand.NotifyCanExecuteChanged(); 
-        ApplyAlignmentCommand.NotifyCanExecuteChanged(); 
-    }
-
-    private void UpdateReticleVisibilityForCurrentState() 
-    { 
-        if (CurrentState == AlignmentState.Initial && SelectedMode == AlignmentMode.Automatic)
-        {
-            TargetCoordinate = null;
-            return;
-        }
-
-        if (_currentStackIndex < 0 || _currentStackIndex >= CoordinateEntries.Count) 
-        { 
-            TargetCoordinate = null; 
-            return; 
-        } 
-        
-        var currentEntry = CoordinateEntries[_currentStackIndex]; 
-        TargetCoordinate = currentEntry.Coordinate; 
-    }
-
-    private void UpdateSearchRadiusRange() 
-    { 
-        if (ActiveImage == null || ActiveImage.ImageSize == default(Size)) 
-        { 
-            MinSearchRadius = 0; 
-            MaxSearchRadius = 100; 
-        } 
-        else 
-        { 
-            double minDimension = Math.Min(ActiveImage.ImageSize.Width, ActiveImage.ImageSize.Height); 
-            MinSearchRadius = 0; 
-            MaxSearchRadius = (int)Math.Floor(minDimension / 2.0); 
-        } 
-        SearchRadius = Math.Clamp(SearchRadius, MinSearchRadius, MaxSearchRadius); 
-    }
-
-    private bool IsIndexAccessible(int index) 
-    { 
-        if (CurrentState != AlignmentState.Initial) return true;
-        
-        if (index < 0 || index >= _totalStackCount) return false;
-        
-        if (SelectedTarget == AlignmentTarget.Stars) return index == 0;
-        
-        return SelectedMode switch {
-            AlignmentMode.Automatic => index == 0,
-            AlignmentMode.Guided => index == 0 || index == _totalStackCount - 1,
-            _ => true 
-        };
-    }
-
-    private void UpdateStackCounterText() 
-    {
-        if (CurrentState != AlignmentState.Initial || SelectedMode == AlignmentMode.Manual) 
-        { 
-            StackCounterText = $"{_currentStackIndex + 1} / {_totalStackCount}"; 
-            return; 
-        }
-        
-        if (SelectedMode == AlignmentMode.Automatic || SelectedTarget == AlignmentTarget.Stars) 
-        { 
-            StackCounterText = "1 / 1"; 
-            return; 
-        }
-        
-        if (SelectedMode == AlignmentMode.Guided) 
-        { 
-            int visibleStep = (_currentStackIndex == 0) ? 1 : 2; 
-            StackCounterText = $"{visibleStep} / 2"; 
-        }
-    }
-    #endregion
 }

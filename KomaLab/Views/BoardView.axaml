@@ -41,9 +41,9 @@
         <controls:GridBackground x:Name="BackgroundGrid"
                                  Background="{DynamicResource AppBackgroundBrush}"
                                  GridLinesBrush="{DynamicResource GridLineBrush}"
-                                 OffsetX="{Binding OffsetX}"
-                                 OffsetY="{Binding OffsetY}"
-                                 Scale="{Binding Scale}"
+                                 OffsetX="{Binding Viewport.OffsetX}"
+                                 OffsetY="{Binding Viewport.OffsetY}"
+                                 Scale="{Binding Viewport.Scale}"
                                  IsHitTestVisible="False" />
 
         <Grid x:Name="ViewportContainer" 
@@ -61,8 +61,8 @@
                 
                 <ItemsControl.RenderTransform>
                     <TransformGroup>
-                        <ScaleTransform ScaleX="{Binding Scale}" ScaleY="{Binding Scale}" />
-                        <TranslateTransform X="{Binding OffsetX}" Y="{Binding OffsetY}" />
+                        <ScaleTransform ScaleX="{Binding Viewport.Scale}" ScaleY="{Binding Viewport.Scale}" />
+                        <TranslateTransform X="{Binding Viewport.OffsetX}" Y="{Binding Viewport.OffsetY}" />
                     </TransformGroup>
                 </ItemsControl.RenderTransform>
 
@@ -86,8 +86,8 @@
                 
                 <ItemsControl.RenderTransform>
                     <TransformGroup>
-                        <ScaleTransform ScaleX="{Binding Scale}" ScaleY="{Binding Scale}" />
-                        <TranslateTransform X="{Binding OffsetX}" Y="{Binding OffsetY}" />
+                        <ScaleTransform ScaleX="{Binding Viewport.Scale}" ScaleY="{Binding Viewport.Scale}" />
+                        <TranslateTransform X="{Binding Viewport.OffsetX}" Y="{Binding Viewport.OffsetY}" />
                     </TransformGroup>
                 </ItemsControl.RenderTransform>
 

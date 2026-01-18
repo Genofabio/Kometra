@@ -28,31 +28,24 @@ public partial class SingleImageNodeView : UserControl
     {
         InitializeComponent();
         
-        // Setup trasformazione per il movimento del nodo
         _tempTransform = new TranslateTransform();
         this.RenderTransform = _tempTransform;
 
-        // --- NUOVO: Sincronizzazione Dimensioni Viewport ---
-        // Troviamo il contenitore (definito nello XAML con x:Name="ImageContainer")
-        // e aggiorniamo il VM quando la dimensione cambia.
+        // --- SINCRONIZZAZIONE DIMENSIONI VIEWPORT ---
         var container = this.FindControl<Border>("ImageContainer");
         if (container != null)
         {
             container.SizeChanged += (_, e) => 
             {
-                if (DataContext is SingleImageNodeViewModel vm)
+                if (DataContext is ImageNodeViewModel vm)
                 {
+                    // Aggiorniamo la dimensione del viewport nel ViewModel
                     vm.Viewport.ViewportSize = e.NewSize;
-                    
-                    // Opzionale: Se vuoi che faccia "Zoom to Fit" ogni volta 
-                    // che ridimensioni il nodo, scommenta la riga sotto:
-                    // vm.Viewport.ResetView(); 
                 }
             };
         }
     }
     
-    // --- OTTIMIZZAZIONE CACHE ---
     protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)
     {
         base.OnAttachedToVisualTree(e);
@@ -66,45 +59,30 @@ public partial class SingleImageNodeView : UserControl
         _cachedBoardView = null;
         _startDragPoint = null;
         _tempTransform = null;
-        this.RenderTransform = null;
         base.OnDetachedFromVisualTree(e);
     }
-    // ----------------------------
 
     private void OnPointerPressed(object? sender, PointerPressedEventArgs e)
     {
-        if (DataContext is not SingleImageNodeViewModel nodeVm) return;
+        if (DataContext is not ImageNodeViewModel nodeVm) return;
         
         var properties = e.GetCurrentPoint(this).Properties;
 
-        // --- NUOVO: PAN INTERNO (Tasto Destro) ---
-        // Usiamo il tasto destro per spostare l'immagine DENTRO il nodo
-        // senza spostare il nodo sulla board.
+        // PAN INTERNO (Tasto Centrale/Rotella premuta)
         if (properties.IsMiddleButtonPressed)
         {
-            if (!nodeVm.IsSelected) return;
             _isPanningImage = true;
             _lastPanPosition = e.GetPosition(this);
             this.Cursor = new Cursor(StandardCursorType.SizeAll);
             e.Pointer.Capture(this);
             e.Handled = true;
-            return; // Usciamo per non triggerare la selezione del nodo
+            return;
         }
 
-        // --- ESISTENTE: DRAG DEL NODO (Tasto Sinistro) ---
+        // DRAG DEL NODO (Tasto Sinistro)
         if (properties.IsLeftButtonPressed)
         {
-            if (_cachedBoardVm == null || _cachedBoardView == null)
-            {
-                _cachedBoardView = this.GetVisualAncestors().OfType<BoardView>().FirstOrDefault();
-                _cachedBoardVm = _cachedBoardView?.DataContext as BoardViewModel;
-            }
-            
-            if (_cachedBoardVm != null)
-            {
-                _cachedBoardVm.SetSelectedNode(nodeVm);
-            }
-
+            _cachedBoardVm?.SetSelectedNode(nodeVm);
             nodeVm.BringToFront(); 
 
             if (_cachedBoardView != null)
@@ -119,6 +97,7 @@ public partial class SingleImageNodeView : UserControl
                 _tempTransform.X = 0;
                 _tempTransform.Y = 0;
                 
+                // Nota: VisualOffsetX/Y devono essere definiti in BaseNodeViewModel
                 nodeVm.VisualOffsetX = 0;
                 nodeVm.VisualOffsetY = 0;
 
@@ -130,30 +109,27 @@ public partial class SingleImageNodeView : UserControl
 
     private void OnPointerMoved(object? sender, PointerEventArgs e)
     {
-        if (DataContext is not SingleImageNodeViewModel nodeVm) return;
+        if (DataContext is not ImageNodeViewModel nodeVm) return;
 
-        // --- NUOVO: GESTIONE PAN INTERNO ---
         if (_isPanningImage)
         {
             var currentPos = e.GetPosition(this);
             var delta = currentPos - _lastPanPosition;
             _lastPanPosition = currentPos;
 
-            // Deleghiamo la matematica al ViewportManager (codice riutilizzato!)
             nodeVm.Viewport.ApplyPan(delta.X, delta.Y);
-            
             e.Handled = true;
             return;
         }
 
-        // --- ESISTENTE: GESTIONE DRAG DEL NODO ---
         if (_startDragPoint == null || _tempTransform == null || 
             _cachedBoardView == null || _cachedBoardVm == null) return;
         
         var currentBoardPos = e.GetPosition(_cachedBoardView);
         var screenDelta = currentBoardPos - _startDragPoint.Value;
         
-        double scale = _cachedBoardVm.Scale;
+        // Usiamo il fattore di zoom della Board per muovere il nodo alla velocità corretta
+        double scale = _cachedBoardVm.Viewport.Scale; 
         if (scale <= 0.01) scale = 0.1; 
 
         double worldDeltaX = screenDelta.X / scale;
@@ -170,20 +146,18 @@ public partial class SingleImageNodeView : UserControl
 
     private void OnPointerReleased(object? sender, PointerReleasedEventArgs e)
     {
-        // --- NUOVO: RILASCIO PAN INTERNO ---
         if (_isPanningImage && e.InitialPressMouseButton == MouseButton.Middle)
         {
             _isPanningImage = false;
-            this.Cursor = Cursor.Default; // Ripristina il cursore normale
+            this.Cursor = Cursor.Default;
             e.Pointer.Capture(null);
             e.Handled = true;
             return;
         }
 
-        // --- ESISTENTE: RILASCIO DRAG DEL NODO ---
         if (_startDragPoint != null && e.InitialPressMouseButton == MouseButton.Left)
         {
-            if (DataContext is SingleImageNodeViewModel nodeVm && _tempTransform != null)
+            if (DataContext is ImageNodeViewModel nodeVm && _tempTransform != null)
             {
                 nodeVm.X += _tempTransform.X;
                 nodeVm.Y += _tempTransform.Y;
@@ -203,53 +177,44 @@ public partial class SingleImageNodeView : UserControl
     
     private void OnPointerWheelChanged(object? sender, PointerWheelEventArgs e)
     {
-        if (DataContext is not SingleImageNodeViewModel vm) return;
+        if (DataContext is not ImageNodeViewModel vm) return;
         if (!vm.IsSelected) return;
 
-        // --- NUOVO: ZOOM (CTRL + WHEEL) ---
+        // ZOOM (CTRL + WHEEL)
         if ((e.KeyModifiers & KeyModifiers.Control) == KeyModifiers.Control)
         {
-            // Troviamo il container per calcolare la posizione relativa del mouse
             var container = this.FindControl<Border>("ImageContainer");
             if (container != null)
             {
-                var centerPoint = new Point(container.Bounds.Width / 2.0, container.Bounds.Height / 2.0);
-                
-                // Usiamo un fattore simile a quello usato nell'AlignmentTool
-                // Delta > 0 = Zoom In, Delta < 0 = Zoom Out
+                // Zoom centrato sulla posizione del mouse relativa al container
+                var mousePos = e.GetPosition(container);
                 double factor = e.Delta.Y > 0 ? 1.1 : (1.0 / 1.1);
-
-                // Deleghiamo al ViewportManager
-                vm.Viewport.ApplyZoomAtPoint(factor, centerPoint);
+                vm.Viewport.ApplyZoomAtPoint(factor, mousePos);
             }
 
             e.Handled = true;
             return;
         }
 
-        // --- ESISTENTE: MODIFICA SOGLIE (SHIFT/NONE + WHEEL) ---
-        if (vm.FitsImage != null)
+        // MODIFICA SOGLIE (SHIFT/NONE + WHEEL)
+        // Puntiamo ad ActiveRenderer invece del vecchio FitsImage
+        if (vm.ActiveRenderer != null)
         {
-            double currentRange = Math.Abs(vm.FitsImage.WhitePoint - vm.FitsImage.BlackPoint);
-            if (currentRange < 0.001) currentRange = 1000.0; 
+            double currentRange = Math.Abs(vm.ActiveRenderer.WhitePoint - vm.ActiveRenderer.BlackPoint);
+            if (currentRange < 0.001) currentRange = 1.0; 
         
-            double stepPercentage = 0.10; 
+            double stepPercentage = 0.05; // 5% ad ogni scatto per maggior precisione
             double deltaAmount = (currentRange * stepPercentage) * e.Delta.Y;
         
             bool isShiftPressed = (e.KeyModifiers & KeyModifiers.Shift) == KeyModifiers.Shift;
-            double gap = 1.0; 
 
             if (isShiftPressed)
             {
-                double newBlack = vm.FitsImage.BlackPoint + deltaAmount;
-                if (newBlack > vm.FitsImage.WhitePoint - gap) newBlack = vm.FitsImage.WhitePoint - gap;
-                vm.FitsImage.BlackPoint = newBlack;
+                vm.ActiveRenderer.BlackPoint += deltaAmount;
             }
             else
             {
-                double newWhite = vm.FitsImage.WhitePoint + deltaAmount;
-                if (newWhite < vm.FitsImage.BlackPoint + gap) newWhite = vm.FitsImage.BlackPoint + gap;
-                vm.FitsImage.WhitePoint = newWhite;
+                vm.ActiveRenderer.WhitePoint += deltaAmount;
             }
         }
         e.Handled = true; 

@@ -30,20 +30,20 @@
 
                 <StackPanel Orientation="Horizontal" Spacing="5">
                     <TextBlock Classes="TargetLabel" Text="Target:"/>
-                    <TextBlock Classes="TargetValue" Text="{Binding TargetFileName}"/>
+                    <TextBlock Classes="TargetValue" Text="{Binding TargetName}"/>
                 </StackPanel>
             </StackPanel>
 
             <StackPanel Grid.Row="1" Spacing="8">
                 <Grid ColumnDefinitions="*, Auto">
-                    <TextBlock Text="{Binding StatusText}" Foreground="{Binding StatusColor}" FontWeight="SemiBold" FontSize="14"/>
+                    <TextBlock Text="{Binding StatusText}" FontWeight="SemiBold" FontSize="14"/>
+                    
                     <TextBlock Text="{Binding ProgressValue, StringFormat='Processati: {0}'}" 
                                Foreground="{DynamicResource Text.MediumGreyBrush}" 
                                FontSize="12" IsVisible="{Binding IsBusy}" Grid.Column="1"/>
                 </Grid>
                 
                 <ProgressBar Height="6" Minimum="0" Maximum="{Binding ProgressMax}" Value="{Binding ProgressValue}"
-                             IsIndeterminate="{Binding ProgressMax, Converter={x:Static ObjectConverters.IsNull}}"
                              IsVisible="{Binding IsBusy}" 
                              Foreground="{DynamicResource ActionPrimaryBackgroundBrush}" 
                              Background="{DynamicResource MenuBackgroundBrush}"/>
@@ -67,28 +67,21 @@
                     <TextBlock Classes="WarningBody" Text="Salva il file per rendere le modifiche all'header permanenti."/>
                 </StackPanel>
 
-                <StackPanel Grid.Column="1" Orientation="Horizontal">
+                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="10">
 
                     <Button Classes="baseBtn greenBtn" 
                             Command="{Binding StartSolvingCommand}"
-                            Content="Avvia risoluzione">
-                        <Button.IsVisible>
-                            <MultiBinding Converter="{x:Static BoolConverters.And}">
-                                <Binding Path="!IsBusy"/>
-                                <Binding Path="!IsFinished"/>
-                            </MultiBinding>
-                        </Button.IsVisible>
-                    </Button>
+                            Content="Avvia risoluzione"
+                            IsVisible="{Binding !IsBusy}"/>
 
                     <Button Classes="baseBtn cancelBtn" 
-                            Command="{Binding CancelOperationCommand}"
+                            Command="{Binding CancelCommand}"
                             IsVisible="{Binding IsBusy}"
                             Content="Annulla"/>
 
                     <Button Classes="baseBtn purpleBtn" 
-                            Command="{Binding CloseWindowCommand}"
-                            CommandParameter="{Binding ElementName=RootWindow}"
-                            IsVisible="{Binding IsFinished}"
+                            Command="{Binding CloseCommand}"
+                            IsVisible="{Binding !IsBusy}"
                             Content="Chiudi finestra"/>
 
                 </StackPanel>

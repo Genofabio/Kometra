@@ -1,87 +1,49 @@
 ﻿using System;
-using System.Globalization;
 using KomaLab.Models.Astrometry;
 using KomaLab.Models.Fits;
+using KomaLab.Services.Fits.Metadata;
 
 namespace KomaLab.Services.Fits.Parsers;
 
-// ---------------------------------------------------------------------------
-// FILE: GeographicParser.cs
-// RUOLO: Parser
-// ---------------------------------------------------------------------------
-
+/// <summary>
+/// Parser specializzato nell'estrazione della posizione geografica dagli header FITS.
+/// Conosce le convenzioni delle chiavi FITS ma delega il parsing matematico a AstroParser.
+/// </summary>
 public static class GeographicParser
 {
-    private static readonly string[] LatTokens = { "SITELAT", "LATITUDE", "LAT-OBS", "GEOLAT", "OBSGEO-B" };
-    private static readonly string[] LonTokens = { "SITELONG", "LONGITUD", "LONG-OBS", "GEOLON", "OBSGEO-L" };
-    private static readonly string[] AltTokens = { "ALTI-OBS", "SITEELEV", "ELEVATIO", "GEOELEV", "ELEVATION" };
+    // Token ordinati per "importanza" (standard prima, custom dopo)
+    private static readonly string[] LatTokens = { "OBSGEO-B", "LAT-OBS", "SITELAT", "LATITUDE", "GEOLAT" };
+    private static readonly string[] LonTokens = { "OBSGEO-L", "LONG-OBS", "SITELONG", "LONGITUD", "GEOLON" };
+    private static readonly string[] AltTokens = { "OBSGEO-A", "ALTI-OBS", "SITEELEV", "ELEVATIO", "GEOELEV", "ELEVATION" };
 
-    public static GeographicLocation? ParseLocation(FitsHeader header)
+    public static GeographicLocation? ParseLocation(FitsHeader header, IFitsMetadataService metadata)
     {
-        double? lat = null;
-        double? lon = null;
-        double? altMeters = null;
+        // 1. Cerchiamo le stringhe grezze nell'header FITS
+        string latStr = FindFirstValue(header, metadata, LatTokens);
+        string lonStr = FindFirstValue(header, metadata, LonTokens);
+        string altStr = FindFirstValue(header, metadata, AltTokens);
 
-        foreach (var card in header.Cards)
-        {
-            if (lat.HasValue && lon.HasValue && altMeters.HasValue) break;
+        // 2. Se mancano i dati fondamentali, usciamo
+        if (string.IsNullOrEmpty(latStr) || string.IsNullOrEmpty(lonStr)) return null;
 
-            string key = card.Key;
-            string val = card.Value; 
-
-            if (string.IsNullOrWhiteSpace(val)) continue;
-
-            if (!lat.HasValue && ContainsToken(key, LatTokens))
-                lat = ParseCoordinateString(val); // <--- Chiamata aggiornata
-            
-            else if (!lon.HasValue && ContainsToken(key, LonTokens))
-                lon = ParseCoordinateString(val); // <--- Chiamata aggiornata
-            
-            else if (!altMeters.HasValue && ContainsToken(key, AltTokens))
-                altMeters = ParseCoordinateString(val); // <--- Chiamata aggiornata
-        }
-
-        if (!lat.HasValue || !lon.HasValue) return null;
-
+        // 3. Deleghiamo la creazione dell'oggetto al Factory Method del modello.
+        // Il modello userà internamente l'AstroParser per gestire ":" o decimali.
+        double? altMeters = AstroParser.ParseDegrees(altStr);
         double altKm = altMeters.HasValue ? altMeters.Value / 1000.0 : 0.5;
-        return new GeographicLocation(lat.Value, lon.Value, altKm);
+
+        return GeographicLocation.FromStrings(latStr, lonStr, altKm);
     }
 
-    // MODIFICA: Reso PUBLIC e rinominato ParseCoordinateString per essere usato da JPLService
-    public static double? ParseCoordinateString(string input)
+    /// <summary>
+    /// Restituisce la prima stringa non vuota trovata tra i token forniti.
+    /// </summary>
+    private static string FindFirstValue(FitsHeader header, IFitsMetadataService metadata, string[] tokens)
     {
-        if (string.IsNullOrWhiteSpace(input)) return null;
-
-        input = input.Replace("'", "").Trim();
-
-        // 1. Tentativo Decimale
-        if (double.TryParse(input, NumberStyles.Any, CultureInfo.InvariantCulture, out double val)) 
-            return val;
-
-        // 2. Tentativo Sessagesimale
-        try 
+        foreach (var token in tokens)
         {
-            char[] separators = { ':', 'd', 'm', 's', '°', '\'', '"', ' ' };
-            string[] parts = input.Split(separators, StringSplitOptions.RemoveEmptyEntries);
-            
-            if (parts.Length == 0) return null;
-
-            double d = double.Parse(parts[0], CultureInfo.InvariantCulture);
-            double m = parts.Length > 1 ? double.Parse(parts[1], CultureInfo.InvariantCulture) : 0;
-            double s = parts.Length > 2 ? double.Parse(parts[2], CultureInfo.InvariantCulture) : 0;
-            
-            double res = Math.Abs(d) + (m / 60.0) + (s / 3600.0);
-            return input.StartsWith("-") ? -res : res;
+            string val = metadata.GetStringValue(header, token);
+            if (!string.IsNullOrWhiteSpace(val)) return val;
         }
-        catch 
-        { 
-            return null; 
-        }
-    }
-
-    private static bool ContainsToken(string key, string[] tokens)
-    {
-        foreach (var t in tokens) if (key.Contains(t)) return true;
-        return false;
+        return string.Empty;
     }
 }

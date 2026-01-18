@@ -3,14 +3,11 @@
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:avalonia="clr-namespace:Material.Icons.Avalonia;assembly=Material.Icons.Avalonia"
-        
         xmlns:items="clr-namespace:KomaLab.ViewModels.Items" 
         xmlns:tools="clr-namespace:KomaLab.ViewModels.Tools"
-        
         mc:Ignorable="d" d:DesignWidth="1000" d:DesignHeight="650"
         x:Class="KomaLab.Views.HeaderEditorToolView"
         x:DataType="tools:HeaderEditorToolViewModel"
-        
         Title="Editor Metadati FITS"
         Width="1000" Height="608"
         MinWidth="920" MinHeight="600"
@@ -19,7 +16,6 @@
         Background="{DynamicResource ToolWindowBackgroundBrush}">
 
     <Grid RowDefinitions="*, Auto">
-
         <Grid Grid.Row="0" ColumnDefinitions="300, *">
 
             <Border Grid.Column="0" 
@@ -50,17 +46,10 @@
                                    Foreground="{DynamicResource Text.StaticWhiteBrush}" 
                                    FontWeight="Bold"/>
                         
-                        <TextBlock Text="Verifica la presenza dei parametri essenziali per l'analisi scientifica."
-                                   Foreground="{DynamicResource Text.StaticWhiteBrush}"
-                                   TextWrapping="Wrap"
-                                   Opacity="0.7"
-                                   Margin="0,0,0,5"/>
-
-                        <Border Background="{DynamicResource ToolWindowBackgroundBrush}" CornerRadius="6" Padding="12" BorderBrush="{DynamicResource SystemControlForegroundBaseLowBrush}" BorderThickness="1"
-                                ToolTip.Tip="Cerca chiave: DATE-OBS oppure DATE.&#x0a;Indica la data e l'ora precise (UT) dell'acquisizione.">
+                        <Border Background="{DynamicResource ToolWindowBackgroundBrush}" CornerRadius="6" Padding="12" BorderBrush="{DynamicResource SystemControlForegroundBaseLowBrush}" BorderThickness="1">
                             <StackPanel Spacing="5">
                                 <StackPanel Orientation="Horizontal" Spacing="10">
-                                    <Ellipse Width="10" Height="10" Fill="{Binding DateStatusColor}" VerticalAlignment="Center"/>
+                                    <Ellipse Width="10" Height="10" Fill="LightGray" VerticalAlignment="Center"/>
                                     <TextBlock Text="Riferimento Temporale" FontWeight="SemiBold" FontSize="13" Foreground="{DynamicResource Text.StaticWhiteBrush}"/>
                                 </StackPanel>
                                 <TextBlock Text="{Binding DateStatusText}" 
@@ -71,11 +60,10 @@
                             </StackPanel>
                         </Border>
 
-                        <Border Background="{DynamicResource ToolWindowBackgroundBrush}" CornerRadius="6" Padding="12" BorderBrush="{DynamicResource SystemControlForegroundBaseLowBrush}" BorderThickness="1"
-                                ToolTip.Tip="Cerca chiavi: SITELAT, LATITUDE, GEO_LAT, ecc.&#x0a;Necessario per correggere la parallasse topocentrica.">
+                        <Border Background="{DynamicResource ToolWindowBackgroundBrush}" CornerRadius="6" Padding="12" BorderBrush="{DynamicResource SystemControlForegroundBaseLowBrush}" BorderThickness="1">
                             <StackPanel Spacing="5">
                                 <StackPanel Orientation="Horizontal" Spacing="10">
-                                    <Ellipse Width="10" Height="10" Fill="{Binding LocationStatusColor}" VerticalAlignment="Center"/>
+                                    <Ellipse Width="10" Height="10" Fill="LightGray" VerticalAlignment="Center"/>
                                     <TextBlock Text="Geolocalizzazione Sito" FontWeight="SemiBold" FontSize="13" Foreground="{DynamicResource Text.StaticWhiteBrush}"/>
                                 </StackPanel>
                                 <TextBlock Text="{Binding LocationStatusText}" 
@@ -86,11 +74,10 @@
                             </StackPanel>
                         </Border>
 
-                        <Border Background="{DynamicResource ToolWindowBackgroundBrush}" CornerRadius="6" Padding="12" BorderBrush="{DynamicResource SystemControlForegroundBaseLowBrush}" BorderThickness="1"
-                                ToolTip.Tip="Cerca chiavi: CRVAL, CRPIX e Matrice CD/PC.&#x0a;Indica se l'immagine possiede una mappa di coordinate celesti (Plate Solving).">
+                        <Border Background="{DynamicResource ToolWindowBackgroundBrush}" CornerRadius="6" Padding="12" BorderBrush="{DynamicResource SystemControlForegroundBaseLowBrush}" BorderThickness="1">
                             <StackPanel Spacing="5">
                                 <StackPanel Orientation="Horizontal" Spacing="10">
-                                    <Ellipse Width="10" Height="10" Fill="{Binding WcsStatusColor}" VerticalAlignment="Center"/>
+                                    <Ellipse Width="10" Height="10" Fill="LightGray" VerticalAlignment="Center"/>
                                     <TextBlock Text="Soluzione Astrometrica" FontWeight="SemiBold" FontSize="13" Foreground="{DynamicResource Text.StaticWhiteBrush}"/>
                                 </StackPanel>
                                 <TextBlock Text="{Binding WcsStatusText}" 
@@ -106,7 +93,7 @@
                         <Separator Background="{DynamicResource SystemControlForegroundBaseLowBrush}" Height="1" Margin="0,20,0,8" Opacity="0.5"/>
                         
                         <Grid ColumnDefinitions="Auto, *, Auto" Margin="5,0">
-                            <Button Grid.Column="0" Classes="navBtn" Command="{Binding PreviousImageCommand}" ToolTip.Tip="Immagine Precedente">
+                            <Button Grid.Column="0" Classes="navBtn" Command="{Binding Navigator.PreviousCommand}" ToolTip.Tip="Immagine Precedente">
                                 <avalonia:MaterialIcon Kind="ChevronLeft" Width="20" Height="20"/>
                             </Button>
                             
@@ -116,7 +103,7 @@
                                            FontWeight="Bold" Foreground="{DynamicResource Text.StaticWhiteBrush}" FontSize="14"/>
                             </Border>
                             
-                            <Button Grid.Column="2" Classes="navBtn" Command="{Binding NextImageCommand}" ToolTip.Tip="Immagine Successiva">
+                            <Button Grid.Column="2" Classes="navBtn" Command="{Binding Navigator.NextCommand}" ToolTip.Tip="Immagine Successiva">
                                 <avalonia:MaterialIcon Kind="ChevronRight" Width="20" Height="20"/>
                             </Button>
                         </Grid>
@@ -150,34 +137,19 @@
                           AutoGenerateColumns="False" 
                           CanUserResizeColumns="True"
                           GridLinesVisibility="Horizontal"
-                          BorderThickness="1"
-                          BorderBrush="{DynamicResource SystemControlForegroundBaseLowBrush}"
                           Background="{DynamicResource ToolWindowBackgroundBrush}"
                           Margin="20,0,20,20">
 
                     <DataGrid.ContextMenu>
                         <ContextMenu>
                             <MenuItem Header="Elimina Riga" Command="{Binding DeleteRowCommand}">
-                                <MenuItem.Icon>
-                                    <avalonia:MaterialIcon Kind="Delete"/>
-                                </MenuItem.Icon>
+                                <MenuItem.Icon><avalonia:MaterialIcon Kind="Delete"/></MenuItem.Icon>
                             </MenuItem>
                         </ContextMenu>
                     </DataGrid.ContextMenu>
                     
-                    <DataGrid.Styles>
-                        <Style Selector="DataGridRow">
-                            <Setter Property="Classes.modified" Value="{Binding IsModified, DataType=items:FitsHeaderEditorRow}"/>
-                        </Style>
-                        <Style Selector="DataGridColumnHeader">
-                            <Setter Property="FontWeight" Value="Bold"/>
-                            <Setter Property="Background" Value="{DynamicResource ToolPanelBackgroundBrush}"/>
-                            <Setter Property="Padding" Value="10,8"/>
-                        </Style>
-                    </DataGrid.Styles>
-
                     <DataGrid.Columns>
-                        <DataGridTemplateColumn Header="KEYWORD" Width="1.2*" MinWidth="130" SortMemberPath="Key">
+                        <DataGridTemplateColumn Header="KEYWORD" Width="1.2*" MinWidth="130">
                             <DataGridTemplateColumn.CellTemplate>
                                 <DataTemplate DataType="items:FitsHeaderEditorRow">
                                     <TextBlock Text="{Binding Key}" VerticalAlignment="Center" Margin="10,0" FontWeight="SemiBold" FontFamily="Consolas, Monospace"/>
@@ -226,29 +198,17 @@
                 BorderThickness="0 1 0 0" 
                 Padding="20">
             <Grid ColumnDefinitions="*, Auto">
-                
                 <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center" Margin="5,0">
                     <avalonia:MaterialIcon Kind="InformationOutline" Width="18" Height="18" Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}"/>
-                    
                     <TextBlock Text="Modifiche applicate solo alla sessione. Salva il file per renderle permanenti." 
-                               FontSize="12"
-                               VerticalAlignment="Center" 
-                               Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}" 
-                               FontStyle="Italic"/>
+                               FontSize="12" VerticalAlignment="Center" Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}" FontStyle="Italic"/>
                 </StackPanel>
 
                 <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="15">
-                    <Button Content="Annulla" 
-                            Click="OnCancelClick" 
-                            Classes="cancel"/>
-                    
-                    <Button Content="Applica" 
-                            Click="OnSaveClick" 
-                            Classes="apply"
-                            ToolTip.Tip="Aggiorna i metadati in memoria e chiude l'editor."/>
+                    <Button Content="Annulla" Click="OnCancelClick" Classes="cancel"/>
+                    <Button Content="Applica" Click="OnSaveClick" Classes="apply"/>
                 </StackPanel>
             </Grid>
         </Border>
-
     </Grid>
 </Window>

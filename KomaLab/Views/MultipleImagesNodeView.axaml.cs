@@ -7,6 +7,7 @@ using Avalonia.Media;
 using Avalonia.VisualTree; 
 using KomaLab.ViewModels;
 using KomaLab.ViewModels.Nodes;
+using KomaLab.ViewModels.Components;
 
 namespace KomaLab.Views;
 
@@ -31,7 +32,7 @@ public partial class MultipleImagesNodeView : UserControl
         this.RenderTransform = _tempTransform;
         
         // --- Sincronizzazione Dimensioni Viewport ---
-        var container = this.FindControl<Border>("ImageContainer"); // Assicurati che il nome nello XAML sia ImageContainer
+        var container = this.FindControl<Border>("ImageContainer");
         if (container != null)
         {
             container.SizeChanged += (_, e) => 
@@ -39,7 +40,6 @@ public partial class MultipleImagesNodeView : UserControl
                 if (DataContext is MultipleImagesNodeViewModel vm)
                 {
                     vm.Viewport.ViewportSize = e.NewSize;
-                    // Opzionale: vm.Viewport.ResetView();
                 }
             };
         }
@@ -58,7 +58,6 @@ public partial class MultipleImagesNodeView : UserControl
         _cachedBoardView = null;
         _startDragPoint = null;
         _tempTransform = null;
-        this.RenderTransform = null;
         base.OnDetachedFromVisualTree(e);
     }
 
@@ -70,8 +69,9 @@ public partial class MultipleImagesNodeView : UserControl
         // --- PAN INTERNO (Tasto Centrale) ---
         if (properties.IsMiddleButtonPressed)
         {
-            if (!nodeVm.IsSelected) return;
-            if (nodeVm.IsAnimating) return;
+            // Verifichiamo il navigatore invece della vecchia proprietà IsAnimating
+            if (!nodeVm.IsSelected || nodeVm.Navigator is SequenceNavigator { IsLooping: true }) return;
+            
             _isPanningImage = true;
             _lastPanPosition = e.GetPosition(this);
             this.Cursor = new Cursor(StandardCursorType.SizeAll);
@@ -83,17 +83,7 @@ public partial class MultipleImagesNodeView : UserControl
         // --- DRAG DEL NODO (Tasto Sinistro) ---
         if (properties.IsLeftButtonPressed)
         {
-            if (_cachedBoardVm == null || _cachedBoardView == null)
-            {
-                _cachedBoardView = this.GetVisualAncestors().OfType<BoardView>().FirstOrDefault();
-                _cachedBoardVm = _cachedBoardView?.DataContext as BoardViewModel;
-            }
-
-            if (_cachedBoardVm != null)
-            {
-                _cachedBoardVm.SetSelectedNode(nodeVm);
-            }
-
+            _cachedBoardVm?.SetSelectedNode(nodeVm);
             nodeVm.BringToFront(); 
 
             if (_cachedBoardView != null)
@@ -121,7 +111,6 @@ public partial class MultipleImagesNodeView : UserControl
     {
         if (DataContext is not MultipleImagesNodeViewModel nodeVm) return;
         
-        // --- GESTIONE PAN INTERNO ---
         if (_isPanningImage)
         {
             var currentPos = e.GetPosition(this);
@@ -129,19 +118,18 @@ public partial class MultipleImagesNodeView : UserControl
             _lastPanPosition = currentPos;
 
             nodeVm.Viewport.ApplyPan(delta.X, delta.Y);
-            
             e.Handled = true;
             return;
         }
 
-        // --- GESTIONE DRAG DEL NODO ---
         if (_startDragPoint == null || _tempTransform == null || 
             _cachedBoardView == null || _cachedBoardVm == null) return;
         
         var currentPosBoard = e.GetPosition(_cachedBoardView);
         var screenDelta = currentPosBoard - _startDragPoint.Value;
         
-        double scale = _cachedBoardVm.Scale;
+        // Puntiamo al Viewport della Board per la scala globale
+        double scale = _cachedBoardVm.Viewport.Scale;
         if (scale <= 0.001) scale = 0.1; 
 
         double worldDeltaX = screenDelta.X / scale;
@@ -158,7 +146,6 @@ public partial class MultipleImagesNodeView : UserControl
 
     private void OnPointerReleased(object? sender, PointerReleasedEventArgs e)
     {
-        // --- RILASCIO PAN INTERNO ---
         if (_isPanningImage && e.InitialPressMouseButton == MouseButton.Middle)
         {
             _isPanningImage = false;
@@ -168,7 +155,6 @@ public partial class MultipleImagesNodeView : UserControl
             return;
         }
 
-        // --- RILASCIO DRAG DEL NODO ---
         if (_startDragPoint != null && e.InitialPressMouseButton == MouseButton.Left)
         {
             if (DataContext is MultipleImagesNodeViewModel nodeVm && _tempTransform != null)
@@ -191,7 +177,9 @@ public partial class MultipleImagesNodeView : UserControl
     private void OnPointerWheelChanged(object? sender, PointerWheelEventArgs e)
     {
         if (DataContext is not MultipleImagesNodeViewModel vm) return;
-        if (vm.IsAnimating) return;
+        
+        // Protezione: non modifichiamo soglie o zoom se la sequenza sta scorrendo velocemente
+        if (vm.Navigator is SequenceNavigator { IsLooping: true }) return;
         if (!vm.IsSelected) return;
 
         // --- ZOOM (CTRL + WHEEL) ---
@@ -200,36 +188,33 @@ public partial class MultipleImagesNodeView : UserControl
             var container = this.FindControl<Border>("ImageContainer");
             if (container != null)
             {
-                var centerPoint = new Point(container.Bounds.Width / 2.0, container.Bounds.Height / 2.0);
+                var mousePos = e.GetPosition(container);
                 double factor = e.Delta.Y > 0 ? 1.1 : (1.0 / 1.1);
-                
-                vm.Viewport.ApplyZoomAtPoint(factor, centerPoint);
+                vm.Viewport.ApplyZoomAtPoint(factor, mousePos);
             }
             e.Handled = true;
             return;
         }
         
-        // --- SOGLIE (STANDARD) ---
-        double currentRange = Math.Abs(vm.WhitePoint - vm.BlackPoint);
-        if (currentRange < 0.0001) currentRange = 1000.0;
-
-        double stepPercentage = 0.10; 
-        double deltaAmount = (currentRange * stepPercentage) * e.Delta.Y;
-
-        bool isShiftPressed = (e.KeyModifiers & KeyModifiers.Shift) == KeyModifiers.Shift;
-        double gap = 1.0;
-
-        if (isShiftPressed)
+        // --- SOGLIE RADIOMETRICHE (ActiveRenderer) ---
+        if (vm.ActiveRenderer != null)
         {
-            double newBlack = vm.BlackPoint + deltaAmount;
-            if (newBlack > vm.WhitePoint - gap) newBlack = vm.WhitePoint - gap;
-            vm.BlackPoint = newBlack;
-        }
-        else
-        {
-            double newWhite = vm.WhitePoint + deltaAmount;
-            if (newWhite < vm.BlackPoint + gap) newWhite = vm.BlackPoint + gap;
-            vm.WhitePoint = newWhite;
+            double currentRange = Math.Abs(vm.ActiveRenderer.WhitePoint - vm.ActiveRenderer.BlackPoint);
+            if (currentRange < 0.0001) currentRange = 1.0;
+
+            double stepPercentage = 0.05; 
+            double deltaAmount = (currentRange * stepPercentage) * e.Delta.Y;
+
+            bool isShiftPressed = (e.KeyModifiers & KeyModifiers.Shift) == KeyModifiers.Shift;
+
+            if (isShiftPressed)
+            {
+                vm.ActiveRenderer.BlackPoint += deltaAmount;
+            }
+            else
+            {
+                vm.ActiveRenderer.WhitePoint += deltaAmount;
+            }
         }
 
         e.Handled = true; 

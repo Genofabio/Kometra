@@ -1,16 +1,36 @@
-﻿namespace KomaLab.Models.Fits;
+﻿using System;
+using System.IO;
 
+namespace KomaLab.Models.Fits;
+
+// ---------------------------------------------------------------------------
+// 5. FITS FILE REFERENCE (Runtime Wrapper)
+// L'oggetto chiave che il ViewModel manipola. Collega il file su disco
+// allo stato volatile (modifiche non salvate).
+// ---------------------------------------------------------------------------
 public class FitsFileReference
 {
+    // Dati Identità (Immutabili)
     public string FilePath { get; }
-    public string FileName => System.IO.Path.GetFileName(FilePath);
+    public string FileName => Path.GetFileName(FilePath);
 
-    // Stato: Header modificato in RAM
-    public FitsHeader? UnsavedHeader { get; set; }
-    public bool HasUnsavedChanges => UnsavedHeader != null;
+    // Stato Volatile (Mutabile)
+    // Se diverso da null, il Renderer deve usare questo invece di quello su disco.
+    public FitsHeader? ModifiedHeader { get; set; }
+    
+    public bool HasUnsavedChanges => ModifiedHeader != null;
 
     public FitsFileReference(string path)
     {
+        if (string.IsNullOrWhiteSpace(path)) throw new ArgumentNullException(nameof(path));
         FilePath = path;
+    }
+
+    /// <summary>
+    /// Annulla le modifiche in memoria.
+    /// </summary>
+    public void RevertChanges()
+    {
+        ModifiedHeader = null;
     }
 }

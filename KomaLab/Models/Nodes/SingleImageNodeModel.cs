@@ -12,11 +12,5 @@ namespace KomaLab.Models.Nodes
     public class SingleImageNodeModel : BaseNodeModel
     {
         public string ImagePath { get; set; } = string.Empty;
-
-        /// <summary>
-        /// Contiene l'header modificato durante la sessione ma non ancora applicato al file su disco.
-        /// Se null, significa che non ci sono modifiche pendenti.
-        /// </summary>
-        public FitsHeader? TempHeader { get; set; }
     }
 }

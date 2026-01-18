@@ -18,7 +18,7 @@ public partial class BoardView : UserControl
         InitializeComponent();
         this.Focusable = true;
         
-        // Cache della trasformazione per accesso rapido
+        // Cache della trasformazione per lo spostamento fluido dei nodi
         if (ViewportContainer.RenderTransform is TranslateTransform tt)
         {
             _viewportTransform = tt;
@@ -36,7 +36,8 @@ public partial class BoardView : UserControl
     {
         if (DataContext is BoardViewModel vm)
         {
-            vm.ViewBounds = new Rect(e.NewSize);
+            // Sincronizziamo la dimensione della finestra con il Viewport
+            vm.Viewport.ViewportSize = e.NewSize;
         }
     }
     
@@ -45,7 +46,7 @@ public partial class BoardView : UserControl
         base.OnDataContextChanged(e);
         if (DataContext is BoardViewModel vm)
         {
-            vm.ViewBounds = this.Bounds;
+            vm.Viewport.ViewportSize = this.Bounds.Size;
         }
     }
 
@@ -64,15 +65,16 @@ public partial class BoardView : UserControl
             _lastPointerPosForPanning = e.GetPosition(this);
             _isPanning = true; 
             
-            // Assicuriamoci che i valori visivi temporanei siano a zero
             if (_viewportTransform != null)
             {
                 _viewportTransform.X = 0;
                 _viewportTransform.Y = 0;
             }
-            // Anche la griglia deve partire "pulita" (anche se dovrebbe già esserlo)
+            
+            // La griglia deve partire sincronizzata
             BackgroundGrid.SetVisualPan(0, 0);
             
+            // Disabilitiamo temporaneamente l'hit test sui nodi per migliorare le performance del drag
             ViewportContainer.IsHitTestVisible = false;
 
             e.Pointer.Capture(this); 
@@ -81,22 +83,18 @@ public partial class BoardView : UserControl
         }
         else if (props.IsLeftButtonPressed)
         {
-            // Deselezione cliccando sul vuoto
             if (DataContext is BoardViewModel vm)
             {
                 vm.DeselectAllNodes();
             }
-            e.Handled = true;
         }
     }
 
     private void OnPointerMoved(object? sender, PointerEventArgs e)
     {
-        // Se non stiamo pannando o abbiamo perso il riferimento, esci
         if (!_isPanning || _lastPointerPosForPanning == null) 
             return;
 
-        // Sicurezza: se rilasciano il tasto fuori finestra
         if (!e.GetCurrentPoint(this).Properties.IsMiddleButtonPressed)
         {
             EndPanning(e);
@@ -108,14 +106,11 @@ public partial class BoardView : UserControl
         
         if (_viewportTransform != null)
         {
-            // 1. Spostiamo i NODI fisicamente (RenderTransform -> GPU)
-            // Accumuliamo il delta nel RenderTransform
+            // 1. Spostamento VISIVO immediato (GPU)
             _viewportTransform.X += delta.X;
             _viewportTransform.Y += delta.Y;
             
-            // 2. Spostiamo la GRIGLIA virtualmente (InvalidateVisual -> CPU)
-            // La griglia NON si sposta, ma ridisegna le linee con questo offset.
-            // Passiamo lo stesso identico valore accumulato.
+            // 2. Spostamento della GRIGLIA (Custom Drawing)
             BackgroundGrid.SetVisualPan(_viewportTransform.X, _viewportTransform.Y);
         }
         
@@ -135,24 +130,21 @@ public partial class BoardView : UserControl
     {
         if (DataContext is BoardViewModel vm && _viewportTransform != null)
         {
-            // COMMIT:
-            // Applichiamo lo spostamento totale accumulato al ViewModel.
-            // Questo causerà l'aggiornamento di OffsetX/Y (che sposterà logicamente i nodi e la griglia).
-            vm.Pan(new Vector(_viewportTransform.X, _viewportTransform.Y));
+            // COMMIT LOGICO:
+            // Applichiamo lo spostamento accumulato al Viewport del ViewModel.
+            // Poiché siamo sulla Board, il delta è in pixel schermo, ApplyPan lo gestirà correttamente.
+            vm.Viewport.ApplyPan(_viewportTransform.X, _viewportTransform.Y);
 
             // RESET VISIVO:
-            // 1. I nodi ora sono nella posizione giusta grazie al VM. 
-            //    Dobbiamo annullare il TranslateTransform locale per non sommare lo spostamento due volte.
+            // Riportiamo a zero le trasformazioni temporanee perché ora i nodi si sono 
+            // spostati "fisicamente" tramite il binding a OffsetX/Y nel ViewModel.
             _viewportTransform.X = 0;
             _viewportTransform.Y = 0;
             
-            // 2. La griglia ora riceve il nuovo OffsetX/Y dal VM tramite Binding.
-            //    Dobbiamo annullare l'offset temporaneo visivo.
             BackgroundGrid.SetVisualPan(0, 0);
         }
         
         ViewportContainer.IsHitTestVisible = true;
-
         _isPanning = false;
         _lastPointerPosForPanning = null;
         e.Pointer.Capture(null); 
@@ -168,15 +160,16 @@ public partial class BoardView : UserControl
         if (DataContext is not BoardViewModel vm) return;
         
         var mousePos = e.GetPosition(this);
-        double delta = e.Delta.Y;
         
-        // Lo zoom passa direttamente al VM (accettabile perché è un evento discreto)
-        vm.Zoom(delta, mousePos);
+        // Calcolo fattore di zoom (esponenziale per fluidità)
+        double factor = e.Delta.Y > 0 ? 1.1 : (1.0 / 1.1);
+        
+        // Deleghiamo al ViewportManager della Board
+        vm.Viewport.ApplyZoomAtPoint(factor, mousePos);
         
         e.Handled = true; 
     }
     
-    // --- Pulizia ---
     protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
     {
         _isPanning = false;
