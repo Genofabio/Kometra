@@ -73,28 +73,34 @@ public abstract partial class ImageNodeViewModel : BaseNodeViewModel
     // ---------------------------------------------------------------------------
 
     /// <summary>
-    /// Esegue lo swap sicuro tra renderer, gestendo l'adattamento del contrasto 
-    /// e la pulizia delle risorse native OpenCV.
+    /// Esegue lo swap sicuro tra renderer, gestendo l'adattamento del contrasto.
+    /// <para>
+    /// PRE-CONDIZIONE: <paramref name="newRenderer"/> DEVE essere già inizializzato 
+    /// (tramite Factory Async) e pronto all'uso (Mat valida).
+    /// </para>
     /// </summary>
     protected async Task ApplyNewRendererAsync(FitsRenderer newRenderer, AbsoluteContrastProfile? explicitProfile = null)
     {
         if (newRenderer == null) throw new ArgumentNullException(nameof(newRenderer));
 
-        // 1. Inizializzazione scientifica (Mat creation)
-        await newRenderer.InitializeAsync();
+        // NOTA ARCHITETTURALE: 
+        // Non chiamiamo più `await newRenderer.InitializeAsync()` qui.
+        // Si assume che la Factory abbia già restituito un oggetto valido e idratato.
 
-        // 2. Sincronizzazione dello stato radiometrico
+        // 1. Sincronizzazione dello stato radiometrico e visuale
         if (explicitProfile != null)
         {
+            newRenderer.VisualizationMode = VisualizationMode; // Mantiene la modalità corrente
             newRenderer.ApplyContrastProfile(explicitProfile);
         }
         else if (ActiveRenderer != null)
         {
+            // Ereditiamo lo stato dal renderer precedente (flicker-free experience)
             newRenderer.VisualizationMode = VisualizationMode;
             newRenderer.ApplyContrastProfile(ActiveRenderer.CaptureContrastProfile());
         }
 
-        // 3. Swap atomico sulla UI Thread
+        // 2. Swap atomico sulla UI Thread
         var oldRenderer = ActiveRenderer;
 
         await Dispatcher.UIThread.InvokeAsync(() =>
@@ -111,7 +117,7 @@ public abstract partial class ImageNodeViewModel : BaseNodeViewModel
             OnPropertyChanged(nameof(EstimatedTotalSize));
         });
 
-        // 4. Cleanup differito per non bloccare il rendering
+        // 3. Cleanup differito per non bloccare il rendering
         if (oldRenderer != null)
         {
             Dispatcher.UIThread.Post(() => oldRenderer.Dispose(), DispatcherPriority.Background);

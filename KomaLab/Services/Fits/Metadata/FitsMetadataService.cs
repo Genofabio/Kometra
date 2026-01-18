@@ -16,7 +16,7 @@ public class FitsMetadataService : IFitsMetadataService
     private static readonly HashSet<string> StructuralKeys = new(StringComparer.OrdinalIgnoreCase)
     {
         "SIMPLE", "BITPIX", "NAXIS", "NAXIS1", "NAXIS2", "NAXIS3", 
-        "EXTEND", "PCOUNT", "GCOUNT", "GROUPS", "BSCALE", "BZERO", "END"
+        "EXTEND", "PCOUNT", "GCOUNT", "GROUPS", "BSCALE", "BZERO"
     };
 
     // Chiavi che ammettono duplicati (Commenti, Storia)
@@ -133,8 +133,14 @@ public class FitsMetadataService : IFitsMetadataService
         if (source == null || destination == null) return;
         foreach (var card in source.Cards)
         {
-            // Non copiamo le chiavi strutturali (NAXIS, BITPIX) perché appartengono all'immagine specifica
+            // 1. Salta le chiavi strutturali (NAXIS, BITPIX...)
             if (StructuralKeys.Contains(card.Key)) continue;
+
+            // 2. Salta ESPLICITAMENTE "END". 
+            // Vogliamo vederla nell'editor, ma non vogliamo copiarla nel nuovo header
+            // perché il Writer ne genererà una nuova alla fine fisica del file.
+            if (card.Key.Equals("END", StringComparison.OrdinalIgnoreCase)) continue;
+
             destination.AddCard(card); 
         }
     }

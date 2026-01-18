@@ -16,15 +16,18 @@ namespace KomaLab.ViewModels.Nodes;
 
 /// <summary>
 /// Nodo per la gestione di una singola immagine FITS.
-/// Implementa IImageNavigator tramite un SequenceNavigator fisso (1/1) 
-/// per garantire coerenza totale con i nodi multipli e i tool.
+/// Aderisce al pattern Async Factory per garantire la robustezza del renderer.
+/// Implementa IImageNavigator tramite un SequenceNavigator fisso (1/1).
 /// </summary>
 public partial class SingleImageNodeViewModel : ImageNodeViewModel
 {
     private readonly IFitsDataManager _dataManager;
     private readonly IFitsRendererFactory _rendererFactory;
-    
+
+    // Wrapper persistente per evitare allocazioni inutili e garantire coerenza dei riferimenti
+    private readonly List<FitsFileReference> _filesWrapper;
     private FitsFileReference _fileReference;
+    
     private CancellationTokenSource? _loadingCts;
     
     // Componente di navigazione coerente (fisso a 1 immagine)
@@ -42,9 +45,16 @@ public partial class SingleImageNodeViewModel : ImageNodeViewModel
     // ---------------------------------------------------------------------------
 
     public override IImageNavigator Navigator => _navigator;
-    public override FitsRenderer? ActiveRenderer => _activeFitsImage;
+    
+    // Binding Proxy: La view deve bindare a ActiveFitsImage per aggiornamenti sicuri
+    public override FitsRenderer? ActiveRenderer => ActiveFitsImage;
+    
     public override Size NodeContentSize => ActiveRenderer?.ImageSize ?? default;
-    public override IReadOnlyList<FitsFileReference> CurrentFiles => new[] { _fileReference };
+
+    // FIX: Restituiamo sempre la stessa istanza della lista wrapper. 
+    // Nessun new[] {}, nessuna copia, nessun riferimento perso.
+    public override IReadOnlyList<FitsFileReference> CurrentFiles => _filesWrapper;
+    
     public override FitsFileReference? ActiveFile => _fileReference;
 
     // ---------------------------------------------------------------------------
@@ -59,7 +69,10 @@ public partial class SingleImageNodeViewModel : ImageNodeViewModel
     {
         _dataManager = dataManager ?? throw new ArgumentNullException(nameof(dataManager));
         _rendererFactory = rendererFactory ?? throw new ArgumentNullException(nameof(rendererFactory));
+        
+        // Setup iniziale del riferimento e del wrapper
         _fileReference = new FitsFileReference(model.ImagePath);
+        _filesWrapper = new List<FitsFileReference> { _fileReference };
 
         // Inizializziamo il navigatore nello stato "Single"
         _navigator.UpdateStatus(0, 1);
@@ -68,7 +81,7 @@ public partial class SingleImageNodeViewModel : ImageNodeViewModel
     public async Task InitializeAsync() => await LoadImageAsync();
 
     // ---------------------------------------------------------------------------
-    // CORE RENDERING PIPELINE
+    // CORE RENDERING PIPELINE (Async Factory Pattern)
     // ---------------------------------------------------------------------------
 
     private async Task LoadImageAsync()
@@ -79,18 +92,21 @@ public partial class SingleImageNodeViewModel : ImageNodeViewModel
         _loadingCts?.Cancel();
         _loadingCts?.Dispose();
         _loadingCts = new CancellationTokenSource();
+        // Nota: Passiamo il token alle operazioni async dove possibile
 
         try
         {
             // 1. Recupero dati tramite DataManager (Cache-aware)
             var data = await _dataManager.GetDataAsync(_fileReference.FilePath);
             
-            // 2. Creazione del Renderer (usa Header modificato se presente)
+            // 2. CREAZIONE & INIZIALIZZAZIONE ATOMICA
+            // Se esiste un ModifiedHeader in RAM (es. dall'editor), usiamo quello.
             var headerToUse = _fileReference.ModifiedHeader ?? data.Header;
-            var newRenderer = _rendererFactory.Create(data.PixelData, headerToUse);
             
-            // 3. Swap Atomico (gestito dalla classe base ImageNodeViewModel)
-            // Nota: ApplyNewRendererAsync eredita automaticamente VisualizationMode e Contrast
+            var newRenderer = await _rendererFactory.CreateAsync(data.PixelData, headerToUse);
+            
+            // 3. Swap Atomico
+            // La classe base gestisce automaticamente l'ereditarietà del contrasto
             await ApplyNewRendererAsync(newRenderer);
         }
         catch (OperationCanceledException) { }
@@ -111,7 +127,13 @@ public partial class SingleImageNodeViewModel : ImageNodeViewModel
         var first = input.FirstOrDefault();
         if (first != null)
         {
+            // Aggiorniamo il riferimento principale
             _fileReference = first;
+            
+            // Aggiorniamo il wrapper esistente SENZA ricrearlo
+            _filesWrapper.Clear();
+            _filesWrapper.Add(_fileReference);
+
             _navigator.UpdateStatus(0, 1); // Reset navigatore se cambiamo file
             await LoadImageAsync();
         }
@@ -119,7 +141,11 @@ public partial class SingleImageNodeViewModel : ImageNodeViewModel
 
     public override async Task RefreshDataFromDiskAsync()
     {
+        // Invalidiamo la cache dei dati grezzi su disco
         _dataManager.Invalidate(_fileReference.FilePath);
+        
+        // Ricarichiamo. Nota: LoadImageAsync darà ancora priorità 
+        // a _fileReference.ModifiedHeader se presente in RAM.
         await LoadImageAsync();
     }
 
@@ -127,7 +153,11 @@ public partial class SingleImageNodeViewModel : ImageNodeViewModel
     // CLEANUP
     // ---------------------------------------------------------------------------
 
-    protected override void OnRendererSwapping(FitsRenderer newRenderer) => _activeFitsImage = newRenderer;
+    protected override void OnRendererSwapping(FitsRenderer newRenderer)
+    {
+        // Usiamo il SETTER della proprietà generata per scatenare le notifiche corrette
+        ActiveFitsImage = newRenderer;
+    }
 
     protected override void Dispose(bool disposing)
     {
@@ -136,7 +166,7 @@ public partial class SingleImageNodeViewModel : ImageNodeViewModel
             _navigator.Stop(); // Cleanup preventivo del navigatore
             _loadingCts?.Cancel();
             _loadingCts?.Dispose();
-            _activeFitsImage?.Dispose();
+            ActiveFitsImage?.Dispose();
         }
         base.Dispose(disposing);
     }

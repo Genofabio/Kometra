@@ -184,22 +184,30 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
             var data = await _dataManager.GetDataAsync(file.FilePath);
             token.ThrowIfCancellationRequested();
 
-            var newRenderer = _rendererFactory.Create(data.PixelData, file.ModifiedHeader ?? data.Header);
+            // 1. ASYNC FACTORY (Caricamento Atomico e Sicuro)
+            var newRenderer = await _rendererFactory.CreateAsync(
+                data.PixelData, 
+                file.ModifiedHeader ?? data.Header
+            );
 
+            // 2. LOGICA ADATTIVA
             if (ActiveRenderer != null)
             {
-                using var nextMat = newRenderer.CaptureScientificMat();
+                using var nextMat = newRenderer.CaptureScientificMat(); // Sicuro: già inizializzato
                 token.ThrowIfCancellationRequested();
                 var profile = ActiveRenderer.GetAdaptedProfileFor(nextMat);
                 newRenderer.ApplyContrastProfile(profile);
+                
+                // Cleanup immediato per liberare RAM
                 ActiveRenderer.Dispose();
             }
 
+            // 3. SWAP
             ActiveRenderer = newRenderer;
-            await ActiveRenderer.InitializeAsync();
 
+            // Sincronizzazione Viewport e Binding
             Viewport.ImageSize = ActiveRenderer.ImageSize;
-            Viewport.SearchRadius = SearchRadius; // Sincronizza il raggio con il viewport
+            Viewport.SearchRadius = SearchRadius; 
             Viewport.TargetCoordinate = CoordinateEntries[index].Coordinate;
             
             OnPropertyChanged(nameof(BlackPoint));
@@ -340,7 +348,6 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
         StatusMessage = string.Empty;
     }
 
-    // Aggiornamento dinamico del raggio nel viewport al cambio dello slider
     partial void OnSearchRadiusChanged(int value)
     {
         Viewport.SearchRadius = value;

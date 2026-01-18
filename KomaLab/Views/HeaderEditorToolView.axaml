@@ -4,15 +4,25 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:avalonia="clr-namespace:Material.Icons.Avalonia;assembly=Material.Icons.Avalonia"
         xmlns:fits="clr-namespace:KomaLab.ViewModels.Fits"
+        xmlns:converters="clr-namespace:KomaLab.Converters"
+        xmlns:metadata="clr-namespace:KomaLab.Services.Fits.Metadata"
         mc:Ignorable="d" d:DesignWidth="1000" d:DesignHeight="650"
         x:Class="KomaLab.Views.HeaderEditorToolView"
         x:DataType="fits:HeaderEditorToolViewModel"
         Title="Editor Metadati FITS"
-        Width="1000" Height="608"
-        MinWidth="920" MinHeight="600"
+        Width="1000" Height="590"
+        MinWidth="920" MinHeight="570"
         WindowStartupLocation="CenterOwner"
         CanResize="True"
         Background="{DynamicResource ToolWindowBackgroundBrush}">
+    
+    <Window.Resources>
+        <converters:StatusToBrushConverter x:Key="StatusToBrushConverter"
+                                           SuccessBrush="{StaticResource ActionSuccessBackgroundBrush}"
+                                           ErrorBrush="{StaticResource ActionDestructiveBackgroundBrush}"
+                                           PendingBrush="{StaticResource ActionDisabledBackgroundBrush}"
+                                           WarningBrush="{StaticResource OverlaySearchBoxBrush}"/> 
+    </Window.Resources>
 
     <Grid RowDefinitions="*, Auto">
         <Grid Grid.Row="0" ColumnDefinitions="300, *">
@@ -38,61 +48,54 @@
                                    Opacity="0.7"/>
                     </StackPanel>
 
-                    <StackPanel Grid.Row="1" Spacing="12">
-                        <Separator Background="{DynamicResource SystemControlForegroundBaseLowBrush}" Height="1" Margin="0,-8,0,4" Opacity="0.5"/>
-                        <TextBlock Text="Integrità Metadati" 
-                                   FontSize="14" 
-                                   Foreground="{DynamicResource Text.StaticWhiteBrush}" 
-                                   FontWeight="Bold"/>
-                        
-                        <Border Background="{DynamicResource ToolWindowBackgroundBrush}" CornerRadius="6" Padding="12" BorderBrush="{DynamicResource SystemControlForegroundBaseLowBrush}" BorderThickness="1">
-                            <StackPanel Spacing="5">
-                                <StackPanel Orientation="Horizontal" Spacing="10">
-                                    <Ellipse Width="10" Height="10" Fill="LightGray" VerticalAlignment="Center"/>
-                                    <TextBlock Text="Riferimento Temporale" FontWeight="SemiBold" FontSize="13" Foreground="{DynamicResource Text.StaticWhiteBrush}"/>
-                                </StackPanel>
-                                <TextBlock Text="{Binding DateStatusText}" 
-                                           FontSize="11" 
-                                           Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}" 
-                                           TextWrapping="Wrap" 
-                                           Margin="20,0,0,0"/>
-                            </StackPanel>
-                        </Border>
+                    <Grid Grid.Row="2" RowDefinitions="Auto, *">
+                        <StackPanel Grid.Row="0" Spacing="12" Margin="0,0,0,12">
+                            <Separator Background="{DynamicResource SystemControlForegroundBaseLowBrush}" Height="1" Margin="0,-8,0,4" Opacity="0.5"/>
+                            <TextBlock Text="Integrità Metadati" 
+                                       FontSize="14" 
+                                       Foreground="{DynamicResource Text.StaticWhiteBrush}" 
+                                       FontWeight="Bold"/>
+                        </StackPanel>
 
-                        <Border Background="{DynamicResource ToolWindowBackgroundBrush}" CornerRadius="6" Padding="12" BorderBrush="{DynamicResource SystemControlForegroundBaseLowBrush}" BorderThickness="1">
-                            <StackPanel Spacing="5">
-                                <StackPanel Orientation="Horizontal" Spacing="10">
-                                    <Ellipse Width="10" Height="10" Fill="LightGray" VerticalAlignment="Center"/>
-                                    <TextBlock Text="Geolocalizzazione Sito" FontWeight="SemiBold" FontSize="13" Foreground="{DynamicResource Text.StaticWhiteBrush}"/>
-                                </StackPanel>
-                                <TextBlock Text="{Binding LocationStatusText}" 
-                                           FontSize="11" 
-                                           Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}" 
-                                           TextWrapping="Wrap" 
-                                           Margin="20,0,0,0"/>
-                            </StackPanel>
-                        </Border>
+                        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+                            <ItemsControl ItemsSource="{Binding HealthChecks}">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate x:DataType="metadata:HealthStatusPresenter">
+                                        <Border Background="{DynamicResource ToolWindowBackgroundBrush}" 
+                                                CornerRadius="6" 
+                                                Padding="12" 
+                                                Margin="0,0,5,8"
+                                                BorderBrush="{DynamicResource SystemControlForegroundBaseLowBrush}" 
+                                                BorderThickness="1"
+                                                ToolTip.Tip="{Binding Tooltip}">
+                                            <StackPanel Spacing="5">
+                                                <StackPanel Orientation="Horizontal" Spacing="10">
+                                                    <Ellipse Width="10" Height="10" 
+                                                             Fill="{Binding Status, Converter={StaticResource StatusToBrushConverter}}" 
+                                                             VerticalAlignment="Center"/>
+                                                    <TextBlock Text="{Binding Title}" 
+                                                               FontWeight="SemiBold" 
+                                                               FontSize="13" 
+                                                               Foreground="{DynamicResource Text.StaticWhiteBrush}"/>
+                                                </StackPanel>
+                                                <TextBlock Text="{Binding Message}" 
+                                                           FontSize="11" 
+                                                           Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}" 
+                                                           TextWrapping="Wrap" 
+                                                           Margin="20,0,0,0"/>
+                                            </StackPanel>
+                                        </Border>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </ScrollViewer>
+                    </Grid>
 
-                        <Border Background="{DynamicResource ToolWindowBackgroundBrush}" CornerRadius="6" Padding="12" BorderBrush="{DynamicResource SystemControlForegroundBaseLowBrush}" BorderThickness="1">
-                            <StackPanel Spacing="5">
-                                <StackPanel Orientation="Horizontal" Spacing="10">
-                                    <Ellipse Width="10" Height="10" Fill="LightGray" VerticalAlignment="Center"/>
-                                    <TextBlock Text="Soluzione Astrometrica" FontWeight="SemiBold" FontSize="13" Foreground="{DynamicResource Text.StaticWhiteBrush}"/>
-                                </StackPanel>
-                                <TextBlock Text="{Binding WcsStatusText}" 
-                                           FontSize="11" 
-                                           Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}" 
-                                           TextWrapping="Wrap" 
-                                           Margin="20,0,0,0"/>
-                            </StackPanel>
-                        </Border>
-                    </StackPanel>
-
-                    <StackPanel Grid.Row="3" IsVisible="{Binding IsMultipleImages}" Spacing="10">
-                        <Separator Background="{DynamicResource SystemControlForegroundBaseLowBrush}" Height="1" Margin="0,20,0,8" Opacity="0.5"/>
+                    <StackPanel Grid.Row="3" IsVisible="{Binding IsMultipleImages}" Spacing="10" Margin="0,20,0,0">
+                        <Separator Background="{DynamicResource SystemControlForegroundBaseLowBrush}" Height="1" Margin="0,0,0,8" Opacity="0.5"/>
                         
                         <Grid ColumnDefinitions="Auto, *, Auto" Margin="5,0">
-                            <Button Grid.Column="0" Classes="navBtn" Command="{Binding Navigator.PreviousCommand}" ToolTip.Tip="Immagine Precedente">
+                            <Button Grid.Column="0" Classes="navBtn" Command="{Binding PreviousImageCommand}" ToolTip.Tip="Immagine Precedente">
                                 <avalonia:MaterialIcon Kind="ChevronLeft" Width="20" Height="20"/>
                             </Button>
                             
@@ -102,17 +105,15 @@
                                            FontWeight="Bold" Foreground="{DynamicResource Text.StaticWhiteBrush}" FontSize="14"/>
                             </Border>
                             
-                            <Button Grid.Column="2" Classes="navBtn" Command="{Binding Navigator.NextCommand}" ToolTip.Tip="Immagine Successiva">
+                            <Button Grid.Column="2" Classes="navBtn" Command="{Binding NextImageCommand}" ToolTip.Tip="Immagine Successiva">
                                 <avalonia:MaterialIcon Kind="ChevronRight" Width="20" Height="20"/>
                             </Button>
                         </Grid>
                     </StackPanel>
-
                 </Grid>
             </Border>
 
             <Grid Grid.Column="1" RowDefinitions="Auto, *">
-                
                 <Grid Grid.Row="0" ColumnDefinitions="*, Auto" Margin="20">
                     <TextBox Grid.Column="0" 
                              Text="{Binding SearchText}" 
@@ -146,6 +147,12 @@
                             </MenuItem>
                         </ContextMenu>
                     </DataGrid.ContextMenu>
+                    
+                    <DataGrid.Styles>
+                        <Style Selector="DataGridRow" x:DataType="fits:FitsHeaderEditorRow">
+                            <Setter Property="Classes.modified" Value="{Binding IsModified}"/>
+                        </Style>
+                    </DataGrid.Styles>
                     
                     <DataGrid.Columns>
                         <DataGridTemplateColumn Header="KEYWORD" Width="1.2*" MinWidth="130">

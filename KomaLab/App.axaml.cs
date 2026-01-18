@@ -63,15 +63,11 @@ public class App : Application
         
         // --- 0. Supporto Microsoft Extensions e Rete ---
         services.AddMemoryCache(); 
-        services.AddHttpClient(); // Necessario per i servizi NASA/JPL
+        services.AddHttpClient(); 
 
-        // --- 1. Infrastruttura (Risoluzione Dipendenza Circolare) ---
-        // Registriamo le classi concrete per i compiti specifici
+        // --- 1. Infrastruttura ---
         services.AddSingleton<LocalFileStreamProvider>();
         services.AddSingleton<AvaloniaAssetStreamProvider>();
-        
-        // Registriamo l'interfaccia usando il Resolver che coordina le due classi sopra
-        // Questo spezza il cerchio perché FileStreamResolver dipende dalle classi concrete, non dall'interfaccia stessa.
         services.AddSingleton<IFileStreamProvider, FileStreamResolver>();
 
         services.AddSingleton<IDialogService, DialogService>(); 
@@ -80,10 +76,14 @@ public class App : Application
 
         // --- 2. Dati & Metadata (Core) ---
         services.AddSingleton<FitsReader>();
+        services.AddSingleton<FitsWriter>();
         services.AddSingleton<IFitsIoService, FitsIoService>();
         services.AddSingleton<IFitsMetadataService, FitsMetadataService>();
         services.AddSingleton<IFitsDataManager, FitsDataManager>(); 
         services.AddSingleton<IFitsOpenCvConverter, FitsOpenCvConverter>();
+        
+        // --- FIX: Registrazione Mancante ---
+        services.AddSingleton<IFitsHeaderHealthEvaluator, FitsHeaderHealthEvaluator>();
 
         // --- 3. Engine Scientifici ---
         services.AddSingleton<IStackingEngine, StackingEngine>();

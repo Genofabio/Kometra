@@ -19,7 +19,7 @@ namespace KomaLab.ViewModels.Fits;
 
 /// <summary>
 /// Gestisce la visualizzazione e la modifica dell'header FITS.
-/// Architettura disaccoppiata: comunica con i dati tramite IReadOnlyList e IImageNavigator.
+/// Implementa un Sandbox a livello di ViewModel e un'analisi dinamica della salute dei metadati.
 /// </summary>
 public partial class HeaderEditorToolViewModel : ObservableObject, IDisposable
 {
@@ -28,6 +28,11 @@ public partial class HeaderEditorToolViewModel : ObservableObject, IDisposable
     private readonly IFitsHeaderHealthEvaluator _healthEvaluator;
     private readonly FitsHeaderUiMapper _mapper;
 
+    // --- SANDBOX UI STATE ---
+    // Conserviamo i ViewModel delle righe per mantenere lo stato "IsModified" durante la navigazione.
+    private readonly Dictionary<FitsFileReference, List<FitsHeaderEditorRow>> _sessionSandbox = new();
+    
+    private FitsFileReference? _currentEditingFile;
     private readonly List<FitsHeaderEditorRow> _allItems = new();
     private CancellationTokenSource? _healthCheckCts;
     private bool _isDisposed;
@@ -43,18 +48,15 @@ public partial class HeaderEditorToolViewModel : ObservableObject, IDisposable
     [ObservableProperty] private string _searchText = "";
     [ObservableProperty] private bool _isChecking = false;
 
-    // --- STATO SALUTE HEADER ---
-    [ObservableProperty] private HeaderHealthStatus _dateStatus = HeaderHealthStatus.Pending;
-    [ObservableProperty] private string _dateStatusText = "In attesa...";
-    [ObservableProperty] private HeaderHealthStatus _locationStatus = HeaderHealthStatus.Pending;
-    [ObservableProperty] private string _locationStatusText = "In attesa...";
-    [ObservableProperty] private HeaderHealthStatus _wcsStatus = HeaderHealthStatus.Pending;
-    [ObservableProperty] private string _wcsStatusText = "In attesa...";
+    // --- NUOVA COLLEZIONE SALUTE (Architettura Dinamica) ---
+    [ObservableProperty] 
+    private ObservableCollection<HealthStatusPresenter> _healthChecks = new();
 
     // Helpers per la View (Binding)
     public string CurrentFileName => ActiveFile?.FileName ?? "N/A";
     public string ImageCounterText => $"{Navigator.CurrentIndex + 1} / {Navigator.TotalCount}";
     public bool IsMultipleImages => Navigator.CanMove;
+    
     private FitsFileReference? ActiveFile => (_files.Count > Navigator.CurrentIndex) ? _files[Navigator.CurrentIndex] : null;
 
     partial void OnSearchTextChanged(string value) => ApplyFilter();
@@ -72,34 +74,37 @@ public partial class HeaderEditorToolViewModel : ObservableObject, IDisposable
         _healthEvaluator = healthEvaluator ?? throw new ArgumentNullException(nameof(healthEvaluator));
         _mapper = mapper ?? throw new ArgumentNullException(nameof(mapper));
 
-        // Sottoscrizione all'evento del navigatore (se disponibile)
         if (Navigator is SequenceNavigator sn)
         {
             sn.IndexChanged += OnNavigatorIndexChanged;
         }
 
+        _currentEditingFile = ActiveFile;
         _ = LoadCurrentHeaderAsync();
     }
 
     private async void OnNavigatorIndexChanged(object? sender, int index)
     {
+        SaveCurrentStateToSandbox();
+        _currentEditingFile = ActiveFile;
         await LoadCurrentHeaderAsync();
     }
 
-    /// <summary>
-    /// Carica l'header basandosi sulla posizione corrente del navigatore.
-    /// </summary>
+    private void SaveCurrentStateToSandbox()
+    {
+        if (_currentEditingFile == null) return;
+        _sessionSandbox[_currentEditingFile] = new List<FitsHeaderEditorRow>(_allItems);
+    }
+
     private async Task LoadCurrentHeaderAsync()
     {
         IsChecking = true;
         ResetStatusToWaiting(); 
 
-        // Notifica alla UI che i dati del file attivo sono cambiati
         OnPropertyChanged(nameof(CurrentFileName));
         OnPropertyChanged(nameof(ImageCounterText));
         OnPropertyChanged(nameof(IsMultipleImages));
 
-        // Aggiorna lo stato dei comandi proxy
         NextImageCommand.NotifyCanExecuteChanged();
         PreviousImageCommand.NotifyCanExecuteChanged();
 
@@ -111,21 +116,22 @@ public partial class HeaderEditorToolViewModel : ObservableObject, IDisposable
 
         try
         {
-            // Caricamento Header (Priorità alla RAM se modificato, altrimenti disco)
-            FitsHeader? headerToMap = ActiveFile.ModifiedHeader ?? 
-                                     await _dataManager.GetHeaderOnlyAsync(ActiveFile.FilePath);
+            _allItems.Clear();
 
-            if (headerToMap == null)
+            if (_sessionSandbox.TryGetValue(ActiveFile, out var cachedRows))
             {
-                ClearEditor();
-                return;
+                _allItems.AddRange(cachedRows);
+            }
+            else
+            {
+                FitsHeader? headerToMap = ActiveFile.ModifiedHeader ?? await _dataManager.GetHeaderOnlyAsync(ActiveFile.FilePath);
+                if (headerToMap != null)
+                {
+                    var rows = await Task.Run(() => _mapper.MapToRows(headerToMap));
+                    _allItems.AddRange(rows);
+                }
             }
 
-            // Mapping verso le righe dell'editor
-            var rows = await Task.Run(() => _mapper.MapToRows(headerToMap));
-            _allItems.Clear();
-            _allItems.AddRange(rows);
-            
             ApplyFilter();
             await RefreshHealthCheckAsync();
         }
@@ -140,8 +146,6 @@ public partial class HeaderEditorToolViewModel : ObservableObject, IDisposable
         }
     }
 
-    // --- LOGICA DI NAVIGAZIONE PROXY ---
-
     [RelayCommand(CanExecute = nameof(CanGoNext))]
     private async Task NextImage() => await Navigator.MoveNextAsync();
 
@@ -151,21 +155,24 @@ public partial class HeaderEditorToolViewModel : ObservableObject, IDisposable
     private bool CanGoNext => Navigator.CanMoveNext;
     private bool CanGoBack => Navigator.CanMovePrevious;
 
-    // --- APPLICAZIONE MODIFICHE ---
-
     [RelayCommand]
     public void ApplyChanges()
     {
-        var newHeader = _mapper.ReconstructHeader(_allItems);
-        if (ActiveFile != null && newHeader != null)
+        SaveCurrentStateToSandbox();
+        foreach (var kvp in _sessionSandbox)
         {
-            // Salvataggio in RAM: il nodo rifletterà i cambiamenti al prossimo ricaricamento
-            ActiveFile.ModifiedHeader = newHeader;
-            _ = RefreshHealthCheckAsync();
+            var fileRef = kvp.Key;
+            var rowsVM = kvp.Value;
+            var newHeader = _mapper.ReconstructHeader(rowsVM);
+
+            if (fileRef != null && newHeader != null)
+            {
+                fileRef.ModifiedHeader = newHeader;
+            }
         }
     }
 
-    // --- ANALISI SALUTE ---
+    // --- NUOVA LOGICA DI ANALISI E ORDINAMENTO ---
 
     public async Task RefreshHealthCheckAsync()
     {
@@ -179,17 +186,22 @@ public partial class HeaderEditorToolViewModel : ObservableObject, IDisposable
             await Task.Delay(250, token); 
             if (_allItems.Count == 0) { ResetStatusToWaiting(); return; }
 
+            // 1. Genera Header dal ViewModel (dati attuali nell'interfaccia)
             var liveHeader = await Task.Run(() => _mapper.ReconstructHeader(_allItems), token);
+            
+            // 2. Valuta tramite il servizio Model-Puro
             var report = await Task.Run(() => _healthEvaluator.Evaluate(liveHeader), token);
 
             if (token.IsCancellationRequested) return;
 
-            DateStatus = report.Date.Status;
-            DateStatusText = report.Date.Message;
-            LocationStatus = report.Location.Status;
-            LocationStatusText = report.Location.Message;
-            WcsStatus = report.Wcs.Status;
-            WcsStatusText = report.Wcs.Message;
+            // 3. Trasforma in Presenter e ORDINA (Invalid > Warning > Valid > Pending)
+            var sortedPresenters = report.Checks
+                .Select(item => new HealthStatusPresenter(item))
+                .OrderByDescending(p => p.SortPriority)
+                .ToList();
+
+            // 4. Aggiorna la collezione UI
+            HealthChecks = new ObservableCollection<HealthStatusPresenter>(sortedPresenters);
         }
         catch (OperationCanceledException) { }
         finally { IsChecking = false; }
@@ -197,9 +209,12 @@ public partial class HeaderEditorToolViewModel : ObservableObject, IDisposable
 
     private void ResetStatusToWaiting()
     {
-        DateStatus = HeaderHealthStatus.Pending; DateStatusText = "Analisi...";
-        LocationStatus = HeaderHealthStatus.Pending; LocationStatusText = "Analisi...";
-        WcsStatus = HeaderHealthStatus.Pending; WcsStatusText = "Analisi...";
+        // Genera una lista di stati "Pending" per tutti i tipi conosciuti
+        var pendingChecks = Enum.GetValues<HealthCheckType>()
+            .Select(type => new HealthStatusPresenter(new HealthStatusItem(type, HeaderHealthStatus.Pending, "Analisi in corso...")))
+            .ToList();
+
+        HealthChecks = new ObservableCollection<HealthStatusPresenter>(pendingChecks);
     }
 
     // --- GESTIONE RIGHE ED EDITOR ---
@@ -244,14 +259,18 @@ public partial class HeaderEditorToolViewModel : ObservableObject, IDisposable
         _allItems.Clear();
         FilteredItems.Clear();
         IsChecking = false;
+        HealthChecks.Clear();
     }
 
     public void Dispose()
     {
         if (_isDisposed) return;
         if (Navigator is SequenceNavigator sn) sn.IndexChanged -= OnNavigatorIndexChanged;
+        
         _healthCheckCts?.Cancel();
         _healthCheckCts?.Dispose();
+        _sessionSandbox.Clear();
+        
         _isDisposed = true;
         GC.SuppressFinalize(this);
     }

@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using Avalonia;
 using KomaLab.Models.Nodes;
@@ -94,24 +95,33 @@ public class NodeViewModelFactory : INodeViewModelFactory
 
     private async Task<Size> CalculateMaxDimensionsAsync(List<string> paths)
     {
-        // Parallelizzazione per velocità su sequenze lunghe
+        // Limitiamo a 10 letture simultanee per non intasare il FileSystem
+        using var semaphore = new SemaphoreSlim(10); 
+    
         var tasks = paths.Select(async path =>
         {
-            var header = await _dataManager.GetHeaderOnlyAsync(path);
-            if (header == null) return new Size(0, 0);
+            await semaphore.WaitAsync();
+            try
+            {
+                var header = await _dataManager.GetHeaderOnlyAsync(path);
+                if (header == null) return new Size(0, 0);
 
-            return new Size(
-                _metadataService.GetIntValue(header, "NAXIS1"),
-                _metadataService.GetIntValue(header, "NAXIS2")
-            );
+                return new Size(
+                    _metadataService.GetIntValue(header, "NAXIS1"),
+                    _metadataService.GetIntValue(header, "NAXIS2")
+                );
+            }
+            finally
+            {
+                semaphore.Release();
+            }
         });
 
         var sizes = await Task.WhenAll(tasks);
-        
+    
         double maxWidth = sizes.Max(s => s.Width);
         double maxHeight = sizes.Max(s => s.Height);
 
-        // Fallback a 512 se i file sono corrotti
         return (maxWidth > 0) ? new Size(maxWidth, maxHeight) : new Size(512, 512);
     }
 

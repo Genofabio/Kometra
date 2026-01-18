@@ -43,12 +43,17 @@ public class FitsReader
                 if (line.StartsWith("END     "))
                 {
                     endFound = true;
-                    break;
+                
+                    // --- AGGIUNTA: Inseriamo esplicitamente la card END nella lista ---
+                    // Usiamo ParseLine per coerenza, oppure la creiamo manualmente.
+                    // Così il tuo editor la vedrà.
+                    header.AddCard(new FitsCard("END", string.Empty, string.Empty, true));
+                
+                    break; // Ora usciamo dal ciclo
                 }
 
                 var card = FitsFormatting.ParseLine(line);
-                
-                // Saltiamo le righe completamente vuote (blank cards)
+            
                 if (string.IsNullOrWhiteSpace(card.Key) && string.IsNullOrWhiteSpace(card.Value)) 
                     continue;
 

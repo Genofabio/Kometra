@@ -16,7 +16,7 @@ namespace KomaLab.ViewModels.ImageProcessing;
 
 /// <summary>
 /// ViewModel per il Tool di Posterizzazione. 
-/// Delega la navigazione al SequenceNavigator e il contrasto al FitsRenderer.
+/// Utilizza Async Factory per il caricamento sicuro e coerente delle immagini FITS.
 /// </summary>
 public partial class PosterizationToolViewModel : ObservableObject, IDisposable
 {
@@ -76,7 +76,7 @@ public partial class PosterizationToolViewModel : ObservableObject, IDisposable
     }
 
     // =======================================================================
-    // 1. RENDERING PIPELINE (Flicker-Free & Adaptive)
+    // 1. RENDERING PIPELINE (Async Factory Pattern)
     // =======================================================================
 
     private async Task LoadImageAtIndexAsync(int index)
@@ -92,39 +92,44 @@ public partial class PosterizationToolViewModel : ObservableObject, IDisposable
 
         try
         {
-            // 1. Caricamento dati
+            // 1. Caricamento dati grezzi
             var data = await _dataManager.GetDataAsync(_sourcePaths[index]);
             token.ThrowIfCancellationRequested();
 
-            // 2. Creazione Renderer
-            var newRenderer = _rendererFactory.Create(data.PixelData, data.Header);
+            // 2. ASYNC FACTORY CREATION
+            // Restituisce un renderer già inizializzato e pronto (Mat valida).
+            var newRenderer = await _rendererFactory.CreateAsync(data.PixelData, data.Header);
             
+            // 3. Configurazione specifica del Tool
             // Applichiamo l'effetto di posterizzazione come hook post-stretch
             newRenderer.PostProcessAction = _coordinator.GetPreviewEffect(Levels);
 
-            // 3. Sincronizzazione Radiometrica (Coerenza con i Nodi)
+            // 4. Logica Adattiva (Sicura: newRenderer è valido)
             if (_hasLoadedFirstImage && AutoAdaptThresholds && ActiveRenderer != null)
             {
-                using var nextMat = newRenderer.CaptureScientificMat();
+                using var nextMat = newRenderer.CaptureScientificMat(); // ORA È SICURO
                 token.ThrowIfCancellationRequested();
                 
+                // Copia soglie e modalità visualizzazione
+                newRenderer.VisualizationMode = ActiveRenderer.VisualizationMode;
                 var profile = ActiveRenderer.GetAdaptedProfileFor(nextMat);
                 newRenderer.ApplyContrastProfile(profile);
-                await newRenderer.InitializeAsync();
             }
             else
             {
-                await newRenderer.InitializeAsync();
                 _hasLoadedFirstImage = true;
             }
 
-            // 4. Swap Atomico
+            // 5. Swap Atomico
             var old = ActiveRenderer;
             ActiveRenderer = newRenderer;
-            old?.Dispose();
-
+            
+            // Sincronizza Viewport
             Viewport.ImageSize = ActiveRenderer.ImageSize;
             StatusText = "Pronto";
+            
+            // Cleanup differito
+            old?.Dispose();
         }
         catch (OperationCanceledException) { }
         catch (Exception ex) { StatusText = $"Errore: {ex.Message}"; }

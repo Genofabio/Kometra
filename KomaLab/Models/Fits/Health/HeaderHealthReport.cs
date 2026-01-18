@@ -1,16 +1,19 @@
-﻿namespace KomaLab.Models.Fits.Health;
+﻿using System.Collections.Generic;
 
-/// <summary>
-/// Rappresenta il risultato granulare di un controllo (Stato + Messaggio descrittivo).
-/// </summary>
-public record HealthStatusItem(HeaderHealthStatus Status, string Message);
+namespace KomaLab.Models.Fits.Health;
 
-/// <summary>
-/// Report complessivo della "salute" di un header FITS.
-/// Raggruppa le analisi per aree tematiche fondamentali.
-/// </summary>
-public record HeaderHealthReport(
-    HealthStatusItem Date,
-    HealthStatusItem Location,
-    HealthStatusItem Wcs
-);
+public enum HealthCheckType 
+{ 
+    TimeReference, 
+    ObservatoryLocation, 
+    OpticalConfiguration, 
+    TargetPointers, 
+    AstrometricSolution 
+}
+
+public record HealthStatusItem(
+    HealthCheckType Type, 
+    HeaderHealthStatus Status, 
+    string Message);
+
+public record HeaderHealthReport(List<HealthStatusItem> Checks);

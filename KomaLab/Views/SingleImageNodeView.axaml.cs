@@ -71,6 +71,8 @@ public partial class SingleImageNodeView : UserControl
         // PAN INTERNO (Tasto Centrale/Rotella premuta)
         if (properties.IsMiddleButtonPressed)
         {
+            if (!nodeVm.IsSelected) return;
+            
             _isPanningImage = true;
             _lastPanPosition = e.GetPosition(this);
             this.Cursor = new Cursor(StandardCursorType.SizeAll);

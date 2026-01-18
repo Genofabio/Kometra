@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Threading.Tasks;
 using KomaLab.Models.Fits;
 using KomaLab.Models.Fits.Structure;
 using KomaLab.Services.Fits.Conversion;
@@ -24,18 +25,25 @@ public class FitsRendererFactory : IFitsRendererFactory
         _metadataService = metadataService;
     }
 
-    public FitsRenderer Create(Array pixelData, FitsHeader header)
+    public async Task<FitsRenderer> CreateAsync(Array pixelData, FitsHeader header)
     {
-        // 1. Estrazione parametri (Responsabilità della Factory preparare i dati)
+        // 1. Estrazione metadati (sincrona)
         double bScale = _metadataService.GetDoubleValue(header, "BSCALE", 1.0);
         double bZero = _metadataService.GetDoubleValue(header, "BZERO", 0.0);
-
-        // 2. Creazione del Renderer con le nuove dipendenze snellite
-        return new FitsRenderer(
+        
+        // 2. Istanziazione (veloce, sincrona)
+        var renderer = new FitsRenderer(
             pixelData, 
             bScale, 
             bZero, 
             _converter, 
-            _presentationService);
+            _presentationService
+        );
+
+        // 3. Inizializzazione pesante (asincrona)
+        // Qui garantiamo che l'oggetto sia "idratato" prima di restituirlo
+        await renderer.InitializeAsync();
+
+        return renderer;
     }
 }

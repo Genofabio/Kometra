@@ -14,7 +14,7 @@ public class BoardViewport : BaseViewport
     public BoardViewport()
     {
         // Impostazioni iniziali per la board (leggermente zoomata indietro di default)
-        Scale = 0.8; 
+        Scale = 0.4; 
         OffsetX = 0;
         OffsetY = 0;
     }
@@ -24,7 +24,7 @@ public class BoardViewport : BaseViewport
     /// </summary>
     public void ResetView()
     {
-        Scale = 1.0;
+        Scale = 0.4;
         OffsetX = 0;
         OffsetY = 0;
     }

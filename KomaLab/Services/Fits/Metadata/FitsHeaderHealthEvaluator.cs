@@ -1,5 +1,5 @@
 ﻿using System;
-using KomaLab.Models.Fits;
+using System.Collections.Generic;
 using KomaLab.Models.Fits.Health;
 using KomaLab.Models.Fits.Structure;
 
@@ -16,47 +16,71 @@ public class FitsHeaderHealthEvaluator : IFitsHeaderHealthEvaluator
 
     public HeaderHealthReport Evaluate(FitsHeader header)
     {
-        if (header == null) return CreateEmptyReport();
+        var checks = new List<HealthStatusItem>();
 
-        return new HeaderHealthReport(
-            Date: EvaluateDate(header),
-            Location: EvaluateLocation(header),
-            Wcs: EvaluateWcs(header)
-        );
+        if (header == null) return new HeaderHealthReport(checks);
+
+        // Esecuzione dei 5 pilastri della salute FITS
+        checks.Add(EvaluateTime(header));
+        checks.Add(EvaluateLocation(header));
+        checks.Add(EvaluateOptics(header));
+        checks.Add(EvaluateTarget(header));
+        checks.Add(EvaluateWcs(header));
+
+        return new HeaderHealthReport(checks);
     }
 
-    // --- Logiche di analisi (Private) ---
-
-    private HealthStatusItem EvaluateDate(FitsHeader header)
+    private HealthStatusItem EvaluateTime(FitsHeader header)
     {
         var dt = _metadataService.GetObservationDate(header);
-        
-        return dt.HasValue 
-            ? new HealthStatusItem(HeaderHealthStatus.Valid, $"Data: {dt.Value:yyyy-MM-dd HH:mm:ss}")
-            : new HealthStatusItem(HeaderHealthStatus.Invalid, "Timestamp mancante o formato non riconosciuto.");
+        return new HealthStatusItem(
+            HealthCheckType.TimeReference,
+            dt.HasValue ? HeaderHealthStatus.Valid : HeaderHealthStatus.Invalid,
+            dt.HasValue ? $"{dt.Value:yyyy-MM-dd HH:mm:ss}" : "Chiave DATE-OBS mancante.");
     }
 
     private HealthStatusItem EvaluateLocation(FitsHeader header)
     {
         var loc = _metadataService.GetObservatoryLocation(header);
+        return new HealthStatusItem(
+            HealthCheckType.ObservatoryLocation,
+            loc != null ? HeaderHealthStatus.Valid : HeaderHealthStatus.Invalid,
+            loc != null ? $"{loc.Latitude:F3}°, {loc.Longitude:F3}°" : "Coordinate SITELAT/LONG assenti.");
+    }
+
+    private HealthStatusItem EvaluateOptics(FitsHeader header)
+    {
+        var focal = _metadataService.GetFocalLength(header);
+        var pix = _metadataService.GetPixelSize(header);
+        bool ok = focal.HasValue && pix.HasValue;
         
-        return loc != null 
-            ? new HealthStatusItem(HeaderHealthStatus.Valid, $"Sito: {loc.Latitude:F3}, {loc.Longitude:F3}")
-            : new HealthStatusItem(HeaderHealthStatus.Invalid, "Coordinate sito assenti (SITELAT/LONG).");
+        return new HealthStatusItem(
+            HealthCheckType.OpticalConfiguration,
+            ok ? HeaderHealthStatus.Valid : HeaderHealthStatus.Invalid,
+            ok ? $"{focal:F0}mm | {pix:F2}µm" : "FOCALLEN o PIXSIZE mancanti.");
+    }
+
+    private HealthStatusItem EvaluateTarget(FitsHeader header)
+    {
+        // Cerchiamo RA/DEC grezzi (Hints per il Solver)
+        double ra = _metadataService.GetDoubleValue(header, "RA", double.NaN);
+        if (double.IsNaN(ra)) ra = _metadataService.GetDoubleValue(header, "OBJCTRA", double.NaN);
+        bool hasRaDec = !double.IsNaN(ra);
+
+        return new HealthStatusItem(
+            HealthCheckType.TargetPointers,
+            hasRaDec ? HeaderHealthStatus.Valid : HeaderHealthStatus.Warning,
+            hasRaDec ? "Coordinate target presenti." : "Coordinate RA/DEC assenti.");
     }
 
     private HealthStatusItem EvaluateWcs(FitsHeader header)
     {
         var wcs = _metadataService.ExtractWcs(header);
+        bool solved = wcs is { IsValid: true };
         
-        return wcs is { IsValid: true } 
-            ? new HealthStatusItem(HeaderHealthStatus.Valid, $"WCS OK (Scala: {wcs.PixelScaleArcsec:F2}\"/px)")
-            : new HealthStatusItem(HeaderHealthStatus.Invalid, "Dati WCS mancanti o calibrazione non valida.");
-    }
-
-    private HeaderHealthReport CreateEmptyReport()
-    {
-        var pending = new HealthStatusItem(HeaderHealthStatus.Pending, "Nessun dato.");
-        return new HeaderHealthReport(pending, pending, pending);
+        return new HealthStatusItem(
+            HealthCheckType.AstrometricSolution,
+            solved ? HeaderHealthStatus.Valid : HeaderHealthStatus.Pending,
+            solved ? $"Scala: {wcs.PixelScaleArcsec:F2}\"/px" : "Dati WCS non trovati.");
     }
 }

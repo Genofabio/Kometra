@@ -10,12 +10,17 @@ namespace KomaLab.Services.Fits.IO;
 public class FitsIoService : IFitsIoService
 {
     private readonly IFileStreamProvider _streamProvider;
-    private readonly FitsReader _reader; 
+    private readonly FitsReader _reader;
+    private readonly FitsWriter _writer; // <--- Nuova Dipendenza
 
-    public FitsIoService(IFileStreamProvider streamProvider, FitsReader reader)
+    public FitsIoService(
+        IFileStreamProvider streamProvider, 
+        FitsReader reader, 
+        FitsWriter writer)
     {
         _streamProvider = streamProvider ?? throw new ArgumentNullException(nameof(streamProvider));
         _reader = reader ?? throw new ArgumentNullException(nameof(reader));
+        _writer = writer ?? throw new ArgumentNullException(nameof(writer));
     }
 
     // =======================================================================
@@ -37,6 +42,7 @@ public class FitsIoService : IFitsIoService
             var h = _reader.ReadHeader(s);
             var m = _reader.ReadMatrix(s, h);
             
+            // Flip per visualizzazione (Top-Down)
             if (m != null) FlipArrayVertical(m);
             return m;
         } 
@@ -48,12 +54,15 @@ public class FitsIoService : IFitsIoService
     // =======================================================================
 
     public async Task WriteFileAsync(string path, Array data, FitsHeader header) => await Task.Run(() => {
+        // FileMode.Create sovrascrive il file se esiste
         using var fs = new FileStream(path, FileMode.Create, FileAccess.Write);
         
-        WriteFitsHeader(fs, header);
-        // Nota: WriteFitsData deve gestire internamente il flip inverso 
-        // per riportare i dati allo standard FITS (Bottom-Up)
-        WriteFitsData(fs, data); 
+        // Deleghiamo interamente al Writer
+        // Il Writer gestisce: Padding 80 char, blocco 2880 header
+        _writer.WriteHeader(fs, header);
+
+        // Il Writer gestisce: Reverse Flip (Bottom-Up), Endianness, Padding dati
+        _writer.WriteMatrix(fs, data); 
     });
 
     // =======================================================================
@@ -75,32 +84,42 @@ public class FitsIoService : IFitsIoService
 
     public void TryDeleteFile(string path)
     {
-        try 
-        { 
-            if (File.Exists(path)) File.Delete(path); 
-        } 
-        catch 
-        { 
-            // Logging silenzioso o delegato
+        try { if (File.Exists(path)) File.Delete(path); } catch { /* Silent */ }
+    }
+
+    // =======================================================================
+    // 4. HELPERS PRIVATI (Manipolazione Memoria)
+    // =======================================================================
+
+    // Manteniamo questo metodo perché serve per il READ (visualizzazione)
+    // Il Write usa un flip on-the-fly dentro FitsWriter per non duplicare la RAM.
+    private void FlipArrayVertical(Array matrix) 
+    { 
+        switch (matrix)
+        {
+            case byte[,] b: FlipMatrix(b); break;
+            case short[,] s: FlipMatrix(s); break;
+            case int[,] i: FlipMatrix(i); break;
+            case float[,] f: FlipMatrix(f); break;
+            case double[,] d: FlipMatrix(d); break;
+            default: throw new NotSupportedException($"Flip non supportato per {matrix.GetType()}");
         }
     }
 
-    // =======================================================================
-    // 4. HELPERS PRIVATI (LOGICA BINARIA E TRASFORMAZIONI)
-    // =======================================================================
+    private void FlipMatrix<T>(T[,] matrix)
+    {
+        int h = matrix.GetLength(0); 
+        int w = matrix.GetLength(1); 
 
-    private void FlipArrayVertical(Array matrix) 
-    { 
-        /* Logica per invertire l'ordine delle righe (Bottom-Up -> Top-Down) */ 
-    }
-
-    private void WriteFitsHeader(Stream s, FitsHeader h) 
-    { 
-        /* Logica di formattazione e scrittura blocchi header (2880 byte) */ 
-    }
-
-    private void WriteFitsData(Stream s, Array m) 
-    { 
-        /* Logica di conversione Endianness e scrittura pixel con padding */ 
+        for (int y = 0; y < h / 2; y++)
+        {
+            int mirrorY = h - 1 - y;
+            for (int x = 0; x < w; x++)
+            {
+                T temp = matrix[y, x];
+                matrix[y, x] = matrix[mirrorY, x];
+                matrix[mirrorY, x] = temp;
+            }
+        }
     }
 }

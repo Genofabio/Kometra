@@ -42,8 +42,8 @@
                     Background="{DynamicResource ImageCanvasBackgroundBrush}">
                 
                 <Grid>
-                    <Image Source="{Binding ActiveRenderer.Image}"
-                           Stretch="None" 
+                    <Image Source="{Binding ActiveFitsImage.Image}"
+                           Stretch="None"
                            HorizontalAlignment="Left"
                            VerticalAlignment="Top"
                            RenderTransformOrigin="0,0"

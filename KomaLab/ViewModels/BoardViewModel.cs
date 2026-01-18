@@ -205,15 +205,33 @@ public partial class BoardViewModel : ObservableObject
     // ---------------------------------------------------------------------------
     // COMANDI PRINCIPALI
     // ---------------------------------------------------------------------------
-
+    
     [RelayCommand]
     private async Task AddNodeAsync()
     {
         var paths = await _dialogService.ShowOpenFitsFileDialogAsync();
         if (paths == null || !paths.Any()) return;
 
-        var sortedPaths = _metadataService.SortByDate(paths, p => _dataManager.GetHeaderOnlyAsync(p).Result).ToList();
-        
+        // --- CORREZIONE DEADLOCK ---
+        // 1. Recuperiamo le coppie (Path, Data) in parallelo asincrono
+        //    Senza bloccare il thread UI.
+        var tasks = paths.Select(async path => 
+        {
+            var header = await _dataManager.GetHeaderOnlyAsync(path);
+            // Assumo tu abbia un metodo per estrarre la data, altrimenti usa la logica standard
+            var date = _metadataService.GetObservationDate(header) ?? DateTime.MinValue; 
+            return (Path: path, Date: date);
+        });
+
+        var results = await Task.WhenAll(tasks);
+
+        // 2. Ordiniamo in memoria (operazione velocissima)
+        var sortedPaths = results
+            .OrderBy(x => x.Date)
+            .Select(x => x.Path)
+            .ToList();
+        // ---------------------------
+
         Point centerScreen = new Point(Viewport.ViewportSize.Width / 2.0, Viewport.ViewportSize.Height / 2.0);
         Point pos = Viewport.ToWorldCoordinates(centerScreen);
 
@@ -325,8 +343,7 @@ public partial class BoardViewModel : ObservableObject
     {
         if (SelectedNode is ImageNodeViewModel imgNode)
         {
-            var newHeader = await _windowService.ShowHeaderEditorAsync(imgNode.CurrentFiles, imgNode.Navigator);
-            if (newHeader != null && imgNode.ActiveFile != null) imgNode.ActiveFile.ModifiedHeader = newHeader;
+            await _windowService.ShowHeaderEditorAsync(imgNode.CurrentFiles, imgNode.Navigator);
         }
     }
 

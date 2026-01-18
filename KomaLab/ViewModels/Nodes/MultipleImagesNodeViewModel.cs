@@ -20,8 +20,7 @@ namespace KomaLab.ViewModels.Nodes;
 
 /// <summary>
 /// Nodo per la gestione di sequenze di immagini FITS.
-/// Delega la logica di navigazione e animazione al SequenceNavigator.
-/// Focalizzato sul caricamento dati, adattamento radiometrico e video export.
+/// Adotta il pattern Async Factory per garantire che i Renderer siano sempre validi.
 /// </summary>
 public partial class MultipleImagesNodeViewModel : ImageNodeViewModel
 {
@@ -50,10 +49,17 @@ public partial class MultipleImagesNodeViewModel : ImageNodeViewModel
     // ---------------------------------------------------------------------------
     
     public override IImageNavigator Navigator => _navigator;
+    
+    // Binding Proxy: La view deve bindare a ActiveFitsImage per aggiornamenti sicuri
     public override FitsRenderer? ActiveRenderer => ActiveFitsImage;
+    
     public override Size NodeContentSize => _maxImageSize;
     public override IReadOnlyList<FitsFileReference> CurrentFiles => _files;
-    public override FitsFileReference? ActiveFile => (_navigator.CurrentIndex >= 0 && _navigator.CurrentIndex < _files.Count) ? _files[_navigator.CurrentIndex] : null;
+    
+    public override FitsFileReference? ActiveFile => 
+        (_navigator.CurrentIndex >= 0 && _navigator.CurrentIndex < _files.Count) 
+        ? _files[_navigator.CurrentIndex] 
+        : null;
 
     public ObservableCollection<string> ImageNames { get; } = new();
     public string CurrentImageText => $"{_navigator.DisplayIndex} / {_files.Count}";
@@ -104,7 +110,7 @@ public partial class MultipleImagesNodeViewModel : ImageNodeViewModel
     }
 
     // ---------------------------------------------------------------------------
-    // CORE RENDERING PIPELINE (Coerente con i Tool)
+    // CORE RENDERING PIPELINE (Async Factory Pattern)
     // ---------------------------------------------------------------------------
 
     private async Task LoadImageAtIndexAsync(int index, bool forceReset = false)
@@ -122,28 +128,39 @@ public partial class MultipleImagesNodeViewModel : ImageNodeViewModel
             var data = await _dataManager.GetDataAsync(fileRef.FilePath);
             token.ThrowIfCancellationRequested();
 
-            var newRenderer = _rendererFactory.Create(data.PixelData, fileRef.ModifiedHeader ?? data.Header);
+            // 1. CREAZIONE & INIZIALIZZAZIONE ATOMICA
+            // La Factory ora restituisce un oggetto Task<FitsRenderer> già "pronto all'uso".
+            // Non servono più chiamate manuali a InitializeAsync().
+            var newRenderer = await _rendererFactory.CreateAsync(
+                data.PixelData, 
+                fileRef.ModifiedHeader ?? data.Header
+            );
             
-            // Logica Adattiva (Flicker-Free): Il Renderer corrente istruisce il nuovo
+            // 2. LOGICA ADATTIVA (Flicker-Free)
             AbsoluteContrastProfile? profile = null;
             if (!forceReset && ActiveFitsImage != null)
             {
+                // Sicuro: CaptureScientificMat() non fallisce mai qui perché newRenderer è garantito valido.
                 using var nextMat = newRenderer.CaptureScientificMat();
                 token.ThrowIfCancellationRequested();
+                
                 profile = ActiveFitsImage.GetAdaptedProfileFor(nextMat);
             }
 
-            // Swap atomico gestito dalla classe base ImageNodeViewModel
+            // 3. SWAP ATOMICO
             await ApplyNewRendererAsync(newRenderer, profile);
 
-            // Prefetch della prossima immagine (solo se non stiamo animando a raffica)
+            // 4. PREFETCH
             if (!token.IsCancellationRequested && !_navigator.IsLooping)
             {
                 _ = PrefetchImageAsync(index + 1, token);
             }
         }
         catch (OperationCanceledException) { }
-        catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"[MultipleImagesNode] Load Error: {ex.Message}"); }
+        catch (Exception ex) 
+        { 
+            System.Diagnostics.Debug.WriteLine($"[MultipleImagesNode] Load Error: {ex.Message}"); 
+        }
     }
 
     private async Task PrefetchImageAsync(int nextIndex, CancellationToken token)
@@ -201,7 +218,13 @@ public partial class MultipleImagesNodeViewModel : ImageNodeViewModel
     // OVERRIDES E CLEANUP
     // ---------------------------------------------------------------------------
 
-    protected override void OnRendererSwapping(FitsRenderer newRenderer) => ActiveFitsImage = newRenderer;
+    protected override void OnRendererSwapping(FitsRenderer newRenderer)
+    {
+        // Questo setter generato da [ObservableProperty] scatena:
+        // 1. PropertyChanged("ActiveFitsImage")
+        // 2. PropertyChanged("ActiveRenderer") -> tramite [NotifyPropertyChangedFor]
+        ActiveFitsImage = newRenderer;
+    }
 
     public override async Task LoadInputAsync(IEnumerable<FitsFileReference> input)
     {
@@ -232,12 +255,10 @@ public partial class MultipleImagesNodeViewModel : ImageNodeViewModel
     {
         if (disposing)
         {
-            _navigator.Stop(); // Ferma il timer del navigatore
+            _navigator.Stop(); 
             _navigator.IndexChanged -= OnNavigatorIndexChanged;
-            _navigationCts?.Cancel();
-            _exportCts?.Cancel();
-            _navigationCts?.Dispose();
-            _exportCts?.Dispose();
+            _navigationCts?.Cancel(); _navigationCts?.Dispose();
+            _exportCts?.Cancel(); _exportCts?.Dispose();
             ActiveFitsImage?.Dispose();
         }
         base.Dispose(disposing);

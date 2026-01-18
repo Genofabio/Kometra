@@ -45,16 +45,48 @@ public class FitsHeaderUiMapper
 
         foreach (var row in rows)
         {
-            if (!string.IsNullOrWhiteSpace(row.Key))
+            if (string.IsNullOrWhiteSpace(row.Key)) continue;
+
+            string keyUpper = row.Key.Trim().ToUpper();
+        
+            // Se è END, lo aggiungiamo così com'è (o lo saltiamo se lo gestisce il Writer, 
+            // ma per l'editor in memoria meglio averlo).
+            if (keyUpper == "END")
             {
-                // Qui assumiamo che FitsCard sia il record/classe base
-                newHeader.AddCard(new FitsCard(
-                    Key: row.Key.ToUpper(), 
-                    Value: row.Value, 
-                    Comment: row.Comment, 
-                    IsCommentStyle: false));
+                newHeader.AddCard(new FitsCard("END", "", "", true));
+                continue;
             }
+
+            // FORMATTAZIONE INTELLIGENTE DEL VALORE
+            string rawValue = row.Value;
+            string formattedValue = FormatValueForFits(keyUpper, rawValue);
+
+            newHeader.AddCard(new FitsCard(
+                Key: keyUpper, 
+                Value: formattedValue, 
+                Comment: row.Comment, 
+                IsCommentStyle: false));
         }
         return newHeader;
+    }
+    
+    private string FormatValueForFits(string key, string uiValue)
+    {
+        if (string.IsNullOrWhiteSpace(uiValue)) return "";
+
+        // Se l'utente ha già messo gli apici, li teniamo
+        if (uiValue.StartsWith("'") && uiValue.EndsWith("'")) return uiValue;
+
+        // Tentiamo di capire il tipo
+        // Numeri e Booleani (T/F) vanno scritti senza apici
+        if (double.TryParse(uiValue, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out _))
+            return uiValue; // È un numero
+
+        if (uiValue == "T" || uiValue == "F") 
+            return uiValue; // È un booleano logico
+
+        // Se siamo qui, è una stringa libera -> AGGIUNGIAMO APICI
+        // Es. L'utente scrive: M31 -> FITS vuole: 'M31'
+        return $"'{uiValue.Replace("'", "''")}'";
     }
 }
