@@ -60,7 +60,7 @@
                         <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
                             <ItemsControl ItemsSource="{Binding HealthChecks}">
                                 <ItemsControl.ItemTemplate>
-                                    <DataTemplate x:DataType="metadata:HealthStatusPresenter">
+                                    <DataTemplate x:DataType="fits:HealthStatusPresenter">
                                         <Border Background="{DynamicResource ToolWindowBackgroundBrush}" 
                                                 CornerRadius="6" 
                                                 Padding="12" 

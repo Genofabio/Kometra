@@ -56,7 +56,7 @@
                                            Foreground="{DynamicResource OverlaySearchBoxBrush}"/>
                     <TextBlock Classes="WarningLabel" Text="Attenzione:" FontWeight="Bold" VerticalAlignment="Center"/>
                     <TextBlock Classes="WarningBody" Margin="0"
-                               Text="Applica i risultati per rendere le modifiche all'header permanenti." 
+                               Text="salva i risultati per rendere le modifiche all'header permanenti." 
                                VerticalAlignment="Center"/>
                 </StackPanel>
 

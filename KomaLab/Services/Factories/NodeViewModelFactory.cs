@@ -128,7 +128,16 @@ public class NodeViewModelFactory : INodeViewModelFactory
     private void ApplyNodeCentering(BaseNodeViewModel vm, double x, double y)
     {
         var size = vm.EstimatedTotalSize;
-        vm.X = x - (size.Width / 2.0);
-        vm.Y = y - (size.Height / 2.0);
+        if (size.Width > 0 && size.Height > 0)
+        {
+            vm.X = x - (size.Width / 2.0);
+            vm.Y = y - (size.Height / 2.0);
+        }
+        else
+        {
+            // Fallback se la UI non è ancora pronta: usa valori di default o non centrare
+            vm.X = x;
+            vm.Y = y;
+        }
     }
 }

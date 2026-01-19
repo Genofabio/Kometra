@@ -85,16 +85,18 @@ public partial class PlateSolvingToolViewModel : ObservableObject, IDisposable
         AppendLog("=== INIZIO SESSIONE DI RISOLUZIONE ==="); 
 
         _cts = new CancellationTokenSource();
-
-        // Handler che trasforma i dati in "Bellezza UI"
         var progressHandler = new Progress<AstrometryProgressReport>(ProcessProgressReport);
 
         try
         {
+            // Il Coordinator ora gestisce interamente il flusso dei messaggi, summary incluso
             await _coordinator.SolveSequenceAsync(_targetFiles, progressHandler, _cts.Token);
             await Task.Delay(150);
         }
-        catch (OperationCanceledException) { AppendLog("\n[!] Operazione interrotta dall'utente."); }
+        catch (OperationCanceledException) 
+        { 
+            // Non appendiamo log qui: il Coordinator invierà "EVENT:CANCELLED" via progress
+        }
         catch (Exception ex)
         {
             AppendLog($"\n!!! ERRORE FATALE: {ex.Message}");
@@ -108,12 +110,8 @@ public partial class PlateSolvingToolViewModel : ObservableObject, IDisposable
         }
     }
 
-    /// <summary>
-    /// CUORE DEL PURISMO: Traduce i tag semantici in estetica visuale.
-    /// </summary>
     private void ProcessProgressReport(AstrometryProgressReport report)
     {
-        // 1. Aggiornamento Stato UI
         if (report.IsStarting)
         {
             StatusText = $"Elaborazione: {report.FileName} ({report.CurrentFileIndex}/{report.TotalFiles})";
@@ -122,42 +120,48 @@ public partial class PlateSolvingToolViewModel : ObservableObject, IDisposable
             return;
         }
 
-        // 2. Parsing dei messaggi taggati
         if (string.IsNullOrEmpty(report.Message)) return;
 
-        if (report.Message.StartsWith("CONFIG:"))
+        // Gestione Tag Semantici
+        if (report.Message == "EVENT:CANCELLED")
+        {
+            AppendLog("\n[!] Operazione interrotta dall'utente.");
+        }
+        else if (report.Message.StartsWith("CONFIG:"))
+        {
             AppendLog($"   > Config: {report.Message.Substring(7)}");
-
+        }
         else if (report.Message.StartsWith("TOOL:"))
+        {
             AppendLog($"     | {report.Message.Substring(5)}");
-
+        }
         else if (report.Message.StartsWith("SKIP:"))
+        {
             AppendLog($"   [!] SALTATO: Dati mancanti ({report.Message.Substring(5)})");
-
+        }
         else if (report.Message == "STATUS:SUCCESS")
         {
-            // Il ViewModel decide come mostrare i dati WCS
             if (report.Result?.SolvedHeader != null)
                 AppendLog(FormatWcsDetails(report.Result.SolvedHeader));
             
             AppendLog("   >>> RISOLTO CON SUCCESSO");
         }
-
         else if (report.Message.StartsWith("STATUS:FAIL:"))
+        {
             AppendLog($"   >>> FALLITO: {report.Message.Substring(12)}");
-
+        }
         else if (report.Message.StartsWith("SUMMARY:"))
         {
-            var parts = report.Message.Split(':');
-            AppendLog($"\n============================================================\nSESSIONE COMPLETATA\nSuccessi: {parts[1]} su {parts[2]} files.\n============================================================");
+            AppendLog(FormatSummary(report.Message));
         }
-        else if (report.Message.StartsWith("SYSTEM_ERROR:"))
-            AppendLog($"   [!] ERRORE SISTEMA: {report.Message.Substring(13)}");
     }
 
-    /// <summary>
-    /// Crea la tabella WCS. Spostata qui per togliere responsabilità al Service.
-    /// </summary>
+    private string FormatSummary(string summaryMsg)
+    {
+        var parts = summaryMsg.Split(':');
+        return $"\n============================================================\nSESSIONE COMPLETATA\nSuccessi: {parts[1]} su {parts[2]} files.\n============================================================";
+    }
+
     private string FormatWcsDetails(FitsHeader header)
     {
         var sb = new StringBuilder();
@@ -175,14 +179,16 @@ public partial class PlateSolvingToolViewModel : ObservableObject, IDisposable
 
     private void FinalizeSession(bool cancelled)
     {
+        int actualSuccesses = _coordinator.GetPendingResults().Count;
+
         if (cancelled)
         {
             StatusText = "Operazione annullata.";
             CurrentStatus = PlateSolvingStatus.Cancelled;
+            // Nota: Il log del SUMMARY viene ora gestito esclusivamente dal ProcessProgressReport
         }
         else
         {
-            int actualSuccesses = _coordinator.GetPendingResults().Count;
             CurrentStatus = actualSuccesses == _targetFiles.Count ? PlateSolvingStatus.Success 
                           : actualSuccesses > 0 ? PlateSolvingStatus.PartialSuccess 
                           : PlateSolvingStatus.Failed;

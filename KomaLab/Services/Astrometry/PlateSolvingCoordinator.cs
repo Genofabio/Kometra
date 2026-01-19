@@ -29,95 +29,118 @@ public class PlateSolvingCoordinator : IPlateSolvingCoordinator
         int total = fileList.Count;
         int successCount = 0;
 
-        for (int i = 0; i < total; i++)
+        try
         {
-            token.ThrowIfCancellationRequested();
-
-            var fileRef = fileList[i];
-            var fileName = Path.GetFileName(fileRef.FilePath);
-
-            // 1. NOTIFICA INIZIO (Solo Dati)
-            // Non inviamo più la stringa "--- [FILE 1/10] ---"
-            progress.Report(new AstrometryProgressReport
+            for (int i = 0; i < total; i++)
             {
-                CurrentFileIndex = i + 1,
-                TotalFiles = total,
-                FileName = fileName,
-                IsStarting = true,
-                Message = fileName // Il VM userà questo per creare l'header grafico
-            });
+                // Verifica interruzione all'inizio di ogni iterazione
+                token.ThrowIfCancellationRequested();
 
-            // 2. DIAGNOSI
-            var diagnosis = await _solver.DiagnoseIssuesAsync(fileRef);
+                var fileRef = fileList[i];
+                var fileName = Path.GetFileName(fileRef.FilePath);
 
-            if (!diagnosis.IsReady)
-            {
-                // Tagghiamo il messaggio come SKIP affinché il VM sappia come formattarlo
+                // 1. NOTIFICA INIZIO
                 progress.Report(new AstrometryProgressReport
                 {
                     CurrentFileIndex = i + 1,
-                    IsError = true,
-                    IsCompleted = true,
-                    Message = $"SKIP:{string.Join(", ", diagnosis.MissingItems)}"
+                    TotalFiles = total,
+                    FileName = fileName,
+                    IsStarting = true,
+                    Message = fileName
                 });
-                continue;
-            }
 
-            // 3. ESECUZIONE (Ponte per i log taggati CONFIG: e TOOL:)
-            var liveLogBridge = new Progress<string>(msg => 
-                progress.Report(new AstrometryProgressReport { Message = msg }));
+                // 2. DIAGNOSI
+                var diagnosis = await _solver.DiagnoseIssuesAsync(fileRef);
 
-            try
-            {
-                PlateSolvingResult result = await _solver.SolveFileAsync(fileRef, token, liveLogBridge);
-
-                if (result.Success && result.SolvedHeader != null)
-                {
-                    _sessionCache[fileRef] = result.SolvedHeader;
-                    successCount++;
-
-                    // Notifichiamo il successo senza costruire la stringa WCS qui
-                    progress.Report(new AstrometryProgressReport
-                    {
-                        CurrentFileIndex = i + 1,
-                        TotalFiles = total,
-                        IsCompleted = true,
-                        Success = true,
-                        Result = result,
-                        Message = "STATUS:SUCCESS" 
-                    });
-                }
-                else
+                if (!diagnosis.IsReady)
                 {
                     progress.Report(new AstrometryProgressReport
                     {
                         CurrentFileIndex = i + 1,
-                        TotalFiles = total,
+                        IsError = true,
                         IsCompleted = true,
-                        Success = false,
-                        Result = result,
-                        Message = $"STATUS:FAIL:{result.Message}"
+                        Message = $"SKIP:{string.Join(", ", diagnosis.MissingItems)}"
+                    });
+                    continue;
+                }
+
+                // 3. ESECUZIONE
+                var liveLogBridge = new Progress<string>(msg => 
+                    progress.Report(new AstrometryProgressReport { Message = msg }));
+
+                try
+                {
+                    PlateSolvingResult result = await _solver.SolveFileAsync(fileRef, token, liveLogBridge);
+
+                    if (result.Success && result.SolvedHeader != null)
+                    {
+                        _sessionCache[fileRef] = result.SolvedHeader;
+                        successCount++;
+
+                        progress.Report(new AstrometryProgressReport
+                        {
+                            CurrentFileIndex = i + 1,
+                            TotalFiles = total,
+                            IsCompleted = true,
+                            Success = true,
+                            Result = result,
+                            Message = "STATUS:SUCCESS" 
+                        });
+                    }
+                    else
+                    {
+                        // Se siamo stati cancellati durante l'esecuzione di SolveFileAsync,
+                        // evitiamo di riportare un fallimento generico perché seguirà il segnale di interruzione.
+                        if (!token.IsCancellationRequested)
+                        {
+                            progress.Report(new AstrometryProgressReport
+                            {
+                                CurrentFileIndex = i + 1,
+                                TotalFiles = total,
+                                IsCompleted = true,
+                                Success = false,
+                                Result = result,
+                                Message = $"STATUS:FAIL:{result.Message}"
+                            });
+                        }
+                    }
+                }
+                catch (OperationCanceledException)
+                {
+                    // Rilanciamo per gestire l'uscita pulita dal loop principale
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    progress.Report(new AstrometryProgressReport
+                    {
+                        CurrentFileIndex = i + 1,
+                        IsError = true,
+                        IsCompleted = true,
+                        Message = $"SYSTEM_ERROR:{ex.Message}"
                     });
                 }
-            }
-            catch (OperationCanceledException) { throw; }
-            catch (Exception ex)
-            {
-                progress.Report(new AstrometryProgressReport
-                {
-                    CurrentFileIndex = i + 1,
-                    IsError = true,
-                    IsCompleted = true,
-                    Message = $"SYSTEM_ERROR:{ex.Message}"
-                });
             }
         }
-
-        // 4. FINE SESSIONE (Solo dati grezzi per il riepilogo)
-        progress.Report(new AstrometryProgressReport 
-        { 
-            Message = $"SUMMARY:{successCount}:{total}" 
-        });
+        catch (OperationCanceledException)
+        {
+            // Notifichiamo l'annullamento dell'intera sessione
+            progress.Report(new AstrometryProgressReport
+            {
+                Message = "EVENT:CANCELLED"
+            });
+            throw;
+        }
+        finally
+        {
+            // 4. FINE SESSIONE 
+            // Essendo nel finally, questo è garantito essere l'ultimo report inviato,
+            // sia in caso di successo totale, sia in caso di errore o cancellazione.
+            progress.Report(new AstrometryProgressReport 
+            { 
+                Message = $"SUMMARY:{successCount}:{total}" 
+            });
+        }
     }
 
     public void ApplyResults()

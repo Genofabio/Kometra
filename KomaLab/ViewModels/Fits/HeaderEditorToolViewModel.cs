@@ -10,10 +10,9 @@ using CommunityToolkit.Mvvm.Input;
 using KomaLab.Models.Fits;
 using KomaLab.Models.Fits.Health;
 using KomaLab.Models.Fits.Structure;
-using KomaLab.Services.Fits;
 using KomaLab.Services.Fits.Metadata;
 using KomaLab.ViewModels.Nodes;
-using SequenceNavigator = KomaLab.ViewModels.Shared.SequenceNavigator;
+using KomaLab.ViewModels.Shared;
 
 namespace KomaLab.ViewModels.Fits;
 
@@ -203,13 +202,50 @@ public partial class HeaderEditorToolViewModel : ObservableObject, IDisposable
     private void ApplyFilter()
     {
         var query = SearchText?.Trim();
-        var results = string.IsNullOrWhiteSpace(query) 
-            ? _allItems 
-            : _allItems.Where(item => 
-                (item.Key?.Contains(query, StringComparison.OrdinalIgnoreCase) ?? false) ||
-                (item.Value?.Contains(query, StringComparison.OrdinalIgnoreCase) ?? false));
 
-        FilteredItems = new ObservableCollection<FitsHeaderEditorRow>(results);
+        // Se la query è vuota, mostriamo tutto nell'ordine originale (Fisico del FITS)
+        if (string.IsNullOrWhiteSpace(query))
+        {
+            FilteredItems = new ObservableCollection<FitsHeaderEditorRow>(_allItems);
+            return;
+        }
+
+        // Calcoliamo i risultati con un sistema di scoring
+        var filteredResults = _allItems
+            .Select(item => new 
+            { 
+                Row = item, 
+                Score = CalculateMatchScore(item, query) 
+            })
+            .Where(x => x.Score > 0) // Escludiamo ciò che non c'entra nulla
+            .OrderByDescending(x => x.Score) // Prima i match più importanti
+            .ThenBy(x => x.Row.Key) // A parità di score, ordine alfabetico
+            .Select(x => x.Row);
+
+        FilteredItems = new ObservableCollection<FitsHeaderEditorRow>(filteredResults);
+    }
+
+    /// <summary>
+    /// Calcola la rilevanza di una riga rispetto alla query.
+    /// Priorità: Chiave (10) > Valore (5) > Commento (1).
+    /// </summary>
+    private int CalculateMatchScore(FitsHeaderEditorRow item, string query)
+    {
+        int score = 0;
+
+        // Match nella Chiave: Massima priorità
+        if (item.Key?.Contains(query, StringComparison.OrdinalIgnoreCase) ?? false)
+            score += 10;
+
+        // Match nel Valore: Priorità media
+        if (item.Value?.Contains(query, StringComparison.OrdinalIgnoreCase) ?? false)
+            score += 5;
+
+        // Match nel Commento: Priorità bassa (ma utile per trovare il "brand" o descrizioni)
+        if (item.Comment?.Contains(query, StringComparison.OrdinalIgnoreCase) ?? false)
+            score += 1;
+
+        return score;
     }
 
     [RelayCommand]

@@ -18,7 +18,7 @@ public class StackingCoordinator : IStackingCoordinator
     private readonly IFitsDataManager _dataManager;
     private readonly IFitsMetadataService _metadataService;
     private readonly IFitsOpenCvConverter _converter;
-    private readonly IStackingEngine _stackingEngine; // Nuovo Motore Puro
+    private readonly IStackingEngine _stackingEngine;
 
     public StackingCoordinator(
         IFitsDataManager dataManager,
@@ -38,34 +38,25 @@ public class StackingCoordinator : IStackingCoordinator
         if (fileList.Count < 2) 
             throw new InvalidOperationException("Sono necessarie almeno 2 immagini per eseguire lo stacking.");
 
-        // Monitoraggio risorse unmanaged
         var matsToDispose = new List<Mat>();
 
         try
         {
             // 1. Caricamento e Conversione
-            // Sfruttiamo il DataManager che gestisce intelligentemente la cache
             foreach (var fileRef in fileList)
             {
                 var data = await _dataManager.GetDataAsync(fileRef.FilePath);
-                
                 double bScale = _metadataService.GetDoubleValue(data.Header, "BSCALE", 1.0);
                 double bZero = _metadataService.GetDoubleValue(data.Header, "BZERO", 0.0);
-                
                 var mat = _converter.RawToMat(data.PixelData, bScale, bZero);
                 matsToDispose.Add(mat);
             }
 
-            // 2. Delega del Calcolo (Pure Math)
-            // L'Engine si occupa di multithreading e algoritmi (Somma, Media, Mediana)
+            // 2. Calcolo Stacking
             using var resultMat = await _stackingEngine.ComputeStackAsync(matsToDispose, mode);
-
-            // 3. Preparazione Output Scientifico
-            // Esportiamo a 64-bit (Double) per preservare la precisione dello stack
             var finalPixels = _converter.MatToRaw(resultMat, FitsBitDepth.Double);
 
-            // 4. Gestione Metadati (Logica di Dominio)
-            // Recuperiamo l'header del primo frame come template astrometrico
+            // 3. Preparazione Header
             var firstFrameData = await _dataManager.GetDataAsync(fileList[0].FilePath);
             var finalHeader = _metadataService.CreateHeaderFromTemplate(
                 firstFrameData.Header, 
@@ -73,22 +64,29 @@ public class StackingCoordinator : IStackingCoordinator
                 FitsBitDepth.Double
             );
 
-            // Arricchimento storico del file FITS
-            _metadataService.AddValue(finalHeader, "HISTORY", $"KomaLab Stacked {fileList.Count} frames");
-            _metadataService.AddValue(finalHeader, "HISTORY", $"Algorithm: {mode}");
-            _metadataService.AddValue(finalHeader, "DATE-PRO", DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ss"), "Processing UTC date");
+            // --- CHIAVI UNICHE (Usa SetValue per evitare duplicati se il file viene ri-elaborato) ---
+            
+            // Identità del software
+            _metadataService.SetValue(finalHeader, "CREATOR", "KomaLab", "Software that created this file");
 
-            // 5. Persistenza Temporanea
-            // Il DataManager salva il file fisico e ci restituisce il riferimento per la UI
+            // Dati scientifici dello stack
+            _metadataService.SetValue(finalHeader, "NCOMBINE", fileList.Count, "KomaLab - Number of combined frames");
+            _metadataService.SetValue(finalHeader, "STACKMET", mode.ToString().ToUpper(), "KomaLab - Stacking algorithm used");
+
+            // Data dell'ultima elaborazione
+            _metadataService.SetValue(finalHeader, "DATE-PRO", DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ss"), "KomaLab - Last processing UTC date");
+
+            // --- CHIAVI ADDITIVE (Usa AddValue per mantenere la cronologia) ---
+            
+            // Nella HISTORY il testo va nel parametro 'value'. Il parametro 'comment' va lasciato null.
+            _metadataService.AddValue(finalHeader, "HISTORY", $"KomaLab - Stacking: {fileList.Count} frames combined using {mode} algorithm.", null);
+
+            // 4. Salvataggio
             return await _dataManager.SaveAsTemporaryAsync(finalPixels, finalHeader, "StackResult");
         }
         finally
         {
-            // Pulizia rigorosa della memoria unmanaged di OpenCV
-            foreach (var mat in matsToDispose)
-            {
-                mat.Dispose();
-            }
+            foreach (var mat in matsToDispose) mat.Dispose();
         }
     }
 }

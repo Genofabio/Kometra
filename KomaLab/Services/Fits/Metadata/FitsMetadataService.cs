@@ -59,31 +59,25 @@ public class FitsMetadataService : IFitsMetadataService
         if (header == null) return string.Empty;
         var card = header.Cards.FirstOrDefault(c => c.Key.Equals(key, StringComparison.OrdinalIgnoreCase));
         
-        // Se la card non esiste
         if (card == null) return string.Empty;
 
-        // COMMENT e HISTORY ritornano il contenuto grezzo (spesso messo nel campo comment o value senza apici)
         if (AdditiveKeys.Contains(key)) return card.Comment ?? card.Value ?? string.Empty;
 
         if (string.IsNullOrWhiteSpace(card.Value)) return string.Empty;
 
-        // Gestione standard FITS per le stringhe: Rimuovi apici esterni e gestisci escape '' -> '
         string val = card.Value.Trim();
         if (val.StartsWith("'") && val.EndsWith("'"))
         {
-            // Rimuovi apici esterni
             val = val.Substring(1, val.Length - 2);
-            // Un-escape dei doppi apici
             val = val.Replace("''", "'");
         }
         return val.Trim();
     }
 
-    // --- INTERPRETAZIONE SCIENTIFICA (Parser Delegati) ---
+    // --- INTERPRETAZIONE SCIENTIFICA ---
 
     public DateTime? GetObservationDate(FitsHeader header)
     {
-        // Logica specifica: DATE-OBS è standard, DATE è fallback
         string dateStr = GetStringValue(header, "DATE-OBS");
         if (string.IsNullOrEmpty(dateStr)) dateStr = GetStringValue(header, "DATE");
         
@@ -98,11 +92,8 @@ public class FitsMetadataService : IFitsMetadataService
 
     public FitsBitDepth GetBitDepth(FitsHeader header)
     {
-        // BITPIX è una keyword OBBLIGATORIA nello standard FITS.
-        // I valori possibili sono: 8, 16, 32, -32 (float), -64 (double)
         int? bitpix = GetIntValue(header, "BITPIX");
 
-        // Se bitpix è null, usiamo 16 come fallback (il più comune in astronomia amatoriale)
         return (bitpix ?? 16) switch
         {
             8 => FitsBitDepth.UInt8,
@@ -110,30 +101,56 @@ public class FitsMetadataService : IFitsMetadataService
             32 => FitsBitDepth.Int32,
             -32 => FitsBitDepth.Float,
             -64 => FitsBitDepth.Double,
-            _ => FitsBitDepth.Int16 // Fallback per valori non standard
+            _ => FitsBitDepth.Int16 
         };
     }
     
-    // In FitsMetadataService.cs
-    // In FitsMetadataService.cs
-
     public SkyCoordinate? GetTargetCoordinates(FitsHeader header)
     {
-        string? raStr = GetStringValue(header, "RA") ?? GetStringValue(header, "OBJCTRA");
-        string? decStr = GetStringValue(header, "DEC") ?? GetStringValue(header, "OBJCTDEC");
+        if (header == null) return null;
 
-        // MODIFICA QUI:
-        // Per l'RA usiamo ParseHoursToDegrees. 
-        // Questo converte "02:56:37" -> 2.94h -> 44.15°
-        double? ra = AstroParser.ParseHoursToDegrees(raStr); 
+        // 1. Identificazione delle Card (RA e DEC con fallback)
+        var raCard = header.Cards.FirstOrDefault(c => c.Key.Equals("RA", StringComparison.OrdinalIgnoreCase))
+                     ?? header.Cards.FirstOrDefault(c => c.Key.Equals("OBJCTRA", StringComparison.OrdinalIgnoreCase));
+
+        var decCard = header.Cards.FirstOrDefault(c => c.Key.Equals("DEC", StringComparison.OrdinalIgnoreCase))
+                      ?? header.Cards.FirstOrDefault(c => c.Key.Equals("OBJCTDEC", StringComparison.OrdinalIgnoreCase));
+
+        if (raCard == null || decCard == null) return null;
+
+        double raDeg = 0;
+        double decDeg = 0;
+
+        // --- 2. LOGICA SMART PER RA (Ascensione Retta) ---
+        string raValRaw = GetStringValue(header, raCard.Key);
+        string raComment = raCard.Comment?.ToLowerInvariant() ?? "";
+
+        if (double.TryParse(raValRaw, NumberStyles.Any, CultureInfo.InvariantCulture, out double rawRa))
+        {
+            // Se il commento dice "deg" o se il valore è palesemente > 24, sono gradi
+            if (raComment.Contains("deg") || rawRa > 24)
+            {
+                raDeg = rawRa;
+            }
+            else
+            {
+                // Altrimenti assumiamo ore (standard FITS per RA < 24) e convertiamo in gradi
+                raDeg = rawRa * 15.0;
+            }
+        }
+        else
+        {
+            // Se è una stringa sessagesimale (es. "01:07:07"), il parser la tratta come ore
+            raDeg = AstroParser.ParseHoursToDegrees(raValRaw) ?? 0;
+        }
+
+        // --- 3. LOGICA PER DEC (Declinazione) ---
+        string decValRaw = GetStringValue(header, decCard.Key);
     
-        // Per la DEC usiamo ParseDegrees (è già in gradi)
-        double? dec = AstroParser.ParseDegrees(decStr);
+        // Il parser delle Declinazioni gestisce già sia gradi decimali che sessagesimali
+        decDeg = AstroParser.ParseDegrees(decValRaw) ?? 0;
 
-        if (ra.HasValue && dec.HasValue)
-            return new SkyCoordinate(ra.Value, dec.Value); // Ora RaValue è davvero in Gradi!
-
-        return null;
+        return new SkyCoordinate(raDeg, decDeg);
     }
     
     // --- SCRITTURA / MANIPOLAZIONE ---
@@ -145,7 +162,6 @@ public class FitsMetadataService : IFitsMetadataService
 
     public void SetValue(FitsHeader header, string key, object value, string? comment = null)
     {
-        // Se non è additiva (HISTORY/COMMENT), rimuovi le precedenti occorrenze per sovrascrivere
         if (!AdditiveKeys.Contains(key)) header.RemoveCard(key);
         AddValue(header, key, value, comment);
     }
@@ -153,24 +169,28 @@ public class FitsMetadataService : IFitsMetadataService
     public void TransferMetadata(FitsHeader source, FitsHeader destination)
     {
         if (source == null || destination == null) return;
+
+        // Pulizia preventiva dell'END per garantire il riposizionamento finale
+        RemoveEndKey(destination);
+
         foreach (var card in source.Cards)
         {
-            // 1. Salta le chiavi strutturali (NAXIS, BITPIX...)
             if (StructuralKeys.Contains(card.Key)) continue;
 
-            // 2. Salta ESPLICITAMENTE "END". 
-            // Vogliamo vederla nell'editor, ma non vogliamo copiarla nel nuovo header
-            // perché il Writer ne genererà una nuova alla fine fisica del file.
+            // Saltiamo l'END della sorgente per evitare duplicati mal posizionati
             if (card.Key.Equals("END", StringComparison.OrdinalIgnoreCase)) continue;
 
             destination.AddCard(card); 
         }
+
+        // Sigillo finale
+        EnsureEndKey(destination);
     }
 
     public FitsHeader CreateHeaderFromTemplate(FitsHeader template, Array newPixels, FitsBitDepth depth)
     {
         var newHeader = new FitsHeader();
-        // Definizione struttura base obbligatoria
+        
         AddValue(newHeader, "SIMPLE", true, "Standard FITS format");
         AddValue(newHeader, "BITPIX", (int)depth, GetBitpixComment((int)depth));
         AddValue(newHeader, "NAXIS", 2, "2D Image");
@@ -179,8 +199,10 @@ public class FitsMetadataService : IFitsMetadataService
         AddValue(newHeader, "BSCALE", 1.0);
         AddValue(newHeader, "BZERO", 0.0);
         
-        // Copia il resto dei metadati (Observer, Object, Telescope...)
         if (template != null) TransferMetadata(template, newHeader);
+        
+        // Garantisce la chiusura dell'header anche in assenza di template
+        EnsureEndKey(newHeader);
         
         return newHeader;
     }
@@ -194,6 +216,21 @@ public class FitsMetadataService : IFitsMetadataService
     }
 
     // --- HELPER INTERNI ---
+
+    private void RemoveEndKey(FitsHeader header)
+    {
+        header.RemoveCard("END");
+    }
+
+    private void EnsureEndKey(FitsHeader header)
+    {
+        // Se non esiste già un marcatore END, lo aggiungiamo in coda.
+        // Se esistesse già (ma rimosso da RemoveEndKey), verrà aggiunto qui alla fine.
+        if (!header.Cards.Any(c => c.Key.Equals("END", StringComparison.OrdinalIgnoreCase)))
+        {
+            header.AddCard(new FitsCard("END", string.Empty, string.Empty, false));
+        }
+    }
 
     private FitsCard CreateCard(string key, object value, string? comment)
     {
@@ -212,13 +249,10 @@ public class FitsMetadataService : IFitsMetadataService
 
     private string FormatFitsString(string s, string key)
     {
-        if (AdditiveKeys.Contains(key)) return s; // COMMENT non ha apici
+        if (AdditiveKeys.Contains(key)) return s; 
         if (string.IsNullOrEmpty(s)) return "''";
 
-        // FITS Standard: Escape single quote with two single quotes
         string escaped = s.Replace("'", "''");
-        
-        // Padding a 8 caratteri per leggibilità (opzionale ma consigliato)
         return $"'{escaped,-8}'"; 
     }
 

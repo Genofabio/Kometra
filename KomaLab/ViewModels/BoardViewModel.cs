@@ -277,7 +277,14 @@ public partial class BoardViewModel : ObservableObject
         try
         {
             var resultRef = await _stackingCoordinator.ExecuteStackingAsync(source.CurrentFiles, mode);
-            var newNode = await _nodeFactory.CreateSingleImageNodeAsync(resultRef.FilePath, source.X + 400, source.Y);
+        
+            // Calcoliamo il centro del nodo sorgente
+            double sourceCenterX = source.X + (1.5 * source.EstimatedTotalSize.Width);
+            double sourceCenterY = source.Y + (source.EstimatedTotalSize.Height / 2.0);
+
+            // Chiediamo alla factory di creare il nuovo nodo centrato 400px a destra del centro sorgente
+            var newNode = await _nodeFactory.CreateSingleImageNodeAsync(resultRef.FilePath, sourceCenterX + 400, sourceCenterY);
+        
             newNode.Title = $"{source.Title} ({mode})";
             if (newNode is ImageNodeViewModel resNode) resNode.VisualizationMode = source.VisualizationMode;
             RegisterProcessingResult(newNode, source, resultRef.FilePath, "Stacking");
@@ -324,11 +331,19 @@ public partial class BoardViewModel : ObservableObject
         if (SelectedNode is not ImageNodeViewModel imgNode) return;
         var inputs = imgNode.GetManagedFilePaths();
         if (!inputs.Any()) return;
+    
         var resultPaths = await windowAction(inputs, imgNode.VisualizationMode);
         if (resultPaths == null || !resultPaths.Any()) return;
+
+        // Calcolo centro sorgente
+        double centerX = imgNode.X + (1.5 * imgNode.EstimatedTotalSize.Width);;
+        double centerY = imgNode.Y + (imgNode.EstimatedTotalSize.Height / 2.0);
+
+        // Posizioniamo il centro del nuovo nodo a destra
         BaseNodeViewModel newNode = resultPaths.Count == 1
-            ? await _nodeFactory.CreateSingleImageNodeAsync(resultPaths[0], imgNode.X + 350, imgNode.Y)
-            : await _nodeFactory.CreateMultipleImagesNodeAsync(resultPaths, imgNode.X + 350, imgNode.Y);
+            ? await _nodeFactory.CreateSingleImageNodeAsync(resultPaths[0], centerX + 400, centerY)
+            : await _nodeFactory.CreateMultipleImagesNodeAsync(resultPaths, centerX + 400, centerY);
+
         newNode.Title = $"{imgNode.Title} {titleSuffix}";
         if (newNode is ImageNodeViewModel resNode) resNode.VisualizationMode = imgNode.VisualizationMode;
         RegisterProcessingResult(newNode, imgNode, resultPaths[0], undoLabel);

@@ -30,7 +30,6 @@ public class PlateSolvingService : IPlateSolvingService
     public async Task<AstrometryDiagnosis> DiagnoseIssuesAsync(FitsFileReference fileRef)
     {
         var diagnosis = new AstrometryDiagnosis();
-        
         var header = fileRef.ModifiedHeader ?? await _dataManager.GetHeaderOnlyAsync(fileRef.FilePath);
         var coords = _metadataService.GetTargetCoordinates(header);
         
@@ -58,25 +57,21 @@ public class PlateSolvingService : IPlateSolvingService
         string? tempFilePath = null;
         try
         {
-            // 1. Recupero Header
+            // 1. Preparazione Ambiente
             var header = fileRef.ModifiedHeader ?? await _dataManager.GetHeaderOnlyAsync(fileRef.FilePath);
-            
-            // 2. Creazione Sandbox Fisica
             tempFilePath = await PrepareSandboxFile(fileRef);
 
-            // 3. Preparazione Parametri
+            // 2. Preparazione Parametri
             string hints = PrepareAstapHints(header);
             string radius = hints.Contains("-ra") ? "30" : "180"; 
-
             var args = $"-f \"{tempFilePath}\" -r {radius} -update -z 0 {hints}";
 
-            // LOG SEMANTICO: Inviamo il dato, il VM aggiungerà il "> Config:"
             liveLog?.Report($"CONFIG:Raggio {radius}° {(hints.Length > 0 ? "(Hinted)" : "(Blind)")}");
 
             var logBuilder = new StringBuilder();
             bool solutionFound = false;
 
-            // 4. Esecuzione Processo
+            // 3. Esecuzione Processo
             await RunProcessInternalAsync(exePath, args, line => 
             {
                 logBuilder.AppendLine(line);
@@ -89,23 +84,29 @@ public class PlateSolvingService : IPlateSolvingService
 
                 if (IsSignificantLogLine(line))
                 {
-                    // LOG SEMANTICO: Inviamo la riga, il VM aggiungerà il pipe "|"
                     liveLog?.Report($"TOOL:{line.Trim()}");
                 }
             }, token);
 
-            // 5. Sincronizzazione Dati
+            // 4. Verifica e Arricchimento
             _dataManager.Invalidate(tempFilePath);
             var solvedHeader = await _dataManager.GetHeaderOnlyAsync(tempFilePath);
-            
             bool hasWcs = solvedHeader != null && !string.IsNullOrEmpty(_metadataService.GetStringValue(solvedHeader, "CRVAL1"));
 
-            // 6. Costruzione Risultato (Senza stringhe UI)
             if (solutionFound && hasWcs)
             {
                 result.Success = true;
-                result.SolvedHeader = solvedHeader; // Passiamo l'oggetto completo
+                result.SolvedHeader = solvedHeader;
                 result.Message = "Risoluzione OK";
+
+                // --- Arricchimento Metadati KomaLab ---
+                _metadataService.SetValue(solvedHeader!, "CREATOR", "KomaLab", "Software that coordinated the solve");
+                _metadataService.SetValue(solvedHeader!, "PLTSOLVD", true, "KomaLab - Plate has been solved");
+                _metadataService.SetValue(solvedHeader!, "SOLVER", "ASTAP", "KomaLab - Engine used for solving");
+                _metadataService.SetValue(solvedHeader!, "DATE-SOL", DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ss"), "KomaLab - Date of astrometric solution");
+
+                string historyEntry = $"KomaLab - Plate solved via ASTAP (Radius: {radius} deg).";
+                _metadataService.AddValue(solvedHeader!, "HISTORY", historyEntry, null);
             }
             else
             {
@@ -115,6 +116,11 @@ public class PlateSolvingService : IPlateSolvingService
             
             result.FullLog = logBuilder.ToString();
         }
+        catch (OperationCanceledException)
+        {
+            result.Message = "Operazione interrotta.";
+            result.Success = false;
+        }
         catch (Exception ex) 
         { 
             result.Message = $"Errore: {ex.Message}"; 
@@ -122,7 +128,10 @@ public class PlateSolvingService : IPlateSolvingService
         }
         finally 
         { 
-            if (tempFilePath != null) _dataManager.DeleteTemporaryData(tempFilePath); 
+            if (tempFilePath != null)
+            {
+                _dataManager.DeleteTemporaryData(tempFilePath); 
+            }
         }
 
         return result;
@@ -134,21 +143,35 @@ public class PlateSolvingService : IPlateSolvingService
         string l = line.ToLowerInvariant();
 
         return l.Contains("solution found") || 
-               l.Contains("no solution found") || 
+               l.Contains("no solution") || 
                l.Contains("solved in") || 
                l.Contains("error") || 
-               l.Contains("warning") || 
+               l.Contains("warning") ||
+               l.Contains("failed") ||
+               l.Contains("not found") ||
                l.Contains("used stars");
     }
 
     private async Task RunProcessInternalAsync(string exe, string args, Action<string> onLineReceived, CancellationToken token)
     {
         var startInfo = new ProcessStartInfo {
-            FileName = exe, Arguments = args, CreateNoWindow = true, UseShellExecute = false,
-            RedirectStandardOutput = true, RedirectStandardError = true, StandardOutputEncoding = Encoding.UTF8
+            FileName = exe, 
+            Arguments = args, 
+            CreateNoWindow = true, 
+            UseShellExecute = false,
+            RedirectStandardOutput = true, 
+            RedirectStandardError = true, 
+            StandardOutputEncoding = Encoding.UTF8
         };
 
         using var process = new Process { StartInfo = startInfo };
+        
+        using var registration = token.Register(() => 
+        {
+            try { if (!process.HasExited) process.Kill(true); } 
+            catch { /* Processo già chiuso */ }
+        });
+
         var outputDone = new TaskCompletionSource<bool>();
         var errorDone = new TaskCompletionSource<bool>();
 
@@ -164,7 +187,16 @@ public class PlateSolvingService : IPlateSolvingService
         process.Start();
         process.BeginOutputReadLine();
         process.BeginErrorReadLine();
-        await Task.WhenAll(process.WaitForExitAsync(token), outputDone.Task, errorDone.Task);
+
+        try
+        {
+            await Task.WhenAll(process.WaitForExitAsync(token), outputDone.Task, errorDone.Task);
+        }
+        catch (OperationCanceledException)
+        {
+            onLineReceived("!!! PROCESSO INTERROTTO DALL'UTENTE !!!");
+            throw;
+        }
     }
 
     private async Task<string> PrepareSandboxFile(FitsFileReference fileRef)

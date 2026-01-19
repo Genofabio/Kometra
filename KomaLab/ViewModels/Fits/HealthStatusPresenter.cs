@@ -1,13 +1,13 @@
 ﻿using CommunityToolkit.Mvvm.ComponentModel;
 using KomaLab.Models.Fits.Health;
 
-namespace KomaLab.Services.Fits.Metadata;
+namespace KomaLab.ViewModels.Fits;
 
 /// <summary>
 /// Wrapper di presentazione per un singolo controllo di salute.
 /// Isola le stringhe UI e la logica di ordinamento dal modello scientifico.
 /// </summary>
-public partial class HealthStatusPresenter : ObservableObject
+public class HealthStatusPresenter : ObservableObject
 {
     private readonly HealthStatusItem _model;
 
