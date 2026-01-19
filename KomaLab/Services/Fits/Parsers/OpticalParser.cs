@@ -12,16 +12,14 @@ public static class OpticalParser
 
     public static double? ParseFocalLength(FitsHeader header, IFitsMetadataService metadata)
     {
+        // Proviamo la chiave HIERARCH specifica del file 2
+        double cahaFocal = metadata.GetDoubleValue(header, "HIERARCH CAHA TEL FOCU LEN", -1);
+        if (cahaFocal > 0) return cahaFocal * 1000.0; // Converte metri -> mm
+
         foreach (var key in FocalKeys)
         {
-            // Usiamo il servizio per estrarre il valore in modo sicuro
             double val = metadata.GetDoubleValue(header, key, -1);
             if (val <= 0) continue;
-
-            // Logica specifica CAHA (m -> mm)
-            if (key.Contains("CAHA") && key.Contains("LEN"))
-                return val * 1000.0;
-
             return val;
         }
         return null;

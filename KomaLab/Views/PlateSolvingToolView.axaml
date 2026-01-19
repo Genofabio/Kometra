@@ -4,30 +4,25 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:avalonia="clr-namespace:Material.Icons.Avalonia;assembly=Material.Icons.Avalonia"
         xmlns:astrometry="clr-namespace:KomaLab.ViewModels.Astrometry"
-        mc:Ignorable="d" d:DesignWidth="600" d:DesignHeight="500"
+        mc:Ignorable="d" d:DesignWidth="650" d:DesignHeight="550"
         x:Class="KomaLab.Views.PlateSolvingToolView"
         x:DataType="astrometry:PlateSolvingToolViewModel"
         x:Name="RootWindow"
-        
         Title="Risoluzione Astrometrica"
         Width="650" Height="550"
         MinWidth="650" MinHeight="550"
         WindowStartupLocation="CenterOwner"
         CanResize="True"
-        Background="{DynamicResource ToolWindowBackgroundBrush}"
-        Focusable="True">
+        Background="{DynamicResource ToolWindowBackgroundBrush}">
 
     <Border Padding="20" Background="Transparent">
         <Grid RowDefinitions="Auto, Auto, *, Auto" RowSpacing="15">
 
             <StackPanel Grid.Row="0" Spacing="10">
                 <TextBlock Classes="TitleText" Text="{Binding Title}"/>
-                
                 <TextBlock Classes="DescriptionText" 
-                           Text="Analizza la disposizione delle stelle per calcolare le coordinate celesti reali (WCS). Questa operazione è necessaria per l'allineamento preciso."/>
-
+                           Text="Analizza la disposizione delle stelle per calcolare le coordinate celesti reali (WCS)."/>
                 <Border Height="1" Background="{DynamicResource ActionDisabledBackgroundBrush}" Margin="0,5"/>
-
                 <StackPanel Orientation="Horizontal" Spacing="5">
                     <TextBlock Classes="TargetLabel" Text="Target:"/>
                     <TextBlock Classes="TargetValue" Text="{Binding TargetName}"/>
@@ -37,14 +32,12 @@
             <StackPanel Grid.Row="1" Spacing="8">
                 <Grid ColumnDefinitions="*, Auto">
                     <TextBlock Text="{Binding StatusText}" FontWeight="SemiBold" FontSize="14"/>
-                    
                     <TextBlock Text="{Binding ProgressValue, StringFormat='Processati: {0}'}" 
                                Foreground="{DynamicResource Text.MediumGreyBrush}" 
-                               FontSize="12" IsVisible="{Binding IsBusy}" Grid.Column="1"/>
+                               FontSize="12" IsVisible="{Binding IsBusyState}" Grid.Column="1"/>
                 </Grid>
-                
                 <ProgressBar Height="6" Minimum="0" Maximum="{Binding ProgressMax}" Value="{Binding ProgressValue}"
-                             IsVisible="{Binding IsBusy}" 
+                             IsVisible="{Binding IsBusyState}" 
                              Foreground="{DynamicResource ActionPrimaryBackgroundBrush}" 
                              Background="{DynamicResource MenuBackgroundBrush}"/>
             </StackPanel>
@@ -56,36 +49,51 @@
                          CaretIndex="{Binding FullLog.Length}"/>
             </Border>
 
-            <Grid Grid.Row="3" ColumnDefinitions="*, Auto">
+            <StackPanel Grid.Row="3" Spacing="15">
                 
-                <StackPanel Grid.Column="0" VerticalAlignment="Center" Spacing="2">
-                    <StackPanel Orientation="Horizontal" Spacing="5" VerticalAlignment="Center">
-                        <avalonia:MaterialIcon Kind="AlertCircleOutline" Width="16" Height="16" Foreground="{DynamicResource OverlaySearchBoxBrush}"/>
-                        <TextBlock Classes="WarningLabel" Text="Attenzione:"/>
+                <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                    <avalonia:MaterialIcon Kind="AlertCircleOutline" Width="16" Height="16" 
+                                           Foreground="{DynamicResource OverlaySearchBoxBrush}"/>
+                    <TextBlock Classes="WarningLabel" Text="Attenzione:" FontWeight="Bold" VerticalAlignment="Center"/>
+                    <TextBlock Classes="WarningBody" Margin="0"
+                               Text="Applica i risultati per rendere le modifiche all'header permanenti." 
+                               VerticalAlignment="Center"/>
+                </StackPanel>
+
+                <Grid>
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" 
+                                IsVisible="{Binding IsInitialState}">
+                        <Button Classes="baseBtn calculate" 
+                                Command="{Binding StartSolvingCommand}"
+                                Content="Avvia risoluzione"/>
                     </StackPanel>
-                    
-                    <TextBlock Classes="WarningBody" Text="Salva il file per rendere le modifiche all'header permanenti."/>
-                </StackPanel>
 
-                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="10">
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" 
+                                IsVisible="{Binding IsBusyState}">
+                        <Button Classes="baseBtn cancel" 
+                                Command="{Binding CancelCommand}"
+                                Content="Interrompi"/>
+                    </StackPanel>
 
-                    <Button Classes="baseBtn greenBtn" 
-                            Command="{Binding StartSolvingCommand}"
-                            Content="Avvia risoluzione"
-                            IsVisible="{Binding !IsBusy}"/>
+                    <StackPanel Orientation="Horizontal" Spacing="10" HorizontalAlignment="Right" 
+                                IsVisible="{Binding IsFinishedState}">
+        
+                        <Button Classes="baseBtn calculate" 
+                                Command="{Binding StartSolvingCommand}"
+                                Content="Riavvia risoluzione"/>
 
-                    <Button Classes="baseBtn cancelBtn" 
-                            Command="{Binding CancelCommand}"
-                            IsVisible="{Binding IsBusy}"
-                            Content="Annulla"/>
+                        <Button Classes="baseBtn cancel" 
+                                Command="{Binding CloseCommand}"
+                                Content="Annulla"/>
 
-                    <Button Classes="baseBtn purpleBtn" 
-                            Command="{Binding CloseCommand}"
-                            IsVisible="{Binding !IsBusy}"
-                            Content="Chiudi finestra"/>
-
-                </StackPanel>
-            </Grid>
+                        <Button Classes="baseBtn apply" 
+                                Command="{Binding ApplyResultsCommand}"
+                                Content="Applica"
+                                IsEnabled="{Binding CanApply}"/>
+                    </StackPanel>
+                </Grid>
+            </StackPanel>
+            
         </Grid>
     </Border>
 </Window>

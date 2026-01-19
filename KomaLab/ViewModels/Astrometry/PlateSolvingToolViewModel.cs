@@ -8,126 +8,169 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using KomaLab.Models.Astrometry.Solving;
 using KomaLab.Models.Fits;
-using KomaLab.Services.Processing.Coordinators;
+using KomaLab.Models.Fits.Structure;
+using KomaLab.Services.Astrometry;
+using KomaLab.Services.Fits.Metadata;
 
 namespace KomaLab.ViewModels.Astrometry;
 
-/// <summary>
-/// ViewModel per il Tool di Plate Solving.
-/// Agisce come puro osservatore del processo coordinato dall'AstrometryCoordinator.
-/// </summary>
-public partial class PlateSolvingToolViewModel : ObservableObject
+public partial class PlateSolvingToolViewModel : ObservableObject, IDisposable
 {
-    // --- Dipendenze ---
-    private readonly IAstrometryCoordinator _coordinator;
+    private readonly IPlateSolvingCoordinator _coordinator;
+    private readonly IFitsMetadataService _metadataService; 
     private readonly List<FitsFileReference> _targetFiles;
     
-    // --- Stato Interno ---
     private readonly StringBuilder _logBuilder = new();
     private CancellationTokenSource? _cts;
-    private int _successCount;
+    private bool _isDisposed;
 
-    // --- Proprietà UI ---
+    public event Action? RequestClose;
+
     [ObservableProperty] private string _title = "Risoluzione Astrometrica";
     [ObservableProperty] private string _targetName = "";
     
     [ObservableProperty] 
     [NotifyPropertyChangedFor(nameof(CanInteract))]
+    [NotifyPropertyChangedFor(nameof(IsBusyState))]
+    [NotifyPropertyChangedFor(nameof(IsInitialState))]
+    [NotifyPropertyChangedFor(nameof(IsFinishedState))]
+    [NotifyPropertyChangedFor(nameof(CanApply))] 
     private bool _isBusy;
-    
-    [ObservableProperty] private PlateSolvingStatus _currentStatus = PlateSolvingStatus.Idle;
+
+    [ObservableProperty] 
+    [NotifyPropertyChangedFor(nameof(IsInitialState))]
+    [NotifyPropertyChangedFor(nameof(IsFinishedState))]
+    [NotifyPropertyChangedFor(nameof(CanApply))]
+    private PlateSolvingStatus _currentStatus = PlateSolvingStatus.Idle;
+
     [ObservableProperty] private string _statusText = "Pronto.";
     [ObservableProperty] private string _fullLog = ""; 
     [ObservableProperty] private int _progressValue = 0;
     [ObservableProperty] private int _progressMax = 100;
 
     public bool CanInteract => !IsBusy;
-    public event Action? RequestClose;
+    public bool IsInitialState => !IsBusy && CurrentStatus == PlateSolvingStatus.Idle;
+    public bool IsBusyState => IsBusy;
+    public bool IsFinishedState => !IsBusy && CurrentStatus != PlateSolvingStatus.Idle;
+    public bool CanApply => !IsBusy && (CurrentStatus == PlateSolvingStatus.Success || CurrentStatus == PlateSolvingStatus.PartialSuccess);
 
     public PlateSolvingToolViewModel(
         IEnumerable<FitsFileReference> files, 
         string targetName,
-        IAstrometryCoordinator coordinator) // Riceve il coordinatore, non più il servizio
+        IPlateSolvingCoordinator coordinator,
+        IFitsMetadataService metadataService)
     {
-        if (files == null) throw new ArgumentNullException(nameof(files));
+        _targetFiles = files?.ToList() ?? throw new ArgumentNullException(nameof(files));
         _coordinator = coordinator ?? throw new ArgumentNullException(nameof(coordinator));
+        _metadataService = metadataService ?? throw new ArgumentNullException(nameof(metadataService));
         
-        _targetFiles = files.ToList();
         TargetName = targetName;
         ProgressMax = _targetFiles.Count;
         
-        if (_targetFiles.Count == 0)
-            StatusText = "Nessun file selezionato.";
+        if (_targetFiles.Count == 0) StatusText = "Nessun file selezionato.";
+        _coordinator.ClearSession();
     }
-
-    // =======================================================================
-    // ESECUZIONE SESSIONE
-    // =======================================================================
 
     [RelayCommand]
     private async Task StartSolving()
     {
         if (IsBusy || _targetFiles.Count == 0) return;
         
-        // 1. Setup Iniziale
         IsBusy = true;
         CurrentStatus = PlateSolvingStatus.Running;
-        _successCount = 0;
+        _progressValue = 0;
+        _coordinator.ClearSession(); 
+        
         _logBuilder.Clear();
-        FullLog = ""; 
+        AppendLog("=== INIZIO SESSIONE DI RISOLUZIONE ==="); 
 
         _cts = new CancellationTokenSource();
-        var token = _cts.Token;
 
-        // 2. Definizione del Reporting strutturato
-        var progressHandler = new Progress<AstrometryProgressReport>(report => 
-        {
-            // Gestione Avanzamento e Testi
-            if (report.IsStarting)
-            {
-                StatusText = $"[{report.CurrentFileIndex}/{report.TotalFiles}] {report.FileName}";
-                ProgressValue = report.CurrentFileIndex;
-            }
-
-            // Gestione Messaggi di Log
-            if (!string.IsNullOrEmpty(report.Message))
-            {
-                AppendLog(report.Message);
-            }
-
-            // Monitoraggio Successi
-            if (report.IsCompleted && report.Success)
-            {
-                _successCount++;
-            }
-        });
+        // Handler che trasforma i dati in "Bellezza UI"
+        var progressHandler = new Progress<AstrometryProgressReport>(ProcessProgressReport);
 
         try
         {
-            AppendLog("--- INIZIO SESSIONE ASTROMETRICA ---");
-            AppendLog($"Target: {TargetName} | Sequenza: {_targetFiles.Count} file");
-
-            // 3. DELEGA TOTALE: Il coordinatore gestisce diagnosi, loop e ASTAP
-            await _coordinator.SolveSequenceAsync(_targetFiles, progressHandler, token);
-
-            FinalizeSession(token.IsCancellationRequested);
+            await _coordinator.SolveSequenceAsync(_targetFiles, progressHandler, _cts.Token);
+            await Task.Delay(150);
         }
-        catch (OperationCanceledException)
-        {
-            FinalizeSession(true);
-        }
+        catch (OperationCanceledException) { AppendLog("\n[!] Operazione interrotta dall'utente."); }
         catch (Exception ex)
         {
             AppendLog($"\n!!! ERRORE FATALE: {ex.Message}");
             CurrentStatus = PlateSolvingStatus.Error;
-            StatusText = "Errore durante il processo.";
+            StatusText = "Errore critico durante il processo.";
         }
         finally
         {
-            IsBusy = false;
-            _cts.Dispose();
-            _cts = null;
+            IsBusy = false; 
+            FinalizeSession(_cts?.IsCancellationRequested ?? false);
         }
+    }
+
+    /// <summary>
+    /// CUORE DEL PURISMO: Traduce i tag semantici in estetica visuale.
+    /// </summary>
+    private void ProcessProgressReport(AstrometryProgressReport report)
+    {
+        // 1. Aggiornamento Stato UI
+        if (report.IsStarting)
+        {
+            StatusText = $"Elaborazione: {report.FileName} ({report.CurrentFileIndex}/{report.TotalFiles})";
+            ProgressValue = report.CurrentFileIndex;
+            AppendLog($"\n------------------------------------------------------------\n[FILE {report.CurrentFileIndex}/{report.TotalFiles}] {report.FileName}");
+            return;
+        }
+
+        // 2. Parsing dei messaggi taggati
+        if (string.IsNullOrEmpty(report.Message)) return;
+
+        if (report.Message.StartsWith("CONFIG:"))
+            AppendLog($"   > Config: {report.Message.Substring(7)}");
+
+        else if (report.Message.StartsWith("TOOL:"))
+            AppendLog($"     | {report.Message.Substring(5)}");
+
+        else if (report.Message.StartsWith("SKIP:"))
+            AppendLog($"   [!] SALTATO: Dati mancanti ({report.Message.Substring(5)})");
+
+        else if (report.Message == "STATUS:SUCCESS")
+        {
+            // Il ViewModel decide come mostrare i dati WCS
+            if (report.Result?.SolvedHeader != null)
+                AppendLog(FormatWcsDetails(report.Result.SolvedHeader));
+            
+            AppendLog("   >>> RISOLTO CON SUCCESSO");
+        }
+
+        else if (report.Message.StartsWith("STATUS:FAIL:"))
+            AppendLog($"   >>> FALLITO: {report.Message.Substring(12)}");
+
+        else if (report.Message.StartsWith("SUMMARY:"))
+        {
+            var parts = report.Message.Split(':');
+            AppendLog($"\n============================================================\nSESSIONE COMPLETATA\nSuccessi: {parts[1]} su {parts[2]} files.\n============================================================");
+        }
+        else if (report.Message.StartsWith("SYSTEM_ERROR:"))
+            AppendLog($"   [!] ERRORE SISTEMA: {report.Message.Substring(13)}");
+    }
+
+    /// <summary>
+    /// Crea la tabella WCS. Spostata qui per togliere responsabilità al Service.
+    /// </summary>
+    private string FormatWcsDetails(FitsHeader header)
+    {
+        var sb = new StringBuilder();
+        var wcsKeys = new[] { "CTYPE1", "CTYPE2", "CRVAL1", "CRVAL2", "CD1_1", "CD1_2", "CD2_1", "CD2_2" };
+
+        sb.AppendLine("     [NUOVI DATI WCS]");
+        foreach (var key in wcsKeys)
+        {
+            string val = _metadataService.GetStringValue(header, key);
+            if (!string.IsNullOrEmpty(val))
+                sb.AppendLine($"     {key,-8} = {val}");
+        }
+        return sb.ToString().TrimEnd();
     }
 
     private void FinalizeSession(bool cancelled)
@@ -136,42 +179,47 @@ public partial class PlateSolvingToolViewModel : ObservableObject
         {
             StatusText = "Operazione annullata.";
             CurrentStatus = PlateSolvingStatus.Cancelled;
-            AppendLog("\n--- SESSIONE INTERROTTA DALL'UTENTE ---");
         }
         else
         {
-            // Determiniamo lo stato finale basandoci sui successi riportati dal coordinatore
-            CurrentStatus = _successCount == _targetFiles.Count ? PlateSolvingStatus.Success 
-                          : _successCount > 0 ? PlateSolvingStatus.PartialSuccess 
+            int actualSuccesses = _coordinator.GetPendingResults().Count;
+            CurrentStatus = actualSuccesses == _targetFiles.Count ? PlateSolvingStatus.Success 
+                          : actualSuccesses > 0 ? PlateSolvingStatus.PartialSuccess 
                           : PlateSolvingStatus.Failed;
 
-            StatusText = $"Sessione conclusa ({_successCount}/{_targetFiles.Count} risolti).";
-            AppendLog($"\n--- FINE SESSIONE: {_successCount} successi ---");
+            StatusText = actualSuccesses > 0 
+                ? $"Sessione conclusa ({actualSuccesses}/{_targetFiles.Count} risolti)."
+                : "Risoluzione fallita (nessun file risolto).";
         }
+
+        ApplyResultsCommand.NotifyCanExecuteChanged();
+        StartSolvingCommand.NotifyCanExecuteChanged();
     }
+
+    [RelayCommand(CanExecute = nameof(CanApply))]
+    private void ApplyResults()
+    {
+        _coordinator.ApplyResults();
+        RequestClose?.Invoke();
+    }
+
+    [RelayCommand] private void Cancel() => _cts?.Cancel();
+    [RelayCommand] private void Close() => RequestClose?.Invoke();
 
     private void AppendLog(string msg)
     {
         if (string.IsNullOrEmpty(msg)) return;
-
-        // Aggiungiamo il timestamp per un look professionale se non è un messaggio vuoto
         _logBuilder.AppendLine(msg);
-        
-        // Aggiornamento della proprietà per il Binding XAML
         FullLog = _logBuilder.ToString();
     }
-    
-    // =======================================================================
-    // COMANDI NAVIGAZIONE
-    // =======================================================================
 
-    [RelayCommand] 
-    private void Cancel() => _cts?.Cancel();
-    
-    [RelayCommand] 
-    private void Close() 
+    public void Dispose()
     {
-        if (IsBusy) _cts?.Cancel();
-        RequestClose?.Invoke();
+        if (_isDisposed) return;
+        _cts?.Cancel();
+        _cts?.Dispose();
+        _coordinator.ClearSession();
+        _isDisposed = true;
+        GC.SuppressFinalize(this);
     }
 }

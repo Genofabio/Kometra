@@ -5,6 +5,7 @@ using Avalonia.Controls;
 using KomaLab.Models.Fits;
 using KomaLab.Models.Fits.Structure;
 using KomaLab.Models.Visualization;
+using KomaLab.Services.Astrometry;
 using KomaLab.Services.Fits;
 using KomaLab.Services.Factories;
 using KomaLab.Services.Fits.Metadata;
@@ -22,7 +23,7 @@ namespace KomaLab.Services.UI;
 
 /// <summary>
 /// Orchestratore delle Finestre. 
-/// Risolve i Coordinatori e i DataManager per inizializzare i ToolViewModel.
+/// Inizializza i ToolViewModel iniettando i Coordinatori e gestendo la chiusura delle View.
 /// </summary>
 public class WindowService : IWindowService
 {
@@ -49,24 +50,17 @@ public class WindowService : IWindowService
     {
         if (_mainWindow == null) throw new InvalidOperationException("Finestra principale non registrata.");
 
-        // Risoluzione Dipendenze per AlignmentToolViewModel
         var coordinator = _serviceProvider.GetRequiredService<IAlignmentCoordinator>();
         var dataManager = _serviceProvider.GetRequiredService<IFitsDataManager>();
         var rendererFactory = _serviceProvider.GetRequiredService<IFitsRendererFactory>();
 
-        using var viewModel = new AlignmentToolViewModel(
-            sourcePaths,
-            coordinator,
-            dataManager,
-            rendererFactory
-        );
-    
-        var alignmentWindow = new AlignmentToolView { DataContext = viewModel };
+        using var viewModel = new AlignmentToolViewModel(sourcePaths, coordinator, dataManager, rendererFactory);
+        var view = new AlignmentToolView { DataContext = viewModel };
 
-        Action closeHandler = () => alignmentWindow.Close();
+        Action closeHandler = () => view.Close();
         viewModel.RequestClose += closeHandler;
 
-        await alignmentWindow.ShowDialog<object>(_mainWindow); 
+        await view.ShowDialog<object>(_mainWindow); 
 
         viewModel.RequestClose -= closeHandler;
         return viewModel.DialogResult ? viewModel.FinalProcessedPaths : null; 
@@ -81,51 +75,62 @@ public class WindowService : IWindowService
         IImageNavigator navigator)
     {
         if (_mainWindow == null) return null;
-        
-        // Risoluzione dipendenze per l'editor
-        var dataManager = _serviceProvider.GetRequiredService<IFitsDataManager>();
+    
+        var coordinator = _serviceProvider.GetRequiredService<IHeaderEditorCoordinator>();
         var healthEvaluator = _serviceProvider.GetRequiredService<IFitsHeaderHealthEvaluator>();
         var mapper = _serviceProvider.GetRequiredService<FitsHeaderUiMapper>();
 
-        // Usiamo il costruttore a 5 argomenti di HeaderEditorToolViewModel
-        using var editorVm = new HeaderEditorToolViewModel(
-            files, 
-            navigator, 
-            dataManager, 
-            healthEvaluator, 
-            mapper);
-        
-        var editorView = new HeaderEditorToolView { DataContext = editorVm };
+        // Pattern Consistente: 'using' per gestire il Dispose (Rollback sessione se non salvato)
+        using var viewModel = new HeaderEditorToolViewModel(files, navigator, coordinator, healthEvaluator, mapper);
+        var view = new HeaderEditorToolView { DataContext = viewModel };
 
-        await editorView.ShowDialog(_mainWindow);
+        // Anche qui aggiungiamo il closeHandler se il ViewModel lo supporta
+        Action closeHandler = () => view.Close();
+        viewModel.RequestClose += closeHandler;
 
-        // Poiché l'editor modifica i file in-place, restituiamo l'header del file attivo nel navigatore
+        await view.ShowDialog(_mainWindow);
+
+        viewModel.RequestClose -= closeHandler;
+
         return navigator.CurrentIndex < files.Count ? files[navigator.CurrentIndex].ModifiedHeader : null;
     }
     
     // =======================================================================
-    // 3. PLATE SOLVING
-    // =======================================================================
+// 3. PLATE SOLVING (Uniformato e Purista)
+// =======================================================================
 
     public async Task ShowPlateSolvingWindowAsync(ImageNodeViewModel node)
     {
         if (_mainWindow == null) return;
 
-        // Risoluzione del nuovo AstrometryCoordinator
-        var astrometryCoordinator = _serviceProvider.GetRequiredService<IAstrometryCoordinator>();
-        
-        // Deriviamo il nome target dai metadati del file attivo se disponibile
+        // Recuperiamo le dipendenze necessarie dal ServiceProvider
+        var coordinator = _serviceProvider.GetRequiredService<IPlateSolvingCoordinator>();
+        var metadataService = _serviceProvider.GetRequiredService<IFitsMetadataService>(); // <--- AGGIUNTO
+    
         string targetName = node.ActiveFile?.FileName ?? "Sorgente Ignota";
 
-        // Usiamo il costruttore a 3 argomenti: (files, targetName, coordinator)
-        var plateVm = new PlateSolvingToolViewModel(
+        // Iniezione delle dipendenze nel ViewModel
+        // Note: Passiamo il metadataService affinché il VM possa formattare i dati WCS
+        using var viewModel = new PlateSolvingToolViewModel(
             node.CurrentFiles, 
             targetName, 
-            astrometryCoordinator);
-        
-        var plateView = new PlateSolvingToolView { DataContext = plateVm };
+            coordinator, 
+            metadataService); // <--- INIETTATO
 
-        await plateView.ShowDialog(_mainWindow);
+        var view = new PlateSolvingToolView { DataContext = viewModel };
+
+        // Gestione della chiusura tramite evento
+        Action closeHandler = () => view.Close();
+        viewModel.RequestClose += closeHandler;
+
+        await view.ShowDialog(_mainWindow);
+
+        // Cleanup dell'evento per evitare memory leak
+        viewModel.RequestClose -= closeHandler;
+    
+        // NOTA: Poiché usiamo 'using', all'uscita dal metodo verrà chiamato viewModel.Dispose().
+        // Questo a sua volta chiamerà _coordinator.ClearSession(), pulendo i file temporanei 
+        // e gli header pendenti se l'utente ha chiuso la finestra senza fare "Applica".
     }
     
     // =======================================================================
@@ -138,25 +143,19 @@ public class WindowService : IWindowService
     {
         if (_mainWindow == null) throw new InvalidOperationException("Finestra principale non registrata.");
 
-        // Risoluzione Dipendenze per PosterizationToolViewModel
         var dataManager = _serviceProvider.GetRequiredService<IFitsDataManager>();
         var rendererFactory = _serviceProvider.GetRequiredService<IFitsRendererFactory>();
         var coordinator = _serviceProvider.GetRequiredService<IPosterizationCoordinator>();
         
-        using var vm = new PosterizationToolViewModel(
-            sourcePaths, 
-            dataManager, 
-            rendererFactory, 
-            coordinator);
-            
-        var view = new PosterizationToolView { DataContext = vm };
+        using var viewModel = new PosterizationToolViewModel(sourcePaths, dataManager, rendererFactory, coordinator);
+        var view = new PosterizationToolView { DataContext = viewModel };
 
         Action closeHandler = () => view.Close();
-        vm.RequestClose += closeHandler;
+        viewModel.RequestClose += closeHandler;
 
         await view.ShowDialog(_mainWindow);
 
-        vm.RequestClose -= closeHandler;
-        return vm.DialogResult ? vm.ResultPaths : null;
+        viewModel.RequestClose -= closeHandler;
+        return viewModel.DialogResult ? viewModel.ResultPaths : null;
     }
 }

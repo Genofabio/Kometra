@@ -62,15 +62,13 @@ public class FitsHeaderHealthEvaluator : IFitsHeaderHealthEvaluator
 
     private HealthStatusItem EvaluateTarget(FitsHeader header)
     {
-        // Cerchiamo RA/DEC grezzi (Hints per il Solver)
-        double ra = _metadataService.GetDoubleValue(header, "RA", double.NaN);
-        if (double.IsNaN(ra)) ra = _metadataService.GetDoubleValue(header, "OBJCTRA", double.NaN);
-        bool hasRaDec = !double.IsNaN(ra);
+        var coords = _metadataService.GetTargetCoordinates(header);
+        bool ok = coords != null;
 
         return new HealthStatusItem(
             HealthCheckType.TargetPointers,
-            hasRaDec ? HeaderHealthStatus.Valid : HeaderHealthStatus.Warning,
-            hasRaDec ? "Coordinate target presenti." : "Coordinate RA/DEC assenti.");
+            ok ? HeaderHealthStatus.Valid : HeaderHealthStatus.Warning,
+            ok ? $"Coordinate: {coords!.RaDeg:F3}°, {coords.DecDeg:F3}°" : "Coordinate RA/DEC mancanti.");
     }
 
     private HealthStatusItem EvaluateWcs(FitsHeader header)

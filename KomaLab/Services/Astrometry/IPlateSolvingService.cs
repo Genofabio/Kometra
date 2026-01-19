@@ -10,16 +10,14 @@ namespace KomaLab.Services.Astrometry;
 public interface IPlateSolvingService
 {
     /// <summary>
-    /// Esegue una diagnosi preventiva sui metadati del file.
-    /// Restituisce un oggetto strutturato, non una stringa.
+    /// Esegue una diagnosi preventiva sui metadati. 
+    /// Accetta FitsFileReference per controllare sia il disco che eventuali modifiche in RAM.
     /// </summary>
-    Task<AstrometryDiagnosis> DiagnoseIssuesAsync(string fitsFilePath);
+    Task<AstrometryDiagnosis> DiagnoseIssuesAsync(FitsFileReference fileRef);
 
     /// <summary>
-    /// Esegue il Plate Solving.
-    /// In caso di successo, aggiorna automaticamente la proprietà ModifiedHeader di fileRef.
+    /// Esegue il Plate Solving su una copia sandbox.
     /// </summary>
-    /// <param name="liveLog">Interfaccia standard per il report dei progressi testuali.</param>
     Task<PlateSolvingResult> SolveFileAsync(
         FitsFileReference fileRef, 
         CancellationToken token = default, 

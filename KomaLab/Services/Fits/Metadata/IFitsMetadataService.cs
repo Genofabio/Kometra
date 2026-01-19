@@ -24,6 +24,7 @@ public interface IFitsMetadataService
     FitsBitDepth GetBitDepth(FitsHeader header);
     WcsData ExtractWcs(FitsHeader header); // Necessario per Astrometria
     GeographicLocation? GetObservatoryLocation(FitsHeader header); // Necessario per Effemeridi
+    public SkyCoordinate? GetTargetCoordinates(FitsHeader header);
     
     // --- Regole di Dominio (Validazione) ---
     bool IsStructuralKey(string key); // NECESSARIO: Il ViewModel chiede "Posso far modificare questa chiave?"

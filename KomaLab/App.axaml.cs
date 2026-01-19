@@ -100,7 +100,8 @@ public class App : Application
         services.AddSingleton<IJplHorizonsService, JplHorizonsService>();
 
         // --- 5. Coordinatori ---
-        services.AddSingleton<IAstrometryCoordinator, AstrometryCoordinator>();
+        services.AddSingleton<IPlateSolvingCoordinator, PlateSolvingCoordinator>();
+        services.AddSingleton<IHeaderEditorCoordinator, HeaderEditorCoordinator>(); 
         services.AddSingleton<IPosterizationCoordinator, PosterizationCoordinator>();
         services.AddSingleton<IAlignmentCoordinator, AlignmentCoordinator>(); 
         services.AddSingleton<IVideoExportCoordinator, VideoExportCoordinator>();

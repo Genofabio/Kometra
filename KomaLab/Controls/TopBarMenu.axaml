@@ -4,7 +4,6 @@
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
              xmlns:avalonia="clr-namespace:Material.Icons.Avalonia;assembly=Material.Icons.Avalonia"
              xmlns:vm="clr-namespace:KomaLab.ViewModels"
-             xmlns:models="clr-namespace:KomaLab.Models"
              xmlns:conv="clr-namespace:KomaLab.Converters"
              xmlns:processing="clr-namespace:KomaLab.Models.Processing"
              xmlns:visualization="clr-namespace:KomaLab.Models.Visualization"

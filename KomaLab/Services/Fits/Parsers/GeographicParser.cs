@@ -8,42 +8,60 @@ namespace KomaLab.Services.Fits.Parsers;
 
 /// <summary>
 /// Parser specializzato nell'estrazione della posizione geografica dagli header FITS.
-/// Conosce le convenzioni delle chiavi FITS ma delega il parsing matematico a AstroParser.
+/// Centralizza la conoscenza delle chiavi ma delega la matematica all'AstroParser.
 /// </summary>
 public static class GeographicParser
 {
-    // Token ordinati per "importanza" (standard prima, custom dopo)
-    private static readonly string[] LatTokens = { "OBSGEO-B", "LAT-OBS", "SITELAT", "LATITUDE", "GEOLAT" };
-    private static readonly string[] LonTokens = { "OBSGEO-L", "LONG-OBS", "SITELONG", "LONGITUD", "GEOLON" };
-    private static readonly string[] AltTokens = { "OBSGEO-A", "ALTI-OBS", "SITEELEV", "ELEVATIO", "GEOELEV", "ELEVATION" };
+    // Espandiamo i token per includere gli standard ASCOM, NINA e le abbreviazioni comuni
+    private static readonly string[] LatTokens = { 
+        "HIERARCH CAHA TEL GEOLAT", "OBSGEO-B", "LAT-OBS", "SITELAT", "LATITUDE", "OBJCTLAT", "LAT" 
+    };
+
+    private static readonly string[] LonTokens = { 
+        "HIERARCH CAHA TEL GEOLON", "OBSGEO-L", "LONG-OBS", "SITELONG", "LONGITUD", "OBJCTLON", "LONG" 
+    };
+
+    private static readonly string[] AltTokens = { 
+        "HIERARCH CAHA TEL GEOELEV", "OBSGEO-A", "ALTI-OBS", "SITEELEV", "ELEVATIO", "GEOELEV" 
+    };
 
     public static GeographicLocation? ParseLocation(FitsHeader header, IFitsMetadataService metadata)
     {
-        // 1. Cerchiamo le stringhe grezze nell'header FITS
         string latStr = FindFirstValue(header, metadata, LatTokens);
         string lonStr = FindFirstValue(header, metadata, LonTokens);
-        string altStr = FindFirstValue(header, metadata, AltTokens);
 
-        // 2. Se mancano i dati fondamentali, usciamo
-        if (string.IsNullOrEmpty(latStr) || string.IsNullOrEmpty(lonStr)) return null;
+        // DEBUG: Vediamo cosa estraiamo dal file FITS
+        System.Diagnostics.Debug.WriteLine($"[GEO DEBUG] Raw Lat: '{latStr}' | Raw Lon: '{lonStr}'");
 
-        // 3. Deleghiamo la creazione dell'oggetto al Factory Method del modello.
-        // Il modello userà internamente l'AstroParser per gestire ":" o decimali.
-        double? altMeters = AstroParser.ParseDegrees(altStr);
-        double altKm = altMeters.HasValue ? altMeters.Value / 1000.0 : 0.5;
+        if (string.IsNullOrEmpty(latStr) || string.IsNullOrEmpty(lonStr)) 
+        {
+            System.Diagnostics.Debug.WriteLine("[GEO DEBUG] Fallimento: Una delle stringhe è vuota.");
+            return null;
+        }
 
-        return GeographicLocation.FromStrings(latStr, lonStr, altKm);
+        double? lat = AstroParser.ParseDegrees(latStr);
+        double? lon = AstroParser.ParseDegrees(lonStr);
+
+        // DEBUG: Vediamo se la matematica dell'AstroParser funziona
+        System.Diagnostics.Debug.WriteLine($"[GEO DEBUG] Parsed Lat: {lat} | Parsed Lon: {lon}");
+
+        if (lat.HasValue && lon.HasValue)
+        {
+            return new GeographicLocation(lat.Value, lon.Value);
+        }
+
+        System.Diagnostics.Debug.WriteLine("[GEO DEBUG] Fallimento: AstroParser ha restituito null.");
+        return null;
     }
 
-    /// <summary>
-    /// Restituisce la prima stringa non vuota trovata tra i token forniti.
-    /// </summary>
     private static string FindFirstValue(FitsHeader header, IFitsMetadataService metadata, string[] tokens)
     {
         foreach (var token in tokens)
         {
             string val = metadata.GetStringValue(header, token);
-            if (!string.IsNullOrWhiteSpace(val)) return val;
+            // Se la stringa non è null, non è vuota e non contiene solo spazi
+            if (!string.IsNullOrWhiteSpace(val)) 
+                return val.Trim(); 
         }
         return string.Empty;
     }

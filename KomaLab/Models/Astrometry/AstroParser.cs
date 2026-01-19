@@ -17,26 +17,32 @@ public static class AstroParser
     public static double? ParseDegrees(string? input)
     {
         if (string.IsNullOrWhiteSpace(input)) return null;
-
-        // Pulizia base (rimozione apici e spazi extra)
-        input = input.Replace("'", "").Trim();
-
+    
+        input = input.Trim();
+    
         // 1. Caso decimale puro (es. "45.1234")
         if (double.TryParse(input, NumberStyles.Any, CultureInfo.InvariantCulture, out double val)) 
             return val;
-
-        // 2. Caso sessagesimale (Gradi:Minuti:Secondi)
+    
+        // 2. Caso sessagesimale (Gradi:Minuti:Secondi o 45° 30' 00")
         try 
         {
+            // Usiamo i separatori per dividere, mantenendo l'integrità dei numeri
             string[] parts = input.Split(Separators, StringSplitOptions.RemoveEmptyEntries);
             if (parts.Length == 0) return null;
-
+    
             double d = double.Parse(parts[0], CultureInfo.InvariantCulture);
             double m = parts.Length > 1 ? double.Parse(parts[1], CultureInfo.InvariantCulture) : 0;
             double s = parts.Length > 2 ? double.Parse(parts[2], CultureInfo.InvariantCulture) : 0;
             
             double res = Math.Abs(d) + (m / 60.0) + (s / 3600.0);
-            return input.StartsWith("-") ? -res : res;
+            
+            // Gestione del segno: cerchiamo '-' o direzioni Sud/Ovest
+            bool isNegative = input.Contains("-") || 
+                              input.Contains("S", StringComparison.OrdinalIgnoreCase) || 
+                              input.Contains("W", StringComparison.OrdinalIgnoreCase);
+    
+            return isNegative ? -res : res;
         }
         catch 
         { 

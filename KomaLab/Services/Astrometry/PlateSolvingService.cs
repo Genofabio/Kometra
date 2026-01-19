@@ -18,54 +18,29 @@ public class PlateSolvingService : IPlateSolvingService
 {
     private readonly IFitsDataManager _dataManager; 
     private readonly IFitsMetadataService _metadataService;
-    
     private readonly Lazy<string?> _executablePath;
-    private bool _isCliVersion; 
 
-    public PlateSolvingService(
-        IFitsDataManager dataManager, 
-        IFitsMetadataService metadataService)
+    public PlateSolvingService(IFitsDataManager dataManager, IFitsMetadataService metadataService)
     {
         _dataManager = dataManager ?? throw new ArgumentNullException(nameof(dataManager));
         _metadataService = metadataService ?? throw new ArgumentNullException(nameof(metadataService));
-
         _executablePath = new Lazy<string?>(FindBestExecutable);
     }
 
-    // =======================================================================
-    // 1. DIAGNOSI (Uso della Cache)
-    // =======================================================================
-    
-    public async Task<AstrometryDiagnosis> DiagnoseIssuesAsync(string fitsFilePath)
+    public async Task<AstrometryDiagnosis> DiagnoseIssuesAsync(FitsFileReference fileRef)
     {
         var diagnosis = new AstrometryDiagnosis();
         
-        // Passiamo dal DataManager: se il file è già aperto, lo leggiamo dalla RAM
-        var header = await _dataManager.GetHeaderOnlyAsync(fitsFilePath);
+        var header = fileRef.ModifiedHeader ?? await _dataManager.GetHeaderOnlyAsync(fileRef.FilePath);
+        var coords = _metadataService.GetTargetCoordinates(header);
         
-        if (header == null) return diagnosis; 
-
-        // Controllo coordinate (RA/DEC)
-        double ra = _metadataService.GetDoubleValue(header, "RA", double.NaN);
-        if (double.IsNaN(ra)) ra = _metadataService.GetDoubleValue(header, "OBJCTRA", double.NaN);
+        if (coords == null) diagnosis.MissingItems.Add(AstrometryPrerequisite.ApproximatePosition);
+        if (!_metadataService.GetFocalLength(header).HasValue) diagnosis.MissingItems.Add(AstrometryPrerequisite.FocalLength);
+        if (!_metadataService.GetPixelSize(header).HasValue) diagnosis.MissingItems.Add(AstrometryPrerequisite.PixelSize);
         
-        if (double.IsNaN(ra)) 
-            diagnosis.MissingItems.Add(AstrometryPrerequisite.ApproximatePosition);
-
-        // Controllo dati ottici e sensore
-        if (!_metadataService.GetFocalLength(header).HasValue) 
-            diagnosis.MissingItems.Add(AstrometryPrerequisite.FocalLength);
-
-        if (!_metadataService.GetPixelSize(header).HasValue) 
-            diagnosis.MissingItems.Add(AstrometryPrerequisite.PixelSize);
-
         return diagnosis;
     }
 
-    // =======================================================================
-    // 2. ESECUZIONE (Logica Sandbox)
-    // =======================================================================
-    
     public async Task<PlateSolvingResult> SolveFileAsync(
         FitsFileReference fileRef, 
         CancellationToken token = default, 
@@ -76,164 +51,154 @@ public class PlateSolvingService : IPlateSolvingService
 
         if (string.IsNullOrEmpty(exePath)) 
         {
-            result.Message = "ASTAP non trovato. Verifica l'installazione.";
-            result.Success = false;
+            result.Message = "Eseguibile ASTAP non trovato.";
             return result;
         }
 
         string? tempFilePath = null;
         try
         {
-            // A. Preparazione: Recupero header (probabilmente dalla cache)
-            var currentHeader = await _dataManager.GetHeaderOnlyAsync(fileRef.FilePath);
-            string hints = PrepareAstapHints(currentHeader);
+            // 1. Recupero Header
+            var header = fileRef.ModifiedHeader ?? await _dataManager.GetHeaderOnlyAsync(fileRef.FilePath);
+            
+            // 2. Creazione Sandbox Fisica
+            tempFilePath = await PrepareSandboxFile(fileRef);
+
+            // 3. Preparazione Parametri
+            string hints = PrepareAstapHints(header);
             string radius = hints.Contains("-ra") ? "30" : "180"; 
 
-            // B. Sandbox: Delega totale al DataManager
-            // Crea la copia, genera il path e lo registra per la pulizia futura
-            tempFilePath = await _dataManager.CreateSandboxCopyAsync(fileRef.FilePath, "Astrometry");
-
-            // C. Esecuzione ASTAP
             var args = $"-f \"{tempFilePath}\" -r {radius} -update -z 0 {hints}";
-            liveLog?.Report($">> Avvio ASTAP (Search Radius: {radius}°)...");
+
+            // LOG SEMANTICO: Inviamo il dato, il VM aggiungerà il "> Config:"
+            liveLog?.Report($"CONFIG:Raggio {radius}° {(hints.Length > 0 ? "(Hinted)" : "(Blind)")}");
 
             var logBuilder = new StringBuilder();
-            await RunProcessAsync(exePath, args, logBuilder, liveLog, token);
+            bool solutionFound = false;
 
-            // D. Verifica Risultato
-            // Rileggiamo l'header dal file sandbox modificato da ASTAP
+            // 4. Esecuzione Processo
+            await RunProcessInternalAsync(exePath, args, line => 
+            {
+                logBuilder.AppendLine(line);
+                
+                if (line.Contains("Solution found", StringComparison.OrdinalIgnoreCase) && 
+                   !line.Contains("No solution", StringComparison.OrdinalIgnoreCase))
+                {
+                    solutionFound = true;
+                }
+
+                if (IsSignificantLogLine(line))
+                {
+                    // LOG SEMANTICO: Inviamo la riga, il VM aggiungerà il pipe "|"
+                    liveLog?.Report($"TOOL:{line.Trim()}");
+                }
+            }, token);
+
+            // 5. Sincronizzazione Dati
+            _dataManager.Invalidate(tempFilePath);
             var solvedHeader = await _dataManager.GetHeaderOnlyAsync(tempFilePath);
             
-            if (solvedHeader != null && !string.IsNullOrEmpty(_metadataService.GetStringValue(solvedHeader, "CRVAL1")))
+            bool hasWcs = solvedHeader != null && !string.IsNullOrEmpty(_metadataService.GetStringValue(solvedHeader, "CRVAL1"));
+
+            // 6. Costruzione Risultato (Senza stringhe UI)
+            if (solutionFound && hasWcs)
             {
                 result.Success = true;
-                result.SolvedHeader = solvedHeader;
-                result.Message = "Risoluzione completata con successo.";
-                
-                // Aggiorniamo il riferimento in memoria
-                fileRef.ModifiedHeader = solvedHeader;
+                result.SolvedHeader = solvedHeader; // Passiamo l'oggetto completo
+                result.Message = "Risoluzione OK";
             }
             else
             {
-                result.Message = "Risoluzione fallita (Dati WCS non trovati).";
+                result.Success = false;
+                result.Message = solutionFound ? "Errore scrittura WCS" : "Soluzione non trovata";
             }
             
             result.FullLog = logBuilder.ToString();
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (Exception ex) 
         { 
             result.Message = $"Errore: {ex.Message}"; 
             result.Success = false;
-            result.FullLog += $"\nEXCEPTION: {ex.Message}";
         }
-        // NOTA: Il blocco 'finally' con la cancellazione manuale del file è opzionale qui,
-        // poiché il DataManager pulirà tutto alla fine. Tuttavia, se vogliamo liberare
-        // spazio subito:
         finally 
         { 
-            if (tempFilePath != null) _dataManager.DeleteTemporaryData(tempFilePath);
+            if (tempFilePath != null) _dataManager.DeleteTemporaryData(tempFilePath); 
         }
 
         return result;
     }
 
-    // =======================================================================
-    // 3. HELPER PRIVATI (Parametri e Processi)
-    // =======================================================================
+    private bool IsSignificantLogLine(string line)
+    {
+        if (string.IsNullOrWhiteSpace(line)) return false;
+        string l = line.ToLowerInvariant();
+
+        return l.Contains("solution found") || 
+               l.Contains("no solution found") || 
+               l.Contains("solved in") || 
+               l.Contains("error") || 
+               l.Contains("warning") || 
+               l.Contains("used stars");
+    }
+
+    private async Task RunProcessInternalAsync(string exe, string args, Action<string> onLineReceived, CancellationToken token)
+    {
+        var startInfo = new ProcessStartInfo {
+            FileName = exe, Arguments = args, CreateNoWindow = true, UseShellExecute = false,
+            RedirectStandardOutput = true, RedirectStandardError = true, StandardOutputEncoding = Encoding.UTF8
+        };
+
+        using var process = new Process { StartInfo = startInfo };
+        var outputDone = new TaskCompletionSource<bool>();
+        var errorDone = new TaskCompletionSource<bool>();
+
+        process.OutputDataReceived += (s, e) => {
+            if (e.Data == null) outputDone.TrySetResult(true);
+            else onLineReceived(e.Data);
+        };
+        process.ErrorDataReceived += (s, e) => {
+            if (e.Data == null) errorDone.TrySetResult(true);
+            else onLineReceived($"[STDERR] {e.Data}");
+        };
+
+        process.Start();
+        process.BeginOutputReadLine();
+        process.BeginErrorReadLine();
+        await Task.WhenAll(process.WaitForExitAsync(token), outputDone.Task, errorDone.Task);
+    }
+
+    private async Task<string> PrepareSandboxFile(FitsFileReference fileRef)
+    {
+        if (fileRef.ModifiedHeader != null)
+        {
+            var package = await _dataManager.GetDataAsync(fileRef.FilePath);
+            var temp = await _dataManager.SaveAsTemporaryAsync(package.PixelData, fileRef.ModifiedHeader, "Astrometry_Mem");
+            return temp.FilePath;
+        }
+        return await _dataManager.CreateSandboxCopyAsync(fileRef.FilePath, "Astrometry_Disk");
+    }
 
     private string PrepareAstapHints(FitsHeader? header)
     {
         if (header == null) return "";
         var sb = new StringBuilder();
+        var coords = _metadataService.GetTargetCoordinates(header);
         
-        double ra = _metadataService.GetDoubleValue(header, "RA", double.NaN);
-        if (double.IsNaN(ra)) ra = _metadataService.GetDoubleValue(header, "OBJCTRA", double.NaN);
-
-        double dec = _metadataService.GetDoubleValue(header, "DEC", double.NaN);
-        if (double.IsNaN(dec)) dec = _metadataService.GetDoubleValue(header, "OBJCTDEC", double.NaN);
-
-        if (!double.IsNaN(ra) && !double.IsNaN(dec))
+        if (coords != null)
         {
-            sb.AppendFormat(CultureInfo.InvariantCulture, "-ra {0:F4} -spd {1:F4} ", ra / 15.0, 90.0 + dec);
+            sb.AppendFormat(CultureInfo.InvariantCulture, " -ra {0:F4} -spd {1:F4}", coords.RaDeg / 15.0, 90.0 + coords.DecDeg);
         }
 
-        double? focal = _metadataService.GetFocalLength(header);
-        if (focal.HasValue) 
-            sb.AppendFormat(CultureInfo.InvariantCulture, "-focal {0:F1} ", focal.Value);
-        
+        if (_metadataService.GetFocalLength(header) is double f) sb.AppendFormat(CultureInfo.InvariantCulture, " -focal {0:F1}", f);
+        if (_metadataService.GetPixelSize(header) is double p) sb.AppendFormat(CultureInfo.InvariantCulture, " -pixsize {0:F2}", p);
+    
         return sb.ToString();
     }
 
     private string? FindBestExecutable()
     {
-        var paths = new[] {
-            @"C:\Program Files\astap\astap_cli.exe", 
-            @"C:\astap\astap_cli.exe",
-            @"C:\Program Files\astap\astap.exe", 
-            @"C:\astap\astap.exe"
-        };
-
-        foreach (var path in paths)
-        {
-            if (File.Exists(path))
-            {
-                _isCliVersion = path.EndsWith("cli.exe", StringComparison.OrdinalIgnoreCase);
-                return path;
-            }
-        }
+        var paths = new[] { @"C:\Program Files\astap\astap_cli.exe", @"D:\astap\astap_cli.exe", @"C:\astap\astap.exe" };
+        foreach (var p in paths) if (File.Exists(p)) return p;
         return null;
-    }
-
-    private async Task RunProcessAsync(string exe, string args, StringBuilder fullLog, IProgress<string>? live, CancellationToken token)
-    {
-        var startInfo = new ProcessStartInfo
-        {
-            FileName = exe, Arguments = args, 
-            CreateNoWindow = true,
-            UseShellExecute = !_isCliVersion,
-            RedirectStandardOutput = _isCliVersion, 
-            RedirectStandardError = _isCliVersion
-        };
-
-        using var process = new Process { StartInfo = startInfo, EnableRaisingEvents = true };
-        
-        if (_isCliVersion)
-        {
-            process.OutputDataReceived += (s, e) => {
-                if (e.Data == null) return;
-                fullLog.AppendLine(e.Data);
-                var clean = CleanAstapLine(e.Data); 
-                if (clean != null) live?.Report(clean);
-            };
-        }
-
-        var tcs = new TaskCompletionSource();
-        process.Exited += (s, e) => tcs.TrySetResult();
-        
-        process.Start();
-        if (_isCliVersion) process.BeginOutputReadLine();
-
-        using var reg = token.Register(() => { 
-            try { process.Kill(); } catch { } 
-            tcs.TrySetCanceled(); 
-        });
-
-        await Task.WhenAny(tcs.Task, Task.Delay(TimeSpan.FromSeconds(90), token));
-        
-        if (!process.HasExited) 
-        { 
-            try { process.Kill(); } catch { } 
-        }
-    }
-
-    private string? CleanAstapLine(string line)
-    {
-        if (string.IsNullOrWhiteSpace(line)) return null;
-        if (line.Contains("x:=") || line.Contains("quads selected")) return null;
-        
-        if (line.StartsWith("Trying FOV:", StringComparison.OrdinalIgnoreCase))
-            return $"   > Campo: {line.Replace("Trying FOV:", "").Trim()}°";
-            
-        return line.Trim();
     }
 }

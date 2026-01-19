@@ -114,6 +114,28 @@ public class FitsMetadataService : IFitsMetadataService
         };
     }
     
+    // In FitsMetadataService.cs
+    // In FitsMetadataService.cs
+
+    public SkyCoordinate? GetTargetCoordinates(FitsHeader header)
+    {
+        string? raStr = GetStringValue(header, "RA") ?? GetStringValue(header, "OBJCTRA");
+        string? decStr = GetStringValue(header, "DEC") ?? GetStringValue(header, "OBJCTDEC");
+
+        // MODIFICA QUI:
+        // Per l'RA usiamo ParseHoursToDegrees. 
+        // Questo converte "02:56:37" -> 2.94h -> 44.15°
+        double? ra = AstroParser.ParseHoursToDegrees(raStr); 
+    
+        // Per la DEC usiamo ParseDegrees (è già in gradi)
+        double? dec = AstroParser.ParseDegrees(decStr);
+
+        if (ra.HasValue && dec.HasValue)
+            return new SkyCoordinate(ra.Value, dec.Value); // Ora RaValue è davvero in Gradi!
+
+        return null;
+    }
+    
     // --- SCRITTURA / MANIPOLAZIONE ---
 
     public void AddValue(FitsHeader header, string key, object value, string? comment = null)
