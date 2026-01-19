@@ -61,14 +61,16 @@ public partial class AlignmentToolView : Window
     private async void OnPreviewSizeChanged(object? sender, SizeChangedEventArgs e)
     {
         if (!_hasLoaded) return;
-        
+    
         if (DataContext is AlignmentToolViewModel vm)
         {
+            // Aggiorna la dimensione della viewport nel VM
             vm.Viewport.ViewportSize = e.NewSize; 
+        
+            // Aspettiamo un istante per il rendering di Avalonia
+            await Task.Delay(1); 
+            vm.Viewport.ResetView();
         }
-
-        await Task.Delay(1); 
-        await CenterImageAsync();
     }
 
     private async Task CenterImageAsync()
@@ -82,9 +84,15 @@ public partial class AlignmentToolView : Window
 
         try
         {
+            // 1. Aspettiamo che l'immagine sia stata caricata nel ViewModel
+            // Sevm.ImageLoadedTcs non è ancora completato, il codice si ferma qui
+            await vm.ImageLoadedTcs.Task;
+
+            // 2. Passiamo le dimensioni REALI correnti del border al ViewModel
+            // previewBorder.Bounds.Size è garantito essere corretto qui
             vm.Viewport.ViewportSize = previewBorder.Bounds.Size;
 
-            // Se l'immagine è già presente, eseguiamo il reset della vista
+            // 3. Eseguiamo il ResetView del Viewport (che ora ha ImageSize e ViewportSize)
             if (vm.ActiveRenderer != null)
             {
                 vm.Viewport.ResetView();
@@ -109,39 +117,31 @@ public partial class AlignmentToolView : Window
     private void OnPreviewPointerPressed(object? sender, PointerPressedEventArgs e)
     {
         if (IsInteractionBlocked()) return;
-        
+    
         var previewBorder = this.FindControl<Border>("PreviewBorder");
         if (DataContext is not AlignmentToolViewModel vm || previewBorder == null) return;
-        
+    
         var props = e.GetCurrentPoint(previewBorder).Properties;
 
-        // PAN INTERNO (Tasto Centrale)
         if (props.IsMiddleButtonPressed)
         {
             _lastPointerPosForPanning = e.GetPosition(previewBorder);
             _isPanning = true; 
             e.Pointer.Capture(previewBorder); 
-            e.Handled = true; 
             this.Cursor = new Cursor(StandardCursorType.SizeAll);
         }
-        // SELEZIONE TARGET (Tasto Sinistro)
         else if (props.IsLeftButtonPressed)
         {
-            if (vm.ActiveRenderer == null || vm.ActiveRenderer.ImageSize == default(Size))
-                return;
+            if (vm.ActiveRenderer?.Image == null) return;
+            if (!vm.IsTargetPlacementAllowed) return;
 
             var viewportPos = e.GetPosition(previewBorder);
-            
-            // Trasformazione coordinate Viewport -> Coordinate Immagine
+        
+            // Calcolo coordinata immagine reale
             double imageX = (viewportPos.X - vm.Viewport.OffsetX) / vm.Viewport.Scale;
             double imageY = (viewportPos.Y - vm.Viewport.OffsetY) / vm.Viewport.Scale;
-            var imageSize = vm.ActiveRenderer.ImageSize;
         
-            double clampedX = Math.Clamp(imageX, 0, imageSize.Width);
-            double clampedY = Math.Clamp(imageY, 0, imageSize.Height);
-        
-            vm.SetTargetCoordinate(new Point(clampedX, clampedY));
-            e.Handled = true;
+            vm.SetTargetCoordinate(new Point(imageX, imageY));
         }
     }
 

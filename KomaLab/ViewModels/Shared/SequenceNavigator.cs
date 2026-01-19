@@ -1,10 +1,11 @@
 ﻿using System;
+using System.Collections.Generic;
+using System.Linq;
 using System.Threading.Tasks;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
-// Assicurati che il namespace sia corretto per la tua struttura
-using KomaLab.ViewModels.Nodes; 
+using KomaLab.ViewModels.Nodes;
 
 namespace KomaLab.ViewModels.Shared;
 
@@ -14,15 +15,12 @@ public partial class SequenceNavigator : ObservableObject, IImageNavigator
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(DisplayIndex))]
-    // 1. FIX: Notifichiamo che le proprietà booleane sono cambiate
     [NotifyPropertyChangedFor(nameof(CanMoveNext))] 
     [NotifyPropertyChangedFor(nameof(CanMovePrevious))]
-    // 2. Aggiorniamo lo stato dei comandi (abilitato/disabilitato)
     [NotifyCanExecuteChangedFor(nameof(NextCommand), nameof(PreviousCommand))]
     private int _currentIndex;
 
     [ObservableProperty]
-    // Anche se TotalCount cambia, potrebbe cambiare la visibilità delle frecce
     [NotifyPropertyChangedFor(nameof(CanMoveNext))]
     [NotifyPropertyChangedFor(nameof(CanMovePrevious))]
     [NotifyPropertyChangedFor(nameof(CanMove))]
@@ -32,13 +30,26 @@ public partial class SequenceNavigator : ObservableObject, IImageNavigator
     [ObservableProperty] private bool _isLooping;
     [ObservableProperty] private int _intervalMs = 250;
 
+    // Filtro per indici accessibili (es. solo 0 e l'ultimo in modalità guidata)
+    private Predicate<int>? _indexFilter;
+    public Predicate<int>? IndexFilter 
+    { 
+        get => _indexFilter;
+        set 
+        {
+            if (SetProperty(ref _indexFilter, value))
+            {
+                RefreshState();
+            }
+        }
+    }
+
     public int DisplayIndex => CurrentIndex + 1;
     public bool CanMove => TotalCount > 1;
 
-    // --- Proprietà per la Visibilità delle Frecce ---
-    // Queste vengono ricalcolate e la UI avvisata grazie agli attributi sopra
-    public bool CanMoveNext => TotalCount > 0 && CurrentIndex < TotalCount - 1;
-    public bool CanMovePrevious => CurrentIndex > 0;
+    // Determina se esiste un indice valido "nel futuro" o "nel passato" rispetto a quello attuale
+    public bool CanMoveNext => GetNextValidIndex(CurrentIndex, false).HasValue;
+    public bool CanMovePrevious => GetPreviousValidIndex(CurrentIndex).HasValue;
 
     public event EventHandler<int>? IndexChanged;
 
@@ -50,9 +61,33 @@ public partial class SequenceNavigator : ObservableObject, IImageNavigator
 
     public void UpdateStatus(int index, int total)
     {
-        // Impostiamo TotalCount prima per evitare calcoli errati nei trigger
-        TotalCount = total;
-        CurrentIndex = index;
+        _totalCount = total;
+        _currentIndex = index;
+        OnPropertyChanged(nameof(TotalCount));
+        OnPropertyChanged(nameof(CurrentIndex));
+        OnPropertyChanged(nameof(DisplayIndex));
+        RefreshState();
+    }
+
+    /// <summary>
+    /// Forza il ricalcolo della disponibilità dei pulsanti Next/Previous.
+    /// Da chiamare quando cambiano le regole di business (es. cambio modalità allineamento).
+    /// </summary>
+    public void RefreshState()
+    {
+        OnPropertyChanged(nameof(CanMoveNext));
+        OnPropertyChanged(nameof(CanMovePrevious));
+        NextCommand.NotifyCanExecuteChanged();
+        PreviousCommand.NotifyCanExecuteChanged();
+    }
+
+    public void MoveTo(int index)
+    {
+        if (index >= 0 && index < TotalCount)
+        {
+            CurrentIndex = index;
+            IndexChanged?.Invoke(this, CurrentIndex);
+        }
     }
 
     [RelayCommand]
@@ -67,46 +102,77 @@ public partial class SequenceNavigator : ObservableObject, IImageNavigator
         else _timer.Stop();
     }
 
-    // I Comandi usano le proprietà CanMove... per abilitare/disabilitare il click
     [RelayCommand(CanExecute = nameof(CanMoveNext))]
     public void Next() => MoveNextInternal(loop: false);
 
     [RelayCommand(CanExecute = nameof(CanMovePrevious))]
     public void Previous() => MovePreviousInternal();
 
-    // Implementazione IImageNavigator
     public async Task MoveNextAsync() { Next(); await Task.CompletedTask; }
     public async Task MovePreviousAsync() { Previous(); await Task.CompletedTask; }
-
-    // --- Logica Interna ---
 
     private void MoveNextInternal(bool loop)
     {
         if (TotalCount == 0) return;
 
-        // Se è l'animazione automatica (loop = true), usiamo il modulo % per ricominciare
-        // Se è manuale (loop = false), ci fermiamo alla fine (anche se il CanExecute dovrebbe già prevenirlo)
-        if (loop)
+        var next = GetNextValidIndex(CurrentIndex, loop);
+        if (next.HasValue)
         {
-            CurrentIndex = (CurrentIndex + 1) % TotalCount;
+            // Salto immediato all'indice valido (es. da 0 a 10)
+            CurrentIndex = next.Value;
+            IndexChanged?.Invoke(this, CurrentIndex);
         }
-        else
+        else if (loop) 
         {
-            if (CurrentIndex < TotalCount - 1) 
-                CurrentIndex++;
+            Stop();
         }
-        
-        IndexChanged?.Invoke(this, CurrentIndex);
     }
 
     private void MovePreviousInternal()
     {
         if (TotalCount == 0) return;
-        
-        if (CurrentIndex > 0)
-            CurrentIndex--;
-            
-        IndexChanged?.Invoke(this, CurrentIndex);
+
+        var prev = GetPreviousValidIndex(CurrentIndex);
+        if (prev.HasValue)
+        {
+            CurrentIndex = prev.Value;
+            IndexChanged?.Invoke(this, CurrentIndex);
+        }
+    }
+
+    // --- LOGICA DI RICERCA SALTO ---
+
+    private int? GetNextValidIndex(int startFrom, bool loop)
+    {
+        if (TotalCount <= 1) return null;
+
+        // Cerca il primo indice che soddisfa il filtro DOPO quello attuale
+        for (int i = startFrom + 1; i < TotalCount; i++)
+        {
+            if (IndexFilter == null || IndexFilter(i)) return i;
+        }
+
+        // Se non trovato e siamo in loop, ricomincia da capo
+        if (loop)
+        {
+            for (int i = 0; i <= startFrom; i++)
+            {
+                if (IndexFilter == null || IndexFilter(i)) return i;
+            }
+        }
+
+        return null;
+    }
+
+    private int? GetPreviousValidIndex(int startFrom)
+    {
+        if (TotalCount <= 1) return null;
+
+        for (int i = startFrom - 1; i >= 0; i--)
+        {
+            if (IndexFilter == null || IndexFilter(i)) return i;
+        }
+        return null;
     }
     
     public void Stop() { IsLooping = false; _timer.Stop(); }
