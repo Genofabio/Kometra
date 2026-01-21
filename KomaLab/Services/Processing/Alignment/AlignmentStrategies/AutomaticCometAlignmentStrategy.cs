@@ -19,27 +19,30 @@ public class AutomaticCometAlignmentStrategy : AlignmentStrategyBase
     private readonly IFitsMetadataService _metadataService;
     private readonly IFitsOpenCvConverter _converter;
     private readonly IImageAnalysisEngine _analysis;
+    private readonly IImageEffectsEngine _effects; // <--- NUOVA DIPENDENZA
 
     public AutomaticCometAlignmentStrategy(
         IFitsDataManager dataManager,
         IFitsMetadataService metadataService,
         IFitsOpenCvConverter converter, 
-        IImageAnalysisEngine analysis) : base(dataManager)
+        IImageAnalysisEngine analysis,
+        IImageEffectsEngine effects) : base(dataManager) // <--- INIEZIONE NEL COSTRUTTORE
     {
         _metadataService = metadataService;
         _converter = converter;
         _analysis = analysis;
+        _effects = effects;
     }
 
     public override async Task<Point2D?[]> CalculateAsync(
         IEnumerable<FitsFileReference> files, 
-        IEnumerable<Point2D?> guesses, // Dati passati al volo
+        IEnumerable<Point2D?> guesses, 
         int searchRadius, 
         IProgress<AlignmentProgressReport>? progress = null,
         CancellationToken token = default)
     {
         var fileList = files.ToList();
-        var guessList = guesses?.ToList(); // Usiamo i guesses passati
+        var guessList = guesses?.ToList(); 
         var results = new Point2D?[fileList.Count];
 
         using var semaphore = new SemaphoreSlim(GetOptimalConcurrency(fileList[0]));
@@ -49,7 +52,6 @@ public class AutomaticCometAlignmentStrategy : AlignmentStrategyBase
             try {
                 token.ThrowIfCancellationRequested();
                 
-                // Se l'utente ha cliccato qualcosa, lo usiamo come suggerimento
                 var guess = (guessList != null && i < guessList.Count) ? guessList[i] : null;
 
                 results[i] = await ExecuteWithRetryAsync(
@@ -75,21 +77,55 @@ public class AutomaticCometAlignmentStrategy : AlignmentStrategyBase
     private async Task<Point2D?> FindObjectCoreAsync(string path, Point2D? guess)
     {
         var data = await DataManager.GetDataAsync(path);
-        using var mat = _converter.RawToMat(data.PixelData, _metadataService.GetDoubleValue(data.Header, "BSCALE", 1.0));
+        double bScale = _metadataService.GetDoubleValue(data.Header, "BSCALE", 1.0);
+        double bZero = _metadataService.GetDoubleValue(data.Header, "BZERO", 0.0);
+        
+        using var mat = _converter.RawToMat(data.PixelData, bScale, bZero);
+
+        // ====================================================================
+        // PRE-PROCESSING (PIPELINE DI EFFETTI)
+        // ====================================================================
+        
+        // Creiamo una copia di lavoro in alta precisione (Double) per l'analisi
+        using var analysisMat = new Mat();
+        mat.ConvertTo(analysisMat, MatType.CV_64FC1);
+
+        // 1. PULIZIA MORFOLOGICA
+        // Rimuove stelle puntiformi e hot pixel, preservando la natura diffusa della cometa.
+        // Utile sia se abbiamo un guess (pulisce la ROI) sia se cerchiamo alla cieca.
+        _effects.ApplyMorphologicalCleanup(analysisMat, analysisMat, kernelSize: 3);
+
+        // 2. PESO CENTRALE (VIGNETTATURA SINTETICA)
+        // Applicato SOLO se non abbiamo un guess manuale (ricerca cieca).
+        // Aiuta a ignorare artefatti ai bordi o stelle luminose periferiche,
+        // assumendo che il target sia grossomodo al centro dell'inquadratura.
+        if (!guess.HasValue)
+        {
+            _effects.ApplyCentralWeighting(analysisMat, analysisMat, sigmaScale: 0.7);
+        }
+
+        // ====================================================================
+        // RICERCA (ANALISI)
+        // ====================================================================
 
         if (guess.HasValue) {
+            // Nota: Stimiamo il raggio sulla matrice originale 'mat' per avere 
+            // la statistica reale del rumore/densità, non quella filtrata.
             int smartRadius = EstimateSmartRadius(mat);
+            
             var roiRect = new Rect((int)(guess.Value.X - smartRadius), (int)(guess.Value.Y - smartRadius), smartRadius * 2, smartRadius * 2)
                 .Intersect(new Rect(0, 0, mat.Width, mat.Height));
 
             if (roiRect.Width > 4 && roiRect.Height > 4) {
-                using var crop = new Mat(mat, roiRect);
+                // Eseguiamo il fit sulla matrice PULITA ('analysisMat')
+                using var crop = new Mat(analysisMat, roiRect);
                 var local = _analysis.FindCenterOfLocalRegion(crop);
                 return new Point2D(local.X + roiRect.X, local.Y + roiRect.Y);
             }
         }
 
-        return _analysis.FindCenterOfLocalRegion(mat);
+        // Ricerca globale sulla matrice trattata
+        return _analysis.FindCenterOfLocalRegion(analysisMat);
     }
 
     private int EstimateSmartRadius(Mat mat) {

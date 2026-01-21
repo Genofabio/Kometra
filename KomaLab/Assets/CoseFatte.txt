@@ -160,6 +160,34 @@ Lettura header per time per ordinare caricamento immagini MultipleImageNode
     - 2 soluzioni: ASTAP (Locale), Astrometry.net (Online)
     - Andiamo di astap che sembra ottima e facilmente ilmplementabile
     - usiamo la versione da riga di comando per non aprire nuove finestre durante l'esecuzione
+    
+- Modifica metodi allineamento
+    - Automatico: Abbiamo esteso questo motore aggiungendo due metodi fondamentali per il pre-processing delle comete:
+                  
+                  ApplyCentralWeighting: Applica una vignettatura sintetica (Gaussiana inversa).
+                  
+                  Scopo: Scurisce i bordi per nascondere stelle luminose periferiche che potrebbero confondere l'algoritmo.
+                  
+                  Logica: Moltiplica l'immagine per una maschera dove il centro vale 1.0 e i bordi scendono verso 0.
+                  
+                  ApplyMorphologicalCleanup: Applica un'operazione di "Opening" (Erosione + Dilatazione).
+                  
+                  Scopo: Rimuove oggetti puntiformi (stelle piccole, hot pixel) lasciando intatta la "nuvola" diffusa della cometa.
+                  
+                  3. File: AutomaticCometAlignmentStrategy.cs
+                  Questa è la classe dove avviene la magia. Le modifiche sono state:
+                  
+                  Dependency Injection: Ora riceve IImageEffectsEngine nel costruttore.
+                  
+                  Pipeline di Pre-processing (in FindObjectCoreAsync):
+                  
+                  Converte l'immagine raw in 64-bit Float per precisione.
+                  
+                  Chiama ApplyMorphologicalCleanup per pulire il campo stellare.
+                  
+                  Chiama ApplyCentralWeighting SOLO SE non c'è un suggerimento manuale (guess == null). Questo favorisce il centro geometrico durante la ricerca "alla cieca".
+                  
+                  Analisi: Passa l'immagine così trattata (pulita e vignettata) all'AnalysisEngine per trovare il centroide, invece di passargli l'immagine grezza piena di stelle.
 
 
 

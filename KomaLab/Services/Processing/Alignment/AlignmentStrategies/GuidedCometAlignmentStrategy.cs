@@ -19,7 +19,8 @@ public class GuidedCometAlignmentStrategy : AlignmentStrategyBase
     private readonly IFitsMetadataService _metadataService;
     private readonly IFitsOpenCvConverter _converter;
     private readonly IImageAnalysisEngine _analysis;
-    private readonly IGeometricEngine _geometricEngine;
+    // GeometricEngine non serve più perché facciamo cropping locale per analisi, 
+    // non warping di template.
 
     public GuidedCometAlignmentStrategy(
         IFitsDataManager dataManager,
@@ -31,81 +32,150 @@ public class GuidedCometAlignmentStrategy : AlignmentStrategyBase
         _metadataService = metadataService;
         _converter = converter;
         _analysis = analysis;
-        _geometricEngine = geometricEngine;
     }
 
     public override async Task<Point2D?[]> CalculateAsync(
         IEnumerable<FitsFileReference> files, 
-        IEnumerable<Point2D?> guesses, // Le ancore fornite dalla UI
+        IEnumerable<Point2D?> guesses, 
         int searchRadius, 
         IProgress<AlignmentProgressReport>? progress = null,
         CancellationToken token = default)
     {
         var fileList = files.ToList();
-        var anchorList = guesses.ToList();
-        int n = fileList.Count;
-        var results = new Point2D?[n];
+        var inputList = guesses.ToList();
+        var results = new Point2D?[fileList.Count];
 
-        // Le ancore sono i punti certi forniti dall'utente (es. frame 1 e frame N)
-        var p1 = anchorList.FirstOrDefault(p => p.HasValue);
-        var pN = anchorList.LastOrDefault(p => p.HasValue);
+        // 1. ANALISI INPUT: Capiamo se usare Interpolazione Lineare o Delta JPL
+        // Se abbiamo punti validi su quasi tutti i frame, assumiamo che siano dati JPL (Dense)
+        // Se ne abbiamo pochi (es. solo inizio e fine), assumiamo modalità Lineare.
+        int validPoints = inputList.Count(x => x.HasValue);
+        bool isDenseTrajectory = validPoints > 2; 
 
-        if (n < 2 || !p1.HasValue || !pN.HasValue) 
-            return anchorList.ToArray();
+        // Troviamo il frame di partenza (il primo che ha un dato)
+        int firstIndex = inputList.FindIndex(g => g.HasValue);
+        if (firstIndex == -1) return results;
 
+        // 2. RAFFINAMENTO INIZIALE (CRUCIALE)
+        // Indipendentemente dalla strategia, dobbiamo trovare dov'è DAVVERO la cometa nel primo frame.
+        // L'utente (o il JPL) ha dato una stima approssimativa -> Noi troviamo il centroide.
+        Point2D startEstimate = inputList[firstIndex]!.Value;
+        
+        Point2D startRefined = await RefineCenterAsync(fileList[firstIndex].FilePath, startEstimate, searchRadius) 
+                               ?? startEstimate;
+        
+        results[firstIndex] = startRefined;
+
+        // 3. ESECUZIONE (Loop Parallelo)
         using var semaphore = new SemaphoreSlim(GetOptimalConcurrency(fileList[0]));
-        Mat? templateMat = null;
+        
+        // Determiniamo l'indice finale per l'interpolazione lineare
+        int lastIndex = inputList.FindLastIndex(g => g.HasValue);
+        Point2D endEstimate = (lastIndex != -1) ? inputList[lastIndex]!.Value : startEstimate;
 
-        try
+        var tasks = fileList.Select(async (file, i) =>
         {
-            // 1. ESTRAZIONE TEMPLATE (Frame 0)
-            var startData = await DataManager.GetDataAsync(fileList[0].FilePath);
-            using var startMat = _converter.RawToMat(startData.PixelData, 
-                _metadataService.GetDoubleValue(startData.Header, "BSCALE", 1.0));
-            
-            templateMat = _geometricEngine.ExtractRegion(startMat, p1.Value, searchRadius);
-            results[0] = p1;
+            if (i == firstIndex) return; // Il primo frame è già fatto e raffinato
 
-            // 2. CALCOLO TRAIETTORIA LINEARE
-            double stepX = (pN.Value.X - p1.Value.X) / (n - 1);
-            double stepY = (pN.Value.Y - p1.Value.Y) / (n - 1);
-
-            // 3. TRACKING PARALLELO
-            var tasks = Enumerable.Range(1, n - 1).Select(async i =>
+            await semaphore.WaitAsync(token);
+            try
             {
-                await semaphore.WaitAsync(token);
-                try {
-                    token.ThrowIfCancellationRequested();
-                    
-                    var expected = new Point2D(p1.Value.X + (i * stepX), p1.Value.Y + (i * stepY));
+                token.ThrowIfCancellationRequested();
 
-                    results[i] = await ExecuteWithRetryAsync(
-                        operation: async () => await ProcessFrameWithTemplateAsync(fileList[i].FilePath, templateMat, expected, searchRadius),
-                        itemIndex: i
-                    ) ?? expected;
+                Point2D estimatedPos;
 
-                    progress?.Report(new AlignmentProgressReport { 
-                        CurrentIndex = i + 1, 
-                        TotalCount = n, 
-                        FoundCenter = results[i], 
-                        Message = $"Tracking cometa frame {i+1}..." 
-                    });
+                // --- RAMO A: STRATEGIA JPL / DENSE ---
+                if (isDenseTrajectory)
+                {
+                    // Logica: "Quanto si è spostato il JPL rispetto al primo frame?"
+                    // Calcoliamo il vettore di movimento relativo secondo i dati in input
+                    if (inputList[i].HasValue)
+                    {
+                        double deltaX = inputList[i]!.Value.X - startEstimate.X;
+                        double deltaY = inputList[i]!.Value.Y - startEstimate.Y;
+
+                        // Applichiamo questo movimento alla posizione INIZIALE REALE (Raffinata)
+                        estimatedPos = new Point2D(startRefined.X + deltaX, startRefined.Y + deltaY);
+                    }
+                    else
+                    {
+                        // Buco nei dati JPL? Saltiamo o interpoliamo (qui saltiamo per sicurezza)
+                        results[i] = null;
+                        return;
+                    }
                 }
-                finally { semaphore.Release(); }
-            });
+                // --- RAMO B: STRATEGIA LINEARE ---
+                else
+                {
+                    // Interpolazione pura tra Start e End
+                    if (lastIndex == firstIndex) 
+                    {
+                        estimatedPos = startRefined; // Immagine ferma
+                    }
+                    else
+                    {
+                        double t = (double)(i - firstIndex) / (lastIndex - firstIndex);
+                        double estX = startRefined.X + (endEstimate.X - startEstimate.X) * t;
+                        double estY = startRefined.Y + (endEstimate.Y - startEstimate.Y) * t;
+                        estimatedPos = new Point2D(estX, estY);
+                    }
+                }
 
-            await Task.WhenAll(tasks);
+                // 4. RAFFINAMENTO LOCALE (Il cuore della richiesta)
+                // Ora che abbiamo la stima (Linear o JPL-Shifted), cerchiamo il vero centro.
+                results[i] = await ExecuteWithRetryAsync(
+                    async () => await RefineCenterAsync(file.FilePath, estimatedPos, searchRadius),
+                    i
+                ) ?? estimatedPos; // Fallback alla stima se il raffinamento fallisce (es. cometa troppo debole)
+
+                progress?.Report(new AlignmentProgressReport { 
+                    CurrentIndex = i + 1, 
+                    TotalCount = fileList.Count, 
+                    FoundCenter = results[i], 
+                    Message = isDenseTrajectory ? "Tracking JPL..." : "Interpolazione..." 
+                });
+            }
+            finally { semaphore.Release(); }
+        });
+
+        await Task.WhenAll(tasks);
+        
+        // Se siamo in modalità lineare, assicuriamoci di raffinare anche l'ultimo frame esplicitamente
+        // (il loop sopra lo copre, ma se lastIndex != firstIndex, verifichiamo che non sia stato saltato per logica strana)
+        if (!isDenseTrajectory && lastIndex > firstIndex && results[lastIndex] == null)
+        {
+             results[lastIndex] = await RefineCenterAsync(fileList[lastIndex].FilePath, endEstimate, searchRadius);
         }
-        finally { templateMat?.Dispose(); }
 
         return results;
     }
 
-    private async Task<Point2D?> ProcessFrameWithTemplateAsync(string path, Mat template, Point2D expected, int radius)
+    // =======================================================================
+    // MOTORE DI RAFFINAMENTO (Identico alla modalità Manuale)
+    // =======================================================================
+    private async Task<Point2D?> RefineCenterAsync(string path, Point2D guess, int radius)
     {
         var data = await DataManager.GetDataAsync(path);
-        using var fullImage = _converter.RawToMat(data.PixelData, _metadataService.GetDoubleValue(data.Header, "BSCALE", 1.0));
+        double bScale = _metadataService.GetDoubleValue(data.Header, "BSCALE", 1.0);
+        
+        using var fullMat = _converter.RawToMat(data.PixelData, bScale);
+        
+        // Creazione ROI sicura
+        int r = radius;
+        int x = (int)guess.X;
+        int y = (int)guess.Y;
+        
+        var roiRect = new Rect(x - r, y - r, r * 2, r * 2)
+            .Intersect(new Rect(0, 0, fullMat.Width, fullMat.Height));
 
-        return _analysis.FindTemplatePosition(fullImage, template, expected, radius);
+        // Se la ROI è troppo piccola o fuori bordo, ritorniamo la stima originale
+        if (roiRect.Width <= 4 || roiRect.Height <= 4) return guess;
+
+        using var roiMat = new Mat(fullMat, roiRect);
+        
+        // Usiamo l'algoritmo robusto (FindCenterOfLocalRegion) che gestisce rumore e blob
+        var localCenter = _analysis.FindCenterOfLocalRegion(roiMat);
+        
+        // Trasformiamo coordinate locali (ROI) in globali
+        return new Point2D(localCenter.X + roiRect.X, localCenter.Y + roiRect.Y);
     }
 }

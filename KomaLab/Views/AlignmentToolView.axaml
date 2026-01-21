@@ -76,9 +76,34 @@
                         <StackPanel Spacing="12">
                             <TextBlock Text="Oggetto dell'allineamento" FontSize="16" FontWeight="Bold" />
                             <Grid ColumnDefinitions="*,*">
-                                <RadioButton Grid.Column="0" GroupName="TargetGroup" Content="Cometa" Classes="segmented" CornerRadius="4,0,0,4" BorderThickness="1,1,0,1" HorizontalAlignment="Stretch"
-                                             IsChecked="{Binding SelectedTarget, Converter={StaticResource EnumToBool}, ConverterParameter={x:Static processing:AlignmentTarget.Comet}}" />
-                                <RadioButton Grid.Column="1" GroupName="TargetGroup" Content="Stelle" Classes="segmented" CornerRadius="0,4,4,0" BorderThickness="1" HorizontalAlignment="Stretch"
+                                <RadioButton Grid.Column="0" 
+                                             GroupName="TargetGroup" 
+                                             Content="Cometa" 
+                                             Classes="segmented"
+                                             IsChecked="{Binding SelectedTarget, Converter={StaticResource EnumToBool}, ConverterParameter={x:Static processing:AlignmentTarget.Comet}}"
+                                             Classes.solo="{Binding !IsMultipleImages}">
+                                    <RadioButton.Styles>
+                                        <Style Selector="RadioButton.segmented">
+                                            <Setter Property="CornerRadius" Value="4,0,0,4" />
+                                            <Setter Property="BorderThickness" Value="1,1,0,1" />
+                                            <Setter Property="HorizontalAlignment" Value="Stretch" />
+                                        </Style>
+                                        <Style Selector="RadioButton.segmented.solo">
+                                            <Setter Property="CornerRadius" Value="4" />
+                                            <Setter Property="BorderThickness" Value="1" />
+                                            <Setter Property="Grid.ColumnSpan" Value="2" />
+                                        </Style>
+                                    </RadioButton.Styles>
+                                </RadioButton>
+
+                                <RadioButton Grid.Column="1" 
+                                             GroupName="TargetGroup" 
+                                             Content="Stelle" 
+                                             Classes="segmented" 
+                                             CornerRadius="0,4,4,0" 
+                                             BorderThickness="1" 
+                                             HorizontalAlignment="Stretch"
+                                             IsVisible="{Binding IsMultipleImages}"
                                              IsChecked="{Binding SelectedTarget, Converter={StaticResource EnumToBool}, ConverterParameter={x:Static processing:AlignmentTarget.Stars}}" />
                             </Grid>
                             <Separator Margin="0,5,0,5"/>
@@ -97,30 +122,45 @@
                                 <TextBlock TextWrapping="Wrap" Opacity="0.7" IsVisible="{Binding SelectedMode, Converter={StaticResource EqualityConverter}, ConverterParameter=Guided}">Indica il nucleo sulla prima e ultima immagine.</TextBlock>
                                 <TextBlock TextWrapping="Wrap" Opacity="0.7" IsVisible="{Binding SelectedMode, Converter={StaticResource EqualityConverter}, ConverterParameter=Manual}">Ispeziona e imposta manualmente il centro per ogni immagine.</TextBlock>
                             </Panel>
-                            <Separator Margin="0,5,0,0"/> 
+                            <Separator Margin="0"/> 
                         </StackPanel>
 
                         <StackPanel Spacing="10">
-                            <TextBlock Text="Opzioni di Ricerca" FontSize="14" FontWeight="Bold" />
+                            <TextBlock Text="Opzioni di Ricerca" FontSize="14" FontWeight="Bold" Margin="0, 8, 0, 0" />
                             
-                            <StackPanel Spacing="2">
-                                <CheckBox IsChecked="{Binding UseJplAstrometry}" Content="{Binding AstrometryOptionLabel}" Margin="0" IsVisible="{Binding IsJplOptionVisible}"/>
+                            <StackPanel Spacing="2" IsVisible="{Binding IsJplOptionVisible}">
+                                <CheckBox IsChecked="{Binding UseJplAstrometry}" Content="{Binding AstrometryOptionLabel}" Margin="0"/>
                                 <StackPanel IsVisible="{Binding UseJplAstrometry}">
-                                    <Grid ColumnDefinitions="*, Auto" Margin="0,5,0,5" IsVisible="{Binding IsTargetNameInputVisible}">
-                                        <TextBox Grid.Column="0" Text="{Binding TargetName}" Watermark="Nome (es. 67P)" Margin="0,0,5,0"/>
-                                        <Button Grid.Column="1" Command="{Binding VerifyJplCommand}">
-                                            <StackPanel Orientation="Horizontal" Spacing="5">
-                                                <avalonia:MaterialIcon Kind="LinkVariant" Width="16" Height="16"/>
-                                                <TextBlock Text="Verifica"/>
-                                            </StackPanel>
-                                        </Button>
-                                    </Grid>
-                                    <ProgressBar IsIndeterminate="True" Height="2" IsVisible="{Binding IsVerifyingJpl}" Foreground="{DynamicResource ActionPrimaryBackgroundBrush}"/>
-                                    <TextBlock Text="{Binding AstrometryStatusMessage}" FontSize="11" Foreground="{Binding AstrometryStatusBrush}" TextWrapping="Wrap" Margin="2,4,0,0"/>
+                                    <ProgressBar IsIndeterminate="True" Height="2" IsVisible="{Binding IsVerifyingJpl}" 
+                                                 Foreground="{DynamicResource ActionPrimaryBackgroundBrush}"/>
+    
+                                    <TextBlock Text="{Binding AstrometryStatusMessage}" 
+                                               FontSize="11" 
+                                               TextWrapping="Wrap" 
+                                               Margin="2,4,0,0">
+        
+                                        <TextBlock.Tag>
+                                            <Binding Path="AstrometryStatus" />
+                                        </TextBlock.Tag>
+
+                                        <TextBlock.Styles>
+                                            <Style Selector="TextBlock">
+                                                <Setter Property="Foreground" Value="{DynamicResource Text.MediumGreyBrush}"/>
+                                            </Style>
+            
+                                            <Style Selector="TextBlock[Tag=Success]">
+                                                <Setter Property="Foreground" Value="{DynamicResource ActionSuccessBackgroundBrush}"/>
+                                            </Style>
+            
+                                            <Style Selector="TextBlock[Tag=Error]">
+                                                <Setter Property="Foreground" Value="{DynamicResource ActionDestructiveBackgroundBrush}"/>
+                                            </Style>
+                                        </TextBlock.Styles>
+                                    </TextBlock>
                                 </StackPanel>
                             </StackPanel>
 
-                            <StackPanel Spacing="5" Margin="0,5,0,0" IsVisible="{Binding IsSearchRadiusVisible}">
+                            <StackPanel Spacing="5" Margin="0" IsVisible="{Binding IsSearchRadiusVisible}">
                                 <TextBlock Text="Raggio di Ricerca (px):"/> 
                                 <Grid ColumnDefinitions="Auto, *" ColumnSpacing="10">
                                     <TextBox Grid.Column="0" Name="SearchRadiusTextBox" Text="{Binding SearchRadius, Mode=OneWay}" MinWidth="45" VerticalAlignment="Center" HorizontalContentAlignment="Right" GotFocus="OnSearchRadiusTextBoxGotFocus" LostFocus="OnSearchRadiusTextBoxLostFocus"/>
@@ -144,7 +184,7 @@
                 
                 <StackPanel Grid.Row="2" Spacing="10" Margin="0,15,0,0">
                     <Separator Margin="0,0,0,10"/>
-                    <Button Content="Calcola Centri" Command="{Binding CalculateCentersCommand}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" IsVisible="{Binding IsCalculateButtonVisible}" Classes="calculate"/> 
+                    <Button Content="{Binding CalculateButtonText}" Command="{Binding CalculateCentersCommand}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" IsVisible="{Binding IsCalculateButtonVisible}" Classes="calculate"/> 
                     
                     <Grid ColumnDefinitions="*, *" ColumnSpacing="10" IsVisible="{Binding IsApplyCancelButtonsVisible}">
                         <Button Grid.Column="0" Content="Annulla" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" Command="{Binding CancelCommand}" Classes="cancel"/> 
@@ -183,7 +223,7 @@
                         <Rectangle Stroke="{DynamicResource OverlaySearchBoxBrush}" StrokeThickness="1" StrokeDashArray="2,2" 
                                    Canvas.Left="{Binding Viewport.SearchBoxLeft}" Canvas.Top="{Binding Viewport.SearchBoxTop}" 
                                    Width="{Binding Viewport.SearchBoxWidth}" Height="{Binding Viewport.SearchBoxHeight}"
-                                   IsVisible="{Binding Viewport.IsSearchBoxVisible}"/>
+                                   IsVisible="{Binding IsSearchBoxOverlayVisible}"/>
                         
                         <Path Data="M0,10 L20,10 M10,0 L10,20" Stroke="{DynamicResource OverlayTargetMarkerBrush}" StrokeThickness="1"
                               Canvas.Left="{Binding Viewport.TargetMarkerScreenX}" Canvas.Top="{Binding Viewport.TargetMarkerScreenY}"
@@ -204,14 +244,30 @@
                         <Button Name="ResetThresholdsButton" ToolTip.Tip="Reset Stretch" Command="{Binding ResetThresholdsCommand}"><avalonia:MaterialIcon Kind="Contrast" Width="16" Height="16" /></Button>
                     </StackPanel>
 
-                    <StackPanel Orientation="Horizontal" Spacing="4" Margin="10" HorizontalAlignment="Left" VerticalAlignment="Bottom" ZIndex="1" Background="Transparent" PointerPressed="OnControlsPointerPressed" IsVisible="{Binding IsNavigationVisible}">
+                    <StackPanel Orientation="Horizontal" Spacing="4" Margin="10" 
+                                HorizontalAlignment="Left" VerticalAlignment="Bottom" 
+                                ZIndex="1" Background="Transparent" 
+                                PointerPressed="OnControlsPointerPressed" 
+                                IsVisible="{Binding IsNavigationVisible}">
+    
+                        <Button Name="GoToFirstImageButton" Command="{Binding Navigator.MoveToFirstCommand}" ToolTip.Tip="Prima Immagine">
+                            <avalonia:MaterialIcon Kind="ChevronDoubleLeft" Width="16" Height="16" />
+                        </Button>
+
                         <Button Name="PreviousImageButton" Command="{Binding Navigator.PreviousCommand}" ToolTip.Tip="Precedente">
                             <avalonia:MaterialIcon Kind="ChevronLeft" Width="16" Height="16" />
                         </Button>
+    
                         <TextBlock Text="{Binding CurrentImageText}" VerticalAlignment="Center" Margin="8,0" Foreground="White" FontWeight="Bold"/>
+    
                         <Button Name="NextImageButton" Command="{Binding Navigator.NextCommand}" ToolTip.Tip="Successiva">
                             <avalonia:MaterialIcon Kind="ChevronRight" Width="16" Height="16" />
                         </Button>
+
+                        <Button Name="GoToLastImageButton" Command="{Binding Navigator.MoveToLastCommand}" ToolTip.Tip="Ultima Immagine">
+                            <avalonia:MaterialIcon Kind="ChevronDoubleRight" Width="16" Height="16" />
+                        </Button>
+    
                     </StackPanel>
                 </Grid>
             </Border>

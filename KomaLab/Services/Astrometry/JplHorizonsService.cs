@@ -8,15 +8,6 @@ using KomaLab.Models.Astrometry;
 
 namespace KomaLab.Services.Astrometry;
 
-// ---------------------------------------------------------------------------
-// FILE: JplHorizonsService.cs
-// RUOLO: Servizio Esterno (API Client)
-// DESCRIZIONE:
-// Interroga le effemeridi NASA JPL Horizons per ottenere coordinate RA/DEC
-// di comete/asteroidi in un dato istante e per una data posizione osservatore.
-// DISACCOPPIAMENTO: Utilizza AstroParser per la logica matematica universale.
-// ---------------------------------------------------------------------------
-
 public class JplHorizonsService : IJplHorizonsService
 {
     private readonly HttpClient _httpClient;
@@ -33,47 +24,77 @@ public class JplHorizonsService : IJplHorizonsService
         GeographicLocation? observerLocation = null,
         CancellationToken token = default)
     {
-        // 1. TENTATIVO PRINCIPALE (Usa il nome così com'è)
-        string response = await CallJplApi(objectName, observationTime, observerLocation, token);
+        // 1. PULIZIA SMART DEL NOME
+        var (desName, fullName) = ExtractSmartNames(objectName);
 
-        if (IsSuccessResponse(response)) 
-            return ParseJplResponse(response);
+        // Debug Log
+        System.Diagnostics.Debug.WriteLine($"[JPL LOGIC] Input: '{objectName}' -> DES: '{desName}', Full: '{fullName}'");
 
-        // 2. FALLBACK PER NOMI COMPLESSI (es. "C/2023 A3 (Tsuchinshan-ATLAS)")
-        if (response.Contains("No matches found") && objectName.Contains("/"))
+        // 2. STRATEGIA A: RICERCA DIRETTA PER DESIGNAZIONE (DES=...)
+        // Ideale per "67P", "12P", ecc.
+        string response = await CallJplApi($"DES={desName};", observationTime, observerLocation, token);
+
+        if (IsSuccessResponse(response)) return ParseJplResponse(response);
+
+        // 3. STRATEGIA B: RICERCA GENERICA (Fallback)
+        if (ContainsError(response))
         {
-            string shortName = objectName.Split(new[] { '/', '(' })[0].Trim();
-            
-            if (objectName.StartsWith("C/", StringComparison.OrdinalIgnoreCase) && !shortName.StartsWith("C/"))
-                shortName = "C/" + shortName;
+            System.Diagnostics.Debug.WriteLine("[JPL LOGIC] Strategy A failed. Trying Strategy B (Name search)...");
 
-            response = await CallJplApi(shortName, observationTime, observerLocation, token);
-            if (IsSuccessResponse(response)) 
-                return ParseJplResponse(response);
+            // FIX: Rimosse le virgolette singole manuali che rompevano l'URL
+            // Proviamo con virgolette doppie per stringa esatta
+            response = await CallJplApi($"\"{fullName}\";", observationTime, observerLocation, token);
+            if (IsSuccessResponse(response)) return ParseJplResponse(response);
+            
+            // Ultimo tentativo: prova senza virgolette, solo il nome nudo e crudo
+             if (ContainsError(response))
+             {
+                 System.Diagnostics.Debug.WriteLine("[JPL LOGIC] Strategy B (Quoted) failed. Trying Strategy B (Raw)...");
+                 response = await CallJplApi($"{fullName};", observationTime, observerLocation, token);
+                 if (IsSuccessResponse(response)) return ParseJplResponse(response);
+             }
         }
 
-        // 3. GESTIONE AMBIGUITÀ (Lista di candidati multipli)
+        // 4. STRATEGIA C: GESTIONE AMBIGUITÀ (Lista ID)
         if (IsAmbiguousResponse(response))
         {
             string bestId = FindBestIdFromAmbiguityList(response, observationTime.Year);
-            
+            System.Diagnostics.Debug.WriteLine($"[JPL LOGIC] Ambiguity detected. Best ID candidate: '{bestId}'");
+
             if (!string.IsNullOrEmpty(bestId))
             {
-                if (!bestId.EndsWith(";")) bestId += ";";
-                
                 response = await CallJplApi(bestId, observationTime, observerLocation, token);
-                
-                if (IsSuccessResponse(response))
-                    return ParseJplResponse(response);
+                if (IsSuccessResponse(response)) return ParseJplResponse(response);
             }
         }
 
+        System.Diagnostics.Debug.WriteLine("[JPL LOGIC] All strategies failed.");
         return null;
     }
 
     // =======================================================================
-    // HELPERS DI COMUNICAZIONE (API CALL)
+    // HELPERS DI LOGICA
     // =======================================================================
+
+    private (string DesName, string FullName) ExtractSmartNames(string rawName)
+    {
+        if (string.IsNullOrWhiteSpace(rawName)) return ("", "");
+
+        // Rimuove parentesi extra: "C/2023 A3 (Atlas)" -> "C/2023 A3"
+        string clean = rawName.Split('(')[0].Trim();
+
+        // Regex per Comete Periodiche (es. 67P, 12P, etc.)
+        // Se inizia con "numero + P + /", prendiamo solo "numero + P" per la DES
+        var match = Regex.Match(clean, @"^(\d+P)/");
+        if (match.Success)
+        {
+            return (match.Groups[1].Value, clean); // ("67P", "67P/Churyumov...")
+        }
+
+        // Regex per Comete Non Periodiche (es. C/2023 A3)
+        // Per queste, la DES solitamente è tutto il codice
+        return (clean, clean);
+    }
 
     private async Task<string> CallJplApi(
         string command, 
@@ -81,127 +102,183 @@ public class JplHorizonsService : IJplHorizonsService
         GeographicLocation? loc, 
         CancellationToken token)
     {
+        var queryParams = new System.Collections.Generic.List<string>
+        {
+            "format=text",
+            // FIX: Command escaping corretto
+            $"COMMAND='{Uri.EscapeDataString(command)}'",
+            "OBJ_DATA='NO'",
+            "MAKE_EPHEM='YES'",
+            "EPHEM_TYPE='OBSERVER'",
+            "QUANTITIES='1'", 
+            "CSV_FORMAT='YES'",
+            "START_TIME='" + time.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture) + "'",
+            "STOP_TIME='" + time.AddMinutes(1).ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture) + "'",
+            "STEP_SIZE='1m'"
+        };
+
+        if (loc != null)
+        {
+            queryParams.Add("CENTER='coord@399'");
+            queryParams.Add("COORD_TYPE='GEODETIC'");
+            string siteCoord = $"'{loc.Longitude.ToString(CultureInfo.InvariantCulture)},{loc.Latitude.ToString(CultureInfo.InvariantCulture)},{loc.AltitudeKm.ToString(CultureInfo.InvariantCulture)}'";
+            queryParams.Add($"SITE_COORD={siteCoord}");
+        }
+        else
+        {
+            queryParams.Add("CENTER='500'");
+        }
+
+        var builder = new UriBuilder(BaseUrl) { Query = string.Join("&", queryParams) };
+        string fullUrl = builder.ToString();
+
+        // ---------------------------------------------------------
+        // DEBUG LOGS (RIPRISTINATI)
+        // ---------------------------------------------------------
+        System.Diagnostics.Debug.WriteLine("--------------------------------------------------");
+        System.Diagnostics.Debug.WriteLine($"[JPL REQUEST] Internal Command: {command}");
+        System.Diagnostics.Debug.WriteLine($"[JPL URL]: {fullUrl}");
+        System.Diagnostics.Debug.WriteLine("--------------------------------------------------");
+
         try
         {
-            string startTime = time.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture);
-            string stopTime = time.AddMinutes(1).ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture);
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(token);
+            cts.CancelAfter(TimeSpan.FromSeconds(20)); // Timeout aumentato a 20s
             
-            string centerParam = "'500'"; // Default Geocentrico
-            string coordExtras = "";
+            var response = await _httpClient.GetStringAsync(fullUrl, cts.Token);
 
-            if (loc != null)
-            {
-                centerParam = "'coord@399'"; 
-                string lon = loc.Longitude.ToString(CultureInfo.InvariantCulture);
-                string lat = loc.Latitude.ToString(CultureInfo.InvariantCulture);
-                string alt = loc.AltitudeKm.ToString(CultureInfo.InvariantCulture);
-                coordExtras = $"&COORD_TYPE='GEODETIC'&SITE_COORD='{lon},{lat},{alt}'";
-            }
+            // ---------------------------------------------------------
+            // DEBUG RESPONSE
+            // ---------------------------------------------------------
+            System.Diagnostics.Debug.WriteLine($"[JPL RESPONSE LENGTH]: {response.Length} chars");
+            string preview = response.Length > 2000 ? response.Substring(0, 2000) + "... [TRUNCATED]" : response;
+            System.Diagnostics.Debug.WriteLine($"[JPL RESPONSE BODY]:\n{preview}");
+            System.Diagnostics.Debug.WriteLine("--------------------------------------------------");
 
-            var builder = new UriBuilder(BaseUrl);
-            string query = $"format=text" +
-                           $"&COMMAND='{Uri.EscapeDataString(command)}'" +
-                           $"&OBJ_DATA='NO'" +
-                           $"&MAKE_EPHEM='YES'" +
-                           $"&EPHEM_TYPE='OBSERVER'" +
-                           $"&CENTER={centerParam}" +
-                           $"&START_TIME='{startTime}'" +
-                           $"&STOP_TIME='{stopTime}'" +
-                           $"&STEP_SIZE='1m'" +
-                           $"&QUANTITIES='1'" +
-                           $"&CSV_FORMAT='YES'" +
-                           coordExtras;
-            
-            builder.Query = query;
-            return await _httpClient.GetStringAsync(builder.ToString(), token);
+            return response;
         }
-        catch { return string.Empty; }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"[JPL ERROR]: {ex.GetType().Name} - {ex.Message}");
+            return string.Empty;
+        }
     }
-
-    // =======================================================================
-    // HELPERS DI PARSING (DATA EXTRACTION)
-    // =======================================================================
 
     private (double Ra, double Dec)? ParseJplResponse(string response)
     {
-        int startIndex = response.IndexOf("$$SOE", StringComparison.Ordinal);
-        int endIndex = response.IndexOf("$$EOE", StringComparison.Ordinal);
+        int start = response.IndexOf("$$SOE", StringComparison.Ordinal);
+        int end = response.IndexOf("$$EOE", StringComparison.Ordinal);
         
-        if (startIndex == -1 || endIndex == -1) return null;
+        if (start == -1 || end == -1) return null;
 
-        string dataBlock = response.Substring(startIndex + 5, endIndex - (startIndex + 5)).Trim();
-        string[] lines = dataBlock.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
+        var dataSection = response.Substring(start + 5, end - (start + 5)).Trim();
+        var lines = dataSection.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
         
-        if (lines.Length == 0) return null;
-
-        string[] parts = lines[0].Split(',');
-        
-        double? foundRa = null;
-        double? foundDec = null;
-        bool isRaInHours = false;
-
-        for (int i = 1; i < parts.Length; i++)
+        foreach (var line in lines)
         {
-            string p = parts[i].Trim();
-            if (string.IsNullOrEmpty(p)) continue;
+            var cleanLine = line.Trim();
+            if (string.IsNullOrEmpty(cleanLine)) continue;
 
-            // --- UTILIZZO DEL MOTORE DI DOMINIO (AstroParser) ---
-            double? val = AstroParser.ParseDegrees(p);
+            var columns = cleanLine.Split(',');
+            
+            string? rawRa = null;
+            string? rawDec = null;
 
-            if (val.HasValue)
+            // Iteriamo sulle colonne cercando RA e DEC
+            foreach (var rawCol in columns)
             {
-                if (foundRa == null)
+                string col = rawCol.Trim();
+                if (string.IsNullOrWhiteSpace(col)) continue;
+
+                // 1. FILTRO DI SICUREZZA:
+                // La data contiene lettere (es. "Feb"), le coordinate NO.
+                // Se c'è una lettera, saltiamo la colonna.
+                bool hasLetters = false;
+                foreach (char c in col)
                 {
-                    foundRa = val;
-                    // Se la stringa contiene separatori, JPL la intende in ORE per la RA
-                    if (p.Contains(" ") || p.Contains(":")) isRaInHours = true;
+                    if (char.IsLetter(c)) 
+                    { 
+                        hasLetters = true; 
+                        break; 
+                    }
                 }
-                else
+                if (hasLetters) continue;
+
+                // 2. IDENTIFICAZIONE COORDINATA:
+                // Deve iniziare con un numero, un '+' o un '-' (Sì, il MENO è controllato qui!)
+                // E deve contenere uno spazio o un punto (formato "HH MM SS" o decimale)
+                bool startsWithSignOrDigit = char.IsDigit(col[0]) || col[0] == '-' || col[0] == '+';
+                bool hasStructure = col.Contains(" ") || col.Contains(".");
+
+                if (startsWithSignOrDigit && hasStructure)
                 {
-                    foundDec = val;
-                    break; 
+                    if (rawRa == null) rawRa = col; // La prima che troviamo è RA
+                    else 
+                    {
+                        rawDec = col; // La seconda è DEC
+                        break; // Trovate entrambe, usciamo dal loop colonne
+                    }
+                }
+            }
+
+            if (rawRa != null && rawDec != null)
+            {
+                double? ra = AstroParser.ParseDegrees(rawRa);
+                double? dec = AstroParser.ParseDegrees(rawDec);
+
+                if (ra.HasValue && dec.HasValue)
+                {
+                    double finalRa = ra.Value;
+                    // Se RA è in formato ore (ha spazi o due punti), converti in gradi
+                    if (rawRa.Contains(" ") || rawRa.Contains(":")) 
+                    {
+                        finalRa *= 15.0;
+                    }
+
+                    System.Diagnostics.Debug.WriteLine($"[JPL PARSER] Success -> RA: {finalRa}, DEC: {dec.Value}");
+                    return (finalRa, dec.Value);
                 }
             }
         }
 
-        if (foundRa.HasValue && foundDec.HasValue)
-        {
-            double finalRa = foundRa.Value;
-            // Conversione Ore -> Gradi (1h = 15°)
-            if (isRaInHours) finalRa *= 15.0;
-            
-            return (finalRa, foundDec.Value);
-        }
-
+        System.Diagnostics.Debug.WriteLine($"[JPL PARSER] Failed to find valid numeric coordinates in:\n{dataSection}");
         return null;
     }
 
     private string FindBestIdFromAmbiguityList(string response, int targetYear)
     {
-        var regex = new Regex(@"^\s*(\d{7,9}|[A-Za-z0-9\/]+)\s+.*?(\d{4})", RegexOptions.Multiline);
+        // Regex per catturare il Record # (prima colonna) e l'Epoch-yr (seconda colonna)
+        // Esempio riga: " 90000700     2006      67P ..."
+        var regex = new Regex(@"^\s*(\d+)\s+(\d{4})", RegexOptions.Multiline);
         
         string bestId = "";
-        int minYearDiff = int.MaxValue;
+        int minDiff = int.MaxValue;
 
         foreach (Match match in regex.Matches(response))
         {
-            string id = match.Groups[1].Value;
+            if (match.Value.Contains("Epoch") || match.Value.Contains("JDT")) continue;
+
+            string id = match.Groups[1].Value; // Cattura "90000700"
+            
             if (int.TryParse(match.Groups[2].Value, out int epochYear))
             {
                 int diff = Math.Abs(epochYear - targetYear);
-                if (diff < minYearDiff) 
+                if (diff < minDiff) 
                 { 
-                    minYearDiff = diff; 
+                    minDiff = diff; 
                     bestId = id; 
                 }
             }
         }
-        return bestId;
+
+        // FIX CRITICO: Se è un ID numerico (Record #), NON AGGIUNGERE "DES="!
+        // JPL vuole solo "90000700;" per cercare per ID.
+        if (string.IsNullOrEmpty(bestId)) return "";
+        
+        return $"{bestId};"; 
     }
 
-    private bool IsSuccessResponse(string response) => response.Contains("$$SOE");
-    
-    private bool IsAmbiguousResponse(string response) => 
-        response.Contains("Matching small-bodies") || 
-        response.Contains("Multiple major-bodies");
+    private bool IsSuccessResponse(string r) => !string.IsNullOrEmpty(r) && r.Contains("$$SOE");
+    private bool ContainsError(string r) => string.IsNullOrEmpty(r) || r.Contains("No matches found") || r.Contains("Error");
+    private bool IsAmbiguousResponse(string r) => !string.IsNullOrEmpty(r) && (r.Contains("Multiple major-bodies") || r.Contains("Matching small-bodies"));
 }

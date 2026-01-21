@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 using KomaLab.Models.Fits;
 using KomaLab.Models.Primitives;
 using KomaLab.Models.Processing;
+using OpenCvSharp;
 
 namespace KomaLab.Services.Processing.Alignment;
 
@@ -30,4 +31,10 @@ public interface IAlignmentService
         List<FitsFileReference> files, 
         List<Point2D?> centers, 
         AlignmentTarget target);
+    
+    /// <summary>
+    /// Restituisce la funzione di processing pronta per essere eseguita dal BatchService.
+    /// Il Service configura internamente la logica (Stelle vs Comete) e l'uso dell'Engine Geometrico.
+    /// </summary>
+    Action<Mat, Mat, int> GetWarpingProcessor(AlignmentMap map);
 }

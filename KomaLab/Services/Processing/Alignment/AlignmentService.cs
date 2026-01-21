@@ -22,23 +22,26 @@ public class AlignmentService : IAlignmentService
     private readonly IFitsOpenCvConverter _converter;
     private readonly IImageAnalysisEngine _analysis;
     private readonly IGeometricEngine _geometricEngine;
+    private readonly IImageEffectsEngine _effectsEngine;
 
     public AlignmentService(
         IFitsDataManager dataManager,
         IFitsMetadataService metadataService,
         IFitsOpenCvConverter converter,
         IImageAnalysisEngine analysis,
-        IGeometricEngine geometricEngine)
+        IGeometricEngine geometricEngine,
+        IImageEffectsEngine effectsEngine)
     {
         _dataManager = dataManager ?? throw new ArgumentNullException(nameof(dataManager));
         _metadataService = metadataService ?? throw new ArgumentNullException(nameof(metadataService));
         _converter = converter ?? throw new ArgumentNullException(nameof(converter));
         _analysis = analysis ?? throw new ArgumentNullException(nameof(analysis));
         _geometricEngine = geometricEngine ?? throw new ArgumentNullException(nameof(geometricEngine));
+        _effectsEngine = effectsEngine ?? throw new ArgumentNullException(nameof(effectsEngine));
     }
 
     // =======================================================================
-    // 1. CALCOLO CENTROIDI (Strategie)
+    // 1. CALCOLO CENTROIDI
     // =======================================================================
 
     public async Task<IEnumerable<Point2D?>> CalculateCentersAsync(
@@ -51,10 +54,8 @@ public class AlignmentService : IAlignmentService
         IProgress<AlignmentProgressReport>? progress = null,
         CancellationToken token = default)
     {
-        // Istanziazione dinamica della strategia tramite factory interna
+        // Il Service delega la logica specifica alla strategia corretta (Manuale, Guidata, Auto)
         IAlignmentStrategy strategy = CreateStrategy(target, mode, method);
-
-        // Calcolo delegato: i guesses sono passati esternamente per mantenere puliti i modelli
         return await strategy.CalculateAsync(files, guesses, searchRadius, progress, token);
     }
 
@@ -70,16 +71,17 @@ public class AlignmentService : IAlignmentService
         Size2D targetSize;
         Point2D globalShift = new Point2D(0, 0);
 
+        // Se allineiamo le stelle, dobbiamo trovare l'unione di tutti i campi (canvas grande)
         if (target == AlignmentTarget.Stars)
         {
-            // Allineamento Siderale: Canvas "Unione" per preservare tutto il campo visibile
             var result = await CalculateUnionGeometryAsync(files, centers);
             targetSize = result.Size;
             globalShift = result.Shift;
         }
         else
         {
-            // Allineamento Oggetto: Canvas centrato sul target con analisi dell'ingombro dati
+            // Se allineiamo una cometa, vogliamo che la cometa sia al centro di un canvas
+            // che contenga l'immagine più "estesa" dal suo centroide.
             targetSize = await CalculatePerfectCanvasSizeAsync(files, centers);
         }
 
@@ -93,59 +95,103 @@ public class AlignmentService : IAlignmentService
     }
 
     // =======================================================================
-    // 3. LOGICA GEOMETRICA AVANZATA (No Placeholders)
+    // 3. PROCESSORE DI WARPING (Per Batch Service)
+    // =======================================================================
+
+    public Action<Mat, Mat, int> GetWarpingProcessor(AlignmentMap map)
+    {
+        // Ottimizzazione: Estraiamo i dati dalla mappa una sola volta
+        var canvasCenter = new Point2D(map.TargetSize.Width / 2.0, map.TargetSize.Height / 2.0);
+        var targetSize = map.TargetSize;
+        var centers = map.Centers;
+        var isStarAlignment = map.Target == AlignmentTarget.Stars;
+        var globalShift = map.GlobalShift;
+
+        // Restituiamo la Lambda che verrà eseguita in parallelo sui thread del BatchService
+        return (src, dst, index) =>
+        {
+            if (index < 0 || index >= centers.Count || centers[index] == null)
+            {
+                src.CopyTo(dst);
+                return;
+            }
+
+            Point2D sourcePoint = centers[index]!.Value;
+            
+            // Determiniamo la destinazione in base al target
+            Point2D destinationPoint = isStarAlignment 
+                ? globalShift 
+                : canvasCenter;
+
+            // Esecuzione della traslazione sub-pixel tramite l'Engine geometrico
+            using var warped = _geometricEngine.WarpTranslation(
+                src, 
+                sourcePoint, 
+                destinationPoint, 
+                targetSize
+            );
+        
+            warped.CopyTo(dst);
+        };
+    }
+
+    // =======================================================================
+    // 4. HELPERS GEOMETRICI
     // =======================================================================
 
     private async Task<(Size2D Size, Point2D Shift)> CalculateUnionGeometryAsync(
         List<FitsFileReference> files, List<Point2D?> centers)
     {
-        double minLeft = double.MaxValue, minTop = double.MaxValue;
-        double maxRight = double.MinValue, maxBottom = double.MinValue;
-        bool hasData = false;
+        double minX = 0, minY = 0, maxX = 0, maxY = 0;
+        bool initialized = false;
 
         for (int i = 0; i < files.Count; i++)
         {
             if (i >= centers.Count || centers[i] == null) continue;
             
             var header = await _dataManager.GetHeaderOnlyAsync(files[i].FilePath);
-            if (header != null)
-            {
-                hasData = true;
-                double w = _metadataService.GetIntValue(header, "NAXIS1");
-                double h = _metadataService.GetIntValue(header, "NAXIS2");
-                var c = centers[i]!.Value;
+            if (header == null) continue;
 
-                // Calcolo spostamenti relativi rispetto al centroide
-                minLeft = Math.Min(minLeft, -c.X);
-                minTop = Math.Min(minTop, -c.Y);
-                maxRight = Math.Max(maxRight, w - c.X);
-                maxBottom = Math.Max(maxBottom, h - c.Y);
+            double w = _metadataService.GetIntValue(header, "NAXIS1");
+            double h = _metadataService.GetIntValue(header, "NAXIS2");
+            var c = centers[i]!.Value;
+
+            // Calcolo distanze relative dal centroide ai bordi
+            double relL = -c.X;
+            double relT = -c.Y;
+            double relR = w - c.X;
+            double relB = h - c.Y;
+
+            if (!initialized) {
+                minX = relL; maxX = relR; minY = relT; maxY = relB;
+                initialized = true;
+            } else {
+                minX = Math.Min(minX, relL); maxX = Math.Max(maxX, relR);
+                minY = Math.Min(minY, relT); maxY = Math.Max(maxY, relB);
             }
         }
 
-        if (!hasData) return (new Size2D(1024, 1024), new Point2D(0, 0));
+        if (!initialized) return (new Size2D(1024, 1024), new Point2D(0, 0));
 
-        double totalW = Math.Ceiling(maxRight - minLeft);
-        double totalH = Math.Ceiling(maxBottom - minTop);
-
-        // Il GlobalShift corregge la posizione affinché l'intero stack rientri nel canvas positivo
-        double shiftX = (totalW / 2.0) - (-minLeft);
-        double shiftY = (totalH / 2.0) - (-minTop);
-
-        return (new Size2D(totalW, totalH), new Point2D(shiftX, shiftY));
+        return (
+            new Size2D(Math.Ceiling(maxX - minX), Math.Ceiling(maxY - minY)), 
+            new Point2D(-minX, -minY)
+        );
     }
 
     private async Task<Size2D> CalculatePerfectCanvasSizeAsync(
         List<FitsFileReference> files, List<Point2D?> centers)
     {
         double maxRadiusX = 0, maxRadiusY = 0;
-        // Parallelismo limitato per proteggere la RAM durante l'analisi pixel
+        
+        // Usiamo un semaforo per non saturare la RAM caricando troppi FITS insieme
         using var semaphore = new SemaphoreSlim(Math.Clamp(Environment.ProcessorCount / 2, 1, 4));
         var tasks = new List<Task<(double Rx, double Ry)>>();
 
         for (int i = 0; i < files.Count; i++)
         {
             if (i >= centers.Count || centers[i] == null) continue;
+            
             string path = files[i].FilePath;
             Point2D center = centers[i]!.Value;
 
@@ -155,10 +201,8 @@ public class AlignmentService : IAlignmentService
                 try
                 {
                     var data = await _dataManager.GetDataAsync(path);
-                    using Mat mat = _converter.RawToMat(data.PixelData, 
-                        _metadataService.GetDoubleValue(data.Header, "BSCALE", 1.0));
+                    using Mat mat = _converter.RawToMat(data.PixelData, _metadataService.GetDoubleValue(data.Header, "BSCALE", 1.0));
                     
-                    // Identificazione dei bordi reali dei dati astronomici
                     Rect2D validBox = _analysis.FindValidDataBox(mat);
                     if (validBox.Width > 0)
                     {
@@ -182,24 +226,17 @@ public class AlignmentService : IAlignmentService
         return new Size2D((int)Math.Ceiling(maxRadiusX * 2), (int)Math.Ceiling(maxRadiusY * 2));
     }
 
-    // =======================================================================
-    // 4. FACTORY INTERNA (Cablaggio Strategie)
-    // =======================================================================
-
     private IAlignmentStrategy CreateStrategy(AlignmentTarget target, AlignmentMode mode, CenteringMethod method)
     {
-        // Nota: Le strategie ricevono i servizi necessari tramite costruttore
         if (target == AlignmentTarget.Stars)
-        {
             return new StarAlignmentStrategy(_dataManager, _metadataService, _converter, _analysis);
-        }
 
         return mode switch
         {
             AlignmentMode.Manual => new ManualCometAlignmentStrategy(_dataManager, _metadataService, _converter, _analysis, method),
             AlignmentMode.Guided => new GuidedCometAlignmentStrategy(_dataManager, _metadataService, _converter, _analysis, _geometricEngine),
-            AlignmentMode.Automatic => new AutomaticCometAlignmentStrategy(_dataManager, _metadataService, _converter, _analysis),
-            _ => throw new NotSupportedException($"Modalità {mode} non supportata per {target}.")
+            AlignmentMode.Automatic => new AutomaticCometAlignmentStrategy(_dataManager, _metadataService, _converter, _analysis, _effectsEngine),
+            _ => throw new NotSupportedException($"Modalità {mode} non supportata.")
         };
     }
 }

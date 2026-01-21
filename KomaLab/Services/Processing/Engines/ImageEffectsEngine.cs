@@ -90,4 +90,69 @@ public class ImageEffectsEngine : IImageEffectsEngine
                 break;
         }
     }
+    
+    /// <summary>
+    /// Applica una vignettatura sintetica per dare peso maggiore al centro dell'immagine.
+    /// Fondamentale per ignorare stelle ai bordi durante il tracking di comete.
+    /// </summary>
+    /// <param name="sigmaScale">Quanto è "larga" la zona centrale (0.4 è standard)</param>
+    public void ApplyCentralWeighting(Mat src, Mat dst, double sigmaScale = 0.4)
+    {
+        if (src.Empty()) return;
+
+        // Assicuriamo che dst abbia la dimensione giusta
+        if (dst.Size() != src.Size() || dst.Type() != src.Type())
+            src.CopyTo(dst);
+
+        int w = src.Cols;
+        int h = src.Rows;
+
+        // 1. Generiamo i kernel gaussiani 1D
+        // Usiamo CV_32F o CV_64F per la maschera
+        using Mat gX = Cv2.GetGaussianKernel(w, w * sigmaScale, MatType.CV_32FC1);
+        using Mat gY = Cv2.GetGaussianKernel(h, h * sigmaScale, MatType.CV_32FC1);
+        
+        // 2. Creiamo la maschera 2D (Outer Product: M = gY * gX')
+        using Mat gXt = new Mat();
+        Cv2.Transpose(gX, gXt);
+        
+        // Nota: "*" tra Mat in OpenCvSharp è moltiplicazione matriciale (quello che vogliamo qui per creare la griglia)
+        using Mat mask = gY * gXt; 
+
+        // 3. Normalizziamo la maschera [0..1] per sicurezza
+        Cv2.Normalize(mask, mask, 0, 1, NormTypes.MinMax);
+
+        // 4. Moltiplicazione Element-Wise (Pixel per Pixel)
+        // Dobbiamo gestire i tipi: se src è ushort, dobbiamo convertire la maschera o src
+        if (src.Depth() == MatType.CV_8U || src.Depth() == MatType.CV_16U)
+        {
+            // Convertiamo src a float temporaneamente per la moltiplicazione precisa
+            using Mat srcFloat = new Mat();
+            src.ConvertTo(srcFloat, MatType.CV_32FC1);
+            
+            Cv2.Multiply(srcFloat, mask, srcFloat);
+            
+            // Torniamo al tipo originale in dst
+            srcFloat.ConvertTo(dst, src.Type());
+        }
+        else
+        {
+            // Se è già float/double, moltiplichiamo diretto
+            // Assicuriamoci che la maschera abbia lo stesso tipo esatto
+            using Mat maskConverted = new Mat();
+            mask.ConvertTo(maskConverted, src.Type());
+            Cv2.Multiply(src, maskConverted, dst);
+        }
+    }
+
+    /// <summary>
+    /// Applica un'apertura morfologica per rimuovere stelle puntiformi e hot pixel,
+    /// lasciando intatta la struttura diffusa della cometa.
+    /// </summary>
+    public void ApplyMorphologicalCleanup(Mat src, Mat dst, int kernelSize = 3)
+    {
+        using Mat kernel = Cv2.GetStructuringElement(MorphShapes.Ellipse, new Size(kernelSize, kernelSize));
+        // MorphTypes.Open = Erosione seguita da Dilatazione (Rimuove piccoli oggetti luminosi)
+        Cv2.MorphologyEx(src, dst, MorphTypes.Open, kernel);
+    }
 }

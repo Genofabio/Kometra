@@ -368,7 +368,7 @@ public class ImageAnalysisEngine : IImageAnalysisEngine
 
         // 3. Raffinamento Sub-Pixel (usando FindCenterOfLocalRegion su crop interno)
         // Questo è ciò che mancava nella "New Version"
-        int refineRad = searchRadius / 2;
+        int refineRad = searchRadius;
         int rsx = (int)Math.Max(0, roughLocal.X - refineRad);
         int rsy = (int)Math.Max(0, roughLocal.Y - refineRad);
         int rsw = (int)Math.Min(refineRad * 2, searchRegion.Width - rsx);
