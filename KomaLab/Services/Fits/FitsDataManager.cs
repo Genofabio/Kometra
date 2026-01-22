@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Concurrent;
 using System.IO;
+using System.Runtime.InteropServices; // Necessario per Marshal.SizeOf
 using System.Threading.Tasks;
 using KomaLab.Models.Fits;
 using KomaLab.Models.Fits.Structure;
@@ -14,7 +15,6 @@ public class FitsDataManager : IFitsDataManager
     private readonly IFitsIoService _ioService;
     private readonly IMemoryCache _cache;
     
-    // Tracciamento centralizzato per la pulizia a fine sessione
     private readonly ConcurrentBag<string> _tempFilesTracker = new();
     private static readonly TimeSpan CacheExpiration = TimeSpan.FromMinutes(10);
 
@@ -42,7 +42,9 @@ public class FitsDataManager : IFitsDataManager
             if (header == null || pixels == null)
                 throw new FileNotFoundException($"File non valido: {path}");
 
-            entry.Size = Buffer.ByteLength(pixels); 
+            // MODIFICA: Calcolo deterministico della dimensione per il limite globale
+            entry.Size = CalculateArraySize(pixels); 
+            
             return new FitsDataPackage(path, header, pixels);
         }) ?? throw new InvalidOperationException("Errore cache");
     }
@@ -63,18 +65,17 @@ public class FitsDataManager : IFitsDataManager
     {
         await _ioService.WriteFileAsync(path, pixels, header);
 
-        // Aggiornamento immediato cache (Write-Through)
         var package = new FitsDataPackage(path, header, pixels);
         _cache.Set(path, package, new MemoryCacheEntryOptions 
         { 
             SlidingExpiration = CacheExpiration,
-            Size = Buffer.ByteLength(pixels)
+            // MODIFICA: Calcolo deterministico della dimensione per il limite globale
+            Size = CalculateArraySize(pixels)
         });
     }
 
     public async Task<FitsFileReference> SaveAsTemporaryAsync(Array pixels, FitsHeader header, string context)
     {
-        // Chiediamo all'IO service un path grezzo ma lo gestiamo noi
         string fullPath = _ioService.BuildRawPath(context, $"{Guid.NewGuid()}.fits");
 
         await SaveDataAsync(fullPath, pixels, header);
@@ -89,13 +90,8 @@ public class FitsDataManager : IFitsDataManager
 
     public async Task<string> CreateSandboxCopyAsync(string originalPath, string context)
     {
-        // Generazione path tramite meccanismo di IO Service
         string tempPath = _ioService.BuildRawPath(context, $"sandbox_{Guid.NewGuid()}.fits");
-        
-        // Esecuzione copia tecnica
         await _ioService.CopyFileAsync(originalPath, tempPath);
-        
-        // Registrazione per il cleanup
         _tempFilesTracker.Add(tempPath);
         
         return tempPath;
@@ -117,29 +113,34 @@ public class FitsDataManager : IFitsDataManager
 
     public void ClearCache()
     {
-        // Svuotiamo solo la memoria gestita da Microsoft.Extensions.Caching.Memory
-        // Il parametro 1.0 (100%) forza la rimozione di tutti gli elementi, 
-        // partendo da quelli non prioritari.
         if (_cache is MemoryCache concreteCache)
         {
             concreteCache.Compact(1.0);
         }
-    
-        // NOTA: Non tocchiamo _tempFilesTracker. 
-        // I file su disco rimangono dove sono, pronti per essere letti di nuovo se serve.
     }
 
     public void Clear()
     {
-        // Prima svuotiamo la RAM
         ClearCache();
-
-        // Poi puliamo fisicamente il disco (Solo ora!)
         foreach (var tempPath in _tempFilesTracker)
         {
             _ioService.TryDeleteFile(tempPath);
         }
-    
         while (_tempFilesTracker.TryTake(out _)) { }
+    }
+
+    // =======================================================================
+    // HELPERS DI CALCOLO DIMENSIONE
+    // =======================================================================
+
+    /// <summary>
+    /// Calcola l'occupazione in byte dell'array di pixel per permettere 
+    /// alla MemoryCache di rispettare il SizeLimit globale configurato.
+    /// </summary>
+    private long CalculateArraySize(Array array)
+    {
+        if (array == null) return 0;
+        // Numero totale di elementi * dimensione in byte del tipo (short, int, double, etc.)
+        return (long)array.Length * Marshal.SizeOf(array.GetType().GetElementType()!);
     }
 }

@@ -12,7 +12,7 @@ public interface IWindowService
     void RegisterMainWindow(Avalonia.Controls.Window window);
 
     // Allineamento: riceve i percorsi e la modalità iniziale
-    Task<List<string>?> ShowAlignmentWindowAsync(List<string> sourcePaths, VisualizationMode initialMode = VisualizationMode.Linear);
+    Task<List<string>?> ShowAlignmentWindowAsync(List<FitsFileReference> sourceFiles, VisualizationMode initialMode = VisualizationMode.Linear);
 
     // Header Editor: riceve Files e Navigator (Decoupled!)
     Task<FitsHeader?> ShowHeaderEditorAsync(IReadOnlyList<FitsFileReference> files, IImageNavigator navigator);
@@ -21,5 +21,5 @@ public interface IWindowService
     Task ShowPlateSolvingWindowAsync(ImageNodeViewModel node);
 
     // Posterizzazione: riceve i percorsi e la modalità
-    Task<List<string>?> ShowPosterizationWindowAsync(List<string> sourcePaths, VisualizationMode initialMode);
+    Task<List<string>?> ShowPosterizationWindowAsync(List<FitsFileReference> sourceFiles, VisualizationMode initialMode);
 }

@@ -45,7 +45,7 @@ public class WindowService : IWindowService
     // =======================================================================
 
     public async Task<List<string>?> ShowAlignmentWindowAsync(
-        List<string> sourcePaths, 
+        List<FitsFileReference> sourceFiles, // MODIFICATO: Da string a FitsFileReference
         VisualizationMode initialMode = VisualizationMode.Linear) 
     {
         if (_mainWindow == null) throw new InvalidOperationException("Finestra principale non registrata.");
@@ -54,7 +54,8 @@ public class WindowService : IWindowService
         var dataManager = _serviceProvider.GetRequiredService<IFitsDataManager>();
         var rendererFactory = _serviceProvider.GetRequiredService<IFitsRendererFactory>();
 
-        using var viewModel = new AlignmentToolViewModel(sourcePaths, coordinator, dataManager, rendererFactory);
+        // Ora i tipi corrispondono: List<FitsFileReference>
+        using var viewModel = new AlignmentToolViewModel(sourceFiles, coordinator, dataManager, rendererFactory);
         var view = new AlignmentToolView { DataContext = viewModel };
 
         Action closeHandler = () => view.Close();
@@ -138,7 +139,7 @@ public class WindowService : IWindowService
     // =======================================================================
 
     public async Task<List<string>?> ShowPosterizationWindowAsync(
-        List<string> sourcePaths, 
+        List<FitsFileReference> sourceFiles, // MODIFICATO: Da string a FitsFileReference
         VisualizationMode initialMode)
     {
         if (_mainWindow == null) throw new InvalidOperationException("Finestra principale non registrata.");
@@ -147,7 +148,8 @@ public class WindowService : IWindowService
         var rendererFactory = _serviceProvider.GetRequiredService<IFitsRendererFactory>();
         var coordinator = _serviceProvider.GetRequiredService<IPosterizationCoordinator>();
         
-        using var viewModel = new PosterizationToolViewModel(sourcePaths, dataManager, rendererFactory, coordinator);
+        // Ora i tipi corrispondono: List<FitsFileReference>
+        using var viewModel = new PosterizationToolViewModel(sourceFiles, dataManager, rendererFactory, coordinator);
         var view = new PosterizationToolView { DataContext = viewModel };
 
         Action closeHandler = () => view.Close();

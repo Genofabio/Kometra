@@ -15,32 +15,19 @@ namespace KomaLab.ViewModels.Nodes;
 
 /// <summary>
 /// Classe base per i nodi FITS. 
-/// Gestisce la composizione della Viewport, lo swap dei renderer e definisce 
-/// il contratto per la navigazione sequenziale delle immagini.
+/// Gestisce esclusivamente la meccanica della Viewport e lo swap dei renderer.
+/// La logica scientifica del contrasto è delegata alle classi derivate.
 /// </summary>
 public abstract partial class ImageNodeViewModel : BaseNodeViewModel
 {
-    // --- Composizione ---
     public ImageViewport Viewport { get; } = new();
 
-    // --- Stato Layout ---
     private bool _isFirstLayoutPerformed;
     [ObservableProperty] private Size _viewportSize;
 
-    // ---------------------------------------------------------------------------
-    // ABSTRACT API (Implementata dai figli)
-    // ---------------------------------------------------------------------------
-
-    /// <summary> L'istanza attiva del renderer (Source of Truth per i pixel). </summary>
+    // --- API Astratta ---
     public abstract FitsRenderer? ActiveRenderer { get; }
-    
-    /// <summary> La dimensione effettiva dell'immagine caricata. </summary>
     public abstract Size NodeContentSize { get; }
-    
-    /// <summary> 
-    /// Il navigatore della sequenza. Obbligatorio per garantire coerenza 
-    /// tra nodi singoli e multipli nella UI.
-    /// </summary>
     public abstract IImageNavigator Navigator { get; }
 
     public VisualizationMode[] AvailableVisualizationModes => Enum.GetValues<VisualizationMode>();
@@ -49,12 +36,9 @@ public abstract partial class ImageNodeViewModel : BaseNodeViewModel
     protected ImageNodeViewModel(BaseNodeModel model) : base(model) { }
 
     // ---------------------------------------------------------------------------
-    // PROXY PROPERTIES (Binding Helpers)
+    // PROXY PROPERTIES (Sincronizzazione Visuale)
     // ---------------------------------------------------------------------------
 
-    /// <summary>
-    /// Proxy verso la modalità di visualizzazione del renderer attivo.
-    /// </summary>
     public VisualizationMode VisualizationMode
     {
         get => ActiveRenderer?.VisualizationMode ?? VisualizationMode.Linear;
@@ -69,62 +53,56 @@ public abstract partial class ImageNodeViewModel : BaseNodeViewModel
     }
 
     // ---------------------------------------------------------------------------
-    // LOGICA DI SWAP RENDERER
+    // MECCANICA DI SWAP RENDERER
     // ---------------------------------------------------------------------------
 
     /// <summary>
-    /// Esegue lo swap sicuro tra renderer, gestendo l'adattamento del contrasto.
-    /// <para>
-    /// PRE-CONDIZIONE: <paramref name="newRenderer"/> DEVE essere già inizializzato 
-    /// (tramite Factory Async) e pronto all'uso (Mat valida).
-    /// </para>
+    /// Esegue lo swap atomico dei renderer gestendo la memoria e la UI.
+    /// Non interferisce con il contrasto a meno di richieste esplicite.
     /// </summary>
     protected async Task ApplyNewRendererAsync(FitsRenderer newRenderer, AbsoluteContrastProfile? explicitProfile = null)
     {
         if (newRenderer == null) throw new ArgumentNullException(nameof(newRenderer));
 
-        // NOTA ARCHITETTURALE: 
-        // Non chiamiamo più `await newRenderer.InitializeAsync()` qui.
-        // Si assume che la Factory abbia già restituito un oggetto valido e idratato.
+        // 1. SINCRONIZZAZIONE STATO
+        // Manteniamo la modalità (Linear/Log) impostata nel nodo
+        newRenderer.VisualizationMode = VisualizationMode;
 
-        // 1. Sincronizzazione dello stato radiometrico e visuale
+        // Se è stato fornito un profilo esplicito (es. da un editor), lo applichiamo.
+        // ALTRIMENTI: Non facciamo nulla. 
+        // - Se il nodo figlio ha applicato un Sigma Profile, il renderer è già configurato.
+        // - Se è un'immagine nuova, il renderer ha già il suo AutoStretch (da InitializeAsync).
         if (explicitProfile != null)
         {
-            newRenderer.VisualizationMode = VisualizationMode; // Mantiene la modalità corrente
             newRenderer.ApplyContrastProfile(explicitProfile);
         }
-        else if (ActiveRenderer != null)
-        {
-            // Ereditiamo lo stato dal renderer precedente (flicker-free experience)
-            newRenderer.VisualizationMode = VisualizationMode;
-            newRenderer.ApplyContrastProfile(ActiveRenderer.CaptureContrastProfile());
-        }
 
-        // 2. Swap atomico sulla UI Thread
+        // 2. SWAP ATOMICO SULLA UI THREAD
         var oldRenderer = ActiveRenderer;
 
         await Dispatcher.UIThread.InvokeAsync(() =>
         {
+            // Hook per aggiornare la proprietà ActiveFitsImage nel figlio
             OnRendererSwapping(newRenderer);
 
-            // Sincronizzazione Viewport
+            // Aggiornamento Viewport
             Viewport.ImageSize = newRenderer.ImageSize;
 
-            // Trigger notifiche per i binding Avalonia
+            // Notifica i binding
             OnPropertyChanged(nameof(ActiveRenderer));
             OnPropertyChanged(nameof(VisualizationMode)); 
             OnPropertyChanged(nameof(NodeContentSize));
             OnPropertyChanged(nameof(EstimatedTotalSize));
         });
 
-        // 3. Cleanup differito per non bloccare il rendering
+        // 3. CLEANUP DIFFERITO
+        // Distruggiamo la vecchia Mat OpenCV solo quando la nuova è visualizzata
         if (oldRenderer != null)
         {
             Dispatcher.UIThread.Post(() => oldRenderer.Dispose(), DispatcherPriority.Background);
         }
     }
 
-    /// <summary> Metodo hook per aggiornare il riferimento locale nel figlio. </summary>
     protected abstract void OnRendererSwapping(FitsRenderer newRenderer);
 
     // ---------------------------------------------------------------------------
@@ -145,8 +123,6 @@ public abstract partial class ImageNodeViewModel : BaseNodeViewModel
     partial void OnViewportSizeChanged(Size value)
     {
         Viewport.ViewportSize = value;
-        
-        // Auto-Reset dello zoom al primo layout valido della board
         if (!_isFirstLayoutPerformed && value.Width > 0 && value.Height > 0)
         {
             _isFirstLayoutPerformed = true;
@@ -157,7 +133,11 @@ public abstract partial class ImageNodeViewModel : BaseNodeViewModel
     [RelayCommand]
     public async Task ResetThresholdsAsync()
     {
-        if (ActiveRenderer != null) await ActiveRenderer.ResetThresholdsAsync();
+        if (ActiveRenderer != null)
+        {
+            await ActiveRenderer.ResetThresholdsAsync();
+            OnPropertyChanged(nameof(VisualizationMode)); 
+        }
     }
 
     public virtual void ResetView() => Viewport.ResetView();

@@ -14,10 +14,6 @@ using OpenCvSharp;
 
 namespace KomaLab.Services.Processing.Batch;
 
-/// <summary>
-/// Esecutore universale per operazioni batch (Capocantiere).
-/// Gestisce il ciclo di vita del processing massivo su file FITS.
-/// </summary>
 public class BatchProcessingService : IBatchProcessingService
 {
     private readonly IFitsDataManager _dataManager;
@@ -35,74 +31,91 @@ public class BatchProcessingService : IBatchProcessingService
     }
 
     public async Task<List<string>> ProcessFilesAsync(
-        IEnumerable<string> sourcePaths,
+        IEnumerable<FitsFileReference> sourceFiles,
         string outputFolder,
-        Action<Mat, Mat, int> processor,
+        Action<Mat, Mat, FitsHeader, int> processor, // Firma aggiornata
         IProgress<BatchProgressReport>? progress = null,
         CancellationToken token = default)
     {
-        var paths = sourcePaths.ToList();
+        var files = sourceFiles.ToList();
         var results = new List<string>();
         
-        if (!Directory.Exists(outputFolder)) 
-            Directory.CreateDirectory(outputFolder);
+        if (!Directory.Exists(outputFolder)) Directory.CreateDirectory(outputFolder);
 
-        for (int i = 0; i < paths.Count; i++)
+        for (int i = 0; i < files.Count; i++)
         {
-            // 1. Controllo Cancellazione
             token.ThrowIfCancellationRequested();
-
-            string currentPath = paths[i];
+            var fileRef = files[i];
             
-            // Notifica Progresso alla UI
-            progress?.Report(new BatchProgressReport(
-                i + 1, 
-                paths.Count, 
-                Path.GetFileName(currentPath), 
-                (double)(i + 1) / paths.Count * 100));
+            progress?.Report(new BatchProgressReport(i + 1, files.Count, Path.GetFileName(fileRef.FilePath), (double)(i + 1) / files.Count * 100));
 
             try
             {
-                // 2. Recupero Dati (DataManager gestisce la Cache)
-                var data = await _dataManager.GetDataAsync(currentPath);
-                
-                // 3. Estrazione Metadati di Scalatura e Profondità (MetadataService)
-                // Usiamo i fallback per garantire che il processo non si interrompa
-                double bScale = _metadata.GetDoubleValue(data.Header, "BSCALE", 1.0);
-                double bZero = _metadata.GetDoubleValue(data.Header, "BZERO", 0.0);
-                
-                // Determiniamo la profondità di bit originale (BITPIX) per l'output
-                FitsBitDepth originalDepth = _metadata.GetBitDepth(data.Header);
+                // 1. RECUPERO DATI E HEADER SORGENTE
+                var data = await _dataManager.GetDataAsync(fileRef.FilePath);
+                var sourceHeader = fileRef.ModifiedHeader ?? data.Header;
+                FitsBitDepth originalDepth = _metadata.GetBitDepth(sourceHeader);
 
-                // 4. Conversione e Preparazione Matrici (Converter)
-                using Mat srcMat = _converter.RawToMat(data.PixelData, bScale, bZero);
+                // 2. ISOLAMENTO: Creiamo la copia di lavoro (workingHeader)
+                // Questo evita di "sporcare" i metadati del file originale in RAM
+                var workingHeader = _metadata.CloneHeader(sourceHeader);
+
+                // 3. CONVERSIONE E PREPARAZIONE MATRICI
+                double bScale = _metadata.GetDoubleValue(sourceHeader, "BSCALE", 1.0);
+                double bZero = _metadata.GetDoubleValue(sourceHeader, "BZERO", 0.0);
+                
+                using Mat srcMat = _converter.RawToMat(data.PixelData, bScale, bZero, FitsBitDepth.Double);
                 using Mat dstMat = new Mat(srcMat.Size(), srcMat.Type());
 
-                // 5. ESECUZIONE DELLA LOGICA (Delegata al chiamante)
-                // Qui viene iniettata la funzione di Posterizzazione, Filtro, ecc.
-                processor(srcMat, dstMat, i); // Passiamo 'i' (l'indice corrente)
+                // 4. ESECUZIONE LOGICA: Il processor ora ha tutto per lavorare
+                // Modificherà dstMat (pixel) e workingHeader (WCS, History)
+                processor(srcMat, dstMat, workingHeader, i);
 
-                // 6. Riconversione in Array RAW (Mantenendo la profondità originale)
-                var finalPixels = _converter.MatToRaw(dstMat, originalDepth);
+                // 5. SMART PROMOTION (NaN Detection)
+                bool hasSpecialValues = !Cv2.CheckRange(dstMat, quiet: true);
+                FitsBitDepth outputDepth = _metadata.ResolveOutputBitDepth(originalDepth, hasSpecialValues);
 
-                // 7. Generazione Header FITS
-                // CreateHeaderFromTemplate si occuperà di aggiornare BITPIX, NAXIS, ecc.
-                var finalHeader = _metadata.CreateHeaderFromTemplate(data.Header, finalPixels, originalDepth);
+                // 6. RICONVERSIONE E FINALIZZAZIONE HEADER
+                var finalPixels = _converter.MatToRaw(dstMat, outputDepth);
                 
-                _metadata.AddValue(finalHeader, "HISTORY", $"KomaLab Processed: {DateTime.UtcNow:yyyy-MM-dd HH:mm}");
+                // CreateHeaderFromTemplate prenderà il workingHeader (già shiftato nel WCS)
+                // e scriverà NAXIS e BITPIX definitivi in cima al nuovo header.
+                var finalHeader = _metadata.CreateHeaderFromTemplate(workingHeader, finalPixels, outputDepth);
 
-                // 8. Salvataggio Fisico (DataManager gestisce la destinazione e la registrazione)
-                var fileRef = await _dataManager.SaveAsTemporaryAsync(finalPixels, finalHeader, "BatchResult");
-                results.Add(fileRef.FilePath);
+                // 7. SALVATAGGIO
+                var resultRef = await _dataManager.SaveAsTemporaryAsync(finalPixels, finalHeader, "BatchResult");
+                results.Add(resultRef.FilePath);
             }
             catch (Exception ex)
             {
-                // Log dell'errore sul singolo file per non interrompere l'intero batch
-                System.Diagnostics.Debug.WriteLine($"Batch Error [{currentPath}]: {ex.Message}");
-                // Opzionale: aggiungere alla lista dei risultati un segnale di errore
+                System.Diagnostics.Debug.WriteLine($"Batch Error [{fileRef.FilePath}]: {ex.Message}");
             }
         }
-
         return results;
+    }
+
+    /// <summary>
+    /// Decide se mantenere il formato originale o promuoverlo a Floating Point.
+    /// Segue le regole: Int32 -> Double (-64), Int16/Byte -> Float (-32) se ci sono NaN.
+    /// </summary>
+    private FitsBitDepth DetermineOptimalOutputDepth(FitsBitDepth original, Mat processedMat)
+    {
+        // Se il file è già in virgola mobile, non facciamo downgrade
+        if ((int)original < 0) return original;
+
+        // Verifichiamo la presenza di NaN o Infiniti (tipici del padding post-allineamento)
+        bool hasSpecialValues = !Cv2.CheckRange(processedMat, quiet: true);
+
+        if (hasSpecialValues)
+        {
+            // Promozione intelligente per preservare la precisione dei dati scientifici
+            // - Gli interi a 32 bit necessitano di Double per non perdere precisione nella mantissa
+            // - Per 8 e 16 bit, il Float (32 bit) è più che sufficiente
+            return (original == FitsBitDepth.Int32) 
+                ? FitsBitDepth.Double 
+                : FitsBitDepth.Float;
+        }
+
+        return original;
     }
 }

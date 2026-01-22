@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
+using KomaLab.Models.Fits;
 using KomaLab.Models.Processing;
 using KomaLab.Models.Visualization;
 using OpenCvSharp;
@@ -15,7 +16,7 @@ public interface IPosterizationCoordinator
 
     // --- Elaborazione Massiva (Batch) ---
     Task<List<string>> ExecuteBatchAsync(
-        IEnumerable<string> sourcePaths,
+        IEnumerable<FitsFileReference> sourceFiles, // MODIFICATO: Da string a FitsFileReference
         int levels,
         VisualizationMode mode,
         double blackPoint,

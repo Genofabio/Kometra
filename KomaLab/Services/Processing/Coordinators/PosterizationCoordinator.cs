@@ -2,6 +2,8 @@
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
+using KomaLab.Models.Fits;
+using KomaLab.Models.Fits.Structure; // Aggiunto per FitsFileReference
 using KomaLab.Models.Processing;
 using KomaLab.Models.Visualization;
 using KomaLab.Services.Processing.Batch;
@@ -25,6 +27,7 @@ public class PosterizationCoordinator : IPosterizationCoordinator
 
     public Action<Mat> GetPreviewEffect(int levels)
     {
+        // L'anteprima lavora in-place sulla Mat del Renderer
         return (mat) => 
         {
             _effectsEngine.ApplyPosterization(mat, mat, levels, VisualizationMode.Linear, 0, 255);
@@ -32,7 +35,7 @@ public class PosterizationCoordinator : IPosterizationCoordinator
     }
 
     public async Task<List<string>> ExecuteBatchAsync(
-        IEnumerable<string> sourcePaths,
+        IEnumerable<FitsFileReference> sourceFiles,
         int levels,
         VisualizationMode mode,
         double blackPoint,
@@ -40,12 +43,24 @@ public class PosterizationCoordinator : IPosterizationCoordinator
         IProgress<BatchProgressReport>? progress = null,
         CancellationToken token = default)
     {
-        // Aggiungiamo l'indice '_' perché è richiesto dalla firma, ma lo ignoriamo
-        Action<Mat, Mat, int> posterizeOp = (src, dst, _) =>
+        // Aggiungiamo 'header' alla firma della lambda per farla combaciare con il BatchService
+        Action<Mat, Mat, FitsHeader, int> posterizeOp = (src, dst, header, index) =>
         {
+            // 1. Esecuzione dell'effetto sui pixel
             _effectsEngine.ApplyPosterization(src, dst, levels, mode, blackPoint, whitePoint);
+
+            // 2. (Opzionale ma consigliato) Aggiornamento metadati
+            // Anche se la posterizzazione non sposta l'immagine (quindi niente ShiftWcs),
+            // è buona norma scrivere nell'header cosa è successo.
+            header.AddCard(new FitsCard("HISTORY", $"KomaLab: Posterization applied ({levels} levels)"));
         };
 
-        return await _batchService.ProcessFilesAsync(sourcePaths, "Posterized", posterizeOp, progress, token);
+        // Ora la chiamata non darà più errore di firma
+        return await _batchService.ProcessFilesAsync(
+            sourceFiles, 
+            "Posterized", 
+            posterizeOp, 
+            progress, 
+            token);
     }
 }

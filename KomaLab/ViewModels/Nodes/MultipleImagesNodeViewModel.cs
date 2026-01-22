@@ -129,26 +129,30 @@ public partial class MultipleImagesNodeViewModel : ImageNodeViewModel
             token.ThrowIfCancellationRequested();
 
             // 1. CREAZIONE & INIZIALIZZAZIONE ATOMICA
-            // La Factory ora restituisce un oggetto Task<FitsRenderer> già "pronto all'uso".
-            // Non servono più chiamate manuali a InitializeAsync().
+            // La Factory restituisce un renderer che ha già calcolato le sue statistiche 
+            // interne a 64-bit e ha già scaricato i _rawPixels per risparmiare RAM.
             var newRenderer = await _rendererFactory.CreateAsync(
                 data.PixelData, 
                 fileRef.ModifiedHeader ?? data.Header
             );
             
-            // 2. LOGICA ADATTIVA (Flicker-Free)
-            AbsoluteContrastProfile? profile = null;
+            // 2. LOGICA ADATTIVA (Flicker-Free) - NIENTE PIÙ MATRICI!
             if (!forceReset && ActiveFitsImage != null)
             {
-                // Sicuro: CaptureScientificMat() non fallisce mai qui perché newRenderer è garantito valido.
-                using var nextMat = newRenderer.CaptureScientificMat();
-                token.ThrowIfCancellationRequested();
-                
-                profile = ActiveFitsImage.GetAdaptedProfileFor(nextMat);
+                // Invece di clonare 400MB di matrice, chiediamo al renderer attuale 
+                // il suo "stile" di visualizzazione in termini di Sigma (2 numeri double).
+                var currentSigmaProfile = ActiveFitsImage.CaptureSigmaProfile();
+
+                // Applichiamo lo stesso stile relativo al nuovo renderer.
+                // Lui userà la sua Media e Sigma (già calcolate) per impostare i Black/White point corretti.
+                newRenderer.VisualizationMode = ActiveFitsImage.VisualizationMode;
+                newRenderer.ApplyRelativeProfile(currentSigmaProfile);
             }
 
             // 3. SWAP ATOMICO
-            await ApplyNewRendererAsync(newRenderer, profile);
+            // Passiamo null come profilo assoluto perché lo abbiamo già applicato 
+            // internamente al newRenderer tramite il profilo relativo.
+            await ApplyNewRendererAsync(newRenderer);
 
             // 4. PREFETCH
             if (!token.IsCancellationRequested && !_navigator.IsLooping)

@@ -35,7 +35,14 @@ public interface IFitsMetadataService
     void SetValue(FitsHeader header, string key, object value, string? comment = null);
     void TransferMetadata(FitsHeader source, FitsHeader destination);
     FitsHeader CreateHeaderFromTemplate(FitsHeader template, Array newPixels, FitsBitDepth depth);
+    // Applica la regola scientifica di promozione del bit-depth (Int -> Float/Double)
+    FitsBitDepth ResolveOutputBitDepth(FitsBitDepth original, bool hasSpecialValues);
+    // Sposta i riferimenti WCS per mantenere la precisione del puntamento astronomico
+    void ShiftWcs(FitsHeader header, double deltaX, double deltaY);
     
     // --- Utility ---
     IEnumerable<T> SortByDate<T>(IEnumerable<T> items, Func<T, FitsHeader?> headerSelector);
+    
+    // Crea una copia isolata per evitare di sporcare i file sorgente in cache
+    FitsHeader CloneHeader(FitsHeader header);
 }

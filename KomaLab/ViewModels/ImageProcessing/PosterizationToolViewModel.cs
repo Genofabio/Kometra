@@ -1,9 +1,12 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using Avalonia.Media.Imaging;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using KomaLab.Models.Fits;
 using KomaLab.Models.Processing;
 using KomaLab.Models.Visualization;
 using KomaLab.Services.Factories;
@@ -16,7 +19,7 @@ namespace KomaLab.ViewModels.ImageProcessing;
 
 /// <summary>
 /// ViewModel per il Tool di Posterizzazione. 
-/// Utilizza Async Factory per il caricamento sicuro e coerente delle immagini FITS.
+/// Gestisce la logica di anteprima e l'esecuzione batch rispettando gli header di sessione.
 /// </summary>
 public partial class PosterizationToolViewModel : ObservableObject, IDisposable
 {
@@ -24,11 +27,12 @@ public partial class PosterizationToolViewModel : ObservableObject, IDisposable
     private readonly IFitsRendererFactory _rendererFactory;
     private readonly IPosterizationCoordinator _coordinator;
 
-    private readonly List<string> _sourcePaths;
+    // Utilizziamo FitsFileReference invece delle semplici stringhe per la coerenza dei metadati
+    private readonly List<FitsFileReference> _sourceFiles;
     private CancellationTokenSource? _loadingCts;
     private bool _hasLoadedFirstImage;
 
-    // --- Sottocomponenti Coerenti ---
+    // --- Sottocomponenti ---
     public SequenceNavigator Navigator { get; } = new();
     public ImageViewport Viewport { get; } = new(); 
 
@@ -37,7 +41,7 @@ public partial class PosterizationToolViewModel : ObservableObject, IDisposable
     private FitsRenderer? _activeRenderer; 
 
     // Proprietà UI delegate al navigatore
-    public string CurrentImageText => $"{Navigator.DisplayIndex} / {_sourcePaths.Count}";
+    public string CurrentImageText => $"{Navigator.DisplayIndex} / {_sourceFiles.Count}";
     public bool IsNavigationVisible => Navigator.CanMove;
 
     [ObservableProperty] private int _levels = 64; 
@@ -46,26 +50,28 @@ public partial class PosterizationToolViewModel : ObservableObject, IDisposable
     [ObservableProperty] private string _statusText = "Pronto";
 
     public VisualizationMode[] AvailableModes => Enum.GetValues<VisualizationMode>();
+    
+    // Lista dei path risultanti (popolata dopo l'Apply)
     public List<string>? ResultPaths { get; private set; }
     public bool DialogResult { get; private set; }
     public event Action? RequestClose;
 
     public PosterizationToolViewModel(
-        List<string> paths,
+        List<FitsFileReference> files, // MODIFICATO: Accetta riferimenti completi
         IFitsDataManager dataManager,
         IFitsRendererFactory rendererFactory,
         IPosterizationCoordinator coordinator)
     {
-        _sourcePaths = paths ?? new List<string>();
+        _sourceFiles = files ?? throw new ArgumentNullException(nameof(files));
         _dataManager = dataManager;
         _rendererFactory = rendererFactory;
         _coordinator = coordinator;
 
         // Inizializzazione Navigatore
-        Navigator.UpdateStatus(0, _sourcePaths.Count);
+        Navigator.UpdateStatus(0, _sourceFiles.Count);
         Navigator.IndexChanged += OnNavigatorIndexChanged;
 
-        if (_sourcePaths.Count > 0) 
+        if (_sourceFiles.Count > 0) 
             _ = LoadImageAtIndexAsync(0);
     }
 
@@ -76,12 +82,12 @@ public partial class PosterizationToolViewModel : ObservableObject, IDisposable
     }
 
     // =======================================================================
-    // 1. RENDERING PIPELINE (Async Factory Pattern)
+    // 1. RENDERING PIPELINE (Async Factory & RAM Optimization)
     // =======================================================================
 
     private async Task LoadImageAtIndexAsync(int index)
     {
-        if (index < 0 || index >= _sourcePaths.Count) return;
+        if (index < 0 || index >= _sourceFiles.Count) return;
 
         _loadingCts?.Cancel();
         _loadingCts?.Dispose();
@@ -92,56 +98,61 @@ public partial class PosterizationToolViewModel : ObservableObject, IDisposable
 
         try
         {
-            // 1. Caricamento dati grezzi
-            var data = await _dataManager.GetDataAsync(_sourcePaths[index]);
+            var fileRef = _sourceFiles[index];
+            
+            // 1. Recupero dati grezzi (Cache-aware)
+            var data = await _dataManager.GetDataAsync(fileRef.FilePath);
             token.ThrowIfCancellationRequested();
 
-            // 2. ASYNC FACTORY CREATION
-            // Restituisce un renderer già inizializzato e pronto (Mat valida).
-            var newRenderer = await _rendererFactory.CreateAsync(data.PixelData, data.Header);
+            // 2. CREAZIONE RENDERER CON PRIORITÀ HEADER
+            // Usiamo l'header modificato se presente (es. correzioni BSCALE manuali)
+            var headerToUse = fileRef.ModifiedHeader ?? data.Header;
+            var newRenderer = await _rendererFactory.CreateAsync(data.PixelData, headerToUse);
             
-            // 3. Configurazione specifica del Tool
-            // Applichiamo l'effetto di posterizzazione come hook post-stretch
+            // 3. Configurazione effetto anteprima
             newRenderer.PostProcessAction = _coordinator.GetPreviewEffect(Levels);
 
-            // 4. Logica Adattiva (Sicura: newRenderer è valido)
+            // 4. LOGICA ADATTIVA (Flicker-Free)
             if (_hasLoadedFirstImage && AutoAdaptThresholds && ActiveRenderer != null)
             {
-                using var nextMat = newRenderer.CaptureScientificMat(); // ORA È SICURO
+                // Catturiamo lo stile (K-Sigma) invece della matrice pesante
+                var currentStyle = ActiveRenderer.CaptureSigmaProfile();
                 token.ThrowIfCancellationRequested();
                 
-                // Copia soglie e modalità visualizzazione
                 newRenderer.VisualizationMode = ActiveRenderer.VisualizationMode;
-                var profile = ActiveRenderer.GetAdaptedProfileFor(nextMat);
-                newRenderer.ApplyContrastProfile(profile);
+                newRenderer.ApplyRelativeProfile(currentStyle);
             }
             else
             {
                 _hasLoadedFirstImage = true;
             }
 
-            // 5. Swap Atomico
+            // 5. SWAP ATOMICO E PULIZIA RAM
             var old = ActiveRenderer;
             ActiveRenderer = newRenderer;
             
-            // Sincronizza Viewport
             Viewport.ImageSize = ActiveRenderer.ImageSize;
             StatusText = "Pronto";
             
-            // Cleanup differito
+            // Rilasciamo immediatamente le risorse native del vecchio renderer (Mat OpenCV)
             old?.Dispose();
         }
         catch (OperationCanceledException) { }
-        catch (Exception ex) { StatusText = $"Errore: {ex.Message}"; }
+        catch (Exception ex) 
+        { 
+            StatusText = $"Errore: {ex.Message}";
+            System.Diagnostics.Debug.WriteLine($"[PosterizationTool] Error: {ex}");
+        }
     }
 
     // =======================================================================
-    // 2. LOGICA TOOL E COMANDI
+    // 2. LOGICA TOOL E BATCH PROCESSING
     // =======================================================================
 
     partial void OnLevelsChanged(int value)
     {
         if (ActiveRenderer == null) return;
+        // Aggiorna l'hook di post-processing e forza il refresh della UI
         ActiveRenderer.PostProcessAction = _coordinator.GetPreviewEffect(value);
         ActiveRenderer.RequestRefresh(); 
     }
@@ -150,7 +161,11 @@ public partial class PosterizationToolViewModel : ObservableObject, IDisposable
     private async Task ResetThresholds()
     {
         if (ActiveRenderer != null)
+        {
             await ActiveRenderer.ResetThresholdsAsync();
+            // Notifica manuale necessaria per i binding del Black/White point se non automatici
+            OnPropertyChanged(nameof(ActiveRenderer)); 
+        }
     }
 
     private bool CanInteract() => ActiveRenderer != null && !IsProcessing;
@@ -160,7 +175,7 @@ public partial class PosterizationToolViewModel : ObservableObject, IDisposable
     {
         if (IsProcessing || ActiveRenderer == null) return;
         
-        Navigator.Stop(); // Fermiamo l'animazione durante il batch
+        Navigator.Stop(); 
         IsProcessing = true;
         
         try
@@ -168,8 +183,9 @@ public partial class PosterizationToolViewModel : ObservableObject, IDisposable
             var progress = new Progress<BatchProgressReport>(p => 
                 StatusText = $"Elaborazione: {p.CurrentFileIndex}/{p.TotalFiles}");
 
+            // Il coordinator riceverà la lista di file completa di metadati aggiornati
             ResultPaths = await _coordinator.ExecuteBatchAsync(
-                _sourcePaths, 
+                _sourceFiles, 
                 Levels, 
                 ActiveRenderer.VisualizationMode, 
                 ActiveRenderer.BlackPoint, 
@@ -179,7 +195,11 @@ public partial class PosterizationToolViewModel : ObservableObject, IDisposable
             DialogResult = true;
             RequestClose?.Invoke();
         }
-        catch (Exception ex) { StatusText = $"Errore: {ex.Message}"; IsProcessing = false; }
+        catch (Exception ex) 
+        { 
+            StatusText = $"Errore applicazione: {ex.Message}"; 
+            IsProcessing = false; 
+        }
     }
 
     [RelayCommand] private void Cancel() => RequestClose?.Invoke();

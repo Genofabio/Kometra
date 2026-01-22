@@ -59,6 +59,7 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
     [NotifyPropertyChangedFor(nameof(CalculateButtonText))]
     [NotifyPropertyChangedFor(nameof(IsSearchBoxOverlayVisible))]
     [NotifyPropertyChangedFor(nameof(IsNavigationVisible))]
+    [NotifyPropertyChangedFor(nameof(ResultsSectionDescription), nameof(CoordinateListHeader))]
     [NotifyCanExecuteChangedFor(nameof(CalculateCentersCommand))]
     private AlignmentTarget _selectedTarget = AlignmentTarget.Comet;
 
@@ -134,7 +135,50 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
         IsSearchRadiusVisible && 
         Viewport.TargetCoordinate.HasValue;
 
-    public string CurrentImageText => $"{Navigator.DisplayIndex} / {Navigator.TotalCount}";
+    // --- TESTI UI DINAMICI ---
+
+    public string CurrentImageText
+    {
+        get
+        {
+            // Se siamo in modalità di navigazione libera (ResultsReady), mostriamo l'indice reale
+            if (CurrentState == AlignmentState.ResultsReady)
+            {
+                return $"{Navigator.DisplayIndex} / {Navigator.TotalCount}";
+            }
+
+            // Calcolo dinamico degli indici visibili in base al filtro attivo
+            int visibleCount = 0;
+            int relativeIndex = 0;
+
+            for (int i = 0; i < _files.Count; i++)
+            {
+                if (IsIndexAccessible(i))
+                {
+                    visibleCount++;
+                    if (i == Navigator.CurrentIndex)
+                    {
+                        relativeIndex = visibleCount;
+                    }
+                }
+            }
+
+            // Fallback di sicurezza
+            if (visibleCount == 0) return "0 / 0";
+
+            return $"{relativeIndex} / {visibleCount}";
+        }
+    }
+
+    public string ResultsSectionTitle => "Rifinitura Manuale";
+
+    public string ResultsSectionDescription => SelectedTarget == AlignmentTarget.Stars
+        ? "Il punto indica il centro calcolato in base al campo stellare. Spostalo per correggere l'allineamento dell'intera immagine."
+        : "Il punto indica il nucleo della cometa rilevato. Spostalo per correggere la centratura.";
+
+    public string CoordinateListHeader => SelectedTarget == AlignmentTarget.Stars
+        ? "Centri Allineamento (Shift)"
+        : "Nuclei Rilevati";
 
     public bool IsNavigationVisible => 
         _files.Count > 1 && 
@@ -188,7 +232,7 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
     #endregion
 
     public AlignmentToolViewModel(
-        List<string> sourcePaths,
+        List<FitsFileReference> sourceFiles, // Cambiato da List<string>
         IAlignmentCoordinator coordinator,
         IFitsDataManager dataManager,
         IFitsRendererFactory rendererFactory)
@@ -196,7 +240,9 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
         _coordinator = coordinator;
         _dataManager = dataManager;
         _rendererFactory = rendererFactory;
-        _files = sourcePaths.Select(p => new FitsFileReference(p)).ToList();
+        
+        // MODIFICA: Non creiamo più nuovi oggetti, usiamo quelli della sessione
+        _files = sourceFiles; 
         
         Navigator.IndexFilter = IsIndexAccessible; 
         Navigator.IndexChanged += OnNavigatorIndexChanged;
@@ -214,23 +260,28 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
             CoordinateEntries.Clear();
             for (int i = 0; i < _files.Count; i++)
             {
-                CoordinateEntries.Add(new CoordinateEntry { Index = i, DisplayName = System.IO.Path.GetFileName(_files[i].FilePath) });
+                CoordinateEntries.Add(new CoordinateEntry 
+                { 
+                    Index = i, 
+                    DisplayName = System.IO.Path.GetFileName(_files[i].FilePath) 
+                });
             }
 
+            // MODIFICA: GetFileMetadataAsync ora riceve il Reference completo.
+            // Il Coordinator userà il ModifiedHeader se presente (ottimizzazione già fatta).
             var metadata = await _coordinator.GetFileMetadataAsync(_files[0]);
             TargetName = metadata.ObjectName;
             
-            // DEFAULT FIX: Predefinito sempre su Automatico
             SelectedTarget = AlignmentTarget.Comet;
             SelectedMode = AlignmentMode.Automatic;
 
             await LoadImageAsync(0);
             ImageLoadedTcs.TrySetResult(true);
         }
-        catch 
+        catch (Exception ex)
         { 
-            StatusMessage = "Errore caricamento iniziale.";
-            ImageLoadedTcs.TrySetException(new Exception("Load failed"));
+            StatusMessage = $"Errore inizializzazione: {ex.Message}";
+            ImageLoadedTcs.TrySetException(ex);
         }
         finally { IsBusy = false; }
     }
@@ -238,7 +289,7 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
     private void UpdateNavigationStatus()
     {
         Navigator.UpdateStatus(Navigator.CurrentIndex, _files.Count);
-        OnPropertyChanged(nameof(CurrentImageText));
+        OnPropertyChanged(nameof(CurrentImageText)); // Aggiorna il testo 1/2
     }
 
     #region Gestione Cambi Mode/Target
@@ -362,14 +413,18 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
                     UpdateSingleUiCoordinate(p.CurrentIndex - 1, p.FoundCenter.Value);
             });
 
+            // Calcolo coerente parametri per history
+            int effectiveRadius = SearchRadius;
+            string? effectiveJplName = (UseJplAstrometry && SelectedMode != AlignmentMode.Manual) ? TargetName : null;
+
             var resultMap = await _coordinator.AnalyzeSequenceAsync(
                 files: _files, 
                 guesses: uiGuesses, 
                 target: SelectedTarget, 
                 mode: SelectedMode, 
                 method: CenteringMethod.LocalRegion, 
-                searchRadius: SearchRadius, 
-                jplTargetName: (UseJplAstrometry && SelectedMode != AlignmentMode.Manual) ? TargetName : null, 
+                searchRadius: effectiveRadius, 
+                jplTargetName: effectiveJplName, 
                 progress: progress);
 
             ApplyCoordinatesToUi(resultMap.Centers);
@@ -379,6 +434,7 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
             
             UpdateNavigationStatus(); 
             ApplyAlignmentCommand.NotifyCanExecuteChanged();
+            OnPropertyChanged(nameof(CurrentImageText)); // Aggiorna navigazione per mostrare totale reale
         }
         catch (Exception ex) 
         { 
@@ -395,21 +451,43 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
         IsBusy = true;
         try
         {
+            // 1. PREPARAZIONE DATI
             var centers = GetCoordinatesFromUi();
+
+            // Parametri coerenti per history
+            int effectiveRadius = SearchRadius; 
+            string? effectiveJplName = (UseJplAstrometry && SelectedMode != AlignmentMode.Manual) 
+                                       ? TargetName 
+                                       : null;
+
+            // 2. ANALISI (Ricalcolo veloce della mappa finale)
             var map = await _coordinator.AnalyzeSequenceAsync(
                 files: _files, 
                 guesses: centers, 
                 target: SelectedTarget, 
                 mode: SelectedMode, 
                 method: CenteringMethod.LocalRegion, 
-                searchRadius: 0,
-                jplTargetName: (UseJplAstrometry && SelectedMode != AlignmentMode.Manual) ? TargetName : null);
+                searchRadius: effectiveRadius,
+                jplTargetName: effectiveJplName
+            );
 
-            FinalProcessedPaths = await _coordinator.ExecuteWarpingAsync(_files, map);
+            // 3. ESECUZIONE (Passiamo le variabili per il log nella History)
+            FinalProcessedPaths = await _coordinator.ExecuteWarpingAsync(
+                files: _files, 
+                map: map, 
+                mode: SelectedMode,      
+                searchRadius: effectiveRadius,  
+                jplName: effectiveJplName       
+            );
+
             DialogResult = true;
             RequestClose?.Invoke();
         }
-        catch { StatusMessage = "Errore durante il salvataggio."; CurrentState = AlignmentState.Initial; }
+        catch (Exception ex) 
+        { 
+            StatusMessage = $"Errore durante il salvataggio: {ex.Message}"; 
+            CurrentState = AlignmentState.Initial; 
+        }
         finally { IsBusy = false; }
     }
 
@@ -495,10 +573,16 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
         await LoadImageAsync(index);
     }
 
+    // =======================================================================
+    // Navigazione e Rendering (Versione Ottimizzata)
+    // =======================================================================
+
     private async Task LoadImageAsync(int index)
     {
         if (index < 0 || index >= _files.Count) return;
+        
         _navigationCts?.Cancel();
+        _navigationCts?.Dispose();
         _navigationCts = new CancellationTokenSource();
         var token = _navigationCts.Token;
 
@@ -508,31 +592,53 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
             var data = await _dataManager.GetDataAsync(file.FilePath);
             token.ThrowIfCancellationRequested();
 
+            // 1. Creazione del nuovo renderer tramite Factory
+            // Il renderer ora nasce già a 64-bit e libera la memoria dei pixel grezzi subito
             var newRenderer = await _rendererFactory.CreateAsync(data.PixelData, file.ModifiedHeader ?? data.Header);
             token.ThrowIfCancellationRequested();
 
+            // 2. LOGICA ADATTIVA SENZA MATRICI
             if (ActiveRenderer != null)
             {
-                using var nextMat = newRenderer.CaptureScientificMat();
-                newRenderer.ApplyContrastProfile(ActiveRenderer.GetAdaptedProfileFor(nextMat));
+                // Catturiamo lo stile di visualizzazione (Black/White point in unità Sigma)
+                var currentStyle = ActiveRenderer.CaptureSigmaProfile();
+                
+                // Sincronizziamo la modalità (Linear, Log, etc.)
+                newRenderer.VisualizationMode = ActiveRenderer.VisualizationMode;
+                
+                // Applichiamo lo stile al nuovo: il calcolo avviene internamente al newRenderer
+                // usando la Media e Sigma che ha calcolato durante la sua inizializzazione.
+                newRenderer.ApplyRelativeProfile(currentStyle);
+
+                // Smaltiamo immediatamente i 64-bit del vecchio renderer dalla RAM
                 ActiveRenderer.Dispose();
             }
 
+            // 3. Aggiornamento Stato UI
             ActiveRenderer = newRenderer;
             Viewport.ImageSize = ActiveRenderer.ImageSize;
             Viewport.SearchRadius = SearchRadius; 
 
+            // Inizializzazione metadati per le coordinate (se necessario)
             if (CoordinateEntries.Count > 0 && CoordinateEntries[0].ImageHeight == 0)
             {
                 foreach (var entry in CoordinateEntries) entry.ImageHeight = ActiveRenderer.ImageSize.Height;
             }
 
+            // Sincronizzazione mirino e notifiche binding
             Viewport.TargetCoordinate = CoordinateEntries[index].Coordinate;
+            
             OnPropertyChanged(nameof(SafeImage));
             OnPropertyChanged(nameof(IsSearchBoxOverlayVisible));
+            OnPropertyChanged(nameof(BlackPoint)); // Notifica alla UI i nuovi valori ADU
+            OnPropertyChanged(nameof(WhitePoint));
         }
         catch (OperationCanceledException) { }
-        catch { StatusMessage = "Errore rendering immagine."; }
+        catch (Exception ex) 
+        { 
+            System.Diagnostics.Debug.WriteLine($"[AlignmentTool] Load Error: {ex.Message}");
+            StatusMessage = "Errore rendering immagine."; 
+        }
     }
 
     #endregion

@@ -15,27 +15,36 @@ public class ImagePresentationService : IImagePresentationService
     }
 
     // =======================================================================
-    // 1. RENDERING (Stretching 8-bit)
+    // 1. RENDERING (Pipeline di Stretching & Display)
     // =======================================================================
 
     public void RenderTo8Bit(Mat src, Mat dst, double blackPoint, double whitePoint, VisualizationMode mode)
     {
         if (src == null || src.Empty()) return;
 
+        // Calcolo del range dinamico
         double range = whitePoint - blackPoint;
         if (Math.Abs(range) < 1e-9) range = 1.0;
 
-        using Mat temp32F = new Mat();
-        
+        // alpha = moltiplicatore, beta = offset
+        // Formula: dst = src * alpha + beta
         double alpha = 1.0 / range;
         double beta = -blackPoint * alpha;
+
+        using Mat temp32F = new Mat();
+        
+        // Portiamo i dati nel range [0.0, 1.0]. 
+        // ConvertTo gestisce internamente sia sorgenti 32F che 64F.
         src.ConvertTo(temp32F, MatType.CV_32FC1, alpha, beta);
 
+        // Clipping: limitiamo i valori per evitare artefatti fuori dal range 0-1
         Cv2.Max(temp32F, 0.0, temp32F);
         Cv2.Min(temp32F, 1.0, temp32F);
 
+        // Applicazione funzione di trasferimento (non lineare)
         ApplyTransferFunction(temp32F, mode);
 
+        // Trasformazione finale in 8-bit Gray per Avalonia
         temp32F.ConvertTo(dst, MatType.CV_8UC1, 255.0);
     }
 
@@ -43,45 +52,51 @@ public class ImagePresentationService : IImagePresentationService
     {
         switch (mode)
         {
-            case VisualizationMode.SquareRoot: Cv2.Sqrt(mat, mat); break;
+            case VisualizationMode.SquareRoot: 
+                Cv2.Sqrt(mat, mat); 
+                break;
+                
             case VisualizationMode.Logarithmic:
+                // Log(1 + x) per gestire i valori vicino allo zero
                 Cv2.Add(mat, 1.0, mat);
                 Cv2.Log(mat, mat);
+                // Normalizzazione logaritmica (log2(1+1) = 1)
                 Cv2.Multiply(mat, 1.442695, mat); 
                 break;
         }
     }
 
     // =======================================================================
-    // 2. LOGICA DI PRESENTAZIONE (Requirements & Profiles)
+    // 2. LOGICA DI PRESENTAZIONE (Statistiche & Profili)
     // =======================================================================
 
     public (double Mean, double StdDev) GetPresentationRequirements(Mat source)
     {
-        if (source == null || source.Empty()) return (0, 1);
-        // Delega la matematica pura al RadiometryEngine
+        // Delega l'analisi dei pixel al motore radiometrico
         return _radiometry.ComputeStatistics(source);
     }
 
     public AbsoluteContrastProfile GetInitialProfile(Mat source)
     {
+        // Ottiene l'AutoStretch iniziale basato sui quantili
         return _radiometry.CalculateAutoStretchProfile(source);
     }
 
-    public AbsoluteContrastProfile GetAdaptedProfile(
-        Mat nextMat, 
-        AbsoluteContrastProfile currentProfile, 
-        (double Mean, double StdDev) currentMetrics)
+    /// <summary>
+    /// Converte soglie ADU assolute in un profilo relativo basato sui Sigma.
+    /// Operazione O(1) - Non tocca i pixel.
+    /// </summary>
+    public SigmaContrastProfile GetRelativeProfile(AbsoluteContrastProfile absolute, (double Mean, double StdDev) stats)
     {
-        if (nextMat == null || nextMat.Empty()) return currentProfile;
+        return _radiometry.ComputeSigmaProfile(absolute.BlackAdu, absolute.WhiteAdu, stats);
+    }
 
-        // Trasformazione ADU -> Sigma (Z-Score)
-        var sigmaProfile = _radiometry.ComputeSigmaProfile(null, currentProfile.BlackAdu, currentProfile.WhiteAdu, currentMetrics);
-
-        // Calcolo metriche immagine successiva per il mapping inverso
-        var nextMetrics = _radiometry.ComputeStatistics(nextMat);
-
-        // Trasformazione Sigma -> ADU (sulla nuova immagine)
-        return _radiometry.ComputeAbsoluteFromSigma(nextMat, sigmaProfile, nextMetrics);
+    /// <summary>
+    /// Traduce un profilo relativo (Sigma) in soglie ADU per l'immagine specifica.
+    /// Operazione O(1) - Non tocca i pixel.
+    /// </summary>
+    public AbsoluteContrastProfile GetAbsoluteProfile(SigmaContrastProfile relative, (double Mean, double StdDev) stats)
+    {
+        return _radiometry.ComputeAbsoluteFromSigma(relative, stats);
     }
 }

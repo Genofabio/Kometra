@@ -3,54 +3,44 @@ using OpenCvSharp;
 
 namespace KomaLab.Services.Processing.Engines;
 
-// ---------------------------------------------------------------------------------------
-// DOMINIO: RADIOMETRIA (INTENSITÀ DEL SEGNALE)
-// RESPONSABILITÀ: Analisi non distruttiva dei valori dei pixel (Asse Z).
-// TIPI DI METODI: 
-// - Calcolo di statistiche (Media, Sigma).
-// - Analisi dell'istogramma (Quantili, AutoStretch).
-// - Trasformazioni matematiche di range (ADU <-> Sigma).
-// NOTA: Non gli interessa DOVE sono i pixel, ma solo che VALORE hanno.
-// ---------------------------------------------------------------------------------------
+/// <summary>
+/// RESPONSABILITÀ: Analisi non distruttiva dei valori dei pixel (Asse Z).
+/// Gestisce statistiche, istogrammi e trasformazioni di range radiometrici.
+/// Supporta matrici a 32-bit (CV_32F) e 64-bit (CV_64F).
+/// </summary>
 public interface IRadiometryEngine
 {
+    // =======================================================================
+    // 1. ANALISI PIXEL (Operazioni Pesanti O(N))
+    // =======================================================================
+
     /// <summary>
-    /// Calcola Media e Deviazione Standard ignorando i valori NaN (O(N)).
+    /// Calcola Media e Deviazione Standard ignorando esplicitamente i valori NaN e Infiniti.
     /// </summary>
     (double Mean, double StdDev) ComputeStatistics(Mat image);
 
     /// <summary>
-    /// Estrae un array di campioni pixel per analisi statistiche veloci.
+    /// Estrae un array di campioni pixel ignorando i NaN per analisi statistiche veloci.
     /// </summary>
     double[] GetPixelSamples(Mat image, int maxSamples = 10000);
 
     /// <summary>
-    /// Calcola i livelli di soglia ideali basati sui quantili dell'intera immagine.
+    /// Analizza l'intero istogramma per calcolare i punti di nero e bianco (AutoStretch).
     /// </summary>
     AbsoluteContrastProfile CalculateAutoStretchProfile(Mat image);
 
+    // =======================================================================
+    // 2. ALGEBRA RADIOMETRICA (Operazioni Leggere O(1))
+    // =======================================================================
+    
     /// <summary>
-    /// Calcola un profilo di contrasto basato sui quantili da un array di campioni pre-esistente.
+    /// Converte valori ADU assoluti in Z-Score (Sigma) usando statistiche pre-calcolate.
+    /// NIENTE PIÙ PASSAGGIO DI MATRICI: evita scansioni ridondanti.
     /// </summary>
-    AbsoluteContrastProfile CalculateAutoStretchFromSamples(double[] samples);
+    SigmaContrastProfile ComputeSigmaProfile(double blackAdu, double whiteAdu, (double Mean, double StdDev) stats);
 
     /// <summary>
-    /// Calcola un profilo di contrasto basato su Media e Sigma (Metodo deviazione standard).
+    /// Converte Z-Score (Sigma) in valori ADU assoluti usando statistiche pre-calcolate.
     /// </summary>
-    AbsoluteContrastProfile CalculateAutoStretchFromStats(double mean, double stdDev);
-
-    /// <summary>
-    /// Calcola l'adattamento di contrasto tra due immagini cercando di mantenere la stessa percezione visiva.
-    /// </summary>
-    AbsoluteContrastProfile CalculateAdaptedProfile(Mat sourceMat, Mat targetMat, double cb, double cw, (double Mean, double StdDev)? ss = null, (double Mean, double StdDev)? ts = null);
-
-    /// <summary>
-    /// Converte valori ADU assoluti in Z-Score (Sigma) relativi alla distribuzione dell'immagine.
-    /// </summary>
-    SigmaContrastProfile ComputeSigmaProfile(Mat? image, double cb, double cw, (double Mean, double StdDev)? stats = null);
-
-    /// <summary>
-    /// Converte Z-Score (Sigma) in valori assoluti ADU basandosi sulla distribuzione dell'immagine corrente.
-    /// </summary>
-    AbsoluteContrastProfile ComputeAbsoluteFromSigma(Mat? image, SigmaContrastProfile profile, (double Mean, double StdDev)? stats = null);
+    AbsoluteContrastProfile ComputeAbsoluteFromSigma(SigmaContrastProfile profile, (double Mean, double StdDev) stats);
 }

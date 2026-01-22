@@ -42,7 +42,7 @@ public class StarAlignmentStrategy : AlignmentStrategyBase
         var guessList = guesses?.ToList();
         var results = new Point2D?[fileList.Count];
 
-        // Rilevamento: Se abbiamo un guess valido nel primo frame (WCS), usiamo la modalità WCS Priority
+        // Rilevamento WCS: Se il primo frame ha coordinate WCS, usiamo quelle come ancora
         bool hasWcsInput = (guessList != null && guessList.Count > 0 && guessList[0].HasValue);
 
         if (hasWcsInput)
@@ -58,7 +58,7 @@ public class StarAlignmentStrategy : AlignmentStrategyBase
     }
 
     // =======================================================================
-    // MODALITÀ 1: WCS PRIORITARIO (CORRETTA)
+    // MODALITÀ 1: WCS PRIORITARIO (Basato su coordinate astronomiche)
     // =======================================================================
     
     private async Task RunWcsPriorityModeAsync(
@@ -68,77 +68,49 @@ public class StarAlignmentStrategy : AlignmentStrategyBase
         IProgress<AlignmentProgressReport>? progress, 
         CancellationToken token)
     {
-        // 1. CALCOLO DELL'OFFSET DI RIFERIMENTO (FRAME 0)
-        // L'obiettivo è che il Frame 0 non si muova. Quindi il suo "centro di allineamento"
-        // deve coincidere con il suo "centro geometrico".
-        
-        var header0 = await DataManager.GetHeaderOnlyAsync(files[0].FilePath);
+        // 1. Calcolo geometria di riferimento sul Frame 0
+        var header0 = files[0].ModifiedHeader ?? await DataManager.GetHeaderOnlyAsync(files[0].FilePath);
         double w0 = _metadataService.GetIntValue(header0!, "NAXIS1");
         double h0 = _metadataService.GetIntValue(header0!, "NAXIS2");
         
         Point2D geoCenter0 = new Point2D(w0 / 2.0, h0 / 2.0);
-        Point2D wcsPoint0 = guesses[0]!.Value; // Il punto WCS input (es. CRPIX o RA/DEC pixel)
+        Point2D wcsPoint0 = guesses[0]!.Value; 
 
-        // Calcoliamo il vettore che porta dal punto WCS al centro geometrico
+        // Delta necessario per centrare l'oggetto WCS nel canvas geometrico
         double deltaX = geoCenter0.X - wcsPoint0.X;
         double deltaY = geoCenter0.Y - wcsPoint0.Y;
 
-        // Fissiamo il risultato per il frame 0
         results[0] = geoCenter0;
-        
-        progress?.Report(new AlignmentProgressReport {
-            CurrentIndex = 1, 
-            TotalCount = files.Count,
-            FileName = System.IO.Path.GetFileName(files[0].FilePath),
-            FoundCenter = results[0], 
-            Message = "Riferimento WCS fissato (Ancorato al centro geometrico)."
-        });
+        ReportProgress(progress, 0, files.Count, files[0].FilePath, results[0], "Ancoraggio WCS completato.");
 
         for (int i = 1; i < files.Count; i++)
         {
             token.ThrowIfCancellationRequested();
 
-            // CASO A: Dato WCS presente per questo frame
+            // CASO A: Il frame corrente ha dati WCS validi
             if (i < guesses.Count && guesses[i].HasValue)
             {
-                // Applichiamo lo STESSO delta calcolato sul primo frame.
-                // Logica: Se WcsPoint0 doveva spostarsi di Delta per finire al centro,
-                // allora WcsPointN deve spostarsi dello stesso Delta (relativo al sistema di coordinate)
-                // per mantenere l'allineamento relativo.
-                
                 Point2D wcsPointI = guesses[i]!.Value;
                 results[i] = new Point2D(wcsPointI.X + deltaX, wcsPointI.Y + deltaY);
                 
-                progress?.Report(new AlignmentProgressReport {
-                    CurrentIndex = i + 1,
-                    TotalCount = files.Count,
-                    FileName = System.IO.Path.GetFileName(files[i].FilePath),
-                    FoundCenter = results[i],
-                    Message = "Allineamento WCS (Relativo)..."
-                });
+                ReportProgress(progress, i, files.Count, files[i].FilePath, results[i], "Allineamento astronomico (WCS)...");
             }
-            // CASO B: Buco nei dati WCS -> Fallback su FFT relativa
+            // CASO B: Fallback su FFT se mancano dati WCS nel mezzo della sequenza
             else
             {
-                Point2D shift = await CalculateShiftWithRetryAsync(files[i - 1].FilePath, files[i].FilePath);
+                // Passiamo i Reference invece dei path per mantenere la coerenza scientifica
+                Point2D shift = await CalculateShiftWithRetryAsync(files[i - 1], files[i]);
                 
-                // Qui usiamo results[i-1] che è già "corretto" con il delta, quindi la catena continua coerente
-                Point2D prevCenter = results[i - 1] ?? new Point2D(0, 0);
+                Point2D prevCenter = results[i - 1] ?? geoCenter0;
                 results[i] = new Point2D(prevCenter.X + shift.X, prevCenter.Y + shift.Y);
                 
-                progress?.Report(new AlignmentProgressReport {
-                    CurrentIndex = i + 1,
-                    TotalCount = files.Count,
-                    FileName = System.IO.Path.GetFileName(files[i].FilePath),
-                    FoundCenter = results[i],
-                    Message = "Fallback FFT (WCS mancante)..."
-                });
+                ReportProgress(progress, i, files.Count, files[i].FilePath, results[i], "Allineamento visivo (FFT Fallback)...");
             }
         }
     }
 
     // =======================================================================
-    // MODALITÀ 2: FFT PURA (VISUALE / BLIND) - INVARIATA
+    // MODALITÀ 2: FFT PURA (Rilevamento automatico degli spostamenti)
     // =======================================================================
 
     private async Task RunVisualBlindModeAsync(
@@ -147,14 +119,15 @@ public class StarAlignmentStrategy : AlignmentStrategyBase
         IProgress<AlignmentProgressReport>? progress, 
         CancellationToken token)
     {
-        var firstHeader = await DataManager.GetHeaderOnlyAsync(files[0].FilePath);
+        var firstHeader = files[0].ModifiedHeader ?? await DataManager.GetHeaderOnlyAsync(files[0].FilePath);
         double w = _metadataService.GetIntValue(firstHeader!, "NAXIS1");
         double h = _metadataService.GetIntValue(firstHeader!, "NAXIS2");
-        results[0] = new Point2D(w / 2.0, h / 2.0);
         
+        results[0] = new Point2D(w / 2.0, h / 2.0);
         ReportProgress(progress, 0, files.Count, files[0].FilePath, results[0], "Riferimento geometrico fissato.");
 
-        Mat? prevMat = await LoadMatWithRetryAsync(files[0].FilePath);
+        // Caricamento del primo frame con Smart Promotion (rispetta BITPIX originale)
+        Mat? prevMat = await LoadMatWithRetryAsync(files[0]);
         if (prevMat == null) return; 
 
         try
@@ -163,26 +136,27 @@ public class StarAlignmentStrategy : AlignmentStrategyBase
             {
                 token.ThrowIfCancellationRequested();
 
-                Mat? currentMat = await LoadMatWithRetryAsync(files[i].FilePath);
+                using Mat? currentMat = await LoadMatWithRetryAsync(files[i]);
 
                 if (currentMat != null)
                 {
+                    // Calcolo dello shift nel dominio della frequenza (FFT)
                     var shiftResult = await Task.Run(() => _analysis.ComputeStarFieldShift(prevMat, currentMat));
                     Point2D shift = shiftResult.Shift;
 
                     Point2D prevCenter = results[i - 1]!.Value;
                     results[i] = new Point2D(prevCenter.X + shift.X, prevCenter.Y + shift.Y);
 
+                    // Scambio matrici per il frame successivo: smaltiamo la vecchia per risparmiare RAM
                     prevMat.Dispose();       
-                    prevMat = currentMat;    
-                    currentMat = null;       
+                    prevMat = currentMat.Clone(); // Clone necessario perché currentMat è 'using'
                 }
                 else
                 {
                     results[i] = results[i - 1];
                 }
 
-                ReportProgress(progress, i, files.Count, files[i].FilePath, results[i], "Analisi FFT Campo Stellare...");
+                ReportProgress(progress, i, files.Count, files[i].FilePath, results[i], "Analisi shift campo stellare...");
             }
         }
         finally
@@ -192,31 +166,39 @@ public class StarAlignmentStrategy : AlignmentStrategyBase
     }
 
     // =======================================================================
-    // HELPERS
-    // =======================================================================
+// HELPERS DI CARICAMENTO (Corretti per Nullable Structs)
+// =======================================================================
 
-    private async Task<Mat?> LoadMatWithRetryAsync(string path)
+    private async Task<Mat?> LoadMatWithRetryAsync(FitsFileReference fileRef)
     {
-        return await ExecuteWithRetryAsync(async () =>
+        // Mat è una classe (Reference Type), quindi qui il ?? o il ritorno null sono già legali
+        return await ExecuteWithRetryAsync<Mat?>(async () =>
         {
-            var data = await DataManager.GetDataAsync(path);
-            double bScale = _metadataService.GetDoubleValue(data.Header, "BSCALE", 1.0);
-            return _converter.RawToMat(data.PixelData, bScale);
+            var data = await DataManager.GetDataAsync(fileRef.FilePath);
+            var header = fileRef.ModifiedHeader ?? data.Header;
+            double bScale = _metadataService.GetDoubleValue(header, "BSCALE", 1.0);
+            double bZero = _metadataService.GetDoubleValue(header, "BZERO", 0.0);
+
+            return _converter.RawToMat(data.PixelData, bScale, bZero);
         }, -1);
     }
 
-    private async Task<Point2D> CalculateShiftWithRetryAsync(string pathPrev, string pathCurr)
+    private async Task<Point2D> CalculateShiftWithRetryAsync(FitsFileReference prev, FitsFileReference curr)
     {
-        return await ExecuteWithRetryAsync(async () =>
+        // Forziamo il tipo generico a Point2D? (nullable struct)
+        var result = await ExecuteWithRetryAsync<Point2D?>(async () =>
         {
-            using var m1 = await LoadMatWithRetryAsync(pathPrev);
-            using var m2 = await LoadMatWithRetryAsync(pathCurr);
-            
-            if (m1 == null || m2 == null) return (Point2D?)new Point2D(0, 0);
+            using var m1 = await LoadMatWithRetryAsync(prev);
+            using var m2 = await LoadMatWithRetryAsync(curr);
+        
+            if (m1 == null || m2 == null) return null;
 
             var res = _analysis.ComputeStarFieldShift(m1, m2);
             return res.Shift;
-        }, -1) ?? new Point2D(0, 0);
+        }, -1);
+
+        // Se il retry restituisce null, torniamo uno shift zero
+        return result ?? new Point2D(0, 0);
     }
 
     private void ReportProgress(IProgress<AlignmentProgressReport>? progress, int index, int total, string path, Point2D? center, string msg)

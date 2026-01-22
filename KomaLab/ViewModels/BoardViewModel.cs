@@ -7,6 +7,7 @@ using System.Threading.Tasks;
 using Avalonia;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using KomaLab.Models.Fits;
 using KomaLab.Models.Nodes;
 using KomaLab.Models.Processing;
 using KomaLab.Models.Visualization;
@@ -24,7 +25,7 @@ namespace KomaLab.ViewModels;
 
 /// <summary>
 /// ViewModel principale della Board. Gestisce il grafo dei nodi e coordina i tool di elaborazione.
-/// Architettura centralizzata basata sul contratto IImageNavigator.
+/// Architettura centralizzata basata sul contratto IImageNavigator e FitsFileReference.
 /// </summary>
 public partial class BoardViewModel : ObservableObject
 {
@@ -212,25 +213,19 @@ public partial class BoardViewModel : ObservableObject
         var paths = await _dialogService.ShowOpenFitsFileDialogAsync();
         if (paths == null || !paths.Any()) return;
 
-        // --- CORREZIONE DEADLOCK ---
-        // 1. Recuperiamo le coppie (Path, Data) in parallelo asincrono
-        //    Senza bloccare il thread UI.
         var tasks = paths.Select(async path => 
         {
             var header = await _dataManager.GetHeaderOnlyAsync(path);
-            // Assumo tu abbia un metodo per estrarre la data, altrimenti usa la logica standard
             var date = _metadataService.GetObservationDate(header) ?? DateTime.MinValue; 
             return (Path: path, Date: date);
         });
 
         var results = await Task.WhenAll(tasks);
 
-        // 2. Ordiniamo in memoria (operazione velocissima)
         var sortedPaths = results
             .OrderBy(x => x.Date)
             .Select(x => x.Path)
             .ToList();
-        // ---------------------------
 
         Point centerScreen = new Point(Viewport.ViewportSize.Width / 2.0, Viewport.ViewportSize.Height / 2.0);
         Point pos = Viewport.ToWorldCoordinates(centerScreen);
@@ -242,12 +237,10 @@ public partial class BoardViewModel : ObservableObject
         AddNodeToGraph(newNode, sortedPaths.Count == 1 ? "Aggiungi Immagine" : "Aggiungi Sequenza");
     }
 
-    // --- COMANDI PONTE PER KEYBINDINGS (Risolvono gli errori di compilazione) ---
-
     [RelayCommand]
     private void PanBoard(string direction)
     {
-        double step = 100; // Pixel di spostamento per ogni tasto freccia
+        double step = 100; 
         switch (direction.ToLower())
         {
             case "left": Viewport.ApplyPan(step, 0); break;
@@ -267,7 +260,7 @@ public partial class BoardViewModel : ObservableObject
     }
 
     // ---------------------------------------------------------------------------
-    // TOOL E ELABORAZIONE
+    // TOOL E ELABORAZIONE (Aggiornati a FitsFileReference)
     // ---------------------------------------------------------------------------
 
     [RelayCommand(CanExecute = nameof(CanStackImages))]
@@ -276,13 +269,12 @@ public partial class BoardViewModel : ObservableObject
         if (SelectedNode is not ImageNodeViewModel source) return;
         try
         {
+            // Lo stackingCoordinator usa già CurrentFiles (List<FitsFileReference>)
             var resultRef = await _stackingCoordinator.ExecuteStackingAsync(source.CurrentFiles, mode);
         
-            // Calcoliamo il centro del nodo sorgente
             double sourceCenterX = source.X + (1.5 * source.EstimatedTotalSize.Width);
             double sourceCenterY = source.Y + (source.EstimatedTotalSize.Height / 2.0);
 
-            // Chiediamo alla factory di creare il nuovo nodo centrato 400px a destra del centro sorgente
             var newNode = await _nodeFactory.CreateSingleImageNodeAsync(resultRef.FilePath, sourceCenterX + 400, sourceCenterY);
         
             newNode.Title = $"{source.Title} ({mode})";
@@ -301,6 +293,7 @@ public partial class BoardViewModel : ObservableObject
         try {
             var fileRef = imgNode.ActiveFile;
             var data = await _dataManager.GetDataAsync(fileRef.FilePath);
+            // Salvataggio rispettando l'header modificato in sessione
             await _dataManager.SaveDataAsync(savePath, data.PixelData, fileRef.ModifiedHeader ?? data.Header);
         } catch (Exception ex) { Debug.WriteLine($"Save failed: {ex.Message}"); }
     }
@@ -311,41 +304,58 @@ public partial class BoardViewModel : ObservableObject
         if (SelectedNode is not ImageNodeViewModel imgNode || imgNode.ActiveRenderer == null) return;
         var path = await _dialogService.ShowSaveFileDialogAsync($"{imgNode.Title}.avi", "Video", "*.avi");
         if (string.IsNullOrWhiteSpace(path)) return;
+        // Utilizza CurrentFiles per mantenere coerenza dei metadati durante l'export video
         await _videoCoordinator.ExportVideoAsync(imgNode.CurrentFiles, path, 5.0, imgNode.ActiveRenderer.CaptureContrastProfile(), imgNode.VisualizationMode);
     }
 
     [RelayCommand(CanExecute = nameof(CanExecuteOnImageNode))]
     private async Task ShowPosterizationWindow()
     {
-        await RunGenericProcessing((paths, mode) => _windowService.ShowPosterizationWindowAsync(paths, mode), "Posterizzazione", "(Posterizzata)");
+        // Passo la lista di FitsFileReference al WindowService
+        await RunGenericProcessing(
+            (files, mode) => _windowService.ShowPosterizationWindowAsync(files, mode), 
+            "Posterizzazione", 
+            "(Posterizzata)");
     }
 
     [RelayCommand(CanExecute = nameof(CanExecuteOnImageNode))]
     private async Task ShowAlignmentWindow()
     {
-        await RunGenericProcessing((paths, mode) => _windowService.ShowAlignmentWindowAsync(paths, mode), "Allineamento", "(Allineata)");
+        // Passo la lista di FitsFileReference al WindowService
+        await RunGenericProcessing(
+            (files, mode) => _windowService.ShowAlignmentWindowAsync(files, mode), 
+            "Allineamento", 
+            "(Allineata)");
     }
     
-    private async Task RunGenericProcessing(Func<List<string>, VisualizationMode, Task<List<string>?>> windowAction, string undoLabel, string titleSuffix)
+    /// <summary>
+    /// Esecutore generico per i tool di elaborazione batch.
+    /// Gestisce l'apertura della finestra, la creazione del nodo risultante e l'undo.
+    /// </summary>
+    private async Task RunGenericProcessing(
+        Func<List<FitsFileReference>, VisualizationMode, Task<List<string>?>> windowAction, 
+        string undoLabel, 
+        string titleSuffix)
     {
         if (SelectedNode is not ImageNodeViewModel imgNode) return;
-        var inputs = imgNode.GetManagedFilePaths();
-        if (!inputs.Any()) return;
+        
+        // Recuperiamo i riferimenti completi (invece dei soli path stringa)
+        var inputFiles = imgNode.CurrentFiles.ToList();
+        if (!inputFiles.Any()) return;
     
-        var resultPaths = await windowAction(inputs, imgNode.VisualizationMode);
+        var resultPaths = await windowAction(inputFiles, imgNode.VisualizationMode);
         if (resultPaths == null || !resultPaths.Any()) return;
 
-        // Calcolo centro sorgente
-        double centerX = imgNode.X + (1.5 * imgNode.EstimatedTotalSize.Width);;
+        double centerX = imgNode.X + (1.5 * imgNode.EstimatedTotalSize.Width);
         double centerY = imgNode.Y + (imgNode.EstimatedTotalSize.Height / 2.0);
 
-        // Posizioniamo il centro del nuovo nodo a destra
         BaseNodeViewModel newNode = resultPaths.Count == 1
             ? await _nodeFactory.CreateSingleImageNodeAsync(resultPaths[0], centerX + 400, centerY)
             : await _nodeFactory.CreateMultipleImagesNodeAsync(resultPaths, centerX + 400, centerY);
 
         newNode.Title = $"{imgNode.Title} {titleSuffix}";
         if (newNode is ImageNodeViewModel resNode) resNode.VisualizationMode = imgNode.VisualizationMode;
+        
         RegisterProcessingResult(newNode, imgNode, resultPaths[0], undoLabel);
     }
 
@@ -358,6 +368,7 @@ public partial class BoardViewModel : ObservableObject
     {
         if (SelectedNode is ImageNodeViewModel imgNode)
         {
+            // L'editor lavora direttamente sui riferimenti di sessione
             await _windowService.ShowHeaderEditorAsync(imgNode.CurrentFiles, imgNode.Navigator);
         }
     }

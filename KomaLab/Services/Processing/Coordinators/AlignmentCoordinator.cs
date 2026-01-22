@@ -40,7 +40,8 @@ public class AlignmentCoordinator : IAlignmentCoordinator
 
     public async Task<AlignmentTargetMetadata> GetFileMetadataAsync(FitsFileReference file)
     {
-        var header = await _dataManager.GetHeaderOnlyAsync(file.FilePath);
+        // Priorità all'header in RAM per rispettare le modifiche dell'utente durante la sessione
+        var header = file.ModifiedHeader ?? await _dataManager.GetHeaderOnlyAsync(file.FilePath);
         if (header == null) throw new InvalidOperationException("Header FITS non leggibile.");
 
         string obj = _metadataService.GetStringValue(header, "OBJECT").Replace("'", "").Trim();
@@ -64,10 +65,10 @@ public class AlignmentCoordinator : IAlignmentCoordinator
         var fileList = files.ToList();
         var results = new List<Point2D?>();
 
-        // Logica di instradamento: WCS per stelle, JPL per comete
         if (target == AlignmentTarget.Stars)
         {
-            var refHeader = await _dataManager.GetHeaderOnlyAsync(fileList[0].FilePath);
+            var firstFile = fileList[0];
+            var refHeader = firstFile.ModifiedHeader ?? await _dataManager.GetHeaderOnlyAsync(firstFile.FilePath);
             var refWcs = _metadataService.ExtractWcs(refHeader!);
             
             foreach (var f in fileList)
@@ -80,7 +81,6 @@ public class AlignmentCoordinator : IAlignmentCoordinator
         }
         else
         {
-            // Fallback: lista vuota se non ci sono dati astrometrici
             results.AddRange(Enumerable.Repeat<Point2D?>(null, fileList.Count));
         }
 
@@ -101,47 +101,62 @@ public class AlignmentCoordinator : IAlignmentCoordinator
         var fileList = files.ToList();
         var guessList = guesses.ToList();
 
-        // --- LOGICA DI COORDINAMENTO INTELLIGENTE ---
-        // Se la UI non ha fornito coordinate (perché eravamo in Automatico)
-        // ma l'utente ha abilitato JPL (abbiamo un jplTargetName), le recuperiamo ora.
         if (guessList.All(g => g == null) && !string.IsNullOrEmpty(jplTargetName))
         {
             guessList = await DiscoverStartingPointsAsync(fileList, target, jplTargetName);
         }
 
-        // Delega il calcolo matematico dei centroidi al Service
+        // Delega allo specialista (AlignmentService) il calcolo dei centroidi reali
         var centers = await _alignmentService.CalculateCentersAsync(
             target, mode, method, fileList, guessList, searchRadius, progress, token);
 
-        // Delega la creazione della mappa geometrica (canvas, shift globali) al Service
+        // Genera la mappa geometrica (Canvas size e spostamenti relativi)
         return await _alignmentService.GenerateMapAsync(fileList, centers.ToList(), target);
     }
+
+    // AlignmentCoordinator.cs
 
     public async Task<List<string>> ExecuteWarpingAsync(
         IEnumerable<FitsFileReference> files,
         AlignmentMap map,
+        // Aggiungi qui i parametri di contesto che vuoi loggare
+        AlignmentMode mode,
+        int searchRadius,
+        string? jplName, 
         IProgress<BatchProgressReport>? progress = null,
         CancellationToken token = default)
     {
-        if (map == null || !map.IsValid) throw new InvalidOperationException("Mappa di allineamento non valida.");
+        if (map == null || !map.IsValid) throw new InvalidOperationException("Mappa non valida.");
 
-        // Il Coordinator chiede al Service IL COME (la funzione di warping)
-        // ma chiede al BatchService IL QUANDO (l'esecuzione parallela sui file)
-        Action<Mat, Mat, int> warpProcessor = _alignmentService.GetWarpingProcessor(map);
+        // 1. Prepariamo la stringa "Statica" (quella che conosciamo già qui)
+        string refInfo = "WCS";
+        if (map.Target == AlignmentTarget.Comet)
+        {
+            refInfo = !string.IsNullOrEmpty(jplName) ? $"JPL ({jplName})" : "Manual";
+        }
 
-        return await _batchService.ProcessFilesAsync(
-            files.Select(f => f.FilePath), 
-            "Aligned", 
-            warpProcessor, 
-            progress, 
-            token);
+        // 2. Definiamo la Strategia (Il Delegato)
+        // Questa funzione vive qui, vede 'mode' e 'refInfo', ma aspetta dx/dy dal service.
+        Func<double, double, string> logStrategy = (dx, dy) => 
+        {
+            return FormattableString.Invariant(
+                $"KomaLab Align: Mode={mode}, Rad={searchRadius}, Ref={refInfo}, dX={dx:F2}, dY={dy:F2}"
+            );
+        };
+
+        // 3. Passiamo la strategia al Service
+        // Non stiamo passando dati, stiamo passando un COMPORTAMENTO.
+        var warpProcessor = _alignmentService.GetWarpingProcessor(map, logStrategy);
+
+        // 4. Eseguiamo
+        return await _batchService.ProcessFilesAsync(files, "Aligned", warpProcessor, progress, token);
     }
 
     #region Helpers Astrometrici Privati
 
     private async Task<Point2D?> FetchJplPointAsync(FitsFileReference file, string targetName)
     {
-        var header = await _dataManager.GetHeaderOnlyAsync(file.FilePath);
+        var header = file.ModifiedHeader ?? await _dataManager.GetHeaderOnlyAsync(file.FilePath);
         var date = _metadataService.GetObservationDate(header!);
         var loc = _metadataService.GetObservatoryLocation(header!);
         var wcs = _metadataService.ExtractWcs(header!);
@@ -157,7 +172,7 @@ public class AlignmentCoordinator : IAlignmentCoordinator
 
     private async Task<Point2D?> FetchWcsPointAsync(FitsFileReference file, double ra, double dec)
     {
-        var header = await _dataManager.GetHeaderOnlyAsync(file.FilePath);
+        var header = file.ModifiedHeader ?? await _dataManager.GetHeaderOnlyAsync(file.FilePath);
         var wcs = _metadataService.ExtractWcs(header!);
         if (!wcs.IsValid) return null;
 

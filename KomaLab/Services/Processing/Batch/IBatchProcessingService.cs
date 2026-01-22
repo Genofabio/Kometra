@@ -2,6 +2,8 @@
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
+using KomaLab.Models.Fits;
+using KomaLab.Models.Fits.Structure;
 using KomaLab.Models.Processing;
 using OpenCvSharp;
 
@@ -23,9 +25,10 @@ public interface IBatchProcessingService
     /// <param name="token">Token per annullare l'operazione.</param>
     /// <returns>Lista dei percorsi dei file generati.</returns>
     Task<List<string>> ProcessFilesAsync(
-        IEnumerable<string> sourcePaths,
+        IEnumerable<FitsFileReference> sourceFiles,
         string outputFolder,
-        Action<Mat, Mat, int> processor, // Aggiunto 'int' per l'indice
+        // Aggiornata la firma dell'Action qui sotto
+        Action<Mat, Mat, FitsHeader, int> processor, 
         IProgress<BatchProgressReport>? progress = null,
         CancellationToken token = default);
 }

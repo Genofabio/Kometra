@@ -46,40 +46,48 @@ public class StackingCoordinator : IStackingCoordinator
             foreach (var fileRef in fileList)
             {
                 var data = await _dataManager.GetDataAsync(fileRef.FilePath);
-                double bScale = _metadataService.GetDoubleValue(data.Header, "BSCALE", 1.0);
-                double bZero = _metadataService.GetDoubleValue(data.Header, "BZERO", 0.0);
-                var mat = _converter.RawToMat(data.PixelData, bScale, bZero);
+                // Usa l'header modificato se presente (es. dopo allineamento), altrimenti quello su disco
+                var headerToUse = fileRef.ModifiedHeader ?? data.Header; 
+                
+                double bScale = _metadataService.GetDoubleValue(headerToUse, "BSCALE", 1.0);
+                double bZero = _metadataService.GetDoubleValue(headerToUse, "BZERO", 0.0);
+                
+                // Usiamo Double per la massima precisione durante la somma
+                var mat = _converter.RawToMat(data.PixelData, bScale, bZero, FitsBitDepth.Double);
                 matsToDispose.Add(mat);
             }
 
-            // 2. Calcolo Stacking
+            // 2. Calcolo Stacking (Somma/Media/Mediana)
             using var resultMat = await _stackingEngine.ComputeStackAsync(matsToDispose, mode);
             var finalPixels = _converter.MatToRaw(resultMat, FitsBitDepth.Double);
 
             // 3. Preparazione Header
             var firstFrameData = await _dataManager.GetDataAsync(fileList[0].FilePath);
+            
+            // NOTA: CreateHeaderFromTemplate ora imposta automaticamente:
+            // - DATE (Creazione file fisico)
+            // - CREATOR (KomaLab)
+            // - ORIGIN (Copia dal sorgente o default)
+            // - BITPIX, NAXIS, BSCALE, BZERO
             var finalHeader = _metadataService.CreateHeaderFromTemplate(
-                firstFrameData.Header, 
+                fileList[0].ModifiedHeader ?? firstFrameData.Header, 
                 finalPixels, 
                 FitsBitDepth.Double
             );
 
-            // --- CHIAVI UNICHE (Usa SetValue per evitare duplicati se il file viene ri-elaborato) ---
+            // --- CHIAVI SPECIFICHE DELLO STACKING ---
             
-            // Identità del software
-            _metadataService.SetValue(finalHeader, "CREATOR", "KomaLab", "Software that created this file");
-
-            // Dati scientifici dello stack
+            // NCOMBINE: Quante immagini compongono questo stack?
             _metadataService.SetValue(finalHeader, "NCOMBINE", fileList.Count, "KomaLab - Number of combined frames");
+            
+            // STACKMET: Quale algoritmo matematico è stato usato?
             _metadataService.SetValue(finalHeader, "STACKMET", mode.ToString().ToUpper(), "KomaLab - Stacking algorithm used");
 
-            // Data dell'ultima elaborazione
-            _metadataService.SetValue(finalHeader, "DATE-PRO", DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ss"), "KomaLab - Last processing UTC date");
+            // DATE-PRO: Quando è avvenuto il calcolo scientifico? (Diverso da DATE scrittura file)
+            _metadataService.SetValue(finalHeader, "DATE-PRO", DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ss"), "KomaLab - Processing timestamp (UTC)");
 
-            // --- CHIAVI ADDITIVE (Usa AddValue per mantenere la cronologia) ---
-            
-            // Nella HISTORY il testo va nel parametro 'value'. Il parametro 'comment' va lasciato null.
-            _metadataService.AddValue(finalHeader, "HISTORY", $"KomaLab - Stacking: {fileList.Count} frames combined using {mode} algorithm.", null);
+            // HISTORY: Traccia dell'operazione per l'utente
+            _metadataService.AddValue(finalHeader, "HISTORY", $"KomaLab - Stacking: Combined {fileList.Count} frames via {mode} algorithm.", null);
 
             // 4. Salvataggio
             return await _dataManager.SaveAsTemporaryAsync(finalPixels, finalHeader, "StackResult");

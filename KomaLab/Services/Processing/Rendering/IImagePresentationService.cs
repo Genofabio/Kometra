@@ -13,5 +13,6 @@ public interface IImagePresentationService
 
     // --- SOGLIE E TRANSIZIONE ---
     AbsoluteContrastProfile GetInitialProfile(Mat source);
-    AbsoluteContrastProfile GetAdaptedProfile(Mat nextMat, AbsoluteContrastProfile currentProfile, (double Mean, double StdDev) currentMetrics);
+    SigmaContrastProfile GetRelativeProfile(AbsoluteContrastProfile absolute, (double Mean, double StdDev) stats);
+    AbsoluteContrastProfile GetAbsoluteProfile(SigmaContrastProfile relative, (double Mean, double StdDev) stats);
 }

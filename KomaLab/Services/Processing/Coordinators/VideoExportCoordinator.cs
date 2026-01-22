@@ -4,6 +4,7 @@ using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using KomaLab.Models.Fits;
+using KomaLab.Models.Fits.Structure;
 using KomaLab.Models.Visualization;
 using KomaLab.Services.Fits;
 using KomaLab.Services.Fits.Conversion;
@@ -18,7 +19,7 @@ public class VideoExportCoordinator : IVideoExportCoordinator
     private readonly IFitsDataManager _dataManager;
     private readonly IFitsOpenCvConverter _converter;
     private readonly IImagePresentationService _presentation;
-    private readonly IFitsMetadataService _metadata; // Reintegrato come da standard di progetto
+    private readonly IFitsMetadataService _metadata;
 
     public VideoExportCoordinator(
         IFitsDataManager dataManager, 
@@ -41,14 +42,13 @@ public class VideoExportCoordinator : IVideoExportCoordinator
         bool adaptiveStretch = true,
         CancellationToken token = default)
     {
-        // Risoluzione errore Ambiguous Invocation: 
-        // Castiamo esplicitamente la lambda a Func<Task> per aiutare il compilatore
-        await Task.Run((Func<Task>)(async () =>
+        await Task.Run(async () =>
         {
             VideoWriter? writer = null;
             Mat? frame8Bit = null;
-            var currentProfile = initialProfile;
-            (double Mean, double StdDev)? lastMetrics = null;
+            
+            // Lo "stile" di contrasto espresso in Sigma (Z-Score)
+            SigmaContrastProfile? referenceSigmaProfile = null;
 
             try
             {
@@ -56,19 +56,26 @@ public class VideoExportCoordinator : IVideoExportCoordinator
                 {
                     token.ThrowIfCancellationRequested();
 
-                    // 1. Caricamento dati
+                    // 1. Caricamento dati e metadati
                     var data = await _dataManager.GetDataAsync(fileRef.FilePath);
-                    var headerToUse = fileRef.ModifiedHeader ?? data.Header;
+                    var header = fileRef.ModifiedHeader ?? data.Header;
 
-                    // 2. Estrazione parametri via MetadataService (Uso standard)
-                    double bScale = _metadata.GetDoubleValue(headerToUse, "BSCALE", 1.0);
-                    double bZero = _metadata.GetDoubleValue(headerToUse, "BZERO", 0.0);
+                    // 2. Decisione Bit-Depth (Ottimizzazione RAM/Precisione)
+                    int bitpix = (int)_metadata.GetDoubleValue(header, "BITPIX", 16);
+                    FitsBitDepth targetDepth = bitpix switch
+                    {
+                        32   => FitsBitDepth.Double, // Interi 32bit -> Double per evitare overflow/precisione
+                        -64  => FitsBitDepth.Double, 
+                        _    => FitsBitDepth.Float   // Default sicuro per 8, 16 e -32 bit
+                    };
+                    
+                    double bScale = _metadata.GetDoubleValue(header, "BSCALE", 1.0);
+                    double bZero = _metadata.GetDoubleValue(header, "BZERO", 0.0);
 
-                    // 3. Conversione a Mat Scientifica
-                    using Mat scientificMat = _converter.RawToMat(data.PixelData, bScale, bZero);
-                    Cv2.PatchNaNs(scientificMat, 0.0);
+                    // 3. Conversione a Mat Scientifica (32/64 bit float)
+                    using Mat scientificMat = _converter.RawToMat(data.PixelData, bScale, bZero, targetDepth);
 
-                    // 4. Inizializzazione VideoWriter
+                    // 4. Inizializzazione VideoWriter (solo al primo frame)
                     if (writer == null)
                     {
                         var videoSize = new OpenCvSharp.Size(scientificMat.Width, scientificMat.Height);
@@ -78,18 +85,29 @@ public class VideoExportCoordinator : IVideoExportCoordinator
                         if (!writer.IsOpened()) throw new IOException("Impossibile inizializzare il codec video.");
                     }
 
-                    // 5. Adattamento Anti-Flicker
-                    if (adaptiveStretch && lastMetrics.HasValue)
+                    // 5. LOGICA ANTI-FLICKER (Adaptive Stretch)
+                    // Calcoliamo le statistiche correnti (Mean/StdDev)
+                    var currentStats = _presentation.GetPresentationRequirements(scientificMat);
+                    
+                    AbsoluteContrastProfile effectiveProfile;
+
+                    if (adaptiveStretch)
                     {
-                        currentProfile = _presentation.GetAdaptedProfile(scientificMat, currentProfile, lastMetrics.Value);
+                        // Se è il primo frame, definiamo lo "stile" basandoci sul profilo iniziale
+                        referenceSigmaProfile ??= _presentation.GetRelativeProfile(initialProfile, currentStats);
+
+                        // Applichiamo lo stile alle statistiche del frame corrente
+                        effectiveProfile = _presentation.GetAbsoluteProfile(referenceSigmaProfile, currentStats);
+                    }
+                    else
+                    {
+                        // Se non è adattivo, usiamo i valori ADU fissi del profilo iniziale
+                        effectiveProfile = initialProfile;
                     }
 
                     // 6. Rendering & Scrittura
-                    _presentation.RenderTo8Bit(scientificMat, frame8Bit!, currentProfile.BlackAdu, currentProfile.WhiteAdu, mode);
+                    _presentation.RenderTo8Bit(scientificMat, frame8Bit!, effectiveProfile.BlackAdu, effectiveProfile.WhiteAdu, mode);
                     writer.Write(frame8Bit);
-
-                    if (adaptiveStretch)
-                        lastMetrics = _presentation.GetPresentationRequirements(scientificMat);
                 }
             }
             finally
@@ -97,6 +115,6 @@ public class VideoExportCoordinator : IVideoExportCoordinator
                 writer?.Dispose();
                 frame8Bit?.Dispose();
             }
-        }));
+        }, token);
     }
 }

@@ -171,10 +171,10 @@
                     </StackPanel>
                     
                     <StackPanel Spacing="5" IsVisible="{Binding IsResultsListVisible}">
-                        <TextBlock Text="Rifinitura Manuale" FontSize="16" FontWeight="Bold"/>
-                        <TextBlock TextWrapping="Wrap" Opacity="0.7" Text="I centri sono stati rilevati. Clicca sull'immagine per modificarli manualmente." IsVisible="{Binding IsTargetPlacementAllowed}"/>
+                        <TextBlock Text="{Binding ResultsSectionTitle}" FontSize="16" FontWeight="Bold"/>
+                        <TextBlock TextWrapping="Wrap" Opacity="0.7" Text="{Binding ResultsSectionDescription}" IsVisible="{Binding IsTargetPlacementAllowed}"/>
                         <Separator Margin="0,10"/>
-                        <TextBlock Text="Centri Rilevati" FontWeight="SemiBold" Margin="0,0,0,8"/>
+                        <TextBlock Text="{Binding CoordinateListHeader}" FontWeight="SemiBold" Margin="0,0,0,8"/>
                     </StackPanel>
                 </StackPanel>
                 

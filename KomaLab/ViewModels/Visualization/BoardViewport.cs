@@ -11,9 +11,13 @@ namespace KomaLab.ViewModels.Visualization;
 /// </summary>
 public class BoardViewport : BaseViewport
 {
+    // Applichiamo i limiti specifici solo per la Board
+    protected override double MinZoomLimit => 0.05; // 5% per vedere tutto il grafo
+    protected override double MaxZoomLimit => 2.0;  // 200% per non sgranare troppo i nodi
+    protected override double ZoomStep => 1.15;    // Zoom leggermente più dolce sulla board
+
     public BoardViewport()
     {
-        // Impostazioni iniziali per la board (leggermente zoomata indietro di default)
         Scale = 0.4; 
         OffsetX = 0;
         OffsetY = 0;
@@ -69,7 +73,7 @@ public class BoardViewport : BaseViewport
         
         // Scegliamo la scala minore per non tagliare nulla e applichiamo dei limiti
         Scale = Math.Min(scaleX, scaleY);
-        Scale = Math.Clamp(Scale, MinZoom, 1.0); // Evitiamo uno zoom eccessivo (>100%) se c'è un solo nodo
+        Scale = Math.Clamp(Scale, MinZoomLimit, 1.0); // Evitiamo uno zoom eccessivo (>100%) se c'è un solo nodo
 
         // 4. Centratura (Pan)
         // Calcoliamo l'offset necessario per spostare il centro del Bounding Box 

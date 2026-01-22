@@ -6,6 +6,7 @@ using Avalonia;
 using Avalonia.Media.Imaging;
 using Avalonia.Platform;
 using CommunityToolkit.Mvvm.ComponentModel;
+using KomaLab.Models.Fits.Structure;
 using KomaLab.Models.Visualization;
 using KomaLab.Services.Fits.Conversion;
 using KomaLab.Services.Processing.Rendering;
@@ -16,17 +17,18 @@ namespace KomaLab.ViewModels.Visualization;
 
 /// <summary>
 /// Gestisce il ciclo di vita visuale di un'immagine FITS.
-/// Incapsula lo stato del contrasto e la memoria della Bitmap (UI).
-/// Custodisce i requisiti radiometrici necessari per la coerenza visuale.
+/// Ottimizzato per ridurre l'impronta in RAM tramite bit-depth adattivo (32/64 bit)
+/// e scaricamento immediato dei buffer sorgente dopo l'idratazione della matrice scientifica.
 /// </summary>
 public partial class FitsRenderer : ObservableObject, IDisposable
 {
-    // --- Dati Sorgente ---
-    private readonly Array _rawPixels;
+    // --- Dati Sorgente (Temporanei) ---
+    private Array? _rawPixels; 
     private readonly double _bScale;
     private readonly double _bZero;
     private readonly int _width;
     private readonly int _height;
+    private readonly FitsBitDepth _targetBitDepth; 
 
     // --- Dipendenze Core ---
     private readonly IFitsOpenCvConverter _converter;
@@ -34,36 +36,44 @@ public partial class FitsRenderer : ObservableObject, IDisposable
 
     // --- Stato Interno e Cache ---
     private CancellationTokenSource? _regenerationCts;
-    private Mat? _cachedScientificMat;
+    private Mat? _cachedScientificMat; 
     private WriteableBitmap? _backBuffer; 
     private bool _disposedValue;
 
-    // Cache dei requisiti radiometrici (Mean, StdDev) necessari per lo stretching
+    // Cache dei requisiti statistici (Mean/StdDev) calcolati una tantum
     private (double Mean, double StdDev)? _presentationRequirements;
 
     // --- Hook per i Tool ---
     public Action<Mat>? PostProcessAction { get; set; }
 
-    // --- Proprietà per la View (Sorgente Unica della Verità) ---
+    // --- Proprietà Pubbliche ---
     public Size ImageSize => new(_width, _height);
     public bool IsDisposed => _disposedValue; 
+
+    /// <summary> Espone la precisione effettiva utilizzata per il rendering (32 o 64 bit). </summary>
+    public FitsBitDepth RenderBitDepth => _targetBitDepth;
 
     [ObservableProperty] private Bitmap? _image;
     [ObservableProperty] private double _blackPoint;
     [ObservableProperty] private double _whitePoint;
     [ObservableProperty] private VisualizationMode _visualizationMode = VisualizationMode.Linear;
 
-    // --- Costruttore ---
+    // =======================================================================
+    // CICLO DI VITA
+    // =======================================================================
+
     public FitsRenderer(
         Array pixelData,
         double bScale,
         double bZero,
+        FitsBitDepth targetBitDepth, 
         IFitsOpenCvConverter converter,    
         IImagePresentationService presentationService) 
     {
         _rawPixels = pixelData ?? throw new ArgumentNullException(nameof(pixelData));
         _bScale = bScale;
         _bZero = bZero;
+        _targetBitDepth = targetBitDepth;
         _converter = converter;
         _presentationService = presentationService;
 
@@ -71,41 +81,52 @@ public partial class FitsRenderer : ObservableObject, IDisposable
         _width = _rawPixels.GetLength(1);
     }
 
+    /// <summary>
+    /// Genera la matrice OpenCV e libera immediatamente la memoria dell'array sorgente C#.
+    /// </summary>
     public async Task InitializeAsync()
     {
-        if (_disposedValue) return;
+        if (_disposedValue || _rawPixels == null) return;
 
         await Task.Run(() =>
         {
-            _cachedScientificMat = _converter.RawToMat(_rawPixels, _bScale, _bZero);
+            // 1. Conversione con bit-depth adattivo
+            _cachedScientificMat = _converter.RawToMat(_rawPixels, _bScale, _bZero, _targetBitDepth);
+            
+            // 2. OTTIMIZZAZIONE RAM: Rilasciamo l'array originale
+            _rawPixels = null; 
         });
 
-        // ResetThresholds popolerà anche la cache dei requisiti
+        // 3. Setup iniziale del contrasto (AutoStretch)
         await ResetThresholdsAsync(skipRegeneration: true);
         await TriggerRegeneration();
     }
 
     // =======================================================================
-    // LOGICA DI DOMINIO (Interfaccia per Nodi e Tool)
+    // LOGICA DI DOMINIO (Contrasto Relativo/Sigma)
     // =======================================================================
 
-    /// <summary>
-    /// Genera un profilo adattato per una nuova immagine basandosi sullo stato attuale.
-    /// Utilizza i requisiti in cache per garantire performance O(1) durante lo scorrimento.
-    /// </summary>
-    public AbsoluteContrastProfile GetAdaptedProfileFor(Mat nextMat)
+    /// <summary> Cattura lo stato visuale attuale in forma di Z-Score (Sigma). </summary>
+    public SigmaContrastProfile CaptureSigmaProfile()
     {
-        if (_disposedValue || nextMat == null || _cachedScientificMat == null) 
-            return CaptureContrastProfile();
-        
-        // Se per qualche motivo la cache è vuota, la popoliamo on-demand
-        _presentationRequirements ??= _presentationService.GetPresentationRequirements(_cachedScientificMat);
+        if (_disposedValue || _presentationRequirements == null) 
+            return new SigmaContrastProfile(-1.5, 10.0);
 
-        // Chiediamo al servizio di calcolare il profilo per l'immagine successiva
-        return _presentationService.GetAdaptedProfile(
-            nextMat, 
+        return _presentationService.GetRelativeProfile(
             CaptureContrastProfile(), 
             _presentationRequirements.Value);
+    }
+
+    /// <summary> Applica un profilo relativo adattandolo alle statistiche di questa immagine. </summary>
+    public void ApplyRelativeProfile(SigmaContrastProfile relativeProfile)
+    {
+        if (_disposedValue || _presentationRequirements == null || relativeProfile == null) return;
+
+        var absoluteProfile = _presentationService.GetAbsoluteProfile(
+            relativeProfile, 
+            _presentationRequirements.Value);
+
+        ApplyContrastProfile(absoluteProfile);
     }
 
     public AbsoluteContrastProfile CaptureContrastProfile() => new(BlackPoint, WhitePoint);
@@ -114,32 +135,23 @@ public partial class FitsRenderer : ObservableObject, IDisposable
     {
         if (_disposedValue || profile == null) return;
         
-        // L'aggiornamento di queste proprietà scatena automaticamente TriggerRegeneration()
         BlackPoint = profile.BlackAdu;
         WhitePoint = profile.WhiteAdu;
     }
 
-    public Mat CaptureScientificMat() => _cachedScientificMat?.Clone() ?? throw new InvalidOperationException("Dati non inizializzati.");
+    public (double Mean, double StdDev) PresentationMetrics => _presentationRequirements ?? (0, 1);
 
-    /// <summary>
-    /// Calcola (o restituisce dalla cache) i requisiti radiometrici necessari alla presentazione.
-    /// </summary>
-    private (double Mean, double StdDev) GetPresentationRequirements()
-    {
-        if (_cachedScientificMat == null || _cachedScientificMat.IsDisposed) return (0, 1);
-        
-        _presentationRequirements ??= _presentationService.GetPresentationRequirements(_cachedScientificMat);
-        return _presentationRequirements.Value;
-    }
+    // =======================================================================
+    // RENDERING PIPELINE
+    // =======================================================================
 
     public async Task ResetThresholdsAsync(bool skipRegeneration = false)
     {
         if (_disposedValue || _cachedScientificMat == null) return;
 
-        // Popoliamo i requisiti (operazione pesante fatta una volta sola)
-        _presentationRequirements = await Task.Run(() => _presentationService.GetPresentationRequirements(_cachedScientificMat));
+        _presentationRequirements = await Task.Run(() => 
+            _presentationService.GetPresentationRequirements(_cachedScientificMat));
         
-        // Otteniamo il profilo di AutoStretch iniziale
         var profile = _presentationService.GetInitialProfile(_cachedScientificMat);
 
         if (skipRegeneration)
@@ -154,10 +166,6 @@ public partial class FitsRenderer : ObservableObject, IDisposable
         }
     }
 
-    // =======================================================================
-    // RENDERING PIPELINE (Reattiva e Multi-threaded)
-    // =======================================================================
-
     partial void OnBlackPointChanged(double value) => _ = TriggerRegeneration();
     partial void OnWhitePointChanged(double value) => _ = TriggerRegeneration();
     partial void OnVisualizationModeChanged(VisualizationMode value) => _ = TriggerRegeneration();
@@ -166,7 +174,7 @@ public partial class FitsRenderer : ObservableObject, IDisposable
 
     private async Task TriggerRegeneration()
     {
-        if (_disposedValue) return;
+        if (_disposedValue || _cachedScientificMat == null) return;
         
         _regenerationCts?.Cancel();
         _regenerationCts?.Dispose();
@@ -175,7 +183,7 @@ public partial class FitsRenderer : ObservableObject, IDisposable
 
         try { await RegeneratePreviewImageAsync(token); }
         catch (OperationCanceledException) { }
-        catch (Exception ex) { Debug.WriteLine($"[FitsRenderer] Rendering Error: {ex.Message}"); }
+        catch (Exception ex) { Debug.WriteLine($"[FitsRenderer] Error: {ex.Message}"); }
     }
 
     private async Task RegeneratePreviewImageAsync(CancellationToken token)
@@ -194,10 +202,10 @@ public partial class FitsRenderer : ObservableObject, IDisposable
                     
                     using var dstMat = Mat.FromPixelData(_height, _width, MatType.CV_8UC1, lockedBuffer.Address, lockedBuffer.RowBytes);
 
-                    // Delega il rendering stretch all'unico esperto
+                    // Esegue lo stretch delegando al servizio dedicato
                     _presentationService.RenderTo8Bit(_cachedScientificMat, dstMat, BlackPoint, WhitePoint, VisualizationMode);
 
-                    // Hook per effetti post-stretch (es. Posterizzazione)
+                    // Applica eventuali filtri post-stretch (es. Posterizzazione)
                     PostProcessAction?.Invoke(dstMat);
 
                 }, token);
@@ -209,7 +217,9 @@ public partial class FitsRenderer : ObservableObject, IDisposable
         catch { targetBitmap.Dispose(); throw; }
     }
 
-    // --- Gestione Buffer e Memoria ---
+    // =======================================================================
+    // GESTIONE BUFFER E MEMORIA NATIVA
+    // =======================================================================
 
     private WriteableBitmap GetOrCreateBuffer()
     {

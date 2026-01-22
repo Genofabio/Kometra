@@ -2,6 +2,7 @@
 using System.Diagnostics;
 using System.Globalization;
 using System.IO;
+using System.Linq;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -58,12 +59,17 @@ public class PlateSolvingService : IPlateSolvingService
         try
         {
             // 1. Preparazione Ambiente
-            var header = fileRef.ModifiedHeader ?? await _dataManager.GetHeaderOnlyAsync(fileRef.FilePath);
+            // Recuperiamo l'header corrente (quello in memoria se modificato, o da disco)
+            var currentHeader = fileRef.ModifiedHeader ?? await _dataManager.GetHeaderOnlyAsync(fileRef.FilePath);
+            
+            // Creiamo il file temporaneo per ASTAP
             tempFilePath = await PrepareSandboxFile(fileRef);
 
             // 2. Preparazione Parametri
-            string hints = PrepareAstapHints(header);
+            string hints = PrepareAstapHints(currentHeader);
             string radius = hints.Contains("-ra") ? "30" : "180"; 
+            
+            // -z 0: No downsampling, -update: scrivi WCS nel file
             var args = $"-f \"{tempFilePath}\" -r {radius} -update -z 0 {hints}";
 
             liveLog?.Report($"CONFIG:Raggio {radius}° {(hints.Length > 0 ? "(Hinted)" : "(Blind)")}");
@@ -71,7 +77,7 @@ public class PlateSolvingService : IPlateSolvingService
             var logBuilder = new StringBuilder();
             bool solutionFound = false;
 
-            // 3. Esecuzione Processo
+            // 3. Esecuzione Processo (ASTAP)
             await RunProcessInternalAsync(exePath, args, line => 
             {
                 logBuilder.AppendLine(line);
@@ -88,30 +94,69 @@ public class PlateSolvingService : IPlateSolvingService
                 }
             }, token);
 
-            // 4. Verifica e Arricchimento
-            _dataManager.Invalidate(tempFilePath);
-            var solvedHeader = await _dataManager.GetHeaderOnlyAsync(tempFilePath);
-            bool hasWcs = solvedHeader != null && !string.IsNullOrEmpty(_metadataService.GetStringValue(solvedHeader, "CRVAL1"));
+            // 4. Verifica e Arricchimento (Logica Chirurgica)
+            _dataManager.Invalidate(tempFilePath); // Puliamo la cache per leggere il file modificato da ASTAP
+            
+            // Leggiamo l'header prodotto da ASTAP (che contiene il WCS ma potrebbe essere "sporco")
+            var astapOutputHeader = await _dataManager.GetHeaderOnlyAsync(tempFilePath);
+            
+            bool hasWcs = astapOutputHeader != null && 
+                          !string.IsNullOrEmpty(_metadataService.GetStringValue(astapOutputHeader, "CRVAL1"));
 
             if (solutionFound && hasWcs)
             {
                 result.Success = true;
-                result.SolvedHeader = solvedHeader;
                 result.Message = "Risoluzione OK";
 
-                // --- Arricchimento Metadati KomaLab ---
-                _metadataService.SetValue(solvedHeader!, "CREATOR", "KomaLab", "Software that coordinated the solve");
-                _metadataService.SetValue(solvedHeader!, "PLTSOLVD", true, "KomaLab - Plate has been solved");
-                _metadataService.SetValue(solvedHeader!, "SOLVER", "ASTAP", "KomaLab - Engine used for solving");
-                _metadataService.SetValue(solvedHeader!, "DATE-SOL", DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ss"), "KomaLab - Date of astrometric solution");
+                // A. CLONAZIONE PULITA
+                // Partiamo dall'header originale del file (preservando TELESCOP, OBJECT, HISTORY vecchie, ecc.)
+                // e garantendo che la struttura (incluso END) sia corretta.
+                var finalHeader = _metadataService.CloneHeader(currentHeader!);
 
-                string historyEntry = $"KomaLab - Plate solved via ASTAP (Radius: {radius} deg).";
-                _metadataService.AddValue(solvedHeader!, "HISTORY", historyEntry, null);
+                // B. TRASFERIMENTO CHIRURGICO DEL WCS
+                // Copiamo solo le chiavi astrometriche dall'output di ASTAP al nostro header pulito.
+                var wcsKeys = new[] { 
+                    "CTYPE1", "CTYPE2", "CRVAL1", "CRVAL2", "CRPIX1", "CRPIX2", 
+                    "CD1_1", "CD1_2", "CD2_1", "CD2_2", // Matrice standard
+                    "CUNIT1", "CUNIT2", 
+                    "CROTA1", "CROTA2",                 // Rotazione legacy
+                    "EQUINOX", "RADESYS", "LONPOLE", "LATPOLE" 
+                };
+
+                foreach (var key in wcsKeys)
+                {
+                    // Cerchiamo la card nel risultato di ASTAP
+                    var newCard = astapOutputHeader!.Cards.FirstOrDefault(c => c.Key.Equals(key, StringComparison.OrdinalIgnoreCase));
+                    
+                    if (newCard != null)
+                    {
+                        // Rimuoviamo la vecchia chiave WCS se esisteva
+                        finalHeader.RemoveCard(key);
+                        // Aggiungiamo la nuova calcolata da ASTAP
+                        finalHeader.AddCard(newCard); 
+                    }
+                }
+
+                // C. ARRICCHIMENTO METADATI KOMALAB
+                // Usiamo il MetadataService per impostare i valori in modo sicuro.
+                
+                _metadataService.SetValue(finalHeader, "PLTSOLVD", true, "KomaLab - Plate has been solved");
+                _metadataService.SetValue(finalHeader, "SOLVER", "ASTAP", "KomaLab - Engine used for solving");
+                
+                // DATE-SOL: Data della risoluzione matematica (diverso da DATE creazione file)
+                _metadataService.SetValue(finalHeader, "DATE-SOL", DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ss"), "KomaLab - Solution timestamp (UTC)");
+
+                // HISTORY: Nota per l'utente
+                string historyEntry = FormattableString.Invariant($"KomaLab - Plate solved via ASTAP (Radius: {radius} deg).");
+                _metadataService.AddValue(finalHeader, "HISTORY", historyEntry, null);
+
+                // Assegniamo l'header pulito e aggiornato al risultato
+                result.SolvedHeader = finalHeader;
             }
             else
             {
                 result.Success = false;
-                result.Message = solutionFound ? "Errore scrittura WCS" : "Soluzione non trovata";
+                result.Message = solutionFound ? "Errore lettura WCS output" : "Soluzione non trovata";
             }
             
             result.FullLog = logBuilder.ToString();

@@ -6,9 +6,9 @@ namespace KomaLab.ViewModels.Visualization;
 
 public partial class BaseViewport : ObservableObject
 {
-    protected const double MinZoom = 0.01; 
-    protected const double MaxZoom = 50.0; 
-    protected const double ZoomStep = 1.25;
+    protected virtual double MinZoomLimit => 0.01; 
+    protected virtual double MaxZoomLimit => 50.0; 
+    protected virtual double ZoomStep => 1.25;
 
     [ObservableProperty] 
     [NotifyPropertyChangedFor(nameof(IsZoomed))]
@@ -46,7 +46,8 @@ public partial class BaseViewport : ObservableObject
     public virtual void ApplyZoomAtPoint(double zoomDelta, Point centerPoint)
     {
         double oldScale = Scale;
-        double newScale = Math.Clamp(oldScale * zoomDelta, MinZoom, MaxZoom);
+        // Ora usiamo le proprietà virtuali, non più le costanti
+        double newScale = Math.Clamp(oldScale * zoomDelta, MinZoomLimit, MaxZoomLimit);
 
         if (Math.Abs(newScale - oldScale) < 0.0001) return;
 
@@ -57,17 +58,8 @@ public partial class BaseViewport : ObservableObject
         Scale = newScale;
     }
 
-    public void ZoomIn()
-    {
-        var center = new Point(ViewportSize.Width / 2.0, ViewportSize.Height / 2.0);
-        ApplyZoomAtPoint(ZoomStep, center);
-    }
-
-    public void ZoomOut()
-    {
-        var center = new Point(ViewportSize.Width / 2.0, ViewportSize.Height / 2.0);
-        ApplyZoomAtPoint(1.0 / ZoomStep, center);
-    }
+    public void ZoomIn() => ApplyZoomAtPoint(ZoomStep, new Point(ViewportSize.Width / 2.0, ViewportSize.Height / 2.0));
+    public void ZoomOut() => ApplyZoomAtPoint(1.0 / ZoomStep, new Point(ViewportSize.Width / 2.0, ViewportSize.Height / 2.0));
 
     public Point ToWorldCoordinates(Point screenPoint)
     {

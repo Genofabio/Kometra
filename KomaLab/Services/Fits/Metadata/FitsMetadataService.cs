@@ -12,14 +12,15 @@ namespace KomaLab.Services.Fits.Metadata;
 
 public class FitsMetadataService : IFitsMetadataService
 {
-    // Chiavi che definiscono la struttura fisica del file e non devono essere toccate manualmente
+    // --- COSTANTI ---
+
     private static readonly HashSet<string> StructuralKeys = new(StringComparer.OrdinalIgnoreCase)
     {
         "SIMPLE", "BITPIX", "NAXIS", "NAXIS1", "NAXIS2", "NAXIS3", 
-        "EXTEND", "PCOUNT", "GCOUNT", "GROUPS", "BSCALE", "BZERO"
+        "EXTEND", "PCOUNT", "GCOUNT", "GROUPS", "BSCALE", "BZERO", "END",
+        "CHECKSUM", "DATASUM", "DATE", "CREATOR", "ORIGIN"
     };
 
-    // Chiavi che ammettono duplicati (Commenti, Storia)
     private static readonly HashSet<string> AdditiveKeys = new(StringComparer.OrdinalIgnoreCase)
     {
         "HISTORY", "COMMENT", "" 
@@ -27,11 +28,8 @@ public class FitsMetadataService : IFitsMetadataService
 
     // --- REGOLE DI DOMINIO ---
 
-    public bool IsStructuralKey(string key)
-    {
-        if (string.IsNullOrWhiteSpace(key)) return false;
-        return StructuralKeys.Contains(key);
-    }
+    public bool IsStructuralKey(string key) => 
+        !string.IsNullOrWhiteSpace(key) && StructuralKeys.Contains(key);
 
     public bool AreGeometricallyCompatible(FitsHeader h1, FitsHeader h2)
     {
@@ -40,7 +38,7 @@ public class FitsMetadataService : IFitsMetadataService
                GetIntValue(h1, "NAXIS2") == GetIntValue(h2, "NAXIS2");
     }
 
-    // --- LETTURA VALORI BASE ---
+    // --- LETTURA (Invariata) ---
 
     public int GetIntValue(FitsHeader header, string key, int defaultValue = 0)
     {
@@ -58,29 +56,23 @@ public class FitsMetadataService : IFitsMetadataService
     {
         if (header == null) return string.Empty;
         var card = header.Cards.FirstOrDefault(c => c.Key.Equals(key, StringComparison.OrdinalIgnoreCase));
-        
         if (card == null) return string.Empty;
 
         if (AdditiveKeys.Contains(key)) return card.Comment ?? card.Value ?? string.Empty;
-
         if (string.IsNullOrWhiteSpace(card.Value)) return string.Empty;
 
         string val = card.Value.Trim();
         if (val.StartsWith("'") && val.EndsWith("'"))
         {
-            val = val.Substring(1, val.Length - 2);
-            val = val.Replace("''", "'");
+            val = val.Substring(1, val.Length - 2).Replace("''", "'");
         }
         return val.Trim();
     }
-
-    // --- INTERPRETAZIONE SCIENTIFICA ---
 
     public DateTime? GetObservationDate(FitsHeader header)
     {
         string dateStr = GetStringValue(header, "DATE-OBS");
         if (string.IsNullOrEmpty(dateStr)) dateStr = GetStringValue(header, "DATE");
-        
         if (DateTime.TryParse(dateStr, CultureInfo.InvariantCulture, DateTimeStyles.None, out var dt)) return dt;
         return null;
     }
@@ -92,143 +84,167 @@ public class FitsMetadataService : IFitsMetadataService
 
     public FitsBitDepth GetBitDepth(FitsHeader header)
     {
-        int? bitpix = GetIntValue(header, "BITPIX");
-
-        return (bitpix ?? 16) switch
+        return GetIntValue(header, "BITPIX") switch
         {
-            8 => FitsBitDepth.UInt8,
-            16 => FitsBitDepth.Int16,
-            32 => FitsBitDepth.Int32,
-            -32 => FitsBitDepth.Float,
-            -64 => FitsBitDepth.Double,
-            _ => FitsBitDepth.Int16 
+            8 => FitsBitDepth.UInt8, 16 => FitsBitDepth.Int16, 32 => FitsBitDepth.Int32,
+            -32 => FitsBitDepth.Float, -64 => FitsBitDepth.Double, _ => FitsBitDepth.Int16
         };
     }
     
     public SkyCoordinate? GetTargetCoordinates(FitsHeader header)
     {
         if (header == null) return null;
-
-        // 1. Identificazione delle Card (RA e DEC con fallback)
-        var raCard = header.Cards.FirstOrDefault(c => c.Key.Equals("RA", StringComparison.OrdinalIgnoreCase))
-                     ?? header.Cards.FirstOrDefault(c => c.Key.Equals("OBJCTRA", StringComparison.OrdinalIgnoreCase));
-
-        var decCard = header.Cards.FirstOrDefault(c => c.Key.Equals("DEC", StringComparison.OrdinalIgnoreCase))
-                      ?? header.Cards.FirstOrDefault(c => c.Key.Equals("OBJCTDEC", StringComparison.OrdinalIgnoreCase));
+        var raCard = header.Cards.FirstOrDefault(c => c.Key.Equals("RA", StringComparison.OrdinalIgnoreCase)) ?? 
+                     header.Cards.FirstOrDefault(c => c.Key.Equals("OBJCTRA", StringComparison.OrdinalIgnoreCase));
+        var decCard = header.Cards.FirstOrDefault(c => c.Key.Equals("DEC", StringComparison.OrdinalIgnoreCase)) ?? 
+                      header.Cards.FirstOrDefault(c => c.Key.Equals("OBJCTDEC", StringComparison.OrdinalIgnoreCase));
 
         if (raCard == null || decCard == null) return null;
 
-        double raDeg = 0;
-        double decDeg = 0;
-
-        // --- 2. LOGICA SMART PER RA (Ascensione Retta) ---
         string raValRaw = GetStringValue(header, raCard.Key);
         string raComment = raCard.Comment?.ToLowerInvariant() ?? "";
-
+        
+        double raDeg = 0;
         if (double.TryParse(raValRaw, NumberStyles.Any, CultureInfo.InvariantCulture, out double rawRa))
-        {
-            // Se il commento dice "deg" o se il valore è palesemente > 24, sono gradi
-            if (raComment.Contains("deg") || rawRa > 24)
-            {
-                raDeg = rawRa;
-            }
-            else
-            {
-                // Altrimenti assumiamo ore (standard FITS per RA < 24) e convertiamo in gradi
-                raDeg = rawRa * 15.0;
-            }
-        }
+            raDeg = (raComment.Contains("deg") || rawRa > 24) ? rawRa : rawRa * 15.0;
         else
-        {
-            // Se è una stringa sessagesimale (es. "01:07:07"), il parser la tratta come ore
             raDeg = AstroParser.ParseHoursToDegrees(raValRaw) ?? 0;
-        }
 
-        // --- 3. LOGICA PER DEC (Declinazione) ---
         string decValRaw = GetStringValue(header, decCard.Key);
-    
-        // Il parser delle Declinazioni gestisce già sia gradi decimali che sessagesimali
-        decDeg = AstroParser.ParseDegrees(decValRaw) ?? 0;
+        double decDeg = AstroParser.ParseDegrees(decValRaw) ?? 0;
 
         return new SkyCoordinate(raDeg, decDeg);
     }
     
-    // --- SCRITTURA / MANIPOLAZIONE ---
+    // --- SCRITTURA / MANIPOLAZIONE (CORRETTA) ---
+
+    /// <summary>
+    /// Inserisce una card nell'header. 
+    /// Se la chiave è univoca, rimuove la precedente.
+    /// NON gestisce l'END (per performance in loop).
+    /// </summary>
+    private void InsertCardRaw(FitsHeader header, FitsCard card)
+    {
+        if (!AdditiveKeys.Contains(card.Key))
+        {
+            header.RemoveCard(card.Key);
+        }
+        header.AddCard(card);
+    }
+
+    /// <summary>
+    /// Garantisce che la chiave END sia sempre l'ultima dell'header.
+    /// Rimuove eventuali END duplicati o mal posizionati e ne aggiunge uno in fondo.
+    /// </summary>
+    private void EnforceEndKey(FitsHeader header)
+    {
+        // Rimuove TUTTE le occorrenze di END esistenti (per sicurezza)
+        while (header.Cards.Any(c => c.Key.Equals("END", StringComparison.OrdinalIgnoreCase)))
+        {
+            header.RemoveCard("END");
+        }
+
+        // Aggiunge END pulito in fondo
+        header.AddCard(new FitsCard("END", string.Empty, string.Empty, false));
+    }
 
     public void AddValue(FitsHeader header, string key, object value, string? comment = null)
     {
+        // 1. Inserisci il valore (es. HISTORY)
         header.AddCard(CreateCard(key, value, comment));
+        // 2. RIPARA L'END (Fondamentale!)
+        EnforceEndKey(header);
     }
 
     public void SetValue(FitsHeader header, string key, object value, string? comment = null)
     {
-        if (!AdditiveKeys.Contains(key)) header.RemoveCard(key);
-        AddValue(header, key, value, comment);
+        // 1. Inserisci il valore (rimuovendo il vecchio se esiste)
+        InsertCardRaw(header, CreateCard(key, value, comment));
+        // 2. RIPARA L'END (Fondamentale!)
+        EnforceEndKey(header);
     }
 
     public void TransferMetadata(FitsHeader source, FitsHeader destination)
     {
         if (source == null || destination == null) return;
 
-        // Pulizia preventiva dell'END per garantire il riposizionamento finale
+        // Qui rimuoviamo END una volta sola all'inizio per efficienza
         RemoveEndKey(destination);
 
         foreach (var card in source.Cards)
         {
             if (StructuralKeys.Contains(card.Key)) continue;
-
-            // Saltiamo l'END della sorgente per evitare duplicati mal posizionati
-            if (card.Key.Equals("END", StringComparison.OrdinalIgnoreCase)) continue;
-
-            destination.AddCard(card); 
+            
+            // Usiamo InsertCardRaw perché sappiamo che l'END è già stato rimosso
+            // e verrà rimesso alla fine. Evitiamo overhead inutile nel loop.
+            InsertCardRaw(destination, card);
         }
 
-        // Sigillo finale
-        EnsureEndKey(destination);
+        // Rimettiamo l'END alla fine
+        EnforceEndKey(destination);
     }
 
     public FitsHeader CreateHeaderFromTemplate(FitsHeader template, Array newPixels, FitsBitDepth depth)
     {
         var newHeader = new FitsHeader();
         
-        AddValue(newHeader, "SIMPLE", true, "Standard FITS format");
-        AddValue(newHeader, "BITPIX", (int)depth, GetBitpixComment((int)depth));
-        AddValue(newHeader, "NAXIS", 2, "2D Image");
-        AddValue(newHeader, "NAXIS1", newPixels.GetLength(1), "Image Width");
-        AddValue(newHeader, "NAXIS2", newPixels.GetLength(0), "Image Height");
-        AddValue(newHeader, "BSCALE", 1.0);
-        AddValue(newHeader, "BZERO", 0.0);
+        // --- Struttura Fisica ---
+        // Usiamo AddValue/SetValue che ora sono sicuri e gestiscono l'END
+        SetValue(newHeader, "SIMPLE", true, "Standard FITS format");
+        SetValue(newHeader, "BITPIX", (int)depth, GetBitpixComment((int)depth));
+        SetValue(newHeader, "NAXIS", 2, "2D Image");
+        SetValue(newHeader, "NAXIS1", newPixels.GetLength(1), "Image Width");
+        SetValue(newHeader, "NAXIS2", newPixels.GetLength(0), "Image Height");
+        
+        SetValue(newHeader, "DATE", DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ss"), "File creation date (UTC)");
+        SetValue(newHeader, "CREATOR", "KomaLab v0.4", "Software used to create this file");
+        
+        SetValue(newHeader, "BSCALE", 1.0);
+        SetValue(newHeader, "BZERO", 0.0);
         
         if (template != null) TransferMetadata(template, newHeader);
         
-        // Garantisce la chiusura dell'header anche in assenza di template
-        EnsureEndKey(newHeader);
-        
+        // Ridondante ma sicuro
+        EnforceEndKey(newHeader);
         return newHeader;
     }
 
-    // --- UTILITY ---
+    // --- ALTRI METODI (Invariati) ---
+
+    public FitsBitDepth ResolveOutputBitDepth(FitsBitDepth original, bool hasSpecialValues)
+    {
+        if ((int)original < 0) return original;
+        if (hasSpecialValues) return (original == FitsBitDepth.Int32) ? FitsBitDepth.Double : FitsBitDepth.Float;
+        return original;
+    }
+
+    public void ShiftWcs(FitsHeader header, double deltaX, double deltaY)
+    {
+        if (header == null || (deltaX == 0 && deltaY == 0)) return;
+        double crpix1 = GetDoubleValue(header, "CRPIX1");
+        double crpix2 = GetDoubleValue(header, "CRPIX2");
+
+        if (Math.Abs(crpix1) > 0.0001 || Math.Abs(crpix2) > 0.0001)
+        {
+            // SetValue ora gestisce automaticamente l'END
+            SetValue(header, "CRPIX1", crpix1 + deltaX);
+            SetValue(header, "CRPIX2", crpix2 - deltaY);
+        }
+    }
 
     public IEnumerable<T> SortByDate<T>(IEnumerable<T> items, Func<T, FitsHeader?> headerSelector)
     {
         if (items == null) return Enumerable.Empty<T>();
         return items.OrderBy(item => GetObservationDate(headerSelector(item)!) ?? DateTime.MinValue);
     }
-
-    // --- HELPER INTERNI ---
+    
+    public FitsHeader CloneHeader(FitsHeader header) => header?.Clone() ?? new FitsHeader();
 
     private void RemoveEndKey(FitsHeader header)
     {
-        header.RemoveCard("END");
-    }
-
-    private void EnsureEndKey(FitsHeader header)
-    {
-        // Se non esiste già un marcatore END, lo aggiungiamo in coda.
-        // Se esistesse già (ma rimosso da RemoveEndKey), verrà aggiunto qui alla fine.
-        if (!header.Cards.Any(c => c.Key.Equals("END", StringComparison.OrdinalIgnoreCase)))
+        while (header.Cards.Any(c => c.Key.Equals("END", StringComparison.OrdinalIgnoreCase)))
         {
-            header.AddCard(new FitsCard("END", string.Empty, string.Empty, false));
+            header.RemoveCard("END");
         }
     }
 
@@ -243,7 +259,6 @@ public class FitsMetadataService : IFitsMetadataService
             string s => FormatFitsString(s, keyUpper),
             _ => value?.ToString() ?? ""
         };
-
         return new FitsCard(keyUpper, valStr, comment, false);
     }
 
@@ -251,9 +266,7 @@ public class FitsMetadataService : IFitsMetadataService
     {
         if (AdditiveKeys.Contains(key)) return s; 
         if (string.IsNullOrEmpty(s)) return "''";
-
-        string escaped = s.Replace("'", "''");
-        return $"'{escaped,-8}'"; 
+        return $"'{s.Replace("'", "''"),-8}'"; 
     }
 
     private string GetBitpixComment(int bitpix) => bitpix switch

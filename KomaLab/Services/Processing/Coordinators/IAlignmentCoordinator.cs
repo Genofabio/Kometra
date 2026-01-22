@@ -35,6 +35,10 @@ public interface IAlignmentCoordinator
     Task<List<string>> ExecuteWarpingAsync(
         IEnumerable<FitsFileReference> files,
         AlignmentMap map,
+        // Aggiungi qui i parametri di contesto che vuoi loggare
+        AlignmentMode mode,
+        int searchRadius,
+        string? jplName, 
         IProgress<BatchProgressReport>? progress = null,
         CancellationToken token = default);
 }

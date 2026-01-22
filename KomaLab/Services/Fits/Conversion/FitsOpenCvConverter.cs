@@ -13,22 +13,47 @@ public class FitsOpenCvConverter : IFitsOpenCvConverter
     // =======================================================================
 
     /// <summary>
-    /// Converte un array raw FITS in una matrice OpenCV Double.
-    /// BSCALE e BZERO sono opzionali (default 1.0 e 0.0).
+    /// Converte un array raw FITS in una matrice OpenCV Floating Point.
+    /// Se targetBitDepth è null, applica la promozione intelligente per preservare la precisione.
     /// </summary>
-    public Mat RawToMat(Array rawPixels, double bScale = 1.0, double bZero = 0.0)
+    public Mat RawToMat(Array rawPixels, double bScale = 1.0, double bZero = 0.0, FitsBitDepth? targetDepth = null)
     {
         if (rawPixels == null) throw new ArgumentNullException(nameof(rawPixels));
+    
         int height = rawPixels.GetLength(0); 
-        // Passiamo i parametri opzionali
-        return RawToMatRect(rawPixels, 0, height, bScale, bZero);
+    
+        // Manteniamo la promozione intelligente: se null, decide DetermineOptimalDepth
+        int depth;
+        if (targetDepth.HasValue)
+        {
+            // Se l'utente specifica l'enum, mappiamo ai bit (32 o 64 per i float OpenCV)
+            depth = (targetDepth.Value == FitsBitDepth.Float) ? 32 : 64;
+        }
+        else
+        {
+            depth = DetermineOptimalDepth(rawPixels);
+        }
+    
+        return RawToMatRect(rawPixels, 0, height, bScale, bZero, depth);
+    }
+
+    // DetermineOptimalDepth rimane IDENTICO nella logica
+    private int DetermineOptimalDepth(Array rawPixels)
+    {
+        return rawPixels switch
+        {
+            byte[,] or short[,] => 32,
+            int[,] => 64,
+            float[,] => 32,
+            double[,] => 64,
+            _ => 64
+        };
     }
 
     /// <summary>
-    /// Converte una porzione dell'array.
-    /// Parametri di scaling opzionali in fondo alla firma.
+    /// Converte una porzione dell'array con profondità di bit specificata.
     /// </summary>
-    public Mat RawToMatRect(Array rawPixels, int yStart, int rowsToRead, double bScale = 1.0, double bZero = 0.0)
+    private Mat RawToMatRect(Array rawPixels, int yStart, int rowsToRead, double bScale = 1.0, double bZero = 0.0, int targetBitDepth = 64)
     {
         if (rawPixels == null) throw new ArgumentNullException(nameof(rawPixels));
 
@@ -36,19 +61,20 @@ public class FitsOpenCvConverter : IFitsOpenCvConverter
         int width = rawPixels.GetLength(1);
 
         if (yStart < 0 || rowsToRead <= 0 || yStart + rowsToRead > totalHeight)
-            throw new ArgumentOutOfRangeException("Regione fuori dai limiti.");
+            throw new ArgumentOutOfRangeException(nameof(yStart), "Regione fuori dai limiti dell'immagine.");
 
-        // Matrice destinazione sempre Double per calcoli scientifici precisi
-        Mat stripMat = new Mat(rowsToRead, width, MatType.CV_64FC1);
+        // Configurazione destinazione
+        MatType destinationType = (targetBitDepth == 32) ? MatType.CV_32FC1 : MatType.CV_64FC1;
+        Mat stripMat = new Mat(rowsToRead, width, destinationType);
 
         try
         {
             switch (rawPixels)
             {
-                case byte[,] b: Copy2DToMat(b, stripMat, MatType.CV_8UC1, bScale, bZero, yStart); break;
-                case short[,] s: Copy2DToMat(s, stripMat, MatType.CV_16SC1, bScale, bZero, yStart); break;
-                case int[,] i: Copy2DToMat(i, stripMat, MatType.CV_32SC1, bScale, bZero, yStart); break;
-                case float[,] f: Copy2DToMat(f, stripMat, MatType.CV_32FC1, bScale, bZero, yStart); break;
+                case byte[,] b:   Copy2DToMat(b, stripMat, MatType.CV_8UC1, bScale, bZero, yStart); break;
+                case short[,] s:  Copy2DToMat(s, stripMat, MatType.CV_16SC1, bScale, bZero, yStart); break;
+                case int[,] i:    Copy2DToMat(i, stripMat, MatType.CV_32SC1, bScale, bZero, yStart); break;
+                case float[,] f:  Copy2DToMat(f, stripMat, MatType.CV_32FC1, bScale, bZero, yStart); break;
                 case double[,] d: Copy2DToMat(d, stripMat, MatType.CV_64FC1, bScale, bZero, yStart); break;
                 default: throw new NotSupportedException($"Tipo array {rawPixels.GetType()} non supportato.");
             }
@@ -62,42 +88,34 @@ public class FitsOpenCvConverter : IFitsOpenCvConverter
         return stripMat;
     }
 
-    private void Copy2DToMat<T>(T[,] source, Mat destDouble, MatType tempType, double bScale, double bZero, int yStart) 
+    private void Copy2DToMat<T>(T[,] source, Mat destMat, MatType sourceTempType, double bScale, double bZero, int yStart) 
         where T : struct
     {
-        int h = destDouble.Rows;
-        int w = destDouble.Cols;
+        int h = destMat.Rows;
+        int w = destMat.Cols;
 
-        using Mat tempMat = new Mat(h, w, tempType);
-    
-        // TRUCCO: Alloca il buffer UNA SOLA VOLTA fuori dal ciclo
+        // 1. Caricamento dati grezzi in una matrice temporanea del tipo originale
+        using Mat tempMat = new Mat(h, w, sourceTempType);
         T[] rowBuffer = new T[w]; 
 
         for (int y = 0; y < h; y++)
         {
             IntPtr destPtr = tempMat.Ptr(y);
-        
-            // Copia i dati dalla matrice 2D al buffer riutilizzabile
             for (int x = 0; x < w; x++)
             {
                 rowBuffer[x] = source[y + yStart, x];
             }
-        
-            // Copia il buffer nella memoria di OpenCV
             MarshalCopyArrayToPtr(rowBuffer, 0, destPtr, w);
         }
 
-        tempMat.ConvertTo(destDouble, MatType.CV_64FC1, bScale, bZero);
+        // 2. Conversione e Scaling (BSCALE/BZERO) verso il tipo floating point finale
+        tempMat.ConvertTo(destMat, destMat.Type(), bScale, bZero);
     }
 
     // =======================================================================
     // 2. MAT (OPENCV) -> RAW (Array Puro)
     // =======================================================================
 
-    /// <summary>
-    /// Converte una matrice OpenCV in un Array C# multidimensionale.
-    /// Non restituisce Header: chi chiama questo metodo saprà creare l'header basandosi sul tipo dell'Array.
-    /// </summary>
     public Array MatToRaw(Mat mat, FitsBitDepth targetDepth = FitsBitDepth.Double)
     {
         if (mat.Empty()) throw new ArgumentException("Matrice nulla o vuota", nameof(mat));
@@ -111,13 +129,13 @@ public class FitsOpenCvConverter : IFitsOpenCvConverter
             FitsBitDepth.Int16  => MatType.CV_16SC1,
             FitsBitDepth.Int32  => MatType.CV_32SC1,
             FitsBitDepth.Float  => MatType.CV_32FC1,
-            _ => MatType.CV_64FC1
+            _                   => MatType.CV_64FC1
         };
 
-        // Convertiamo se necessario (gestione memoria interna OpenCV)
         Mat sourceToRead = mat;
         bool tempCreated = false;
         
+        // Se la matrice non è già nel formato richiesto, eseguiamo la conversione
         if (mat.Type() != requiredType)
         {
             sourceToRead = new Mat();
@@ -127,14 +145,14 @@ public class FitsOpenCvConverter : IFitsOpenCvConverter
 
         try
         {
-            switch (targetDepth)
+            return targetDepth switch
             {
-                case FitsBitDepth.UInt8:  return MatTo2DArray<byte>(sourceToRead, h, w);
-                case FitsBitDepth.Int16:  return MatTo2DArray<short>(sourceToRead, h, w);
-                case FitsBitDepth.Int32:  return MatTo2DArray<int>(sourceToRead, h, w);
-                case FitsBitDepth.Float:  return MatTo2DArray<float>(sourceToRead, h, w);
-                default:                  return MatTo2DArray<double>(sourceToRead, h, w);
-            }
+                FitsBitDepth.UInt8 => MatTo2DArray<byte>(sourceToRead, h, w),
+                FitsBitDepth.Int16 => MatTo2DArray<short>(sourceToRead, h, w),
+                FitsBitDepth.Int32 => MatTo2DArray<int>(sourceToRead, h, w),
+                FitsBitDepth.Float => MatTo2DArray<float>(sourceToRead, h, w),
+                _                  => MatTo2DArray<double>(sourceToRead, h, w),
+            };
         }
         finally
         {
@@ -143,7 +161,7 @@ public class FitsOpenCvConverter : IFitsOpenCvConverter
     }
 
     // =======================================================================
-    // 3. HELPERS (Marshalling)
+    // 3. HELPERS (Marshalling & Memory)
     // =======================================================================
 
     private T[,] MatTo2DArray<T>(Mat mat, int rows, int cols) where T : struct

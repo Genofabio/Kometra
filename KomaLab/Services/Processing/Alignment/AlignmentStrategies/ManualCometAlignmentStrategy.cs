@@ -36,7 +36,7 @@ public class ManualCometAlignmentStrategy : AlignmentStrategyBase
 
     public override async Task<Point2D?[]> CalculateAsync(
         IEnumerable<FitsFileReference> files, 
-        IEnumerable<Point2D?> guesses, // Iniezione dei dati nel metodo
+        IEnumerable<Point2D?> guesses, 
         int searchRadius, 
         IProgress<AlignmentProgressReport>? progress = null,
         CancellationToken token = default)
@@ -53,6 +53,7 @@ public class ManualCometAlignmentStrategy : AlignmentStrategyBase
         {
             token.ThrowIfCancellationRequested();
             int index = i;
+            var fileRef = fileList[index]; // Prendiamo il Reference completo
             var guess = (index < guessList.Count) ? guessList[index] : null;
 
             if (guess == null) {
@@ -65,14 +66,13 @@ public class ManualCometAlignmentStrategy : AlignmentStrategyBase
                 await semaphore.WaitAsync(token);
                 try
                 {
-                    // Se raggio <= 0, ci fidiamo ciecamente del click utente
                     if (searchRadius <= 0) {
                         results[index] = guess;
                     }
                     else {
-                        // Raffinamento sub-pixel con gestione RAM (ClearCache) automatica nella base
+                        // Raffinamento sub-pixel: passiamo il fileRef per i metadati di sessione
                         results[index] = await ExecuteWithRetryAsync(
-                            operation: async () => await RefineCenterCoreAsync(fileList[index].FilePath, guess.Value, searchRadius),
+                            operation: async () => await RefineCenterCoreAsync(fileRef, guess.Value, searchRadius),
                             itemIndex: index
                         ) ?? guess;
                     }
@@ -80,7 +80,7 @@ public class ManualCometAlignmentStrategy : AlignmentStrategyBase
                     progress?.Report(new AlignmentProgressReport { 
                         CurrentIndex = index + 1, 
                         TotalCount = fileList.Count, 
-                        FileName = System.IO.Path.GetFileName(fileList[index].FilePath),
+                        FileName = System.IO.Path.GetFileName(fileRef.FilePath),
                         FoundCenter = results[index], 
                         Message = "Raffinamento manuale completato." 
                     });
@@ -93,17 +93,29 @@ public class ManualCometAlignmentStrategy : AlignmentStrategyBase
         return results;
     }
 
-    private async Task<Point2D?> RefineCenterCoreAsync(string path, Point2D guess, int radius)
+    private async Task<Point2D?> RefineCenterCoreAsync(FitsFileReference fileRef, Point2D guess, int radius)
     {
-        var data = await DataManager.GetDataAsync(path);
-        using var fullMat = _converter.RawToMat(data.PixelData, _metadataService.GetDoubleValue(data.Header, "BSCALE", 1.0));
+        // 1. Recupero dati originali dalla cache
+        var data = await DataManager.GetDataAsync(fileRef.FilePath);
         
+        // 2. PRIORITÀ HEADER: Rispettiamo BSCALE/BZERO modificati in RAM
+        var header = fileRef.ModifiedHeader ?? data.Header;
+        double bScale = _metadataService.GetDoubleValue(header, "BSCALE", 1.0);
+        double bZero = _metadataService.GetDoubleValue(header, "BZERO", 0.0);
+
+        // 3. SMART PROMOTION: Passando null, il convertitore sceglie 32 o 64 bit 
+        // in base al BITPIX originale del file, garantendo integrità scientifica.
+        using var fullMat = _converter.RawToMat(data.PixelData, bScale, bZero);
+        
+        // 4. Esecuzione ROI (Regione di interesse)
         var roi = new Rect((int)(guess.X - radius), (int)(guess.Y - radius), radius * 2, radius * 2)
             .Intersect(new Rect(0, 0, fullMat.Width, fullMat.Height));
 
         if (roi.Width <= 4 || roi.Height <= 4) return guess;
 
         using var roiMat = new Mat(fullMat, roi);
+        
+        // 5. Analisi del centroide con il metodo scelto dall'utente
         Point2D localCenter = _method switch {
             CenteringMethod.Centroid => _analysis.FindCentroid(roiMat),
             CenteringMethod.GaussianFit => _analysis.FindGaussianCenter(roiMat),
