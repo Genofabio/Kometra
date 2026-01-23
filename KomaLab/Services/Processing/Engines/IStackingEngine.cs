@@ -1,26 +1,23 @@
-﻿using System.Collections.Generic;
+﻿using System;
+using System.Collections.Generic;
 using System.Threading.Tasks;
-using KomaLab.Models.Processing;
 using OpenCvSharp;
+using KomaLab.Models.Fits.Structure;
 
 namespace KomaLab.Services.Processing.Engines;
 
-// ---------------------------------------------------------------------------------------
-// DOMINIO: INTEGRAZIONE DATI (STACKING)
-// RESPONSABILITÀ: Fusione matematica di N immagini in un unico risultato.
-// TIPI DI METODI: 
-// - Algoritmi statistici di integrazione (Media, Mediana, Somma).
-// - Gestione di set di dati massivi in parallelo.
-// NOTA: Opera puramente su matrici in memoria per produrre un segnale sintetico pulito.
-// ---------------------------------------------------------------------------------------
-
 public interface IStackingEngine
 {
-    /// <summary>
-    /// Esegue la fusione matematica di una lista di matrici.
-    /// </summary>
-    /// <param name="sources">Lista di matrici (devono avere le stesse dimensioni).</param>
-    /// <param name="mode">Algoritmo di integrazione (Sum, Average, Median).</param>
-    /// <returns>Una nuova matrice contenente il risultato dello stacking.</returns>
-    Task<Mat> ComputeStackAsync(List<Mat> sources, StackingMode mode);
+    // Per Somma/Media: Inizializza e Accumula (già ottimo per memoria)
+    void InitializeAccumulators(int width, int height, out Mat accumulator, out Mat countMap);
+    void AccumulateFrame(Mat accumulator, Mat countMap, Mat currentFrame);
+    void FinalizeAverage(Mat accumulator, Mat countMap);
+
+    // Per Mediana: Nuova firma "Chunked"
+    // Invece di una lista di Mat, prende una lista di "Riferimenti" e una funzione per caricarne un pezzo
+    Task<Mat> ComputeMedianChunkedAsync<TSource>(
+        IEnumerable<TSource> sources, 
+        int width, 
+        int height,
+        Func<TSource, Rect, Task<Mat>> regionLoader);
 }
