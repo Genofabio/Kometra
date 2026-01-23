@@ -32,9 +32,7 @@ public class PlateSolvingService : IPlateSolvingService
     {
         var diagnosis = new AstrometryDiagnosis();
         var header = fileRef.ModifiedHeader ?? await _dataManager.GetHeaderOnlyAsync(fileRef.FilePath);
-        var coords = _metadataService.GetTargetCoordinates(header);
-        
-        if (coords == null) diagnosis.MissingItems.Add(AstrometryPrerequisite.ApproximatePosition);
+
         if (!_metadataService.GetFocalLength(header).HasValue) diagnosis.MissingItems.Add(AstrometryPrerequisite.FocalLength);
         if (!_metadataService.GetPixelSize(header).HasValue) diagnosis.MissingItems.Add(AstrometryPrerequisite.PixelSize);
         
@@ -196,9 +194,14 @@ public class PlateSolvingService : IPlateSolvingService
                l.Contains("not found") ||
                l.Contains("used stars");
     }
+    
 
     private async Task RunProcessInternalAsync(string exe, string args, Action<string> onLineReceived, CancellationToken token)
     {
+        // LOG 1: Vediamo esattamente cosa stiamo lanciando
+        Debug.WriteLine($"[ASTAP-LAUNCH] CMD: {exe}");
+        Debug.WriteLine($"[ASTAP-LAUNCH] ARGS: {args}");
+
         var startInfo = new ProcessStartInfo {
             FileName = exe, 
             Arguments = args, 
@@ -211,6 +214,18 @@ public class PlateSolvingService : IPlateSolvingService
 
         using var process = new Process { StartInfo = startInfo };
         
+        // LOG 2: Verifica se il processo parte davvero
+        try 
+        {
+            process.Start();
+            Debug.WriteLine($"[ASTAP-STATUS] Processo avviato. PID: {process.Id}");
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"[ASTAP-ERROR] Impossibile avviare il processo: {ex.Message}");
+            throw; // Rilancia per gestire l'errore a monte
+        }
+
         using var registration = token.Register(() => 
         {
             try { if (!process.HasExited) process.Kill(true); } 
@@ -221,24 +236,42 @@ public class PlateSolvingService : IPlateSolvingService
         var errorDone = new TaskCompletionSource<bool>();
 
         process.OutputDataReceived += (s, e) => {
-            if (e.Data == null) outputDone.TrySetResult(true);
-            else onLineReceived(e.Data);
+            if (e.Data == null) 
+            {
+                outputDone.TrySetResult(true);
+            }
+            else 
+            {
+                // LOG 3: Leggiamo cosa dice ASTAP in tempo reale
+                Debug.WriteLine($"[ASTAP-STDOUT] {e.Data}");
+                onLineReceived(e.Data);
+            }
         };
+        
         process.ErrorDataReceived += (s, e) => {
-            if (e.Data == null) errorDone.TrySetResult(true);
-            else onLineReceived($"[STDERR] {e.Data}");
+            if (e.Data == null) 
+            {
+                errorDone.TrySetResult(true);
+            }
+            else 
+            {
+                // LOG 4: Leggiamo eventuali errori di ASTAP
+                Debug.WriteLine($"[ASTAP-STDERR] {e.Data}");
+                onLineReceived($"[STDERR] {e.Data}");
+            }
         };
 
-        process.Start();
         process.BeginOutputReadLine();
         process.BeginErrorReadLine();
 
         try
         {
             await Task.WhenAll(process.WaitForExitAsync(token), outputDone.Task, errorDone.Task);
+            Debug.WriteLine($"[ASTAP-EXIT] Codice uscita: {process.ExitCode}");
         }
         catch (OperationCanceledException)
         {
+            Debug.WriteLine("[ASTAP-CANCEL] Operazione annullata dall'utente.");
             onLineReceived("!!! PROCESSO INTERROTTO DALL'UTENTE !!!");
             throw;
         }

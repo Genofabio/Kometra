@@ -131,6 +131,12 @@
                             <StackPanel Spacing="2" IsVisible="{Binding IsJplOptionVisible}">
                                 <CheckBox IsChecked="{Binding UseJplAstrometry}" Content="{Binding AstrometryOptionLabel}" Margin="0"/>
                                 <StackPanel IsVisible="{Binding UseJplAstrometry}">
+                                    <Grid ColumnDefinitions="*, Auto" Margin="0,5,0,5" IsVisible="{Binding IsTargetNameInputVisible}">
+                                        <TextBox Grid.Column="0" Text="{Binding TargetName}" Watermark="Nome (es. 67P)" Margin="0,0,5,0"/>
+                                        <Button Grid.Column="1" Command="{Binding VerifyJplCommand}" ToolTip.Tip="Verifica disponibilità dati" IsVisible="{Binding IsVerifyButtonVisible}">
+                                            <StackPanel Orientation="Horizontal" Spacing="5"><avalonia:MaterialIcon Kind="LinkVariant" Width="16" Height="16"/><TextBlock Text="Verifica"/></StackPanel>
+                                        </Button>
+                                    </Grid>
                                     <ProgressBar IsIndeterminate="True" Height="2" IsVisible="{Binding IsVerifyingJpl}" 
                                                  Foreground="{DynamicResource ActionPrimaryBackgroundBrush}"/>
     
