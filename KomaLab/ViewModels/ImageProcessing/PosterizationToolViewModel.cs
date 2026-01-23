@@ -1,12 +1,11 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
-using Avalonia.Media.Imaging;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using KomaLab.Models.Fits;
+using KomaLab.Models.Fits.Structure;
 using KomaLab.Models.Processing;
 using KomaLab.Models.Visualization;
 using KomaLab.Services.Factories;
@@ -27,7 +26,6 @@ public partial class PosterizationToolViewModel : ObservableObject, IDisposable
     private readonly IFitsRendererFactory _rendererFactory;
     private readonly IPosterizationCoordinator _coordinator;
 
-    // Utilizziamo FitsFileReference invece delle semplici stringhe per la coerenza dei metadati
     private readonly List<FitsFileReference> _sourceFiles;
     private CancellationTokenSource? _loadingCts;
     private bool _hasLoadedFirstImage;
@@ -40,119 +38,183 @@ public partial class PosterizationToolViewModel : ObservableObject, IDisposable
     [NotifyCanExecuteChangedFor(nameof(ResetThresholdsCommand))]
     private FitsRenderer? _activeRenderer; 
 
-    // Proprietà UI delegate al navigatore
-    public string CurrentImageText => $"{Navigator.DisplayIndex} / {_sourceFiles.Count}";
-    public bool IsNavigationVisible => Navigator.CanMove;
+    // --- PROPRIETÀ PROXY: IL RENDERER COMANDA ---
+
+    public double BlackPoint
+    {
+        get => ActiveRenderer?.BlackPoint ?? 0;
+        set
+        {
+            if (ActiveRenderer == null || Math.Abs(ActiveRenderer.BlackPoint - value) < 0.1) return;
+            
+            // Logica Pushing: se il nero supera il bianco, sposta il bianco in avanti
+            if (value >= WhitePoint)
+            {
+                ActiveRenderer.WhitePoint = Math.Clamp(value + 1.0, 0, 65535);
+                OnPropertyChanged(nameof(WhitePoint));
+            }
+
+            ActiveRenderer.BlackPoint = Math.Clamp(value, 0, 65535);
+            OnPropertyChanged();
+        }
+    }
+
+    public double WhitePoint
+    {
+        get => ActiveRenderer?.WhitePoint ?? 65535;
+        set
+        {
+            if (ActiveRenderer == null || Math.Abs(ActiveRenderer.WhitePoint - value) < 0.1) return;
+
+            // Logica Pushing: se il bianco scende sotto il nero, sposta il nero all'indietro
+            if (value <= BlackPoint)
+            {
+                ActiveRenderer.BlackPoint = Math.Clamp(value - 1.0, 0, 65535);
+                OnPropertyChanged(nameof(BlackPoint));
+            }
+
+            ActiveRenderer.WhitePoint = Math.Clamp(value, 0, 65535);
+            OnPropertyChanged();
+        }
+    }
+
+    public VisualizationMode SelectedMode
+    {
+        get => ActiveRenderer?.VisualizationMode ?? VisualizationMode.Linear;
+        set
+        {
+            if (ActiveRenderer != null)
+            {
+                ActiveRenderer.VisualizationMode = value;
+                OnPropertyChanged();
+            }
+        }
+    }
 
     [ObservableProperty] private int _levels = 64; 
+    [ObservableProperty] private int _maxLevels = 64; 
     [ObservableProperty] private bool _autoAdaptThresholds = true; 
     [ObservableProperty] private bool _isProcessing;
     [ObservableProperty] private string _statusText = "Pronto";
 
+    // Proprietà UI delegate al navigatore
     public VisualizationMode[] AvailableModes => Enum.GetValues<VisualizationMode>();
-    
-    // Lista dei path risultanti (popolata dopo l'Apply)
+    public string CurrentImageText => $"{Navigator.DisplayIndex} / {_sourceFiles.Count}";
+    public bool IsNavigationVisible => Navigator.CanMove;
     public List<string>? ResultPaths { get; private set; }
     public bool DialogResult { get; private set; }
     public event Action? RequestClose;
 
     public PosterizationToolViewModel(
-        List<FitsFileReference> files, // MODIFICATO: Accetta riferimenti completi
+        List<FitsFileReference> files,
         IFitsDataManager dataManager,
         IFitsRendererFactory rendererFactory,
         IPosterizationCoordinator coordinator)
     {
-        _sourceFiles = files ?? throw new ArgumentNullException(nameof(files));
+        _sourceFiles = files;
         _dataManager = dataManager;
         _rendererFactory = rendererFactory;
         _coordinator = coordinator;
 
-        // Inizializzazione Navigatore
         Navigator.UpdateStatus(0, _sourceFiles.Count);
-        Navigator.IndexChanged += OnNavigatorIndexChanged;
+        Navigator.IndexChanged += async (_, idx) => await LoadImageAtIndexAsync(idx);
 
         if (_sourceFiles.Count > 0) 
             _ = LoadImageAtIndexAsync(0);
     }
 
-    private async void OnNavigatorIndexChanged(object? sender, int index)
-    {
-        OnPropertyChanged(nameof(CurrentImageText));
-        await LoadImageAtIndexAsync(index);
-    }
-
     // =======================================================================
-    // 1. RENDERING PIPELINE (Async Factory & RAM Optimization)
+    // 1. RENDERING PIPELINE (Flicker-Free & Adaptive)
     // =======================================================================
 
     private async Task LoadImageAtIndexAsync(int index)
     {
-        if (index < 0 || index >= _sourceFiles.Count) return;
-
         _loadingCts?.Cancel();
-        _loadingCts?.Dispose();
         _loadingCts = new CancellationTokenSource();
         var token = _loadingCts.Token;
 
-        StatusText = "Caricamento...";
-
         try
         {
+            StatusText = "Caricamento...";
             var fileRef = _sourceFiles[index];
-            
-            // 1. Recupero dati grezzi (Cache-aware)
             var data = await _dataManager.GetDataAsync(fileRef.FilePath);
             token.ThrowIfCancellationRequested();
 
-            // 2. CREAZIONE RENDERER CON PRIORITÀ HEADER
-            // Usiamo l'header modificato se presente (es. correzioni BSCALE manuali)
-            var headerToUse = fileRef.ModifiedHeader ?? data.Header;
-            var newRenderer = await _rendererFactory.CreateAsync(data.PixelData, headerToUse);
+            var newRenderer = await _rendererFactory.CreateAsync(data.PixelData, fileRef.ModifiedHeader ?? data.Header);
             
-            // 3. Configurazione effetto anteprima
+            // --- DEFAULT LIVELLI DINAMICO (Solo al primo avvio) ---
+            if (!_hasLoadedFirstImage)
+            {
+                // Se l'immagine è Float/Double, partiamo da 32 livelli, altrimenti 64
+                if (newRenderer.RenderBitDepth == FitsBitDepth.Float || 
+                    newRenderer.RenderBitDepth == FitsBitDepth.Double)
+                {
+                    Levels = 32;
+                    MaxLevels = 32;
+                }
+                else
+                {
+                    Levels = 64;
+                    MaxLevels = 64;
+                }
+            }
+
+            // Configurazione hook anteprima (usa il valore Levels appena calcolato o quello dell'utente)
             newRenderer.PostProcessAction = _coordinator.GetPreviewEffect(Levels);
 
-            // 4. LOGICA ADATTIVA (Flicker-Free)
-            if (_hasLoadedFirstImage && AutoAdaptThresholds && ActiveRenderer != null)
+            if (_hasLoadedFirstImage && ActiveRenderer != null)
             {
-                // Catturiamo lo stile (K-Sigma) invece della matrice pesante
-                var currentStyle = ActiveRenderer.CaptureSigmaProfile();
-                token.ThrowIfCancellationRequested();
-                
                 newRenderer.VisualizationMode = ActiveRenderer.VisualizationMode;
-                newRenderer.ApplyRelativeProfile(currentStyle);
-            }
-            else
-            {
-                _hasLoadedFirstImage = true;
+
+                if (AutoAdaptThresholds)
+                {
+                    // Adattamento statistico dinamico (K-Sigma)
+                    newRenderer.ApplyRelativeProfile(ActiveRenderer.CaptureSigmaProfile());
+                }
+                else
+                {
+                    // Mantenimento valori ADU fissi
+                    newRenderer.BlackPoint = ActiveRenderer.BlackPoint;
+                    newRenderer.WhitePoint = ActiveRenderer.WhitePoint;
+                }
             }
 
-            // 5. SWAP ATOMICO E PULIZIA RAM
             var old = ActiveRenderer;
             ActiveRenderer = newRenderer;
             
+            // Sincronizzazione UI
+            OnPropertyChanged(nameof(BlackPoint));
+            OnPropertyChanged(nameof(WhitePoint));
+            OnPropertyChanged(nameof(SelectedMode));
+            OnPropertyChanged(nameof(CurrentImageText));
+
             Viewport.ImageSize = ActiveRenderer.ImageSize;
-            StatusText = "Pronto";
             
-            // Rilasciamo immediatamente le risorse native del vecchio renderer (Mat OpenCV)
+            // Gestione dimensioni iniziali finestra e prima attivazione
+            if (!_hasLoadedFirstImage) 
+            { 
+                _hasLoadedFirstImage = true;
+                await Task.Delay(50); 
+                Viewport.ResetView(); 
+            }
+
+            StatusText = "Pronto";
             old?.Dispose();
         }
         catch (OperationCanceledException) { }
         catch (Exception ex) 
         { 
-            StatusText = $"Errore: {ex.Message}";
-            System.Diagnostics.Debug.WriteLine($"[PosterizationTool] Error: {ex}");
+            StatusText = $"Errore: {ex.Message}"; 
         }
     }
 
     // =======================================================================
-    // 2. LOGICA TOOL E BATCH PROCESSING
+    // 2. LOGICA TOOL E BATCH
     // =======================================================================
 
     partial void OnLevelsChanged(int value)
     {
         if (ActiveRenderer == null) return;
-        // Aggiorna l'hook di post-processing e forza il refresh della UI
         ActiveRenderer.PostProcessAction = _coordinator.GetPreviewEffect(value);
         ActiveRenderer.RequestRefresh(); 
     }
@@ -163,8 +225,8 @@ public partial class PosterizationToolViewModel : ObservableObject, IDisposable
         if (ActiveRenderer != null)
         {
             await ActiveRenderer.ResetThresholdsAsync();
-            // Notifica manuale necessaria per i binding del Black/White point se non automatici
-            OnPropertyChanged(nameof(ActiveRenderer)); 
+            OnPropertyChanged(nameof(BlackPoint));
+            OnPropertyChanged(nameof(WhitePoint));
         }
     }
 
@@ -175,21 +237,24 @@ public partial class PosterizationToolViewModel : ObservableObject, IDisposable
     {
         if (IsProcessing || ActiveRenderer == null) return;
         
-        Navigator.Stop(); 
         IsProcessing = true;
-        
         try
         {
+            // Catturiamo il profilo sigma corrente per l'adattamento batch
+            var currentProfile = ActiveRenderer.CaptureSigmaProfile();
+
             var progress = new Progress<BatchProgressReport>(p => 
                 StatusText = $"Elaborazione: {p.CurrentFileIndex}/{p.TotalFiles}");
 
-            // Il coordinator riceverà la lista di file completa di metadati aggiornati
+            // Esecuzione batch con parametri di adattamento definitivi
             ResultPaths = await _coordinator.ExecuteBatchAsync(
                 _sourceFiles, 
                 Levels, 
                 ActiveRenderer.VisualizationMode, 
                 ActiveRenderer.BlackPoint, 
-                ActiveRenderer.WhitePoint, 
+                ActiveRenderer.WhitePoint,
+                AutoAdaptThresholds,
+                currentProfile,
                 progress);
 
             DialogResult = true;
@@ -197,24 +262,17 @@ public partial class PosterizationToolViewModel : ObservableObject, IDisposable
         }
         catch (Exception ex) 
         { 
-            StatusText = $"Errore applicazione: {ex.Message}"; 
+            StatusText = $"Errore: {ex.Message}";
             IsProcessing = false; 
         }
     }
 
     [RelayCommand] private void Cancel() => RequestClose?.Invoke();
 
-    // =======================================================================
-    // 3. CLEANUP
-    // =======================================================================
-
-    public void Dispose() 
-    { 
-        Navigator.Stop();
-        Navigator.IndexChanged -= OnNavigatorIndexChanged;
+    public void Dispose()
+    {
         _loadingCts?.Cancel();
         _loadingCts?.Dispose();
         ActiveRenderer?.Dispose();
-        GC.SuppressFinalize(this);
     }
 }

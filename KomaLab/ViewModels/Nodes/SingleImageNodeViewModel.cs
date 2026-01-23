@@ -30,6 +30,8 @@ public partial class SingleImageNodeViewModel : ImageNodeViewModel
     
     private CancellationTokenSource? _loadingCts;
     
+    private readonly Size _imageSize; // Aggiungi questo campo
+    
     // Componente di navigazione coerente (fisso a 1 immagine)
     private readonly SequenceNavigator _navigator = new();
 
@@ -49,7 +51,7 @@ public partial class SingleImageNodeViewModel : ImageNodeViewModel
     // Binding Proxy: La view deve bindare a ActiveFitsImage per aggiornamenti sicuri
     public override FitsRenderer? ActiveRenderer => ActiveFitsImage;
     
-    public override Size NodeContentSize => ActiveRenderer?.ImageSize ?? default;
+    public override Size NodeContentSize => _imageSize;
 
     // FIX: Restituiamo sempre la stessa istanza della lista wrapper. 
     // Nessun new[] {}, nessuna copia, nessun riferimento perso.
@@ -64,17 +66,16 @@ public partial class SingleImageNodeViewModel : ImageNodeViewModel
     public SingleImageNodeViewModel(
         SingleImageNodeModel model, 
         IFitsDataManager dataManager, 
-        IFitsRendererFactory rendererFactory) 
+        IFitsRendererFactory rendererFactory,
+        Size imageSize) // <--- Aggiunto
         : base(model)
     {
-        _dataManager = dataManager ?? throw new ArgumentNullException(nameof(dataManager));
-        _rendererFactory = rendererFactory ?? throw new ArgumentNullException(nameof(rendererFactory));
+        _dataManager = dataManager;
+        _rendererFactory = rendererFactory;
+        _imageSize = imageSize; // <--- Memorizza la dimensione
         
-        // Setup iniziale del riferimento e del wrapper
         _fileReference = new FitsFileReference(model.ImagePath);
         _filesWrapper = new List<FitsFileReference> { _fileReference };
-
-        // Inizializziamo il navigatore nello stato "Single"
         _navigator.UpdateStatus(0, 1);
     }
 

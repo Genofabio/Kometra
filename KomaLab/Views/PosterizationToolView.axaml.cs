@@ -24,17 +24,6 @@ namespace KomaLab.Views
         private void OnLoaded(object? sender, RoutedEventArgs e)
         {
             this.Focus();
-
-            if (DataContext is PosterizationToolViewModel vm)
-            {
-                var border = this.FindControl<Border>("PreviewBorder");
-                if (border != null && border.Bounds.Width > 0 && border.Bounds.Height > 0)
-                {
-                    vm.Viewport.ViewportSize = border.Bounds.Size;
-                    vm.Viewport.ResetView();
-                    _isFirstLayout = false;
-                }
-            }
         }
 
         private void OnPreviewSizeChanged(object? sender, SizeChangedEventArgs e)
@@ -42,8 +31,9 @@ namespace KomaLab.Views
             if (DataContext is PosterizationToolViewModel vm)
             {
                 vm.Viewport.ViewportSize = e.NewSize;
-
-                if (_isFirstLayout && e.NewSize.Width > 0 && e.NewSize.Height > 0)
+        
+                // Se è la prima volta che abbiamo dimensioni reali, adattiamo l'immagine
+                if (_isFirstLayout && e.NewSize.Width > 0)
                 {
                     vm.Viewport.ResetView();
                     _isFirstLayout = false;
@@ -58,7 +48,6 @@ namespace KomaLab.Views
         private void OnValueInputLostFocus(object? sender, RoutedEventArgs e)
         {
             if (sender is not TextBox textBox || DataContext is not PosterizationToolViewModel vm) return;
-            if (vm.ActiveRenderer == null) return;
 
             string input = (textBox.Text ?? "").Replace(',', '.');
             var culture = CultureInfo.InvariantCulture;
@@ -66,30 +55,20 @@ namespace KomaLab.Views
             if (textBox.Name == "LevelsInput")
             {
                 if (int.TryParse(input, out int levels))
-                    vm.Levels = Math.Clamp(levels, 2, 256); // Range esteso per posterizzazione fine
-                else
-                    vm.Levels = 64;
+                    vm.Levels = Math.Clamp(levels, 2, 256);
                 textBox.Text = vm.Levels.ToString();
             }
             else if (textBox.Name == "BlackInput")
             {
                 if (double.TryParse(input, NumberStyles.Any, culture, out double black))
-                {
-                    // Clamp basato sui limiti del Renderer attivo
-                    double maxAllowed = Math.Max(0, vm.ActiveRenderer.WhitePoint - 1);
-                    vm.ActiveRenderer.BlackPoint = Math.Clamp(black, 0, maxAllowed);
-                }
-                textBox.Text = vm.ActiveRenderer.BlackPoint.ToString("F1", culture);
+                    vm.BlackPoint = black; // PASSA DAL VM, NON DAL RENDERER
+                textBox.Text = vm.BlackPoint.ToString("F1", culture);
             }
             else if (textBox.Name == "WhiteInput")
             {
                 if (double.TryParse(input, NumberStyles.Any, culture, out double white))
-                {
-                    // Clamp basato sui limiti del Renderer attivo
-                    double minAllowed = Math.Min(65535, vm.ActiveRenderer.BlackPoint + 1);
-                    vm.ActiveRenderer.WhitePoint = Math.Clamp(white, minAllowed, 65535);
-                }
-                textBox.Text = vm.ActiveRenderer.WhitePoint.ToString("F1", culture);
+                    vm.WhitePoint = white; // PASSA DAL VM, NON DAL RENDERER
+                textBox.Text = vm.WhitePoint.ToString("F1", culture);
             }
         }
 
@@ -142,10 +121,9 @@ namespace KomaLab.Views
 
         private void OnPreviewPointerWheelChanged(object? sender, PointerWheelEventArgs e)
         {
-            if (DataContext is not PosterizationToolViewModel vm) return;
+            if (DataContext is not PosterizationToolViewModel vm || vm.ActiveRenderer == null) return;
             if (sender is not Border border) return;
 
-            // 1. ZOOM (Ctrl + Wheel)
             if (e.KeyModifiers.HasFlag(KeyModifiers.Control))
             {
                 var mousePos = e.GetPosition(border);
@@ -155,21 +133,16 @@ namespace KomaLab.Views
                 return;
             }
 
-            // 2. SOGLIE (Wheel standard)
-            if (vm.ActiveRenderer == null) return;
-
-            double currentRange = Math.Max(100, vm.ActiveRenderer.WhitePoint - vm.ActiveRenderer.BlackPoint);
+            // Gestione Soglie con rotellina
+            double currentRange = Math.Max(100, vm.WhitePoint - vm.BlackPoint);
             double step = currentRange * 0.05;
             if (e.Delta.Y < 0) step = -step;
 
             if (e.KeyModifiers.HasFlag(KeyModifiers.Shift))
-            {
-                vm.ActiveRenderer.BlackPoint = Math.Clamp(vm.ActiveRenderer.BlackPoint + step, 0, vm.ActiveRenderer.WhitePoint - 1);
-            }
+                vm.BlackPoint += step; // USA IL VM
             else
-            {
-                vm.ActiveRenderer.WhitePoint = Math.Clamp(vm.ActiveRenderer.WhitePoint + step, vm.ActiveRenderer.BlackPoint + 1, 65535);
-            }
+                vm.WhitePoint += step; // USA IL VM
+    
             e.Handled = true;
         }
 

@@ -34,6 +34,9 @@ public class NodeViewModelFactory : INodeViewModelFactory
 
     public async Task<SingleImageNodeViewModel> CreateSingleImageNodeAsync(string path, double x, double y)
     {
+        // 1. Calcoliamo le dimensioni reali dall'header PRIMA di creare il VM
+        var size = await CalculateMaxDimensionsAsync(new List<string> { path });
+
         var model = new SingleImageNodeModel
         {
             ImagePath = path,
@@ -42,11 +45,14 @@ public class NodeViewModelFactory : INodeViewModelFactory
             Y = y
         };
 
-        var vm = new SingleImageNodeViewModel(model, _dataManager, _rendererFactory);
-        
+        // 2. Passiamo la dimensione calcolata al costruttore
+        var vm = new SingleImageNodeViewModel(model, _dataManager, _rendererFactory, size);
+    
         await vm.InitializeAsync();
+    
+        // Ora vm.EstimatedTotalSize restituirà 'size' e il centering funzionerà
         ApplyNodeCentering(vm, x, y);
-        
+    
         return vm;
     }
 

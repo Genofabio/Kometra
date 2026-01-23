@@ -97,7 +97,7 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
     [ObservableProperty] private JplStatus _astrometryStatus = JplStatus.Idle;
 
     // --- REGOLE DI BUSINESS ---
-    public int MinSearchRadius => 5;
+    public int MinSearchRadius => 0;
     public int MaxSearchRadius => 500;
     
     public bool IsMultipleImages => _files.Count > 1;
