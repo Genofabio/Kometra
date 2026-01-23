@@ -16,7 +16,7 @@ namespace KomaLab.Services.Processing.Alignment.AlignmentStrategies;
 
 /// <summary>
 /// Strategia di allineamento guidato (Cometa).
-/// Calcola una traiettoria (lineare o densa/JPL) e raffina la posizione localmente.
+/// Supporta traiettoria densa (JPL) o interpolazione visiva intelligente (Start/End manuali + Star Tracking FFT).
 /// </summary>
 public class GuidedCometAlignmentStrategy : AlignmentStrategyBase
 {
@@ -48,73 +48,130 @@ public class GuidedCometAlignmentStrategy : AlignmentStrategyBase
 
         // 1. ANALISI INPUT
         int validPoints = inputList.Count(x => x.HasValue);
+        // Se abbiamo molti punti (>2), assumiamo siano dati JPL o simili -> Dense Trajectory
         bool isDenseTrajectory = validPoints > 2; 
 
         int firstIndex = inputList.FindIndex(g => g.HasValue);
         if (firstIndex == -1) return results;
 
-        // 2. RAFFINAMENTO INIZIALE (Punto di ancoraggio)
+        // 2. RAFFINAMENTO START (Anchor Point)
+        // Calcoliamo subito il punto di partenza reale
         Point2D startEstimate = inputList[firstIndex]!.Value;
-        
-        // Raffiniamo il primo punto: è fondamentale per calcolare i delta successivi
         Point2D startRefined = await RefineCenterAsync(fileList[firstIndex], startEstimate, searchRadius) 
                                ?? startEstimate;
-        
         results[firstIndex] = startRefined;
 
-        // 3. ESECUZIONE (Loop Parallelo con Semaforo)
-        using var semaphore = new SemaphoreSlim(GetOptimalConcurrency(fileList[0]));
-        
         int lastIndex = inputList.FindLastIndex(g => g.HasValue);
         Point2D endEstimate = (lastIndex != -1) ? inputList[lastIndex]!.Value : startEstimate;
 
-        var tasks = fileList.Select(async (fileRef, i) =>
-        {
-            if (i == firstIndex) return; 
+        // Limite di concorrenza calcolato in base alla RAM disponibile
+        int concurrencyLimit = GetOptimalConcurrency(fileList[0]);
 
-            await semaphore.WaitAsync(token);
+        // =========================================================================================
+        // FASE A: PRE-CALCOLO TRAIETTORIA VISIVA (Solo se non abbiamo dati densi/JPL)
+        // =========================================================================================
+        Point2D[] starDriftPath = null;
+        Point2D cometProperMotionTotal = new Point2D(0, 0);
+
+        if (!isDenseTrajectory && lastIndex > firstIndex)
+        {
+            progress?.Report(new AlignmentProgressReport { Message = "Calcolo tracking stellare..." });
+
+            int steps = lastIndex - firstIndex;
+            var shiftTasks = new Task<Point2D>[steps];
+
+            // 1. Usiamo un semaforo anche per questa fase per evitare picchi di memoria
+            using var shiftSemaphore = new SemaphoreSlim(concurrencyLimit);
+
+            for (int k = 0; k < steps; k++)
+            {
+                int idxA = firstIndex + k;
+                int idxB = firstIndex + k + 1;
+                
+                // Avvolgiamo la chiamata nel semaforo
+                shiftTasks[k] = Task.Run(async () => 
+                {
+                    await shiftSemaphore.WaitAsync(token);
+                    try
+                    {
+                        return await CalculateShiftWithRetryAsync(fileList[idxA], fileList[idxB]);
+                    }
+                    finally
+                    {
+                        shiftSemaphore.Release();
+                    }
+                }, token);
+            }
+
+            var shifts = await Task.WhenAll(shiftTasks);
+
+            // 2. Accumulo del percorso stellare (Star Path)
+            starDriftPath = new Point2D[fileList.Count];
+            double accX = 0, accY = 0;
+            
+            // Il frame Start ha drift 0
+            starDriftPath[firstIndex] = new Point2D(0, 0); 
+
+            for (int k = 0; k < shifts.Length; k++)
+            {
+                accX += shifts[k].X;
+                accY += shifts[k].Y;
+                starDriftPath[firstIndex + k + 1] = new Point2D(accX, accY);
+            }
+
+            // 3. Calcolo del vettore "Moto Proprio Cometa" (Closing Error)
+            Point2D starOnlyEndPos = new Point2D(startRefined.X + accX, startRefined.Y + accY);
+            
+            cometProperMotionTotal = new Point2D(
+                endEstimate.X - starOnlyEndPos.X,
+                endEstimate.Y - starOnlyEndPos.Y
+            );
+        }
+
+        // =========================================================================================
+        // FASE B: ESECUZIONE RAFFINAMENTO (Loop Parallelo)
+        // =========================================================================================
+        using var refinementSemaphore = new SemaphoreSlim(concurrencyLimit);
+        
+        var processingTasks = fileList.Select(async (fileRef, i) =>
+        {
+            // Saltiamo i frame fuori dal range definito dall'utente
+            if (i < firstIndex || i > lastIndex) return; 
+            if (i == firstIndex) return; // Già fatto
+
+            await refinementSemaphore.WaitAsync(token);
             try
             {
                 token.ThrowIfCancellationRequested();
-
                 Point2D estimatedPos;
 
-                // --- RAMO A: STRATEGIA JPL / DENSE (Basata su Delta) ---
                 if (isDenseTrajectory)
                 {
+                    // --- MODALITÀ 1: DATA-DRIVEN (JPL) ---
                     if (inputList[i].HasValue)
                     {
-                        // Spostamento relativo fornito dall'input (JPL) rispetto allo start originale
                         double deltaX = inputList[i]!.Value.X - startEstimate.X;
                         double deltaY = inputList[i]!.Value.Y - startEstimate.Y;
-
-                        // Applichiamo il delta allo start reale raffinato
                         estimatedPos = new Point2D(startRefined.X + deltaX, startRefined.Y + deltaY);
                     }
-                    else
-                    {
-                        results[i] = null;
-                        return;
-                    }
+                    else return;
                 }
-                // --- RAMO B: STRATEGIA LINEARE (Interpolazione) ---
                 else
                 {
-                    if (lastIndex == firstIndex) 
-                    {
-                        estimatedPos = startRefined;
-                    }
-                    else
-                    {
-                        double t = (double)(i - firstIndex) / (lastIndex - firstIndex);
-                        double estX = startRefined.X + (endEstimate.X - startEstimate.X) * t;
-                        double estY = startRefined.Y + (endEstimate.Y - startEstimate.Y) * t;
-                        estimatedPos = new Point2D(estX, estY);
-                    }
+                    // --- MODALITÀ 2: VISUAL TRACKING (Interpolazione Smart) ---
+                    double progressRatio = (double)(i - firstIndex) / (lastIndex - firstIndex);
+                    
+                    Point2D starShift = starDriftPath![i]; 
+                    double cometShiftX = cometProperMotionTotal.X * progressRatio;
+                    double cometShiftY = cometProperMotionTotal.Y * progressRatio;
+
+                    estimatedPos = new Point2D(
+                        startRefined.X + starShift.X + cometShiftX,
+                        startRefined.Y + starShift.Y + cometShiftY
+                    );
                 }
 
                 // 4. RAFFINAMENTO LOCALE
-                // Eseguiamo l'operazione con retry e pulizia automatica della cache (tramite classe base)
                 results[i] = await ExecuteWithRetryAsync(
                     async () => await RefineCenterAsync(fileRef, estimatedPos, searchRadius),
                     i
@@ -125,53 +182,71 @@ public class GuidedCometAlignmentStrategy : AlignmentStrategyBase
                     TotalCount = fileList.Count, 
                     FileName = System.IO.Path.GetFileName(fileRef.FilePath),
                     FoundCenter = results[i], 
-                    Message = isDenseTrajectory ? "Tracking JPL..." : "Interpolazione lineare..." 
+                    Message = isDenseTrajectory ? "Tracking JPL..." : "Tracking Visivo..." 
                 });
             }
-            finally { semaphore.Release(); }
+            finally { refinementSemaphore.Release(); }
         });
 
-        await Task.WhenAll(tasks);
+        await Task.WhenAll(processingTasks);
         return results;
     }
 
     // =======================================================================
-    // MOTORE DI RAFFINAMENTO (Ottimizzato)
+    // HELPERS (Copiati/Adattati per supportare il calcolo shift)
     // =======================================================================
+
+    private async Task<Point2D> CalculateShiftWithRetryAsync(FitsFileReference prev, FitsFileReference curr)
+    {
+        var result = await ExecuteWithRetryAsync<Point2D?>(async () =>
+        {
+            using var m1 = await LoadMatForFftAsync(prev);
+            using var m2 = await LoadMatForFftAsync(curr);
+        
+            if (m1 == null || m2 == null) return null;
+
+            var res = _analysis.ComputeStarFieldShift(m1, m2);
+            return res.Shift;
+        }, -1);
+
+        return result ?? new Point2D(0, 0);
+    }
+
+    private async Task<Mat?> LoadMatForFftAsync(FitsFileReference fileRef)
+    {
+        var data = await DataManager.GetDataAsync(fileRef.FilePath);
+        var header = fileRef.ModifiedHeader ?? data.Header;
+        double bScale = _metadataService.GetDoubleValue(header, "BSCALE", 1.0);
+        double bZero = _metadataService.GetDoubleValue(header, "BZERO", 0.0);
+
+        // Usiamo targetBitDepth = null per lasciare che il convertitore decida (o 32 o 64)
+        // PatchNaNsInPlace (ereditato) gestirà entrambi i casi grazie a SafePatchNaNs
+        var mat = _converter.RawToMat(data.PixelData, bScale, bZero);
+        
+        PatchNaNsInPlace(mat);
+        return mat;
+    }
+
     private async Task<Point2D?> RefineCenterAsync(FitsFileReference fileRef, Point2D guess, int radius)
     {
-        // 1. Caricamento dati
         var data = await DataManager.GetDataAsync(fileRef.FilePath);
-        
-        // 2. Priorità Header: usiamo il Modified se presente (per BSCALE/BZERO/CROP corretti)
         var header = fileRef.ModifiedHeader ?? data.Header;
         double bScale = _metadataService.GetDoubleValue(header, "BSCALE", 1.0);
         double bZero = _metadataService.GetDoubleValue(header, "BZERO", 0.0);
         
-        // 3. Conversione Smart: targetBitDepth = null delega la scelta al convertitore (fedeltà scientifica)
         using var fullMat = _converter.RawToMat(data.PixelData, bScale, bZero);
         
-        // ====================================================================
-        // 4. SANITIZZAZIONE E CROP DINAMICO
-        // ====================================================================
-        // Ritagliamo l'immagine sui dati validi, espandendo se necessario per includere il guess.
-        // I NaN interni vengono sostituiti con 0.0 per permettere l'analisi matematica.
-        // 'workMat' è l'immagine pulita, 'offset' è la posizione del crop rispetto all'originale.
+        // SanitizeAndCrop (ereditato) è safe per i double
         var (workMat, offset) = SanitizeAndCrop(fullMat, guess);
 
         using (workMat)
         {
-            // Adattiamo il guess (Globale) in coordinate locali del crop
             Point2D localGuess = new Point2D(guess.X - offset.X, guess.Y - offset.Y);
-
-            // Controllo limiti (se per caso il guess è ancora fuori dopo l'espansione, scenario estremo)
+            
             if (localGuess.X < 0 || localGuess.Y < 0 || 
                 localGuess.X >= workMat.Width || localGuess.Y >= workMat.Height)
                 return guess;
 
-            // ====================================================================
-            // 5. ANALISI ROI (Sui dati puliti)
-            // ====================================================================
             var roiRect = new Rect(
                 (int)(localGuess.X - radius), 
                 (int)(localGuess.Y - radius), 
@@ -181,14 +256,8 @@ public class GuidedCometAlignmentStrategy : AlignmentStrategyBase
             if (roiRect.Width <= 4 || roiRect.Height <= 4) return guess;
 
             using var roiMat = new Mat(workMat, roiRect);
-            
-            // Analisi locale per trovare il vero centroide della chioma
             var localCenter = _analysis.FindCenterOfLocalRegion(roiMat);
             
-            // ====================================================================
-            // 6. RICONVERSIONE COORDINATE GLOBALI
-            // ====================================================================
-            // Sommiamo offset del crop, offset ROI e risultato locale
             return new Point2D(
                 localCenter.X + roiRect.X + offset.X, 
                 localCenter.Y + roiRect.Y + offset.Y

@@ -17,8 +17,6 @@ namespace KomaLab.Services.Processing.Alignment.AlignmentStrategies;
 public abstract class AlignmentStrategyBase : IAlignmentStrategy
 {
     protected readonly IFitsDataManager DataManager;
-    
-    // Dipendenza opzionale per l'analisi (le strategie che ne hanno bisogno la useranno)
     protected readonly IImageAnalysisEngine? AnalysisEngine; 
 
     protected AlignmentStrategyBase(IFitsDataManager dataManager, IImageAnalysisEngine? analysisEngine = null)
@@ -30,11 +28,10 @@ public abstract class AlignmentStrategyBase : IAlignmentStrategy
     public abstract Task<Point2D?[]> CalculateAsync(
         IEnumerable<FitsFileReference> files,
         IEnumerable<Point2D?> guesses, 
-        int searchRadius,
+        int searchRadius, 
         IProgress<AlignmentProgressReport>? progress = null,
         CancellationToken token = default);
 
-    // --- LOGICA DI CONCORRENZA ---
     protected int GetOptimalConcurrency(FitsFileReference sampleFile)
     {
         long fileSize = 0;
@@ -52,7 +49,6 @@ public abstract class AlignmentStrategyBase : IAlignmentStrategy
         return fileSize > 150 * 1024 * 1024 ? 1 : optimal;
     }
 
-    // --- RESILIENZA ---
     protected async Task<T?> ExecuteWithRetryAsync<T>(
         Func<Task<T?>> operation, 
         int itemIndex, 
@@ -77,86 +73,100 @@ public abstract class AlignmentStrategyBase : IAlignmentStrategy
                     await Task.Delay(1000);
                 }
                 if (attempt < maxRetries) await Task.Delay(300 * attempt);
+                // Se fallisce all'ultimo tentativo, l'eccezione risale
+                if (attempt == maxRetries) throw; 
             }
         }
         return default;
     }
     
     // =======================================================================
-    // HELPERS COMUNI PER LA SANITIZZAZIONE
+    // HELPERS COMUNI CON FIX PER DOUBLE (64-BIT)
     // =======================================================================
 
-    /// <summary>
-    /// Ritaglia l'immagine sui dati validi, espandendo se necessario per includere il guess.
-    /// Sostituisce i NaN interni con 0.0.
-    /// Gestisce la conversione tra Rect2D (Double) e OpenCV.Rect (Int).
-    /// </summary>
     protected (Mat CroppedMat, Point2D Offset) SanitizeAndCrop(Mat src, Point2D? guess)
     {
         if (AnalysisEngine == null) throw new InvalidOperationException("AnalysisEngine richiesto per SanitizeAndCrop.");
 
-        // 1. Trova il box dei dati validi (Rect2D -> Double)
+        // 1. Trova il box dei dati validi
         Rect2D rawBox = AnalysisEngine.FindValidDataBox(src);
         
-        // Convertiamo in Rect OpenCV (Interi) per il cropping
         Rect validRect;
-
-        // Se l'immagine è vuota o il box non valido, prendiamo tutto
         if (rawBox.Width <= 0 || rawBox.Height <= 0)
         {
             validRect = new Rect(0, 0, src.Width, src.Height);
         }
         else
         {
-            // Casting esplicito a int perché OpenCV lavora su pixel interi
             validRect = new Rect((int)rawBox.X, (int)rawBox.Y, (int)rawBox.Width, (int)rawBox.Height);
         }
 
-        // 2. Espansione dinamica per includere il guess (se fuori dal box valido)
+        // 2. Espansione dinamica per includere il guess
         if (guess.HasValue)
         {
             int gx = (int)guess.Value.X;
             int gy = (int)guess.Value.Y;
             int margin = 50; 
 
-            // Calcoli usando interi e Rect di OpenCV
             int minX = Math.Min(validRect.X, gx - margin);
             int minY = Math.Min(validRect.Y, gy - margin);
-            
-            // Nota: Rect2D non ha .Right/.Bottom, ma OpenCV Rect sì (.Right / .Bottom)
-            // Oppure calcoliamo manualmente: X + Width
             int currentRight = validRect.X + validRect.Width;
             int currentBottom = validRect.Y + validRect.Height;
-
             int maxX = Math.Max(currentRight, gx + margin);
             int maxY = Math.Max(currentBottom, gy + margin);
 
-            // Clamping ai bordi fisici
             minX = Math.Max(0, minX);
             minY = Math.Max(0, minY);
             maxX = Math.Min(src.Width, maxX);
             maxY = Math.Min(src.Height, maxY);
 
-            // Aggiorniamo il rettangolo di taglio finale
             validRect = new Rect(minX, minY, maxX - minX, maxY - minY);
         }
 
-        // 3. Crop (Il costruttore di Mat accetta OpenCvSharp.Rect)
+        // 3. Crop
         Mat cropped = new Mat(src, validRect);
 
-        // 4. Patching NaN interni
-        // Sostituisce eventuali pixel NaN inclusi nel crop (es. area nera) con 0.0
-        Cv2.PatchNaNs(cropped, 0.0);
+        // 4. FIX PATCHING: Supporto per Double (64-bit)
+        SafePatchNaNs(cropped, 0.0);
 
         return (cropped, new Point2D(validRect.X, validRect.Y));
     }
 
-    /// <summary>
-    /// Sostituisce i NaN con 0.0 in-place senza ritagliare. 
-    /// Utile per FFT/Stelle dove le dimensioni devono restare fisse.
-    /// </summary>
     protected void PatchNaNsInPlace(Mat src)
     {
-        Cv2.PatchNaNs(src, 0.0);
+        // FIX PATCHING: Supporto per Double (64-bit)
+        SafePatchNaNs(src, 0.0);
+    }
+
+    /// <summary>
+    /// Sostituisce i NaN con 'val' gestendo sia Float (32) che Double (64).
+    /// Cv2.PatchNaNs supporta solo CV_32F, quindi implementiamo un workaround per CV_64F.
+    /// </summary>
+    private void SafePatchNaNs(Mat mat, double val)
+    {
+        if (mat.Empty()) return;
+
+        if (mat.Depth() == MatType.CV_32F)
+        {
+            // Per Float 32-bit, usiamo la funzione nativa veloce
+            Cv2.PatchNaNs(mat, val);
+        }
+        else if (mat.Depth() == MatType.CV_64F)
+        {
+            // Per Double 64-bit, usiamo il confronto logico (NaN != NaN è true)
+            // 1. Creiamo una maschera dove i pixel sono NaN
+            using var mask = new Mat();
+            // Confrontando la matrice con se stessa usando NotEqual, 
+            // solo i NaN risulteranno True (255) perché (NaN != NaN)
+            Cv2.Compare(mat, mat, mask, CmpType.NE);
+            
+            // 2. Impostiamo a 'val' i pixel identificati dalla maschera
+            // Se la maschera è vuota (countNonZero == 0), SetTo è quasi istantaneo
+            if (Cv2.CountNonZero(mask) > 0)
+            {
+                mat.SetTo(new Scalar(val), mask);
+            }
+        }
+        // Ignoriamo altri tipi (Int, Byte) che non possono contenere NaN
     }
 }

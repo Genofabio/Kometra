@@ -195,7 +195,7 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
     public bool IsTargetNameInputVisible => SelectedTarget == AlignmentTarget.Comet;
     public bool IsVerifyButtonVisible => SelectedTarget == AlignmentTarget.Comet;
     
-    public string AstrometryOptionLabel => SelectedTarget == AlignmentTarget.Stars ? "Usa WCS Header" : "Usa NASA/JPL";
+    public string AstrometryOptionLabel => SelectedTarget == AlignmentTarget.Stars ? "Usa WCS Header" : "Usa NASA/JPL e WCS Header";
     public string CalculateButtonText => SelectedTarget == AlignmentTarget.Stars ? "Allinea Stelle" : "Calcola Centri";
 
     public string ProcessingStatusText 

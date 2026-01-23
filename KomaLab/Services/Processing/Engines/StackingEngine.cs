@@ -9,6 +9,7 @@ namespace KomaLab.Services.Processing.Engines;
 
 public class StackingEngine : IStackingEngine
 {
+    // Metodo "Massivo" per Mediana (richiede tutte le immagini)
     public async Task<Mat> ComputeStackAsync(List<Mat> sources, StackingMode mode)
     {
         if (sources == null || sources.Count == 0) 
@@ -17,59 +18,66 @@ public class StackingEngine : IStackingEngine
         int width = sources[0].Width;
         int height = sources[0].Height;
         
-        // Creiamo la matrice di destinazione (Sempre Double per la massima dinamica scientifica)
         Mat resultMat = new Mat(height, width, MatType.CV_64FC1, new Scalar(0));
 
         await Task.Run(() =>
         {
-            switch (mode)
+            if (mode == StackingMode.Median)
             {
-                case StackingMode.Sum:
-                case StackingMode.Average:
-                    ExecuteLinearStack(sources, resultMat, mode, width, height);
-                    break;
-
-                case StackingMode.Median:
-                    ExecuteMedianStack(sources, resultMat, width, height);
-                    break;
+                ExecuteMedianStack(sources, resultMat, width, height);
+            }
+            else
+            {
+                // Fallback per Somma/Media se qualcuno passa la lista intera
+                // (Ma preferiamo la via incrementale dal Coordinator)
+                using Mat countMat = new Mat(height, width, MatType.CV_64FC1, new Scalar(0));
+                foreach (var src in sources)
+                {
+                    AccumulateFrame(resultMat, countMat, src);
+                }
+                if (mode == StackingMode.Average) FinalizeAverage(resultMat, countMat);
             }
         });
 
         return resultMat;
     }
 
-    // --- Algoritmi Lineari (Veloce O(N)) ---
+    // --- NUOVI METODI PER STACKING INCREMENTALE (Low Memory) ---
 
-    private void ExecuteLinearStack(List<Mat> sources, Mat result, StackingMode mode, int w, int h)
+    public void InitializeAccumulators(int width, int height, out Mat accumulator, out Mat countMap)
     {
-        using Mat validCountMat = new Mat(h, w, MatType.CV_64FC1, new Scalar(0));
-        using Mat onesMat = new Mat(h, w, MatType.CV_64FC1, new Scalar(1));
-
-        foreach (var currentMat in sources)
-        {
-            using Mat nonNanMask = new Mat();
-            // Troviamo i pixel validi (Ignoriamo i NaN derivanti dall'allineamento)
-            Cv2.Compare(currentMat, currentMat, nonNanMask, CmpType.EQ);
-            
-            Cv2.Add(result, currentMat, result, mask: nonNanMask);
-            Cv2.Add(validCountMat, onesMat, validCountMat, mask: nonNanMask);
-        }
-
-        if (mode == StackingMode.Average)
-        {
-            // Divisione pixel-per-pixel per il numero di frame validi trovati
-            using Mat safeDivisor = validCountMat.Clone();
-            Cv2.Max(safeDivisor, 1.0, safeDivisor);
-            Cv2.Divide(result, safeDivisor, result, scale: 1, dtype: MatType.CV_64FC1);
-        }
+        accumulator = new Mat(height, width, MatType.CV_64FC1, new Scalar(0));
+        countMap = new Mat(height, width, MatType.CV_64FC1, new Scalar(0));
     }
 
-    // --- Algoritmo Mediana (Intensivo O(N log N)) ---
+    public void AccumulateFrame(Mat accumulator, Mat countMap, Mat currentFrame)
+    {
+        using Mat nonNanMask = new Mat();
+        // 1. Maschera: (pixel == pixel) è falso solo per NaN.
+        //    Usiamo EQ: True(255) se valido, False(0) se NaN.
+        Cv2.Compare(currentFrame, currentFrame, nonNanMask, CmpType.EQ);
+        
+        // 2. Accumulo Valori (dove mask è true)
+        Cv2.Add(accumulator, currentFrame, accumulator, mask: nonNanMask);
+        
+        // 3. Accumulo Conteggi (dove mask è true aggiungiamo 1.0)
+        using Mat ones = new Mat(accumulator.Size(), MatType.CV_64FC1, new Scalar(1));
+        Cv2.Add(countMap, ones, countMap, mask: nonNanMask);
+    }
+
+    public void FinalizeAverage(Mat accumulator, Mat countMap)
+    {
+        // Evitiamo divisione per zero: Max(count, 1.0)
+        Cv2.Max(countMap, 1.0, countMap);
+        Cv2.Divide(accumulator, countMap, accumulator, scale: 1, dtype: MatType.CV_64FC1);
+    }
+
+    // --- Algoritmo Mediana (Invariato, richiede molta RAM) ---
 
     private void ExecuteMedianStack(List<Mat> sources, Mat result, int w, int h)
     {
         int numFrames = sources.Count;
-        int stripHeight = 64; // Ottimizzato per la cache L2/L3
+        int stripHeight = 64; 
 
         Parallel.For(0, (h + stripHeight - 1) / stripHeight, stripIndex =>
         {
@@ -77,15 +85,13 @@ public class StackingEngine : IStackingEngine
             int currentStripH = Math.Min(stripHeight, h - yStart);
             int pixelsInStrip = w * currentStripH;
 
-            // Buffer per ogni frame nella striscia corrente
+            // Allocazione buffer ridotta all'interno dello strip
             double[][] frameBuffers = new double[numFrames][];
             for (int k = 0; k < numFrames; k++)
             {
                 frameBuffers[k] = new double[pixelsInStrip];
-                for (int r = 0; r < currentStripH; r++)
-                {
-                    Marshal.Copy(sources[k].Ptr(yStart + r), frameBuffers[k], r * w, w);
-                }
+                // Accesso diretto alla memoria (unsafe-like speed)
+                Marshal.Copy(sources[k].Ptr(yStart), frameBuffers[k], 0, pixelsInStrip);
             }
 
             double[] resultBuffer = new double[pixelsInStrip];
@@ -102,23 +108,18 @@ public class StackingEngine : IStackingEngine
 
                 if (validCount == 0)
                 {
-                    resultBuffer[i] = double.NaN;
+                    resultBuffer[i] = 0.0; // Meglio 0.0 che NaN per il risultato finale
                 }
                 else
                 {
                     Array.Sort(pixelValues, 0, validCount);
-                    // Calcolo mediana (pari o dispari)
                     resultBuffer[i] = (validCount % 2 == 0)
                         ? (pixelValues[validCount / 2 - 1] + pixelValues[validCount / 2]) * 0.5
                         : pixelValues[validCount / 2];
                 }
             }
 
-            // Scrittura della striscia elaborata nella matrice finale
-            for (int r = 0; r < currentStripH; r++)
-            {
-                Marshal.Copy(resultBuffer, r * w, result.Ptr(yStart + r), w);
-            }
+            Marshal.Copy(resultBuffer, 0, result.Ptr(yStart), pixelsInStrip);
         });
     }
 }

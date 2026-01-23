@@ -38,63 +38,126 @@ public class StackingCoordinator : IStackingCoordinator
         if (fileList.Count < 2) 
             throw new InvalidOperationException("Sono necessarie almeno 2 immagini per eseguire lo stacking.");
 
-        var matsToDispose = new List<Mat>();
+        // 1. Recuperiamo dimensioni e header base dal primo frame
+        // Questo serve sia per inizializzare gli accumulatori sia come template per l'header finale
+        var firstFrameData = await _dataManager.GetDataAsync(fileList[0].FilePath);
+        var baseHeader = fileList[0].ModifiedHeader ?? firstFrameData.Header;
+        int width = _metadataService.GetIntValue(baseHeader, "NAXIS1");
+        int height = _metadataService.GetIntValue(baseHeader, "NAXIS2");
 
+        Mat finalMat = null;
+
+        // =================================================================================
+        // STRATEGIA A: STACKING INCREMENTALE (Low Memory)
+        // Usata per Somma e Media: carica 1 file, accumula, scarica subito.
+        // =================================================================================
+        if (mode == StackingMode.Sum || mode == StackingMode.Average)
+        {
+            // Nota: Assicurati che StackingEngine implementi questi metodi pubblici (o usa un cast se sono sull'implementazione concreta)
+            // Se IStackingEngine non li espone ancora, dovrai aggiornare l'interfaccia.
+            // Qui assumo un cast sicuro all'implementazione concreta per accedere alla logica incrementale.
+            if (_stackingEngine is StackingEngine engine)
+            {
+                engine.InitializeAccumulators(width, height, out Mat accumulator, out Mat countMap);
+
+                try
+                {
+                    foreach (var fileRef in fileList)
+                    {
+                        var data = await _dataManager.GetDataAsync(fileRef.FilePath);
+                        var h = fileRef.ModifiedHeader ?? data.Header;
+                        double bScale = _metadataService.GetDoubleValue(h, "BSCALE", 1.0);
+                        double bZero = _metadataService.GetDoubleValue(h, "BZERO", 0.0);
+
+                        // Carichiamo e convertiamo al volo (Double per precisione)
+                        using var currentMat = _converter.RawToMat(data.PixelData, bScale, bZero, FitsBitDepth.Double);
+                        
+                        // Accumuliamo nel buffer statico
+                        engine.AccumulateFrame(accumulator, countMap, currentMat);
+                        
+                        // 'currentMat' viene disposto qui, liberando ~200MB di RAM immediatamente
+                    }
+
+                    if (mode == StackingMode.Average)
+                    {
+                        engine.FinalizeAverage(accumulator, countMap);
+                    }
+                    
+                    finalMat = accumulator; // Trasferiamo la proprietà del risultato
+                }
+                finally
+                {
+                    countMap.Dispose();
+                    // Non disponiamo 'accumulator' qui se è diventato 'finalMat', 
+                    // altrimenti disponiamo anche quello in caso di errore.
+                    if (finalMat == null) accumulator.Dispose();
+                }
+            }
+            else
+            {
+                // Fallback se l'engine non è quello atteso (non dovrebbe accadere con DI corretta)
+                throw new InvalidOperationException("L'engine di stacking configurato non supporta la modalità incrementale.");
+            }
+        }
+        // =================================================================================
+        // STRATEGIA B: STACKING MASSIVO (High Memory)
+        // Usata per Mediana: richiede tutti i pixel per calcolare la statistica.
+        // =================================================================================
+        else 
+        {
+            var matsToDispose = new List<Mat>();
+            try
+            {
+                foreach (var fileRef in fileList)
+                {
+                    var data = await _dataManager.GetDataAsync(fileRef.FilePath);
+                    var h = fileRef.ModifiedHeader ?? data.Header;
+                    double bScale = _metadataService.GetDoubleValue(h, "BSCALE", 1.0);
+                    double bZero = _metadataService.GetDoubleValue(h, "BZERO", 0.0);
+                    
+                    // Qui purtroppo dobbiamo tenerle tutte in vita
+                    matsToDispose.Add(_converter.RawToMat(data.PixelData, bScale, bZero, FitsBitDepth.Double));
+                }
+                
+                finalMat = await _stackingEngine.ComputeStackAsync(matsToDispose, mode);
+            }
+            finally
+            {
+                foreach (var m in matsToDispose) m.Dispose();
+            }
+        }
+
+        // =================================================================================
+        // 3. FINALIZZAZIONE E SALVATAGGIO
+        // =================================================================================
         try
         {
-            // 1. Caricamento e Conversione
-            foreach (var fileRef in fileList)
+            using (finalMat) // Assicura che la matrice risultato venga pulita dopo la conversione
             {
-                var data = await _dataManager.GetDataAsync(fileRef.FilePath);
-                // Usa l'header modificato se presente (es. dopo allineamento), altrimenti quello su disco
-                var headerToUse = fileRef.ModifiedHeader ?? data.Header; 
-                
-                double bScale = _metadataService.GetDoubleValue(headerToUse, "BSCALE", 1.0);
-                double bZero = _metadataService.GetDoubleValue(headerToUse, "BZERO", 0.0);
-                
-                // Usiamo Double per la massima precisione durante la somma
-                var mat = _converter.RawToMat(data.PixelData, bScale, bZero, FitsBitDepth.Double);
-                matsToDispose.Add(mat);
+                // Riconversione in array grezzo (Manteniamo Double per dati scientifici)
+                var finalPixels = _converter.MatToRaw(finalMat, FitsBitDepth.Double);
+
+                var finalHeader = _metadataService.CreateHeaderFromTemplate(
+                    baseHeader, 
+                    finalPixels, 
+                    FitsBitDepth.Double
+                );
+
+                // --- Metadati ---
+                _metadataService.SetValue(finalHeader, "NCOMBINE", fileList.Count, "KomaLab - Number of combined frames");
+                _metadataService.SetValue(finalHeader, "STACKMET", mode.ToString().ToUpper(), "KomaLab - Stacking algorithm used");
+                _metadataService.SetValue(finalHeader, "DATE-PRO", DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ss"), "KomaLab - Processing timestamp (UTC)");
+                _metadataService.AddValue(finalHeader, "HISTORY", $"KomaLab - Stacking: Combined {fileList.Count} frames via {mode} algorithm.", null);
+
+                // Salvataggio
+                return await _dataManager.SaveAsTemporaryAsync(finalPixels, finalHeader, "StackResult");
             }
-
-            // 2. Calcolo Stacking (Somma/Media/Mediana)
-            using var resultMat = await _stackingEngine.ComputeStackAsync(matsToDispose, mode);
-            var finalPixels = _converter.MatToRaw(resultMat, FitsBitDepth.Double);
-
-            // 3. Preparazione Header
-            var firstFrameData = await _dataManager.GetDataAsync(fileList[0].FilePath);
-            
-            // NOTA: CreateHeaderFromTemplate ora imposta automaticamente:
-            // - DATE (Creazione file fisico)
-            // - CREATOR (KomaLab)
-            // - ORIGIN (Copia dal sorgente o default)
-            // - BITPIX, NAXIS, BSCALE, BZERO
-            var finalHeader = _metadataService.CreateHeaderFromTemplate(
-                fileList[0].ModifiedHeader ?? firstFrameData.Header, 
-                finalPixels, 
-                FitsBitDepth.Double
-            );
-
-            // --- CHIAVI SPECIFICHE DELLO STACKING ---
-            
-            // NCOMBINE: Quante immagini compongono questo stack?
-            _metadataService.SetValue(finalHeader, "NCOMBINE", fileList.Count, "KomaLab - Number of combined frames");
-            
-            // STACKMET: Quale algoritmo matematico è stato usato?
-            _metadataService.SetValue(finalHeader, "STACKMET", mode.ToString().ToUpper(), "KomaLab - Stacking algorithm used");
-
-            // DATE-PRO: Quando è avvenuto il calcolo scientifico? (Diverso da DATE scrittura file)
-            _metadataService.SetValue(finalHeader, "DATE-PRO", DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ss"), "KomaLab - Processing timestamp (UTC)");
-
-            // HISTORY: Traccia dell'operazione per l'utente
-            _metadataService.AddValue(finalHeader, "HISTORY", $"KomaLab - Stacking: Combined {fileList.Count} frames via {mode} algorithm.", null);
-
-            // 4. Salvataggio
-            return await _dataManager.SaveAsTemporaryAsync(finalPixels, finalHeader, "StackResult");
         }
-        finally
+        catch
         {
-            foreach (var mat in matsToDispose) mat.Dispose();
+            // Sicurezza extra: se qualcosa fallisce nel salvataggio, puliamo la matrice
+            if (finalMat != null && !finalMat.IsDisposed) finalMat.Dispose();
+            throw;
         }
     }
 }
