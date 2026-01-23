@@ -26,7 +26,7 @@ public class AutomaticCometAlignmentStrategy : AlignmentStrategyBase
         IFitsMetadataService metadataService,
         IFitsOpenCvConverter converter, 
         IImageAnalysisEngine analysis,
-        IImageEffectsEngine effects) : base(dataManager)
+        IImageEffectsEngine effects) : base(dataManager, analysis)
     {
         _metadataService = metadataService;
         _converter = converter;
@@ -89,53 +89,83 @@ public class AutomaticCometAlignmentStrategy : AlignmentStrategyBase
         
         // 2. CARICAMENTO INTELLIGENTE: targetBitDepth = null delega al convertitore 
         // la scelta tra 32 e 64 bit per preservare la precisione originale.
-        using var mat = _converter.RawToMat(data.PixelData, bScale, bZero);
+        using var rawMat = _converter.RawToMat(data.PixelData, bScale, bZero);
 
         // ====================================================================
-        // PRE-PROCESSING (Analisi sulla matrice scientifica)
+        // 3. SANITIZZAZIONE E CROP DINAMICO
         // ====================================================================
-        
-        // Utilizziamo direttamente 'mat' per l'analisi. 
-        // Se il file era 16-bit, 'mat' è 32F. Se era 64-bit, 'mat' è 64F.
-        // In entrambi i casi, gli engine di effetto lavorano correttamente.
+        // Ritagliamo l'immagine sui dati validi, espandendo se necessario per includere il guess.
+        // I NaN interni vengono sostituiti con 0.0 per permettere l'analisi matematica.
+        // 'mat' è l'immagine pulita, 'offset' è la posizione del crop rispetto all'originale.
+        var (mat, offset) = SanitizeAndCrop(rawMat, guess);
 
-        // 1. PULIZIA MORFOLOGICA (In-place)
-        // Rimuove stelle puntiformi per isolare la chioma diffusa della cometa.
-        _effects.ApplyMorphologicalCleanup(mat, mat, kernelSize: 3);
-
-        // 2. PESO CENTRALE (VIGNETTATURA SINTETICA)
-        // Se non abbiamo un punto di partenza, aiutiamo l'algoritmo a cercare verso il centro.
-        if (!guess.HasValue)
+        try
         {
-            _effects.ApplyCentralWeighting(mat, mat, sigmaScale: 0.7);
-        }
-
-        // ====================================================================
-        // RICERCA E CENTRATURA
-        // ====================================================================
-
-        if (guess.HasValue) 
-        {
-            // Stima dinamica del raggio di ricerca in base alla densità del segnale
-            int smartRadius = EstimateSmartRadius(mat);
+            // ====================================================================
+            // 4. PRE-PROCESSING (Analisi sulla matrice sanitizzata)
+            // ====================================================================
             
-            var roiRect = new Rect(
-                (int)(guess.Value.X - smartRadius), 
-                (int)(guess.Value.Y - smartRadius), 
-                smartRadius * 2, 
-                smartRadius * 2)
-                .Intersect(new Rect(0, 0, mat.Width, mat.Height));
+            // 1. PULIZIA MORFOLOGICA (In-place su 'mat')
+            // Rimuove stelle puntiformi per isolare la chioma diffusa della cometa.
+            _effects.ApplyMorphologicalCleanup(mat, mat, kernelSize: 3);
 
-            if (roiRect.Width > 4 && roiRect.Height > 4) 
+            // 2. PESO CENTRALE (VIGNETTATURA SINTETICA)
+            // Se non abbiamo un punto di partenza, aiutiamo l'algoritmo a cercare verso il centro.
+            if (!guess.HasValue)
             {
-                using var crop = new Mat(mat, roiRect);
-                var local = _analysis.FindCenterOfLocalRegion(crop);
-                return new Point2D(local.X + roiRect.X, local.Y + roiRect.Y);
+                _effects.ApplyCentralWeighting(mat, mat, sigmaScale: 0.7);
             }
-        }
 
-        // Ricerca globale sull'intera inquadratura trattata
-        return _analysis.FindCenterOfLocalRegion(mat);
+            // ====================================================================
+            // 5. RICERCA E CENTRATURA LOCALE
+            // ====================================================================
+
+            Point2D localResult;
+
+            if (guess.HasValue) 
+            {
+                // Adattiamo il guess alle coordinate locali del crop
+                var localGuess = new Point2D(guess.Value.X - offset.X, guess.Value.Y - offset.Y);
+
+                // Stima dinamica del raggio di ricerca in base alla densità del segnale
+                int smartRadius = EstimateSmartRadius(mat);
+                
+                var roiRect = new Rect(
+                    (int)(localGuess.X - smartRadius), 
+                    (int)(localGuess.Y - smartRadius), 
+                    smartRadius * 2, 
+                    smartRadius * 2)
+                    .Intersect(new Rect(0, 0, mat.Width, mat.Height));
+
+                if (roiRect.Width > 4 && roiRect.Height > 4) 
+                {
+                    using var crop = new Mat(mat, roiRect);
+                    var localCenter = _analysis.FindCenterOfLocalRegion(crop);
+                    localResult = new Point2D(localCenter.X + roiRect.X, localCenter.Y + roiRect.Y);
+                }
+                else
+                {
+                    // Fallback se la ROI è troppo piccola o fuori dai bordi
+                    localResult = localGuess;
+                }
+            }
+            else
+            {
+                // Ricerca globale sull'intero crop trattato
+                localResult = _analysis.FindCenterOfLocalRegion(mat);
+            }
+
+            // ====================================================================
+            // 6. RICONVERSIONE COORDINATE GLOBALI
+            // ====================================================================
+            // Sommiamo l'offset del crop per ottenere le coordinate nell'immagine originale
+            return new Point2D(localResult.X + offset.X, localResult.Y + offset.Y);
+        }
+        finally
+        {
+            // Importante: rilasciare la matrice croppata creata da SanitizeAndCrop
+            mat.Dispose();
+        }
     }
 
     private int EstimateSmartRadius(Mat mat) 

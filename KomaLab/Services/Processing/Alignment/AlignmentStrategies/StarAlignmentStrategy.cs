@@ -24,7 +24,7 @@ public class StarAlignmentStrategy : AlignmentStrategyBase
         IFitsDataManager dataManager,
         IFitsMetadataService metadataService,
         IFitsOpenCvConverter converter, 
-        IImageAnalysisEngine analysis) : base(dataManager)
+        IImageAnalysisEngine analysis) : base(dataManager, analysis)
     {
         _metadataService = metadataService;
         _converter = converter;
@@ -166,8 +166,8 @@ public class StarAlignmentStrategy : AlignmentStrategyBase
     }
 
     // =======================================================================
-// HELPERS DI CARICAMENTO (Corretti per Nullable Structs)
-// =======================================================================
+    // HELPERS DI CARICAMENTO (Corretti per Nullable Structs)
+    // =======================================================================
 
     private async Task<Mat?> LoadMatWithRetryAsync(FitsFileReference fileRef)
     {
@@ -179,7 +179,14 @@ public class StarAlignmentStrategy : AlignmentStrategyBase
             double bScale = _metadataService.GetDoubleValue(header, "BSCALE", 1.0);
             double bZero = _metadataService.GetDoubleValue(header, "BZERO", 0.0);
 
-            return _converter.RawToMat(data.PixelData, bScale, bZero);
+            var mat = _converter.RawToMat(data.PixelData, bScale, bZero);
+
+            // GESTIONE NAN PER FFT:
+            // Sostituiamo i NaN (bordi o pixel caldi) con 0.0 mantenendo la dimensione originale.
+            // Il crop falserebbe la correlazione di fase perché sposterebbe il centro geometrico.
+            PatchNaNsInPlace(mat);
+
+            return mat;
         }, -1);
     }
 

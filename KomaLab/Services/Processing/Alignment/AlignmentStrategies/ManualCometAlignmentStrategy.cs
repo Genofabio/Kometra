@@ -26,7 +26,7 @@ public class ManualCometAlignmentStrategy : AlignmentStrategyBase
         IFitsMetadataService metadataService,
         IFitsOpenCvConverter converter, 
         IImageAnalysisEngine analysis,
-        CenteringMethod method) : base(dataManager)
+        CenteringMethod method) : base(dataManager, analysis)
     {
         _metadataService = metadataService;
         _converter = converter;
@@ -107,22 +107,53 @@ public class ManualCometAlignmentStrategy : AlignmentStrategyBase
         // in base al BITPIX originale del file, garantendo integrità scientifica.
         using var fullMat = _converter.RawToMat(data.PixelData, bScale, bZero);
         
-        // 4. Esecuzione ROI (Regione di interesse)
-        var roi = new Rect((int)(guess.X - radius), (int)(guess.Y - radius), radius * 2, radius * 2)
-            .Intersect(new Rect(0, 0, fullMat.Width, fullMat.Height));
+        // ====================================================================
+        // 4. SANITIZZAZIONE E CROP DINAMICO
+        // ====================================================================
+        // Ritagliamo l'immagine sui dati validi, espandendo se necessario per includere il guess.
+        // I NaN interni vengono sostituiti con 0.0 per permettere l'analisi matematica.
+        // 'workMat' è l'immagine pulita, 'offset' è la posizione del crop rispetto all'originale.
+        var (workMat, offset) = SanitizeAndCrop(fullMat, guess);
 
-        if (roi.Width <= 4 || roi.Height <= 4) return guess;
+        using (workMat)
+        {
+            // Adattiamo il guess (Globale) in coordinate locali del crop
+            Point2D localGuess = new Point2D(guess.X - offset.X, guess.Y - offset.Y);
 
-        using var roiMat = new Mat(fullMat, roi);
-        
-        // 5. Analisi del centroide con il metodo scelto dall'utente
-        Point2D localCenter = _method switch {
-            CenteringMethod.Centroid => _analysis.FindCentroid(roiMat),
-            CenteringMethod.GaussianFit => _analysis.FindGaussianCenter(roiMat),
-            CenteringMethod.Peak => _analysis.FindPeak(roiMat),
-            _ => _analysis.FindCenterOfLocalRegion(roiMat)
-        };
-        
-        return new Point2D(localCenter.X + roi.X, localCenter.Y + roi.Y);
+            // Controllo limiti (se per caso il guess è ancora fuori dopo l'espansione, scenario estremo)
+            if (localGuess.X < 0 || localGuess.Y < 0 || 
+                localGuess.X >= workMat.Width || localGuess.Y >= workMat.Height)
+                return guess;
+
+            // ====================================================================
+            // 5. ESECUZIONE ROI (Regione di interesse sui dati puliti)
+            // ====================================================================
+            var roi = new Rect(
+                (int)(localGuess.X - radius), 
+                (int)(localGuess.Y - radius), 
+                radius * 2, radius * 2
+            ).Intersect(new Rect(0, 0, workMat.Width, workMat.Height));
+
+            if (roi.Width <= 4 || roi.Height <= 4) return guess;
+
+            using var roiMat = new Mat(workMat, roi);
+            
+            // 6. Analisi del centroide con il metodo scelto dall'utente
+            Point2D localCenter = _method switch {
+                CenteringMethod.Centroid => _analysis.FindCentroid(roiMat),
+                CenteringMethod.GaussianFit => _analysis.FindGaussianCenter(roiMat),
+                CenteringMethod.Peak => _analysis.FindPeak(roiMat),
+                _ => _analysis.FindCenterOfLocalRegion(roiMat)
+            };
+            
+            // ====================================================================
+            // 7. RICONVERSIONE COORDINATE GLOBALI
+            // ====================================================================
+            // Sommiamo l'offset del crop, l'offset della ROI e il risultato locale
+            return new Point2D(
+                localCenter.X + roi.X + offset.X, 
+                localCenter.Y + roi.Y + offset.Y
+            );
+        }
     }
 }

@@ -28,7 +28,7 @@ public class GuidedCometAlignmentStrategy : AlignmentStrategyBase
         IFitsDataManager dataManager,
         IFitsMetadataService metadataService,
         IFitsOpenCvConverter converter, 
-        IImageAnalysisEngine analysis) : base(dataManager)
+        IImageAnalysisEngine analysis) : base(dataManager, analysis)
     {
         _metadataService = metadataService;
         _converter = converter;
@@ -151,21 +151,48 @@ public class GuidedCometAlignmentStrategy : AlignmentStrategyBase
         // 3. Conversione Smart: targetBitDepth = null delega la scelta al convertitore (fedeltà scientifica)
         using var fullMat = _converter.RawToMat(data.PixelData, bScale, bZero);
         
-        // 4. Analisi ROI
-        int r = radius;
-        int x = (int)guess.X;
-        int y = (int)guess.Y;
-        
-        var roiRect = new Rect(x - r, y - r, r * 2, r * 2)
-            .Intersect(new Rect(0, 0, fullMat.Width, fullMat.Height));
+        // ====================================================================
+        // 4. SANITIZZAZIONE E CROP DINAMICO
+        // ====================================================================
+        // Ritagliamo l'immagine sui dati validi, espandendo se necessario per includere il guess.
+        // I NaN interni vengono sostituiti con 0.0 per permettere l'analisi matematica.
+        // 'workMat' è l'immagine pulita, 'offset' è la posizione del crop rispetto all'originale.
+        var (workMat, offset) = SanitizeAndCrop(fullMat, guess);
 
-        if (roiRect.Width <= 4 || roiRect.Height <= 4) return guess;
+        using (workMat)
+        {
+            // Adattiamo il guess (Globale) in coordinate locali del crop
+            Point2D localGuess = new Point2D(guess.X - offset.X, guess.Y - offset.Y);
 
-        using var roiMat = new Mat(fullMat, roiRect);
-        
-        // Analisi locale per trovare il vero centroide della chioma
-        var localCenter = _analysis.FindCenterOfLocalRegion(roiMat);
-        
-        return new Point2D(localCenter.X + roiRect.X, localCenter.Y + roiRect.Y);
+            // Controllo limiti (se per caso il guess è ancora fuori dopo l'espansione, scenario estremo)
+            if (localGuess.X < 0 || localGuess.Y < 0 || 
+                localGuess.X >= workMat.Width || localGuess.Y >= workMat.Height)
+                return guess;
+
+            // ====================================================================
+            // 5. ANALISI ROI (Sui dati puliti)
+            // ====================================================================
+            var roiRect = new Rect(
+                (int)(localGuess.X - radius), 
+                (int)(localGuess.Y - radius), 
+                radius * 2, radius * 2
+            ).Intersect(new Rect(0, 0, workMat.Width, workMat.Height));
+
+            if (roiRect.Width <= 4 || roiRect.Height <= 4) return guess;
+
+            using var roiMat = new Mat(workMat, roiRect);
+            
+            // Analisi locale per trovare il vero centroide della chioma
+            var localCenter = _analysis.FindCenterOfLocalRegion(roiMat);
+            
+            // ====================================================================
+            // 6. RICONVERSIONE COORDINATE GLOBALI
+            // ====================================================================
+            // Sommiamo offset del crop, offset ROI e risultato locale
+            return new Point2D(
+                localCenter.X + roiRect.X + offset.X, 
+                localCenter.Y + roiRect.Y + offset.Y
+            );
+        }
     }
 }
