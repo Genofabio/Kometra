@@ -1,7 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Threading.Channels; // Necessario per il Producer-Consumer
+using System.Threading.Channels; 
 using System.Threading.Tasks;
 using KomaLab.Models.Fits;
 using KomaLab.Models.Fits.Structure;
@@ -21,6 +21,9 @@ public class StackingCoordinator : IStackingCoordinator
     private readonly IFitsOpenCvConverter _converter;
     private readonly IStackingEngine _stackingEngine;
 
+    // Limite di precisione intera esatta per IEEE 754 Float (32-bit).
+    private const double FloatPrecisionLimit = 16_777_216.0;
+
     public StackingCoordinator(
         IFitsDataManager dataManager,
         IFitsMetadataService metadataService,
@@ -39,65 +42,91 @@ public class StackingCoordinator : IStackingCoordinator
         if (fileList.Count < 2) 
             throw new InvalidOperationException("Sono necessarie almeno 2 immagini per eseguire lo stacking.");
 
-        // 1. Setup Iniziale (Dimensioni e Header base)
+        // 1. Analisi Input e Setup
+        // Carichiamo solo il primo frame per decidere la strategia. È veloce e sicuro.
         var firstFrameData = await _dataManager.GetDataAsync(fileList[0].FilePath);
         var baseHeader = fileList[0].ModifiedHeader ?? firstFrameData.Header;
         int width = _metadataService.GetIntValue(baseHeader, "NAXIS1");
         int height = _metadataService.GetIntValue(baseHeader, "NAXIS2");
 
+        // 2. Analisi Dinamica della Precisione
+        bool useDoubleAccumulator = false;
+        
+        // Creiamo una Mat temporanea per analizzare i dati reali
+        using (var testMat = _converter.RawToMat(firstFrameData.PixelData, 1, 0, null))
+        {
+            // A. Se l'input è già Double, restiamo in Double
+            if (testMat.Depth() == MatType.CV_64F)
+            {
+                useDoubleAccumulator = true;
+            }
+            // B. Se facciamo SOMMA su dati Float/Int, controlliamo se serve passare a Double
+            else if (mode == StackingMode.Sum)
+            {
+                double maxPixelValue = 0;
+
+                // Tentativo 1: Leggere DATAMAX dall'header (veloce)
+                double headerMax = _metadataService.GetDoubleValue(baseHeader, "DATAMAX", 0.0);
+                
+                if (headerMax > 0)
+                {
+                    maxPixelValue = headerMax;
+                }
+                else
+                {
+                    // Tentativo 2: Scansione reale del primo frame (molto veloce con OpenCV)
+                    // MinMaxLoc è ottimizzato in C++, su un frame 4k richiede pochi millisecondi.
+                    testMat.MinMaxLoc(out _, out maxPixelValue);
+                }
+
+                // C. Calcolo del Rischio Overflow
+                // Aggiungiamo un margine di sicurezza (Safety Margin) del 20% (1.2)
+                // nel caso in cui i frame successivi siano leggermente più luminosi del primo.
+                double estimatedTotalSum = maxPixelValue * fileList.Count * 1.2;
+
+                if (estimatedTotalSum > FloatPrecisionLimit)
+                {
+                    useDoubleAccumulator = true;
+                }
+            }
+        }
+        
+        // Per Average e Median, Float basta sempre (se l'input non è Double)
+        
         Mat finalMat = null;
 
         // =================================================================================
-        // STRATEGIA 1: MEDIANA (Chunked / Low Memory)
+        // STRATEGIA 1: MEDIANA
         // =================================================================================
         if (mode == StackingMode.Median)
         {
-            // Passiamo all'engine la lista dei file e una funzione (Lambda) che spiega 
-            // come caricare un singolo "pezzo" (ROI) di un'immagine quando richiesto.
             finalMat = await _stackingEngine.ComputeMedianChunkedAsync(
-                fileList, 
-                width, 
-                height, 
+                fileList, width, height, 
                 async (fileRef, rect) => 
                 {
-                    // A. Caricamento Dati (IO)
                     var data = await _dataManager.GetDataAsync(fileRef.FilePath);
                     var h = fileRef.ModifiedHeader ?? data.Header;
                     double bScale = _metadataService.GetDoubleValue(h, "BSCALE", 1.0);
                     double bZero = _metadataService.GetDoubleValue(h, "BZERO", 0.0);
 
-                    // B. Conversione ROI
-                    // Carichiamo l'intera immagine (transiente), ritagliamo il pezzo e disponiamo l'originale.
-                    // Questo garantisce che occupiamo RAM solo per 1 immagine intera alla volta.
-                    using var fullMat = _converter.RawToMat(data.PixelData, bScale, bZero, FitsBitDepth.Double);
-                    
-                    // C. Estrazione Sottomatrice
-                    // .Clone() è fondamentale: copia i dati in una nuova memoria piccola, 
-                    // slegandosi da 'fullMat' che verrà distrutta alla fine del blocco using.
+                    using var fullMat = _converter.RawToMat(data.PixelData, bScale, bZero, targetDepth: null);
                     return fullMat.SubMat(rect).Clone();
                 });
         }
         // =================================================================================
-        // STRATEGIA 2: SOMMA/MEDIA (Producer-Consumer Pipeline)
+        // STRATEGIA 2: SOMMA/MEDIA
         // =================================================================================
         else 
         {
-            // Usiamo il casting per accedere ai metodi incrementali se non sono nell'interfaccia IStackingEngine
-            // (Consiglio: aggiungi InitializeAccumulators/AccumulateFrame all'interfaccia IStackingEngine)
             if (_stackingEngine is StackingEngine engine)
             {
-                engine.InitializeAccumulators(width, height, out Mat accumulator, out Mat countMap);
+                engine.InitializeAccumulators(width, height, useDoubleAccumulator, out Mat accumulator, out Mat countMap);
 
-                // Creiamo un canale limitato. Permette di pre-caricare fino a 3 immagini in memoria
-                // mentre il consumatore le elabora. Se il canale è pieno, il produttore aspetta.
                 var channel = Channel.CreateBounded<Mat>(new BoundedChannelOptions(3)
                 {
-                    SingleWriter = true,
-                    SingleReader = true,
-                    FullMode = BoundedChannelFullMode.Wait
+                    SingleWriter = true, SingleReader = true, FullMode = BoundedChannelFullMode.Wait
                 });
 
-                // --- TASK PRODUTTORE (Caricamento IO & Conversione) ---
                 var producerTask = Task.Run(async () =>
                 {
                     try
@@ -109,53 +138,32 @@ public class StackingCoordinator : IStackingCoordinator
                             double bScale = _metadataService.GetDoubleValue(h, "BSCALE", 1.0);
                             double bZero = _metadataService.GetDoubleValue(h, "BZERO", 0.0);
 
-                            // Convertiamo e inviamo al canale
-                            var mat = _converter.RawToMat(data.PixelData, bScale, bZero, FitsBitDepth.Double);
+                            var mat = _converter.RawToMat(data.PixelData, bScale, bZero, targetDepth: null);
                             await channel.Writer.WriteAsync(mat);
                         }
                     }
-                    catch (Exception ex)
-                    {
-                        channel.Writer.Complete(ex); // Segnala errore al consumatore
-                    }
-                    finally
-                    {
-                        channel.Writer.Complete(); // Segnala fine dati
-                    }
+                    catch (Exception ex) { channel.Writer.Complete(ex); }
+                    finally { channel.Writer.Complete(); }
                 });
 
-                // --- CONSUMATORE (Accumulo su Thread Corrente) ---
                 try
                 {
-                    // Leggiamo dal canale man mano che arrivano i dati
                     await foreach (var mat in channel.Reader.ReadAllAsync())
                     {
-                        using (mat) // Importante: Dispone la Mat appena finiamo di accumularla
-                        {
-                            engine.AccumulateFrame(accumulator, countMap, mat);
-                        }
+                        using (mat) engine.AccumulateFrame(accumulator, countMap, mat);
                     }
-
-                    // Attendiamo che il produttore finisca "pulito" (per rilanciare eventuali eccezioni)
                     await producerTask;
 
-                    if (mode == StackingMode.Average)
-                    {
-                        engine.FinalizeAverage(accumulator, countMap);
-                    }
+                    if (mode == StackingMode.Average) engine.FinalizeAverage(accumulator, countMap);
                     
-                    finalMat = accumulator; // Accumulator diventa il risultato finale
+                    finalMat = accumulator;
                 }
                 catch
                 {
-                    // Se qualcosa va storto nel loop, puliamo l'accumulatore se non è ancora finalMat
                     if (finalMat == null) accumulator.Dispose();
                     throw;
                 }
-                finally
-                {
-                    countMap.Dispose(); // La mappa conteggi non serve più
-                }
+                finally { countMap.Dispose(); }
             }
             else
             {
@@ -164,16 +172,19 @@ public class StackingCoordinator : IStackingCoordinator
         }
 
         // =================================================================================
-        // 3. FINALIZZAZIONE E SALVATAGGIO (Comune)
+        // 3. FINALIZZAZIONE E SALVATAGGIO
         // =================================================================================
         try
         {
             using (finalMat) 
             {
-                var finalPixels = _converter.MatToRaw(finalMat, FitsBitDepth.Double);
-                var finalHeader = _metadataService.CreateHeaderFromTemplate(baseHeader, finalPixels, FitsBitDepth.Double);
+                FitsBitDepth outputDepth = (finalMat.Depth() == MatType.CV_64F) 
+                    ? FitsBitDepth.Double 
+                    : FitsBitDepth.Float;
 
-                // Metadata
+                var finalPixels = _converter.MatToRaw(finalMat, outputDepth);
+                var finalHeader = _metadataService.CreateHeaderFromTemplate(baseHeader, finalPixels, outputDepth);
+
                 _metadataService.SetValue(finalHeader, "NCOMBINE", fileList.Count, "Number of combined frames");
                 _metadataService.SetValue(finalHeader, "STACKMET", mode.ToString().ToUpper(), "Stacking algorithm");
                 _metadataService.SetValue(finalHeader, "DATE-PRO", DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ss"), "Processing timestamp");
