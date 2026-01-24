@@ -1,0 +1,71 @@
+﻿<Styles xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:avalonia="clr-namespace:Material.Icons.Avalonia;assembly=Material.Icons.Avalonia">
+
+    <Style Selector="Button">
+        <Setter Property="HorizontalContentAlignment" Value="Center"/>
+        <Setter Property="VerticalContentAlignment" Value="Center"/>
+        <Setter Property="HorizontalAlignment" Value="Stretch"/>
+        <Setter Property="Height" Value="34"/>
+        <Setter Property="FontSize" Value="12"/>
+        <Setter Property="FontWeight" Value="SemiBold"/>
+        <Setter Property="CornerRadius" Value="4"/>
+        <Setter Property="BorderThickness" Value="0"/>
+        <Setter Property="Cursor" Value="Hand"/>
+    </Style>
+
+    <Style Selector="Button.addPrimary">
+        <Setter Property="Background" Value="{DynamicResource ActionPrimaryBackgroundBrush}"/>
+        <Setter Property="Foreground" Value="White"/>
+    </Style>
+    <Style Selector="Button.addPrimary:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+        <Setter Property="Background" Value="{DynamicResource ActionPrimaryHoverBrush}"/>
+    </Style>
+    <Style Selector="Button.addPrimary:pressed /template/ ContentPresenter#PART_ContentPresenter">
+        <Setter Property="Background" Value="{DynamicResource ActionPrimaryPressedBrush}"/>
+    </Style>
+
+    <Style Selector="Button.clearDestructive, Button.delBtn">
+        <Setter Property="Background" Value="{DynamicResource ActionDestructiveBackgroundBrush}"/>
+        <Setter Property="Foreground" Value="White"/>
+    </Style>
+    <Style Selector="Button.clearDestructive:pointerover /template/ ContentPresenter#PART_ContentPresenter, 
+                   Button.delBtn:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+        <Setter Property="Background" Value="{DynamicResource ActionDestructiveHoverBrush}"/>
+    </Style>
+    <Style Selector="Button.clearDestructive:pressed /template/ ContentPresenter#PART_ContentPresenter, 
+                   Button.delBtn:pressed /template/ ContentPresenter#PART_ContentPresenter">
+        <Setter Property="Background" Value="{DynamicResource ActionDestructivePressedBrush}"/>
+    </Style>
+
+    <Style Selector="Button.applySuccess">
+        <Setter Property="Background" Value="{DynamicResource ActionSuccessBackgroundBrush}"/>
+        <Setter Property="Foreground" Value="White"/>
+    </Style>
+    <Style Selector="Button.applySuccess:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+        <Setter Property="Background" Value="{DynamicResource ActionSuccessHoverBrush}"/>
+    </Style>
+    <Style Selector="Button.applySuccess:pressed /template/ ContentPresenter#PART_ContentPresenter">
+        <Setter Property="Background" Value="{DynamicResource ActionSuccessPressedBrush}"/>
+    </Style>
+
+    <Style Selector="Button.delBtn">
+        <Setter Property="Width" Value="22"/>
+        <Setter Property="Height" Value="22"/>
+        <Setter Property="Padding" Value="0"/> <Setter Property="MinWidth" Value="0"/> <Setter Property="MinHeight" Value="0"/>
+        <Setter Property="HorizontalContentAlignment" Value="Center"/>
+        <Setter Property="VerticalContentAlignment" Value="Center"/>
+        <Setter Property="Background" Value="{DynamicResource ActionDestructiveBackgroundBrush}"/>
+    </Style>
+
+    <Style Selector="Button.delBtn avalonia|MaterialIcon">
+        <Setter Property="HorizontalAlignment" Value="Center"/>
+        <Setter Property="VerticalAlignment" Value="Center"/>
+        <Setter Property="Margin" Value="0"/>
+    </Style>
+
+    <Style Selector="ListBoxItem:nth-child(even)">
+        <Setter Property="Background" Value="{DynamicResource Background.WhiteFaintBrush}"/>
+    </Style>
+
+</Styles>

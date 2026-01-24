@@ -22,4 +22,7 @@ public interface IWindowService
 
     // Posterizzazione: riceve i percorsi e la modalità
     Task<List<string>?> ShowPosterizationWindowAsync(List<FitsFileReference> sourceFiles, VisualizationMode initialMode);
+    
+    // Aggiungi questo metodo all'interfaccia
+    Task<List<string>?> ShowImportWindowAsync();
 }

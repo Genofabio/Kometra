@@ -210,10 +210,12 @@ public partial class BoardViewModel : ObservableObject
     [RelayCommand]
     private async Task AddNodeAsync()
     {
-        var paths = await _dialogService.ShowOpenFitsFileDialogAsync();
-        if (paths == null || !paths.Any()) return;
+        // 1. Apertura della finestra di Importazione avanzata invece del semplice file picker
+        var resultPaths = await _windowService.ShowImportWindowAsync();
+        if (resultPaths == null || !resultPaths.Any()) return;
 
-        var tasks = paths.Select(async path => 
+        // 2. Recupero metadati e ordinamento per data
+        var tasks = resultPaths.Select(async path => 
         {
             var header = await _dataManager.GetHeaderOnlyAsync(path);
             var date = _metadataService.GetObservationDate(header) ?? DateTime.MinValue; 
@@ -230,9 +232,18 @@ public partial class BoardViewModel : ObservableObject
         Point centerScreen = new Point(Viewport.ViewportSize.Width / 2.0, Viewport.ViewportSize.Height / 2.0);
         Point pos = Viewport.ToWorldCoordinates(centerScreen);
 
+        // 3. Creazione del nodo tramite Factory
         BaseNodeViewModel newNode = sortedPaths.Count == 1 
             ? await _nodeFactory.CreateSingleImageNodeAsync(sortedPaths[0], pos.X, pos.Y)
             : await _nodeFactory.CreateMultipleImagesNodeAsync(sortedPaths, pos.X, pos.Y);
+
+        // 4. Gestione dinamica del titolo: se i path puntano alla cartella temporanea "Calibrated",
+        // aggiungiamo il suffisso al nome standard creato dalla factory.
+        bool isCalibrated = sortedPaths.Any(p => p.Contains("Calibrated", StringComparison.OrdinalIgnoreCase));
+        if (isCalibrated)
+        {
+            newNode.Title += " (Calibrata)";
+        }
 
         AddNodeToGraph(newNode, sortedPaths.Count == 1 ? "Aggiungi Immagine" : "Aggiungi Sequenza");
     }
@@ -254,13 +265,12 @@ public partial class BoardViewModel : ObservableObject
     private void ZoomBoard(string direction)
     {
         double factor = direction.ToLower() == "in" ? 1.2 : 0.8;
-        // Calcola il centro del viewport per uno zoom bilanciato
         var center = new Point(Viewport.ViewportSize.Width / 2, Viewport.ViewportSize.Height / 2);
         Viewport.ApplyZoomAtPoint(factor, center);
     }
 
     // ---------------------------------------------------------------------------
-    // TOOL E ELABORAZIONE (Aggiornati a FitsFileReference)
+    // TOOL E ELABORAZIONE (Utilizzano FitsFileReference)
     // ---------------------------------------------------------------------------
 
     [RelayCommand(CanExecute = nameof(CanStackImages))]
@@ -269,7 +279,6 @@ public partial class BoardViewModel : ObservableObject
         if (SelectedNode is not ImageNodeViewModel source) return;
         try
         {
-            // Lo stackingCoordinator usa già CurrentFiles (List<FitsFileReference>)
             var resultRef = await _stackingCoordinator.ExecuteStackingAsync(source.CurrentFiles, mode);
         
             double sourceCenterX = source.X + (1.5 * source.EstimatedTotalSize.Width);
@@ -293,7 +302,6 @@ public partial class BoardViewModel : ObservableObject
         try {
             var fileRef = imgNode.ActiveFile;
             var data = await _dataManager.GetDataAsync(fileRef.FilePath);
-            // Salvataggio rispettando l'header modificato in sessione
             await _dataManager.SaveDataAsync(savePath, data.PixelData, fileRef.ModifiedHeader ?? data.Header);
         } catch (Exception ex) { Debug.WriteLine($"Save failed: {ex.Message}"); }
     }
@@ -304,14 +312,12 @@ public partial class BoardViewModel : ObservableObject
         if (SelectedNode is not ImageNodeViewModel imgNode || imgNode.ActiveRenderer == null) return;
         var path = await _dialogService.ShowSaveFileDialogAsync($"{imgNode.Title}.avi", "Video", "*.avi");
         if (string.IsNullOrWhiteSpace(path)) return;
-        // Utilizza CurrentFiles per mantenere coerenza dei metadati durante l'export video
         await _videoCoordinator.ExportVideoAsync(imgNode.CurrentFiles, path, 5.0, imgNode.ActiveRenderer.CaptureContrastProfile(), imgNode.VisualizationMode);
     }
 
     [RelayCommand(CanExecute = nameof(CanExecuteOnImageNode))]
     private async Task ShowPosterizationWindow()
     {
-        // Passo la lista di FitsFileReference al WindowService
         await RunGenericProcessing(
             (files, mode) => _windowService.ShowPosterizationWindowAsync(files, mode), 
             "Posterizzazione", 
@@ -321,17 +327,12 @@ public partial class BoardViewModel : ObservableObject
     [RelayCommand(CanExecute = nameof(CanExecuteOnImageNode))]
     private async Task ShowAlignmentWindow()
     {
-        // Passo la lista di FitsFileReference al WindowService
         await RunGenericProcessing(
             (files, mode) => _windowService.ShowAlignmentWindowAsync(files, mode), 
             "Allineamento", 
             "(Allineata)");
     }
     
-    /// <summary>
-    /// Esecutore generico per i tool di elaborazione batch.
-    /// Gestisce l'apertura della finestra, la creazione del nodo risultante e l'undo.
-    /// </summary>
     private async Task RunGenericProcessing(
         Func<List<FitsFileReference>, VisualizationMode, Task<List<string>?>> windowAction, 
         string undoLabel, 
@@ -339,7 +340,6 @@ public partial class BoardViewModel : ObservableObject
     {
         if (SelectedNode is not ImageNodeViewModel imgNode) return;
         
-        // Recuperiamo i riferimenti completi (invece dei soli path stringa)
         var inputFiles = imgNode.CurrentFiles.ToList();
         if (!inputFiles.Any()) return;
     
@@ -368,7 +368,6 @@ public partial class BoardViewModel : ObservableObject
     {
         if (SelectedNode is ImageNodeViewModel imgNode)
         {
-            // L'editor lavora direttamente sui riferimenti di sessione
             await _windowService.ShowHeaderEditorAsync(imgNode.CurrentFiles, imgNode.Navigator);
         }
     }

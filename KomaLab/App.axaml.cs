@@ -20,6 +20,7 @@ using KomaLab.Services.UI;
 using KomaLab.Services.Undo;
 using KomaLab.ViewModels;
 using KomaLab.ViewModels.Fits;
+using KomaLab.ViewModels.ImageProcessing;
 using KomaLab.Views;
 using AlignmentToolViewModel = KomaLab.ViewModels.ImageProcessing.AlignmentToolViewModel;
 using HeaderEditorToolViewModel = KomaLab.ViewModels.Fits.HeaderEditorToolViewModel;
@@ -92,6 +93,7 @@ public class App : Application
         services.AddSingleton<IImageAnalysisEngine, ImageAnalysisEngine>();
         services.AddSingleton<IGeometricEngine, GeometricEngine>(); 
         services.AddSingleton<IImagePresentationService, ImagePresentationService>();
+        services.AddSingleton<ICalibrationEngine, CalibrationEngine>();
 
         // --- 4. Servizi di Dominio ---
         services.AddSingleton<IPlateSolvingService, PlateSolvingService>();
@@ -106,6 +108,7 @@ public class App : Application
         services.AddSingleton<IAlignmentCoordinator, AlignmentCoordinator>(); 
         services.AddSingleton<IVideoExportCoordinator, VideoExportCoordinator>();
         services.AddSingleton<IStackingCoordinator, StackingCoordinator>();
+        services.AddSingleton<ICalibrationCoordinator, CalibrationCoordinator>();
 
         // --- 6. Factories ---
         services.AddSingleton<INodeViewModelFactory, NodeViewModelFactory>();
@@ -121,6 +124,7 @@ public class App : Application
         services.AddTransient<PosterizationToolViewModel>();
         services.AddTransient<PlateSolvingToolViewModel>();
         services.AddTransient<AlignmentToolViewModel>();
+        services.AddTransient<ImportViewModel>();
 
         return services.BuildServiceProvider();
     }

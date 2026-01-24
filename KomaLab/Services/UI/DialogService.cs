@@ -115,19 +115,22 @@ public class DialogService : IDialogService
     /// </summary>
     private IStorageProvider? GetStorageProvider()
     {
-        // 1. Caso Desktop Classico (MainWindow)
         if (Application.Current?.ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
-            if (desktop.MainWindow == null) return null; // Finestra non ancora inizializzata
-            return TopLevel.GetTopLevel(desktop.MainWindow)?.StorageProvider;
+            // CERCA LA FINESTRA ATTIVA (quella in primo piano)
+            // Se l'utente ha aperto ImportView, desktop.Windows conterrà sia MainWindow che ImportView.
+            // Prendiamo l'ultima finestra attiva o l'ultima aperta nella lista.
+            var activeWindow = desktop.Windows.LastOrDefault(w => w.IsActive) 
+                               ?? desktop.Windows.LastOrDefault();
+
+            if (activeWindow == null) return null;
+            return TopLevel.GetTopLevel(activeWindow)?.StorageProvider;
         }
-        
-        // 2. Caso Single View (Mobile / Browser / Embedded)
-        // Utile per rendere il servizio "future-proof" se mai porterai KomaLab su Android/Linux Touch
+    
         if (Application.Current?.ApplicationLifetime is ISingleViewApplicationLifetime singleView)
         {
-             if (singleView.MainView == null) return null;
-             return TopLevel.GetTopLevel(singleView.MainView)?.StorageProvider;
+            if (singleView.MainView == null) return null;
+            return TopLevel.GetTopLevel(singleView.MainView)?.StorageProvider;
         }
 
         return null;

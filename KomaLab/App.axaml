@@ -37,6 +37,7 @@
         <StyleInclude Source="avares://KomaLab/Styles/PlateSolvingToolStyles.axaml" />
         <StyleInclude Source="avares://KomaLab/Styles/AlignmentToolStyles.axaml" />
         <StyleInclude Source="avares://KomaLab/Styles/HeaderEditorToolStyles.axaml" />
+        <StyleInclude Source="avares://KomaLab/Styles/ImportStyles.axaml" />
         
         <StyleInclude Source="avares://Avalonia.Controls.DataGrid/Themes/Fluent.xaml"/>
     </Application.Styles>

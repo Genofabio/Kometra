@@ -11,6 +11,7 @@ using KomaLab.Services.Factories;
 using KomaLab.Services.Fits.Metadata;
 using KomaLab.Services.Processing.Coordinators;
 using KomaLab.ViewModels.Fits;
+using KomaLab.ViewModels.ImageProcessing;
 using KomaLab.ViewModels.Nodes;
 using KomaLab.Views;
 using Microsoft.Extensions.DependencyInjection;
@@ -159,5 +160,28 @@ public class WindowService : IWindowService
 
         viewModel.RequestClose -= closeHandler;
         return viewModel.DialogResult ? viewModel.ResultPaths : null;
+    }
+    
+    public async Task<List<string>?> ShowImportWindowAsync()
+    {
+        if (_mainWindow == null) return null;
+
+        // Recuperiamo le dipendenze per l'ImportViewModel
+        var dialogService = _serviceProvider.GetRequiredService<IDialogService>();
+        var coordinator = _serviceProvider.GetRequiredService<ICalibrationCoordinator>();
+
+        var viewModel = new ImportViewModel(dialogService, coordinator);
+        var view = new ImportView { DataContext = viewModel };
+
+        // Gestione chiusura
+        Action closeHandler = () => view.Close();
+        viewModel.RequestClose += closeHandler;
+
+        await view.ShowDialog(_mainWindow);
+
+        viewModel.RequestClose -= closeHandler;
+
+        // Se l'utente ha confermato, restituiamo i path dei file calibrati
+        return viewModel.DialogResult ? viewModel.CalibratedResultPaths : null;
     }
 }
