@@ -17,6 +17,10 @@
         <conv:IndexConverter x:Key="IndexConverter" />
         <conv:BoolToOpacityConverter x:Key="BoolToOpacityConverter" FalseOpacity="0.35" />
     </Window.Resources>
+    
+    <Window.Styles>
+        <StyleInclude Source="avares://KomaLab/Styles/ImportStyles.axaml" />
+    </Window.Styles>
 
     <Grid RowDefinitions="*, Auto">
         
