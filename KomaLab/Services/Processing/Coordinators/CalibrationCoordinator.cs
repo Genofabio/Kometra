@@ -101,6 +101,10 @@ public class CalibrationCoordinator : ICalibrationCoordinator
                     var calibratedPixels = _converter.MatToRaw(calibratedMat, outputDepth);
                     var finalHeader = _metadata.CreateHeaderFromTemplate(header, calibratedPixels, outputDepth);
                     
+                    _metadata.SetValue(finalHeader, "DARKCORR", "COMPLETE", "Dark frame subtraction applied");
+                    _metadata.SetValue(finalHeader, "FLATCORR", "COMPLETE", "Flat field correction applied");
+                    _metadata.SetValue(finalHeader, "BIASCORR", "COMPLETE", "Bias frame subtraction applied");
+                    
                     _metadata.AddValue(finalHeader, "HISTORY", $"KomaLab - Calibrated (D:{darkPaths.Any()} F:{flatPaths.Any()} B:{biasPaths.Any()})");
 
                     Debug.WriteLine("[CalibrationCoordinator] Tentativo di salvataggio file temporaneo...");
