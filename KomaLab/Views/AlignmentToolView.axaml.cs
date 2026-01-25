@@ -192,7 +192,7 @@ public partial class AlignmentToolView : Window
         if (vm.ActiveRenderer == null) return; 
 
         // ZOOM (CTRL + WHEEL)
-        if ((e.KeyModifiers & KeyModifiers.Control) == KeyModifiers.Control)
+        if (e.KeyModifiers.HasFlag(KeyModifiers.Control))
         {
             var mousePos = e.GetPosition(previewBorder);
             double factor = e.Delta.Y > 0 ? 1.1 : (1.0 / 1.1);
@@ -203,18 +203,49 @@ public partial class AlignmentToolView : Window
         }
 
         // SOGLIE RADIOMETRICHE (SHIFT o DEFAULT + WHEEL)
+        // 1. Calcolo step dinamico (5% del range attuale)
         double currentRange = Math.Abs(vm.ActiveRenderer.WhitePoint - vm.ActiveRenderer.BlackPoint);
-        double step = Math.Max(1.0, currentRange * 0.05); 
-    
-        if (e.Delta.Y < 0) step = -step; 
+        double baseStep = (currentRange > 0.00001) ? currentRange * 0.05 : 1.0;
+        
+        // Step minimo per evitare blocco su float molto piccoli
+        double step = Math.Max(0.0001, baseStep); 
 
+        // Direzione
+        if (e.Delta.Y < 0) step = -step;
+
+        // 2. Applicazione con guardie anti-crossing
         if (e.KeyModifiers.HasFlag(KeyModifiers.Shift))
         {
-            vm.ActiveRenderer.BlackPoint = Math.Min(vm.ActiveRenderer.BlackPoint + step, vm.ActiveRenderer.WhitePoint - 1); 
+            // Modifica BLACK POINT
+            double newBlack = vm.ActiveRenderer.BlackPoint + step;
+            
+            // Se stiamo alzando il nero (step > 0), non deve superare il bianco.
+            // Lasciamo un piccolo cuscinetto (step * 0.1).
+            if (step > 0)
+            {
+                double maxAllowed = vm.ActiveRenderer.WhitePoint - (step * 0.1);
+                vm.ActiveRenderer.BlackPoint = Math.Min(newBlack, maxAllowed);
+            }
+            else
+            {
+                vm.ActiveRenderer.BlackPoint = newBlack;
+            }
         }
         else
         {
-            vm.ActiveRenderer.WhitePoint = Math.Max(vm.ActiveRenderer.WhitePoint + step, vm.ActiveRenderer.BlackPoint + 1);
+            // Modifica WHITE POINT
+            double newWhite = vm.ActiveRenderer.WhitePoint + step;
+            
+            // Se stiamo abbassando il bianco (step < 0), non deve scendere sotto il nero.
+            if (step < 0)
+            {
+                double minAllowed = vm.ActiveRenderer.BlackPoint + (Math.Abs(step) * 0.1);
+                vm.ActiveRenderer.WhitePoint = Math.Max(newWhite, minAllowed);
+            }
+            else
+            {
+                vm.ActiveRenderer.WhitePoint = newWhite;
+            }
         }
 
         e.Handled = true;

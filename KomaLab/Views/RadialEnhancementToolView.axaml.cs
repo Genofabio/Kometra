@@ -149,11 +149,7 @@ public partial class RadialEnhancementToolView : Window
             e.Handled = true;
         }
     }
-
-    // --- (RESTO DEL CODICE: Pan, Zoom, Resize rimangono uguali) ---
     
-    // ... Copia qui i metodi OnPreviewSizeChanged, CenterImage, PointerPressed, etc...
-    // ... esattamente come erano nel codice precedente ...
     
     private void OnPreviewSizeChanged(object? sender, SizeChangedEventArgs e)
     {
@@ -211,10 +207,11 @@ public partial class RadialEnhancementToolView : Window
 
     private void OnPreviewPointerWheelChanged(object? sender, PointerWheelEventArgs e)
     {
-        if (DataContext is not RadialEnhancementToolViewModel vm || vm.ActiveRenderer == null) return;
+        if (DataContext is not RadialEnhancementToolViewModel vm || vm.ActiveRenderer == null || vm.IsBusy) return;
         var border = sender as Border;
         if (border == null) return;
 
+        // ZOOM
         if (e.KeyModifiers.HasFlag(KeyModifiers.Control))
         {
             var pos = e.GetPosition(border);
@@ -224,23 +221,43 @@ public partial class RadialEnhancementToolView : Window
         }
         else
         {
+            // SOGLIE RADIOMETRICHE (Versione Robusta)
+            // 1. Calcolo step dinamico (5% del range attuale)
             double currentRange = Math.Abs(vm.ActiveRenderer.WhitePoint - vm.ActiveRenderer.BlackPoint);
             double baseStep = (currentRange > 0.00001) ? currentRange * 0.05 : 1.0;
-            double step = Math.Max(0.0001, baseStep); 
+            double step = Math.Max(0.0001, baseStep); // Minimo step per evitare stallo su float piccoli
 
             if (e.Delta.Y < 0) step = -step;
 
             if (e.KeyModifiers.HasFlag(KeyModifiers.Shift))
             {
+                // BLACK POINT
                 double newBlack = vm.ActiveRenderer.BlackPoint + step;
-                if (step > 0) vm.ActiveRenderer.BlackPoint = Math.Min(newBlack, vm.ActiveRenderer.WhitePoint - (step * 0.1));
-                else vm.ActiveRenderer.BlackPoint = newBlack;
+                if (step > 0)
+                {
+                    // Evita l'accavallamento col White Point
+                    double maxAllowed = vm.ActiveRenderer.WhitePoint - (step * 0.1);
+                    vm.ActiveRenderer.BlackPoint = Math.Min(newBlack, maxAllowed);
+                }
+                else
+                {
+                    vm.ActiveRenderer.BlackPoint = newBlack;
+                }
             }
             else
             {
+                // WHITE POINT
                 double newWhite = vm.ActiveRenderer.WhitePoint + step;
-                if (step < 0) vm.ActiveRenderer.WhitePoint = Math.Max(newWhite, vm.ActiveRenderer.BlackPoint + (Math.Abs(step) * 0.1));
-                else vm.ActiveRenderer.WhitePoint = newWhite;
+                if (step < 0)
+                {
+                    // Evita l'accavallamento col Black Point
+                    double minAllowed = vm.ActiveRenderer.BlackPoint + (Math.Abs(step) * 0.1);
+                    vm.ActiveRenderer.WhitePoint = Math.Max(newWhite, minAllowed);
+                }
+                else
+                {
+                    vm.ActiveRenderer.WhitePoint = newWhite;
+                }
             }
             e.Handled = true;
         }

@@ -48,6 +48,8 @@ public partial class ImportViewModel : ObservableObject
         
         Debug.WriteLine("[ImportVM] Inizializzato.");
     }
+    
+    
 
     // =======================================================================
     // 1. COMANDI DI SELEZIONE
@@ -56,30 +58,40 @@ public partial class ImportViewModel : ObservableObject
     [RelayCommand]
     private async Task AddLights()
     {
-        IsInteractionEnabled = false; // Blocca la view
+        IsInteractionEnabled = false;
         try {
             var paths = await _dialogService.ShowOpenFitsFileDialogAsync();
             if (paths != null) {
                 foreach (var p in paths) LightFiles.Add(p);
-                // NOTIFICA IL CAMBIAMENTO
-                OnPropertyChanged(nameof(HasLights));
-                ConfirmCommand.NotifyCanExecuteChanged();
+                NotifyLightChanges(); // Aggiorna stato Confirm e ClearLights
             }
         } finally {
-            IsInteractionEnabled = true; // Sblocca la view
+            IsInteractionEnabled = true;
         }
     }
     
     public bool HasLights => LightFiles.Any();
 
     [RelayCommand]
-    private async Task AddDarkAsync() => await AddToCollection(DarkFiles, "DARKS");
+    private async Task AddDarkAsync()
+    {
+        await AddToCollection(DarkFiles, "DARKS");
+        ClearDarksCommand.NotifyCanExecuteChanged(); // <--- AGGIUNTO
+    }
 
     [RelayCommand]
-    private async Task AddFlatAsync() => await AddToCollection(FlatFiles, "FLATS");
+    private async Task AddFlatAsync()
+    {
+        await AddToCollection(FlatFiles, "FLATS");
+        ClearFlatsCommand.NotifyCanExecuteChanged(); // <--- AGGIUNTO
+    }
 
     [RelayCommand]
-    private async Task AddBiasAsync() => await AddToCollection(BiasFiles, "BIAS");
+    private async Task AddBiasAsync()
+    {
+        await AddToCollection(BiasFiles, "BIAS");
+        ClearBiasCommand.NotifyCanExecuteChanged(); // <--- AGGIUNTO
+    }
 
     // Nel tuo ImportViewModel.cs
     [ObservableProperty] private bool _isInteractionEnabled = true;
@@ -101,10 +113,32 @@ public partial class ImportViewModel : ObservableObject
     // 2. COMANDI DI RIMOZIONE
     // =======================================================================
 
-    [RelayCommand] private void RemoveLight(string path) => RemoveFromCollection(LightFiles, path);
-    [RelayCommand] private void RemoveDark(string path) => RemoveFromCollection(DarkFiles, path);
-    [RelayCommand] private void RemoveFlat(string path) => RemoveFromCollection(FlatFiles, path);
-    [RelayCommand] private void RemoveBias(string path) => RemoveFromCollection(BiasFiles, path);
+    [RelayCommand] 
+    private void RemoveLight(string path) 
+    {
+        if (LightFiles.Remove(path)) NotifyLightChanges();
+    }
+
+    [RelayCommand] 
+    private void RemoveDark(string path) 
+    {
+        RemoveFromCollection(DarkFiles, path);
+        ClearDarksCommand.NotifyCanExecuteChanged(); // <--- AGGIUNTO
+    }
+
+    [RelayCommand] 
+    private void RemoveFlat(string path) 
+    {
+        RemoveFromCollection(FlatFiles, path);
+        ClearFlatsCommand.NotifyCanExecuteChanged(); // <--- AGGIUNTO
+    }
+
+    [RelayCommand] 
+    private void RemoveBias(string path) 
+    {
+        RemoveFromCollection(BiasFiles, path);
+        ClearBiasCommand.NotifyCanExecuteChanged(); // <--- AGGIUNTO
+    }
 
     private void RemoveFromCollection(ObservableCollection<string> collection, string path)
     {
@@ -114,10 +148,39 @@ public partial class ImportViewModel : ObservableObject
         }
     }
     
-    [RelayCommand] private void ClearLights() => LightFiles.Clear();
-    [RelayCommand] private void ClearDarks() => DarkFiles.Clear();
-    [RelayCommand] private void ClearFlats() => FlatFiles.Clear();
-    [RelayCommand] private void ClearBias() => BiasFiles.Clear();
+    private bool CanClearLights() => LightFiles.Count > 0;
+    private bool CanClearDarks() => DarkFiles.Count > 0;
+    private bool CanClearFlats() => FlatFiles.Count > 0;
+    private bool CanClearBias() => BiasFiles.Count > 0;
+
+// Collega la condizione al comando tramite CanExecute
+    [RelayCommand(CanExecute = nameof(CanClearLights))]
+    private void ClearLights()
+    {
+        LightFiles.Clear();
+        NotifyLightChanges(); // Metodo helper per aggiornare UI e comandi
+    }
+
+    [RelayCommand(CanExecute = nameof(CanClearDarks))]
+    private void ClearDarks()
+    {
+        DarkFiles.Clear();
+        ClearDarksCommand.NotifyCanExecuteChanged();
+    }
+
+    [RelayCommand(CanExecute = nameof(CanClearFlats))]
+    private void ClearFlats()
+    {
+        FlatFiles.Clear();
+        ClearFlatsCommand.NotifyCanExecuteChanged();
+    }
+
+    [RelayCommand(CanExecute = nameof(CanClearBias))]
+    private void ClearBias()
+    {
+        BiasFiles.Clear();
+        ClearBiasCommand.NotifyCanExecuteChanged();
+    }
 
     [RelayCommand]
     private void ClearAll()
@@ -208,5 +271,13 @@ public partial class ImportViewModel : ObservableObject
             DialogResult = false;
             RequestClose?.Invoke();
         }
+    }
+    
+    // Helper per centralizzare gli aggiornamenti relativi ai Lights
+    private void NotifyLightChanges()
+    {
+        OnPropertyChanged(nameof(HasLights));          // Aggiorna l'UI (es. ScrollViewer)
+        ConfirmCommand.NotifyCanExecuteChanged();      // Aggiorna pulsante Importa
+        ClearLightsCommand.NotifyCanExecuteChanged();  // Aggiorna pulsante Svuota
     }
 }

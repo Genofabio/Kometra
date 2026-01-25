@@ -36,7 +36,7 @@ public partial class RadialEnhancementToolViewModel : ObservableObject, IDisposa
 
     public TaskCompletionSource<bool> ImageLoadedTcs { get; } = new();
     public SequenceNavigator Navigator { get; } = new();
-    public ImageViewport Viewport { get; } = new();
+    public EnhancementImageViewport Viewport { get; } = new();
 
     public event Action? RequestClose;
     public bool DialogResult { get; private set; }
