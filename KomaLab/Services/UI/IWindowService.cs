@@ -27,4 +27,8 @@ public interface IWindowService
     Task<List<string>?> ShowImportWindowAsync();
     
     Task<List<string>?> ShowRadialEnhancementWindowAsync(List<FitsFileReference> files, VisualizationMode mode);
+
+    public Task<List<string>?> ShowStructureExtractionWindowAsync(
+        List<FitsFileReference> sourceFiles,
+        VisualizationMode initialMode);
 }

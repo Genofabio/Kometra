@@ -61,6 +61,7 @@
         </MenuItem>
         
         <MenuItem Header="_Modifica">
+            
             <MenuItem Header="Allinea"
                       Classes="innerMenuItem"
                       Command="{Binding BoardVm.ShowAlignmentWindowCommand}">
@@ -77,12 +78,28 @@
                 </MenuItem.Icon>
             </MenuItem>
             
-            <MenuItem Header="Modelli Radiali"
-                      Classes="innerMenuItem"
-                      Command="{Binding BoardVm.ShowRadialEnhancementWindowCommand}">
+            <Separator />
+
+            <MenuItem Header="Analisi Morfologica" Classes="innerMenuItem">
                 <MenuItem.Icon>
-                    <avalonia:MaterialIcon Kind="Radius" />
+                    <avalonia:MaterialIcon Kind="Creation" />
                 </MenuItem.Icon>
+
+                <MenuItem Header="Modelli Radiali"
+                          Classes="innerMenuItem"
+                          Command="{Binding BoardVm.ShowRadialEnhancementWindowCommand}">
+                    <MenuItem.Icon>
+                        <avalonia:MaterialIcon Kind="Radius" />
+                    </MenuItem.Icon>
+                </MenuItem>
+
+                <MenuItem Header="Estrazione Strutture (LS/RVSF)"
+                          Classes="innerMenuItem"
+                          Command="{Binding BoardVm.ShowStructureExtractionWindowCommand}">
+                    <MenuItem.Icon>
+                        <avalonia:MaterialIcon Kind="Radar" />
+                    </MenuItem.Icon>
+                </MenuItem>
             </MenuItem>
             
             <Separator />

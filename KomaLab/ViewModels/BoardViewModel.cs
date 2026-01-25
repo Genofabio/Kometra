@@ -59,6 +59,7 @@ public partial class BoardViewModel : ObservableObject
         SetVisualizationModeCommand.NotifyCanExecuteChanged();
         ShowPosterizationWindowCommand.NotifyCanExecuteChanged();
         ShowRadialEnhancementWindowCommand.NotifyCanExecuteChanged();
+        ShowStructureExtractionWindowCommand.NotifyCanExecuteChanged(); // <--- AGGIUNTO
     }
     
     public bool IsGlobalAnimationRunning => 
@@ -332,6 +333,15 @@ public partial class BoardViewModel : ObservableObject
             (files, mode) => _windowService.ShowRadialEnhancementWindowAsync(files, mode), 
             "Miglioramento Radiale", 
             "(Radiale)");
+    }
+
+    [RelayCommand(CanExecute = nameof(CanExecuteOnImageNode))]
+    private async Task ShowStructureExtractionWindow() // <--- AGGIUNTO
+    {
+        await RunGenericProcessing(
+            (files, mode) => _windowService.ShowStructureExtractionWindowAsync(files, mode), 
+            "Estrazione Strutture", 
+            "(Strutture)");
     }
 
     [RelayCommand(CanExecute = nameof(CanExecuteOnImageNode))]

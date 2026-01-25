@@ -100,6 +100,9 @@ public class App : Application
         // Registrazione motore radiale (ToPolar/FromPolar/Sub-sampling)
         services.AddSingleton<IRadialEnhancementEngine, RadialEnhancementEngine>();
 
+        // Registrazione motore Larson-Sekanina / RVSF (Rotazione/Shift)
+        services.AddSingleton<IStructureExtractionEngine, StructureExtractionEngine>(); // <--- AGGIUNTO
+
         // --- 4. Servizi di Dominio ---
         services.AddSingleton<IPlateSolvingService, PlateSolvingService>();
         services.AddSingleton<IAlignmentService, AlignmentService>(); 
@@ -118,6 +121,9 @@ public class App : Application
         // Coordinatore per la regia tra UI e Engine radiale
         services.AddSingleton<IRadialEnhancementCoordinator, RadialEnhancementCoordinator>();
 
+        // Coordinatore per la regia tra UI e Engine strutture
+        services.AddSingleton<IStructureExtractionCoordinator, StructureExtractionCoordinator>(); // <--- AGGIUNTO
+
         // --- 6. Factories ---
         services.AddSingleton<INodeViewModelFactory, NodeViewModelFactory>();
         services.AddSingleton<IFitsRendererFactory, FitsRendererFactory>();
@@ -130,7 +136,8 @@ public class App : Application
         // --- 8. Tool ViewModels (Transient) ---
         services.AddTransient<HeaderEditorToolViewModel>();
         services.AddTransient<PosterizationToolViewModel>();
-        services.AddTransient<RadialEnhancementToolViewModel>(); // Registrazione per WindowService
+        services.AddTransient<RadialEnhancementToolViewModel>();
+        services.AddTransient<StructureExtractionToolViewModel>(); // <--- AGGIUNTO
         services.AddTransient<PlateSolvingToolViewModel>();
         services.AddTransient<AlignmentToolViewModel>();
         services.AddTransient<ImportViewModel>();

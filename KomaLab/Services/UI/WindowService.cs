@@ -15,10 +15,14 @@ using KomaLab.ViewModels.ImageProcessing;
 using KomaLab.ViewModels.Nodes;
 using KomaLab.Views;
 using Microsoft.Extensions.DependencyInjection;
+
+// Alias per evitare ambiguità
 using AlignmentToolViewModel = KomaLab.ViewModels.ImageProcessing.AlignmentToolViewModel;
 using HeaderEditorToolViewModel = KomaLab.ViewModels.Fits.HeaderEditorToolViewModel;
 using PlateSolvingToolViewModel = KomaLab.ViewModels.Astrometry.PlateSolvingToolViewModel;
 using PosterizationToolViewModel = KomaLab.ViewModels.ImageProcessing.PosterizationToolViewModel;
+using RadialEnhancementToolViewModel = KomaLab.ViewModels.ImageProcessing.RadialEnhancementToolViewModel;
+using StructureExtractionToolViewModel = KomaLab.ViewModels.ImageProcessing.StructureExtractionToolViewModel;
 
 namespace KomaLab.Services.UI;
 
@@ -46,7 +50,7 @@ public class WindowService : IWindowService
     // =======================================================================
 
     public async Task<List<string>?> ShowAlignmentWindowAsync(
-        List<FitsFileReference> sourceFiles, // MODIFICATO: Da string a FitsFileReference
+        List<FitsFileReference> sourceFiles,
         VisualizationMode initialMode = VisualizationMode.Linear) 
     {
         if (_mainWindow == null) throw new InvalidOperationException("Finestra principale non registrata.");
@@ -55,7 +59,6 @@ public class WindowService : IWindowService
         var dataManager = _serviceProvider.GetRequiredService<IFitsDataManager>();
         var rendererFactory = _serviceProvider.GetRequiredService<IFitsRendererFactory>();
 
-        // Ora i tipi corrispondono: List<FitsFileReference>
         using var viewModel = new AlignmentToolViewModel(sourceFiles, coordinator, dataManager, rendererFactory);
         var view = new AlignmentToolView { DataContext = viewModel };
 
@@ -82,11 +85,9 @@ public class WindowService : IWindowService
         var healthEvaluator = _serviceProvider.GetRequiredService<IFitsHeaderHealthEvaluator>();
         var mapper = _serviceProvider.GetRequiredService<FitsHeaderUiMapper>();
 
-        // Pattern Consistente: 'using' per gestire il Dispose (Rollback sessione se non salvato)
         using var viewModel = new HeaderEditorToolViewModel(files, navigator, coordinator, healthEvaluator, mapper);
         var view = new HeaderEditorToolView { DataContext = viewModel };
 
-        // Anche qui aggiungiamo il closeHandler se il ViewModel lo supporta
         Action closeHandler = () => view.Close();
         viewModel.RequestClose += closeHandler;
 
@@ -98,41 +99,27 @@ public class WindowService : IWindowService
     }
     
     // =======================================================================
-// 3. PLATE SOLVING (Uniformato e Purista)
-// =======================================================================
+    // 3. PLATE SOLVING
+    // =======================================================================
 
     public async Task ShowPlateSolvingWindowAsync(ImageNodeViewModel node)
     {
         if (_mainWindow == null) return;
 
-        // Recuperiamo le dipendenze necessarie dal ServiceProvider
         var coordinator = _serviceProvider.GetRequiredService<IPlateSolvingCoordinator>();
-        var metadataService = _serviceProvider.GetRequiredService<IFitsMetadataService>(); // <--- AGGIUNTO
+        var metadataService = _serviceProvider.GetRequiredService<IFitsMetadataService>();
     
         string targetName = node.ActiveFile?.FileName ?? "Sorgente Ignota";
 
-        // Iniezione delle dipendenze nel ViewModel
-        // Note: Passiamo il metadataService affinché il VM possa formattare i dati WCS
-        using var viewModel = new PlateSolvingToolViewModel(
-            node.CurrentFiles, 
-            targetName, 
-            coordinator, 
-            metadataService); // <--- INIETTATO
-
+        using var viewModel = new PlateSolvingToolViewModel(node.CurrentFiles, targetName, coordinator, metadataService);
         var view = new PlateSolvingToolView { DataContext = viewModel };
 
-        // Gestione della chiusura tramite evento
         Action closeHandler = () => view.Close();
         viewModel.RequestClose += closeHandler;
 
         await view.ShowDialog(_mainWindow);
 
-        // Cleanup dell'evento per evitare memory leak
         viewModel.RequestClose -= closeHandler;
-    
-        // NOTA: Poiché usiamo 'using', all'uscita dal metodo verrà chiamato viewModel.Dispose().
-        // Questo a sua volta chiamerà _coordinator.ClearSession(), pulendo i file temporanei 
-        // e gli header pendenti se l'utente ha chiuso la finestra senza fare "Applica".
     }
     
     // =======================================================================
@@ -140,7 +127,7 @@ public class WindowService : IWindowService
     // =======================================================================
 
     public async Task<List<string>?> ShowPosterizationWindowAsync(
-        List<FitsFileReference> sourceFiles, // MODIFICATO: Da string a FitsFileReference
+        List<FitsFileReference> sourceFiles,
         VisualizationMode initialMode)
     {
         if (_mainWindow == null) throw new InvalidOperationException("Finestra principale non registrata.");
@@ -149,7 +136,6 @@ public class WindowService : IWindowService
         var rendererFactory = _serviceProvider.GetRequiredService<IFitsRendererFactory>();
         var coordinator = _serviceProvider.GetRequiredService<IPosterizationCoordinator>();
         
-        // Ora i tipi corrispondono: List<FitsFileReference>
         using var viewModel = new PosterizationToolViewModel(sourceFiles, dataManager, rendererFactory, coordinator);
         var view = new PosterizationToolView { DataContext = viewModel };
 
@@ -162,31 +148,31 @@ public class WindowService : IWindowService
         return viewModel.DialogResult ? viewModel.ResultPaths : null;
     }
     
+    // =======================================================================
+    // 5. IMPORTAZIONE
+    // =======================================================================
+
     public async Task<List<string>?> ShowImportWindowAsync()
     {
         if (_mainWindow == null) return null;
 
-        // Recuperiamo le dipendenze per l'ImportViewModel
         var dialogService = _serviceProvider.GetRequiredService<IDialogService>();
         var coordinator = _serviceProvider.GetRequiredService<ICalibrationCoordinator>();
 
         var viewModel = new ImportViewModel(dialogService, coordinator);
         var view = new ImportView { DataContext = viewModel };
 
-        // Gestione chiusura
         Action closeHandler = () => view.Close();
         viewModel.RequestClose += closeHandler;
 
         await view.ShowDialog(_mainWindow);
 
         viewModel.RequestClose -= closeHandler;
-
-        // Se l'utente ha confermato, restituiamo i path dei file calibrati
         return viewModel.DialogResult ? viewModel.CalibratedResultPaths : null;
     }
     
     // =======================================================================
-    // 5. MODELLI RADIALI (Inverse Rho, Average, Median, Renorm)
+    // 6. MODELLI RADIALI
     // =======================================================================
 
     public async Task<List<string>?> ShowRadialEnhancementWindowAsync(
@@ -195,25 +181,57 @@ public class WindowService : IWindowService
     {
         if (_mainWindow == null) throw new InvalidOperationException("Finestra principale non registrata.");
 
-        // 1. Risoluzione dipendenze
         var dataManager = _serviceProvider.GetRequiredService<IFitsDataManager>();
         var rendererFactory = _serviceProvider.GetRequiredService<IFitsRendererFactory>();
         var coordinator = _serviceProvider.GetRequiredService<IRadialEnhancementCoordinator>();
 
-        // 2. Inizializzazione ViewModel e View
-        // Nota: Il ViewModel deve implementare IDisposable (gestito con 'using')
         using var viewModel = new RadialEnhancementToolViewModel(sourceFiles, dataManager, rendererFactory, coordinator);
         var view = new RadialEnhancementToolView { DataContext = viewModel };
 
-        // 3. Gestione chiusura e restituzione risultati
         Action closeHandler = () => view.Close();
         viewModel.RequestClose += closeHandler;
 
         await view.ShowDialog(_mainWindow);
 
         viewModel.RequestClose -= closeHandler;
+        return viewModel.DialogResult ? viewModel.ResultPaths : null;
+    }
 
-        // Se l'utente ha premuto "Applica" (Batch), restituiamo i path dei nuovi file
+    // =======================================================================
+    // 7. ESTRAZIONE STRUTTURE (Larson-Sekanina / RVSF)
+    // =======================================================================
+
+    public async Task<List<string>?> ShowStructureExtractionWindowAsync(
+        List<FitsFileReference> sourceFiles,
+        VisualizationMode initialMode)
+    {
+        if (_mainWindow == null) throw new InvalidOperationException("Finestra principale non registrata.");
+
+        // 1. Risoluzione dipendenze specifiche
+        var dataManager = _serviceProvider.GetRequiredService<IFitsDataManager>();
+        var rendererFactory = _serviceProvider.GetRequiredService<IFitsRendererFactory>();
+        var coordinator = _serviceProvider.GetRequiredService<IStructureExtractionCoordinator>();
+        
+        // AGGIUNTO: MetadataService per gestire il ridimensionamento header nel Mosaico
+        var metadataService = _serviceProvider.GetRequiredService<IFitsMetadataService>();
+
+        // 2. Inizializzazione
+        using var viewModel = new StructureExtractionToolViewModel(
+            sourceFiles, 
+            dataManager, 
+            rendererFactory, 
+            coordinator, 
+            metadataService); // <--- Iniettato qui
+
+        var view = new StructureExtractionToolView { DataContext = viewModel };
+
+        // 3. Gestione chiusura e risultati
+        Action closeHandler = () => view.Close();
+        viewModel.RequestClose += closeHandler;
+
+        await view.ShowDialog(_mainWindow);
+
+        viewModel.RequestClose -= closeHandler;
         return viewModel.DialogResult ? viewModel.ResultPaths : null;
     }
 }
