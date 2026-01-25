@@ -33,7 +33,7 @@
         <StyleInclude Source="avares://KomaLab/Styles/ConnectionStyles.axaml" />
         <StyleInclude Source="avares://KomaLab/Styles/TopBarMenuStyles.axaml" />
     
-        <StyleInclude Source="avares://KomaLab/Styles/PosterizationToolStyles.axaml" />
+        <StyleInclude Source="avares://KomaLab/Styles/EnhancementToolsStyles.axaml" />
         <StyleInclude Source="avares://KomaLab/Styles/PlateSolvingToolStyles.axaml" />
         <StyleInclude Source="avares://KomaLab/Styles/AlignmentToolStyles.axaml" />
         <StyleInclude Source="avares://KomaLab/Styles/HeaderEditorToolStyles.axaml" />

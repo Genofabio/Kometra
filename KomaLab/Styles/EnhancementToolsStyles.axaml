@@ -1,0 +1,72 @@
+﻿<Styles xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <Style Selector="TextBlock.sectionTitle">
+        <Setter Property="FontWeight" Value="Bold"/>
+        <Setter Property="FontSize" Value="14"/>
+        <Setter Property="Foreground" Value="{DynamicResource Text.StaticWhiteBrush}"/>
+        <Setter Property="Margin" Value="0,15,0,5"/>
+    </Style>
+
+    <Style Selector="TextBlock.inputLabel">
+        <Setter Property="FontSize" Value="12"/>
+        <Setter Property="Foreground" Value="{DynamicResource Text.MediumGreyBrush}"/>
+        <Setter Property="VerticalAlignment" Value="Center"/>
+    </Style>
+
+    <Style Selector="TextBox.valueInput">
+        <Setter Property="FontSize" Value="12"/>
+        <Setter Property="VerticalContentAlignment" Value="Center"/>
+        <Setter Property="HorizontalContentAlignment" Value="Right"/>
+        <Setter Property="Background" Value="{DynamicResource ToolWindowBackgroundBrush}"/>
+        <Setter Property="Foreground" Value="{DynamicResource NavButtonForegroundBrush}"/>
+        <Setter Property="BorderBrush" Value="{DynamicResource ActionDisabledBackgroundBrush}"/>
+        <Setter Property="Padding" Value="5,0"/>
+        <Setter Property="MinHeight" Value="26"/>
+    </Style>
+    
+    <Style Selector="TextBox.valueInput:focus /template/ Border#PART_BorderElement">
+        <Setter Property="BorderBrush" Value="{DynamicResource ActionPrimaryBackgroundBrush}"/>
+        <Setter Property="BorderThickness" Value="1"/>
+    </Style>
+
+    <Style Selector="Button.actionBtn">
+        <Setter Property="HorizontalAlignment" Value="Stretch"/>
+        <Setter Property="HorizontalContentAlignment" Value="Center"/>
+        <Setter Property="Padding" Value="10,8"/>
+        <Setter Property="FontSize" Value="14"/>
+        <Setter Property="FontWeight" Value="SemiBold"/>
+        <Setter Property="CornerRadius" Value="4"/>
+    </Style>
+
+    <Style Selector="Button.apply">
+        <Setter Property="Background" Value="{DynamicResource ActionSuccessBackgroundBrush}"/>
+        <Setter Property="Foreground" Value="{DynamicResource Text.StaticWhiteBrush}"/>
+        <Setter Property="BorderThickness" Value="0"/>
+    </Style>
+    <Style Selector="Button.apply:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+        <Setter Property="Background" Value="{DynamicResource ActionSuccessHoverBrush}"/>
+        <Setter Property="Foreground" Value="{DynamicResource Text.StaticWhiteBrush}"/>
+    </Style>
+    <Style Selector="Button.apply:pressed /template/ ContentPresenter#PART_ContentPresenter">
+        <Setter Property="Background" Value="{DynamicResource ActionSuccessPressedBrush}"/>
+        <Setter Property="Foreground" Value="{DynamicResource Text.StaticWhiteBrush}"/>
+    </Style>
+
+    <Style Selector="Button.cancel">
+        <Setter Property="Background" Value="{DynamicResource ActionDestructiveBackgroundBrush}"/>
+        <Setter Property="Foreground" Value="{DynamicResource Text.StaticWhiteBrush}"/>
+        <Setter Property="BorderThickness" Value="0"/>
+    </Style>
+    <Style Selector="Button.cancel:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+        <Setter Property="Background" Value="{DynamicResource ActionDestructiveHoverBrush}"/>
+        <Setter Property="Foreground" Value="{DynamicResource Text.StaticWhiteBrush}"/>
+    </Style>
+
+    <Style Selector="ComboBox.standard">
+        <Setter Property="HorizontalAlignment" Value="Stretch"/>
+        <Setter Property="Background" Value="{DynamicResource ToolWindowBackgroundBrush}"/>
+        <Setter Property="BorderBrush" Value="{DynamicResource Border.WhiteDimBrush}"/>
+        <Setter Property="Padding" Value="10,6"/>
+    </Style>
+</Styles>

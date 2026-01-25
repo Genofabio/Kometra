@@ -189,6 +189,49 @@ Lettura header per time per ordinare caricamento immagini MultipleImageNode
                   
                   Analisi: Passa l'immagine così trattata (pulita e vignettata) all'AnalysisEngine per trovare il centroide, invece di passargli l'immagine grezza piena di stelle.
 
+- Controlla aggiunte su tablet
 
+- Aggiunta filtri
+    -1/rho: Parallelismo Massivo: In Python/NumPy, sebbene vettorizzato, il calcolo è spesso limitato a un singolo thread. Qui usiamo Parallel.For, che distribuisce il calcolo dei pixel su tutti i core della tua CPU.
+            
+            Lookup Tables (LUT): Per la trasformazione polare, ho pre-calcolato le matrici di Sin e Cos. Invece di calcolare migliaia di volte le funzioni trigonometriche (molto lente), le leggiamo istantaneamente dalla memoria.
+            
+            Gestione Float/Double Dinamica: Il codice è ottimizzato per lavorare a 32 o 64 bit per preservare la mantissa dei dati astronomici.
+            
+            Uso degli Indexer: Invece di accedere ai pixel tramite metodi lenti, usiamo gli Indexer di OpenCVSharp che mappano direttamente l'indirizzo di memoria del pixel.
+    
+    - Filtri azimuthal average e median: Parallelismo di Calcolo (Multi-threading)
+                                Mentre il codice Python con NumPy è "vettorizzato" (veloce ma spesso limitato a operazioni sequenziali dal punto di vista del processore), in C# abbiamo usato Parallel.For.
+                                
+                                Miglioria: Ogni riga della matrice polare (ovvero ogni raggio della cometa) viene elaborata indipendentemente da un core diverso della CPU. Su un processore moderno, questo riduce drasticamente i tempi di calcolo per immagini ad alta risoluzione, permettendo una preview quasi istantanea.
+                                
+                                2. Protezione contro la Divisione per Zero (Epsilon Guard)
+                                In astronomia, dopo la sottrazione del fondo cielo, i pixel possono avere valori vicini allo zero o leggermente negativi (rumore).
+                                
+                                Miglioria: Nel divisore abbiamo aggiunto 1e-10f (un valore infinitesimale). Questo impedisce la creazione di pixel "Infinity" o "NaN" nel caso in cui un anello della cometa sia completamente nero, garantendo che il software non crashi e non generi artefatti visivi (pixel bianchi o neri "sparati").
+                                
+                                3. Filtro Selettivo dei Dati (NaN Transparency)
+                                Il codice Python spesso deve gestire i NaN con maschere booleane che consumano memoria.
+                                
+                                Miglioria: Durante la raccolta dei pixel per calcolare la media, filtriamo attivamente i NaN e i valori negativi fisicamente impossibili prima ancora di iniziare il calcolo statistico. Il modello della chioma viene così costruito solo su "dati reali", evitando che il rumore del padding (i bordi neri dopo l'allineamento) inquini la media radiale.
+                                
+                                4. Precisione Accumulata a 64-bit
+                                Anche se l'immagine finale è a 32-bit (per risparmiare spazio), i calcoli statistici intermedi sono ora in 64-bit (double).
+                                
+                                Miglioria: Quando calcoliamo la somma dei quadrati per la deviazione standard (Sigma), usare i 64 bit previene errori di arrotondamento che, su milioni di pixel, potrebbero portare a un calcolo del Sigma leggermente errato, rendendo il rigetto delle stelle meno preciso.
 
-
+    - azimuthal_renormalization: Gestione dei NaN: Il tuo codice Python originale usava valid_mask_1 = (avect >= 0.0). Se c'erano dei NaN (Not a Number), il calcolo di np.mean o np.std poteva fallire o restituire risultati errati. La nostra versione C# controlla esplicitamente float.IsNaN() e li ignora, preservando la statistica della riga.
+                                 
+                                 Precisione Scientifica (Z-Score): Nel tuo Python, il calcolo finale era (avect - rowmin) * 255.0 / diff. Questo forzava il dato in un formato "immagine 8-bit" (0-255). La nostra versione C# calcola lo Z-Score puro: (valore - media) / (nsig * sigma). Questo mantiene il dato "scientifico" e permette alla UI di KomaLab di gestirlo con molta più flessibilità.
+                                 
+                                 Efficienza Multi-core: La versione Python usa un ciclo for i in range(nrad). Anche se NumPy è veloce, quel ciclo gira su un solo core della CPU. La nostra versione C# usa Parallel.For, processando centinaia di anelli della cometa simultaneamente.
+                                 
+    - ottimizzazione prestazioni: Ecco le ottimizzazioni chiave applicate nella versione sotto:
+                                  
+                                  Parallelizzazione Massiva (ToPolar / FromPolar): Utilizzo di Parallel.For con partizionamento per massimizzare l'uso della CPU.
+                                  
+                                  Ottimizzazione Loop (InverseRho): Ho ridotto le operazioni dentro il loop più interno (es. calcolando subX e subY in modo incrementale o fuori dal loop quando possibile).
+                                  
+                                  Riduzione Allocazioni (ApplyAzimuthal...): Invece di allocare List<float> dentro ogni iterazione del Parallel.For (che causa pressione sul Garbage Collector), uso array pool o semplicemente calcoli diretti a due passaggi (un loop per la media, uno per la deviazione standard) evitando del tutto le liste dove possibile. Questo è molto più veloce e consuma meno RAM.
+                                  
+                                  Look-up Tables (LUT): Ho mantenuto le LUT per seno/coseno ma ottimizzato l'accesso.

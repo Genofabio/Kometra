@@ -77,6 +77,14 @@
                 </MenuItem.Icon>
             </MenuItem>
             
+            <MenuItem Header="Modelli Radiali"
+                      Classes="innerMenuItem"
+                      Command="{Binding BoardVm.ShowRadialEnhancementWindowCommand}">
+                <MenuItem.Icon>
+                    <avalonia:MaterialIcon Kind="Radius" />
+                </MenuItem.Icon>
+            </MenuItem>
+            
             <Separator />
             
             <MenuItem Header="Editor Header / Metadati"

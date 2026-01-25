@@ -25,4 +25,6 @@ public interface IWindowService
     
     // Aggiungi questo metodo all'interfaccia
     Task<List<string>?> ShowImportWindowAsync();
+    
+    Task<List<string>?> ShowRadialEnhancementWindowAsync(List<FitsFileReference> files, VisualizationMode mode);
 }

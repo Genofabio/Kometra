@@ -184,4 +184,36 @@ public class WindowService : IWindowService
         // Se l'utente ha confermato, restituiamo i path dei file calibrati
         return viewModel.DialogResult ? viewModel.CalibratedResultPaths : null;
     }
+    
+    // =======================================================================
+    // 5. MODELLI RADIALI (Inverse Rho, Average, Median, Renorm)
+    // =======================================================================
+
+    public async Task<List<string>?> ShowRadialEnhancementWindowAsync(
+        List<FitsFileReference> sourceFiles,
+        VisualizationMode initialMode)
+    {
+        if (_mainWindow == null) throw new InvalidOperationException("Finestra principale non registrata.");
+
+        // 1. Risoluzione dipendenze
+        var dataManager = _serviceProvider.GetRequiredService<IFitsDataManager>();
+        var rendererFactory = _serviceProvider.GetRequiredService<IFitsRendererFactory>();
+        var coordinator = _serviceProvider.GetRequiredService<IRadialEnhancementCoordinator>();
+
+        // 2. Inizializzazione ViewModel e View
+        // Nota: Il ViewModel deve implementare IDisposable (gestito con 'using')
+        using var viewModel = new RadialEnhancementToolViewModel(sourceFiles, dataManager, rendererFactory, coordinator);
+        var view = new RadialEnhancementToolView { DataContext = viewModel };
+
+        // 3. Gestione chiusura e restituzione risultati
+        Action closeHandler = () => view.Close();
+        viewModel.RequestClose += closeHandler;
+
+        await view.ShowDialog(_mainWindow);
+
+        viewModel.RequestClose -= closeHandler;
+
+        // Se l'utente ha premuto "Applica" (Batch), restituiamo i path dei nuovi file
+        return viewModel.DialogResult ? viewModel.ResultPaths : null;
+    }
 }

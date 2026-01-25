@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Collections.Generic;
 using Avalonia;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
@@ -22,10 +23,13 @@ using KomaLab.ViewModels;
 using KomaLab.ViewModels.Fits;
 using KomaLab.ViewModels.ImageProcessing;
 using KomaLab.Views;
+
+// Alias per evitare ambiguità nei ViewModel dei Tool
 using AlignmentToolViewModel = KomaLab.ViewModels.ImageProcessing.AlignmentToolViewModel;
 using HeaderEditorToolViewModel = KomaLab.ViewModels.Fits.HeaderEditorToolViewModel;
 using PlateSolvingToolViewModel = KomaLab.ViewModels.Astrometry.PlateSolvingToolViewModel;
 using PosterizationToolViewModel = KomaLab.ViewModels.ImageProcessing.PosterizationToolViewModel;
+using RadialEnhancementToolViewModel = KomaLab.ViewModels.ImageProcessing.RadialEnhancementToolViewModel;
 
 namespace KomaLab;
 
@@ -82,8 +86,6 @@ public class App : Application
         services.AddSingleton<IFitsMetadataService, FitsMetadataService>();
         services.AddSingleton<IFitsDataManager, FitsDataManager>(); 
         services.AddSingleton<IFitsOpenCvConverter, FitsOpenCvConverter>();
-        
-        // --- FIX: Registrazione Mancante ---
         services.AddSingleton<IFitsHeaderHealthEvaluator, FitsHeaderHealthEvaluator>();
 
         // --- 3. Engine Scientifici ---
@@ -94,6 +96,9 @@ public class App : Application
         services.AddSingleton<IGeometricEngine, GeometricEngine>(); 
         services.AddSingleton<IImagePresentationService, ImagePresentationService>();
         services.AddSingleton<ICalibrationEngine, CalibrationEngine>();
+        
+        // Registrazione motore radiale (ToPolar/FromPolar/Sub-sampling)
+        services.AddSingleton<IRadialEnhancementEngine, RadialEnhancementEngine>();
 
         // --- 4. Servizi di Dominio ---
         services.AddSingleton<IPlateSolvingService, PlateSolvingService>();
@@ -109,6 +114,9 @@ public class App : Application
         services.AddSingleton<IVideoExportCoordinator, VideoExportCoordinator>();
         services.AddSingleton<IStackingCoordinator, StackingCoordinator>();
         services.AddSingleton<ICalibrationCoordinator, CalibrationCoordinator>();
+        
+        // Coordinatore per la regia tra UI e Engine radiale
+        services.AddSingleton<IRadialEnhancementCoordinator, RadialEnhancementCoordinator>();
 
         // --- 6. Factories ---
         services.AddSingleton<INodeViewModelFactory, NodeViewModelFactory>();
@@ -122,6 +130,7 @@ public class App : Application
         // --- 8. Tool ViewModels (Transient) ---
         services.AddTransient<HeaderEditorToolViewModel>();
         services.AddTransient<PosterizationToolViewModel>();
+        services.AddTransient<RadialEnhancementToolViewModel>(); // Registrazione per WindowService
         services.AddTransient<PlateSolvingToolViewModel>();
         services.AddTransient<AlignmentToolViewModel>();
         services.AddTransient<ImportViewModel>();

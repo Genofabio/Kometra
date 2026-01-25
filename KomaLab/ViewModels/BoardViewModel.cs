@@ -58,6 +58,7 @@ public partial class BoardViewModel : ObservableObject
         ShowPlateSolvingWindowCommand.NotifyCanExecuteChanged();
         SetVisualizationModeCommand.NotifyCanExecuteChanged();
         ShowPosterizationWindowCommand.NotifyCanExecuteChanged();
+        ShowRadialEnhancementWindowCommand.NotifyCanExecuteChanged();
     }
     
     public bool IsGlobalAnimationRunning => 
@@ -322,6 +323,15 @@ public partial class BoardViewModel : ObservableObject
             (files, mode) => _windowService.ShowPosterizationWindowAsync(files, mode), 
             "Posterizzazione", 
             "(Posterizzata)");
+    }
+    
+    [RelayCommand(CanExecute = nameof(CanExecuteOnImageNode))]
+    private async Task ShowRadialEnhancementWindow()
+    {
+        await RunGenericProcessing(
+            (files, mode) => _windowService.ShowRadialEnhancementWindowAsync(files, mode), 
+            "Miglioramento Radiale", 
+            "(Radiale)");
     }
 
     [RelayCommand(CanExecute = nameof(CanExecuteOnImageNode))]
