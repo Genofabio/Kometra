@@ -20,6 +20,42 @@
         <Setter Property="CornerRadius" Value="0,0,8,8"/>
         <Setter Property="ClipToBounds" Value="True"/>
     </Style>
+    
+    <Style Selector="TextBox.NodeTitleEditor">
+        <Setter Property="FontSize" Value="30"/>
+        <Setter Property="FontWeight" Value="Normal"/>
+        <Setter Property="Padding" Value="18"/>
+        <Setter Property="Background" Value="Transparent"/>
+        <Setter Property="BorderThickness" Value="0"/>
+        <Setter Property="Foreground" Value="White"/>
+        <Setter Property="CaretBrush" Value="White"/>
+        <Setter Property="VerticalContentAlignment" Value="Center"/>
+        <Setter Property="MinHeight" Value="0"/>
+        <Setter Property="MinWidth" Value="0"/>
+    </Style>
+
+    <Style Selector="TextBox.NodeTitleEditor:pointerover /template/ Border#PART_BorderElement">
+        <Setter Property="Background" Value="Transparent"/>
+        <Setter Property="BorderThickness" Value="0"/>
+    </Style>
+
+    <Style Selector="TextBox.NodeTitleEditor:focus /template/ Border#PART_BorderElement">
+        <Setter Property="Background" Value="#33FFFFFF"/> <Setter Property="BorderThickness" Value="0"/>
+    </Style>
+
+    <Style Selector="TextBox.NodeTitleEditor:focus /template/ Border#PART_BorderElement">
+        <Setter Property="BorderBrush" Value="Transparent"/>
+    </Style>
+
+    <Style Selector="TextBox.NodeTitleEditor">
+        <Setter Property="SelectionBrush" Value="#66FFFFFF"/>
+    </Style>
+    
+    <Style Selector="TextBox.NodeTitleEditor[IsReadOnly=True]">
+        <Setter Property="IsHitTestVisible" Value="False"/>
+        <Setter Property="Focusable" Value="False"/>
+        <Setter Property="Cursor" Value="Arrow"/>
+    </Style>
 
     <Style Selector="TextBlock.NodeTitle">
         <Setter Property="FontWeight" Value="Normal"/>

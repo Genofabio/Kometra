@@ -14,12 +14,25 @@
         
         <Grid RowDefinitions="Auto, *">
             
-            <Border Grid.Row="0" Classes="Header">
-                <Grid ColumnDefinitions="*,Auto">
-                    <TextBlock Grid.Column="0" 
-                               Classes="NodeTitle"
-                               Text="{Binding Title}"/>
+            <Border Grid.Row="0" 
+                    Name="TitleHeader" 
+                    Classes="Header" 
+                    MaxWidth="{Binding NodeContentSize.Width}" 
+                    ClipToBounds="True"
+                    Background="Transparent"> <Grid ColumnDefinitions="*,Auto">
                     
+                    <TextBox Name="TitleTextBox"
+                             Grid.Column="0" 
+                             Classes="NodeTitleEditor"
+                             Text="{Binding Title, Mode=TwoWay}"
+                             IsReadOnly="True"
+                             HorizontalAlignment="Stretch"
+                             TextAlignment="Left" 
+                             TextWrapping="NoWrap"
+                             AcceptsReturn="False"
+                             LostFocus="TitleTextBox_OnLostFocus"
+                             KeyDown="TitleTextBox_OnKeyDown"/>
+        
                     <Button Grid.Column="1" 
                             Content="✕" 
                             Classes="CloseButton"

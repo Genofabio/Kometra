@@ -3,6 +3,7 @@ using System.Linq;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
+using Avalonia.Interactivity; // Necessario per RoutedEventArgs
 using Avalonia.Media;
 using Avalonia.VisualTree; 
 using KomaLab.ViewModels;
@@ -64,12 +65,40 @@ public partial class MultipleImagesNodeView : UserControl
     private void OnPointerPressed(object? sender, PointerPressedEventArgs e)
     {
         if (DataContext is not MultipleImagesNodeViewModel nodeVm) return;
+        
         var properties = e.GetCurrentPoint(this).Properties;
+        var textBox = this.FindControl<TextBox>("TitleTextBox");
+        var headerBorder = this.FindControl<Border>("TitleHeader");
+        
+        var sourceVisual = e.Source as Visual;
 
-        // --- PAN INTERNO (Tasto Centrale) ---
+        // --- VERIFICA HIT TEST HEADER ---
+        // Verifichiamo se il click è avvenuto sull'area del titolo (Header).
+        // Se TextBox è ReadOnly, lo stile IsHitTestVisible=False fa passare il click al Border (TitleHeader).
+        bool isHeaderClick = headerBorder != null && sourceVisual != null && 
+                             (sourceVisual == headerBorder || headerBorder.IsVisualAncestorOf(sourceVisual));
+
+        // Escludiamo il pulsante di chiusura (che è dentro l'header)
+        if (isHeaderClick && (sourceVisual is Button || sourceVisual.GetVisualAncestors().OfType<Button>().Any())) 
+            isHeaderClick = false;
+
+        // --- 1. GESTIONE DOPPIO CLICK (EDIT) ---
+        if (e.ClickCount == 2 && properties.IsLeftButtonPressed)
+        {
+            if (isHeaderClick && textBox != null)
+            {
+                // Attivazione manuale della modifica
+                textBox.IsReadOnly = false;
+                textBox.Focus();
+                textBox.SelectAll();
+                e.Handled = true; // Stop all'evento (niente drag)
+                return;
+            }
+        }
+
+        // --- 2. PAN INTERNO (Tasto Centrale) ---
         if (properties.IsMiddleButtonPressed)
         {
-            // Verifichiamo il navigatore invece della vecchia proprietà IsAnimating
             if (!nodeVm.IsSelected || nodeVm.Navigator is SequenceNavigator { IsLooping: true }) return;
             
             _isPanningImage = true;
@@ -80,9 +109,24 @@ public partial class MultipleImagesNodeView : UserControl
             return; 
         }
 
-        // --- DRAG DEL NODO (Tasto Sinistro) ---
+        // --- 3. DRAG DEL NODO (Tasto Sinistro) ---
         if (properties.IsLeftButtonPressed)
         {
+            // Se siamo in modalità EDIT (!IsReadOnly), lasciamo gestire il click alla TextBox
+            if (textBox != null && !textBox.IsReadOnly)
+            {
+                // Se clicchiamo fuori dalla textbox (ma non sull'header per riattivarla), chiudiamo l'edit
+                if (!isHeaderClick && !textBox.IsVisualAncestorOf(sourceVisual))
+                {
+                    textBox.IsReadOnly = true;
+                    this.Focus();
+                }
+                else
+                {
+                    return; // Lasciamo il cursore muoversi nel testo
+                }
+            }
+
             _cachedBoardVm?.SetSelectedNode(nodeVm);
             nodeVm.BringToFront(); 
 
@@ -106,6 +150,36 @@ public partial class MultipleImagesNodeView : UserControl
             }
         }
     }
+    
+    // --- GESTORI EDITING TITOLO ---
+
+    private void TitleTextBox_OnKeyDown(object? sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.Enter && sender is TextBox textBox)
+        {
+            textBox.IsReadOnly = true;
+            this.Focus(); // Toglie il focus
+            e.Handled = true;
+        }
+        else if (e.Key == Key.Escape && sender is TextBox tb)
+        {
+            tb.IsReadOnly = true;
+            this.Focus();
+            e.Handled = true;
+        }
+    }
+
+    private void TitleTextBox_OnLostFocus(object? sender, RoutedEventArgs e)
+    {
+        if (sender is TextBox textBox)
+        {
+            textBox.IsReadOnly = true;
+            textBox.SelectionStart = 0;
+            textBox.SelectionEnd = 0;
+        }
+    }
+
+    // --- ALTRI EVENTI (Moved, Released, Wheel) ---
 
     private void OnPointerMoved(object? sender, PointerEventArgs e)
     {
@@ -128,7 +202,6 @@ public partial class MultipleImagesNodeView : UserControl
         var currentPosBoard = e.GetPosition(_cachedBoardView);
         var screenDelta = currentPosBoard - _startDragPoint.Value;
         
-        // Puntiamo al Viewport della Board per la scala globale
         double scale = _cachedBoardVm.Viewport.Scale;
         if (scale <= 0.001) scale = 0.1; 
 
@@ -178,11 +251,9 @@ public partial class MultipleImagesNodeView : UserControl
     {
         if (DataContext is not MultipleImagesNodeViewModel vm) return;
         
-        // Protezione: non modifichiamo soglie o zoom se la sequenza sta scorrendo velocemente
         if (vm.Navigator is SequenceNavigator { IsLooping: true }) return;
         if (!vm.IsSelected) return;
 
-        // --- ZOOM (CTRL + WHEEL) ---
         if ((e.KeyModifiers & KeyModifiers.Control) == KeyModifiers.Control)
         {
             var container = this.FindControl<Border>("ImageContainer");
@@ -196,7 +267,6 @@ public partial class MultipleImagesNodeView : UserControl
             return;
         }
         
-        // --- SOGLIE RADIOMETRICHE (ActiveRenderer) ---
         if (vm.ActiveRenderer != null)
         {
             double currentRange = Math.Abs(vm.ActiveRenderer.WhitePoint - vm.ActiveRenderer.BlackPoint);
@@ -208,13 +278,9 @@ public partial class MultipleImagesNodeView : UserControl
             bool isShiftPressed = (e.KeyModifiers & KeyModifiers.Shift) == KeyModifiers.Shift;
 
             if (isShiftPressed)
-            {
                 vm.ActiveRenderer.BlackPoint += deltaAmount;
-            }
             else
-            {
                 vm.ActiveRenderer.WhitePoint += deltaAmount;
-            }
         }
 
         e.Handled = true; 
