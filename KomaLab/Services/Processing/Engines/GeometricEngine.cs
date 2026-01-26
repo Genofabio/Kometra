@@ -12,42 +12,60 @@ public class GeometricEngine : IGeometricEngine
     // 1. TRASFORMAZIONI SPAZIALI (WARPING)
     // =======================================================================
 
+    /// <summary>
+    /// Esegue una traslazione sub-pixel di alta precisione.
+    /// Utilizza un sistema di Alpha Mask per prevenire l'erosione dei bordi causata dai NaN 
+    /// durante l'interpolazione Lanczos4.
+    /// </summary>
     public Mat WarpTranslation(Mat source, Point2D sourcePoint, Point2D targetPoint, Size2D outputSize)
     {
         if (source == null || source.Empty()) return new Mat();
 
-        // 1. Lavoriamo sempre in Double per preservare la fotometria durante il ricampionamento
-        bool needsConversion = source.Type() != MatType.CV_64FC1;
-        using Mat workingSrc = needsConversion ? new Mat() : source;
-        if (needsConversion) source.ConvertTo(workingSrc, MatType.CV_64FC1);
+        // 1. Identificazione dell'area dati validi per l'isolamento fisico
+        using Mat mask = new Mat();
+        Cv2.Compare(source, source, mask, CmpType.EQ); // Identifica i pixel non-NaN
+        Rect validRect = Cv2.BoundingRect(mask);
 
-        // 2. Calcolo del vettore di spostamento (Shift Vector)
-        // La matematica è: Punto_Destinazione - Punto_Sorgente
-        double tx = targetPoint.X - sourcePoint.X;
-        double ty = targetPoint.Y - sourcePoint.Y;
+        if (validRect.Width <= 0 || validRect.Height <= 0) return source.Clone();
 
-        // 3. Matrice di Trasformazione Affine (Traslazione pura)
-        // $$ M = \begin{bmatrix} 1 & 0 & tx \\ 0 & 1 & ty \end{bmatrix} $$
+        // 2. Isolamento e preparazione della sorgente
+        // Il Clone() è fondamentale: impedisce a Lanczos4 di campionare NaN esterni nella memoria fisica
+        using Mat workingSrc = source.SubMat(validRect).Clone();
+        if (workingSrc.Type() != MatType.CV_64FC1) workingSrc.ConvertTo(workingSrc, MatType.CV_64FC1);
+        
+        // Pulizia NaN interni per non corrompere l'interpolazione
+        using (Mat nanMask = new Mat())
+        {
+            Cv2.Compare(workingSrc, workingSrc, nanMask, CmpType.NE);
+            workingSrc.SetTo(new Scalar(0), nanMask);
+        }
+
+        // 3. Generazione Maschera Alpha per il ripristino selettivo dei NaN
+        using Mat alphaMask = new Mat(workingSrc.Size(), MatType.CV_8UC1, new Scalar(255));
+
+        // 4. Calcolo delle coordinate locali e del vettore di spostamento
+        Point2D adjustedSourcePoint = new Point2D(sourcePoint.X - validRect.X, sourcePoint.Y - validRect.Y);
+        double tx = targetPoint.X - adjustedSourcePoint.X;
+        double ty = targetPoint.Y - adjustedSourcePoint.Y;
+
         using Mat m = new Mat(2, 3, MatType.CV_64FC1);
         m.Set(0, 0, 1.0); m.Set(0, 1, 0.0); m.Set(0, 2, tx);
         m.Set(1, 0, 0.0); m.Set(1, 1, 1.0); m.Set(1, 2, ty);
 
         var cvSize = new Size((int)outputSize.Width, (int)outputSize.Height);
         
-        // 4. Inizializziamo il risultato con NaN (Background astronomico standard)
-        Mat result = new Mat(cvSize, MatType.CV_64FC1, new Scalar(double.NaN));
-        
-        // 5. Warp con Lanczos4: il "Gold Standard" per preservare la PSF delle stelle
-        // Evita l'effetto "morbido" della bilineare e il ringing della bicubica semplice.
-        Cv2.WarpAffine(
-            workingSrc, 
-            result, 
-            m, 
-            cvSize, 
-            InterpolationFlags.Lanczos4, 
-            BorderTypes.Constant, 
-            new Scalar(double.NaN)
-        );
+        // 5. Warp dell'immagine (Interpolazione Lanczos4 su sfondo nero)
+        Mat result = new Mat(cvSize, MatType.CV_64FC1, new Scalar(0));
+        Cv2.WarpAffine(workingSrc, result, m, cvSize, InterpolationFlags.Lanczos4, BorderTypes.Constant, new Scalar(0));
+
+        // 6. Warp della maschera (Nearest Neighbor per mantenere i bordi netti)
+        using Mat warpedMask = new Mat(cvSize, MatType.CV_8UC1, new Scalar(0));
+        Cv2.WarpAffine(alphaMask, warpedMask, m, cvSize, InterpolationFlags.Nearest, BorderTypes.Constant, new Scalar(0));
+
+        // 7. Ripristino dei NaN nelle aree prive di segnale originale
+        using Mat finalMask = new Mat();
+        Cv2.Compare(warpedMask, new Scalar(0), finalMask, CmpType.EQ);
+        result.SetTo(new Scalar(double.NaN), finalMask);
 
         return result;
     }
@@ -60,7 +78,7 @@ public class GeometricEngine : IGeometricEngine
     {
         if (source == null || source.Empty()) return new Mat();
 
-        // Calcolo ROI con protezione bordi
+        // Calcolo ROI con protezione dei confini della matrice
         int size = radius * 2;
         int sx = (int)Math.Max(0, center.X - radius);
         int sy = (int)Math.Max(0, center.Y - radius);
@@ -71,11 +89,11 @@ public class GeometricEngine : IGeometricEngine
 
         using Mat crop = new Mat(source, new Rect(sx, sy, sw, sh));
         
-        // Convertiamo a Float32 per l'analisi (più performante di Double e sufficiente)
+        // Conversione a Float32 per ottimizzare le prestazioni dei motori di analisi
         Mat result = new Mat();
         crop.ConvertTo(result, MatType.CV_32FC1); 
         
-        // Pulizia per motori di analisi (es. Star Finder o Comet Tracker)
+        // Sanitizzazione NaN per calcoli statistici
         Cv2.PatchNaNs(result, 0.0);
         
         return result;

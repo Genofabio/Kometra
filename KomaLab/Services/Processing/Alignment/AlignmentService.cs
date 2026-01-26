@@ -97,7 +97,6 @@ public class AlignmentService : IAlignmentService
     // 3. PROCESSORE DI WARPING (Iniezione nel Batch Service)
     // =======================================================================
 
-    // Cambiamo la firma da Action<Mat, Mat, int> a Action<Mat, Mat, FitsHeader, int>
     public Action<Mat, Mat, FitsHeader, int> GetWarpingProcessor(
         AlignmentMap map, 
         Func<double, double, string>? historyGenerator = null) 
@@ -127,11 +126,10 @@ public class AlignmentService : IAlignmentService
             double deltaX = destinationPoint.X - sourcePoint.X;
             double deltaY = destinationPoint.Y - sourcePoint.Y;
 
-            // 3. WCS Shift (Dovere tecnico del Service)
+            // 3. WCS Shift
             _metadataService.ShiftWcs(header, deltaX, deltaY);
 
-            // 4. ESECUZIONE DELLA STRATEGIA DI LOGGING (Se fornita)
-            // Qui il Service usa i SUOI dati (delta) combinati con la logica del chiamante
+            // 4. Esecuzione della strategia di logging per la History FITS
             if (historyGenerator != null)
             {
                 string logMessage = historyGenerator(deltaX, deltaY);
@@ -157,7 +155,6 @@ public class AlignmentService : IAlignmentService
         {
             if (i >= centers.Count || centers[i] == null) continue;
             
-            // Priorità all'header di sessione per coerenza geometrica
             var header = files[i].ModifiedHeader ?? await _dataManager.GetHeaderOnlyAsync(files[i].FilePath);
             if (header == null) continue;
 
@@ -192,7 +189,6 @@ public class AlignmentService : IAlignmentService
     {
         double maxRadiusX = 0, maxRadiusY = 0;
         
-        // Semaforo per limitare il carico simultaneo in RAM durante la scansione massiva
         using var semaphore = new SemaphoreSlim(Math.Clamp(Environment.ProcessorCount / 2, 1, 4));
         var tasks = new List<Task<(double Rx, double Ry)>>();
 
@@ -210,14 +206,10 @@ public class AlignmentService : IAlignmentService
                 {
                     var fileRef = files[index];
                     var data = await _dataManager.GetDataAsync(fileRef.FilePath);
-                    
-                    // Recupero metadati corretti dalla sessione
                     var header = fileRef.ModifiedHeader ?? data.Header;
                     double bScale = _metadataService.GetDoubleValue(header, "BSCALE", 1.0);
                     double bZero = _metadataService.GetDoubleValue(header, "BZERO", 0.0);
 
-                    // OTTIMIZZAZIONE: Per l'analisi dei bordi (FindValidDataBox), 
-                    // 32-bit (float) sono sufficienti e risparmiano il 50% di RAM OpenCV.
                     using Mat mat = _converter.RawToMat(data.PixelData, bScale, bZero, FitsBitDepth.Float);
                     
                     Rect2D validBox = _analysis.FindValidDataBox(mat);
@@ -240,7 +232,14 @@ public class AlignmentService : IAlignmentService
             maxRadiusY = Math.Max(maxRadiusY, r.Ry);
         }
 
-        return new Size2D((int)Math.Ceiling(maxRadiusX * 2), (int)Math.Ceiling(maxRadiusY * 2));
+        // Safety margin di 4 pixel per gestire arrotondamenti sub-pixel senza clipping
+        int safetyMargin = 4; 
+        var finalSize = new Size2D(
+            (int)Math.Ceiling(maxRadiusX * 2) + safetyMargin, 
+            (int)Math.Ceiling(maxRadiusY * 2) + safetyMargin
+        );
+
+        return finalSize;
     }
 
     // =======================================================================

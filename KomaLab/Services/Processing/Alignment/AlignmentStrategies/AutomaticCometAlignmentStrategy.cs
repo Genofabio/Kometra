@@ -45,7 +45,6 @@ public class AutomaticCometAlignmentStrategy : AlignmentStrategyBase
         var guessList = guesses?.ToList(); 
         var results = new Point2D?[fileList.Count];
 
-        // Utilizzo del semaforo per gestire il parallelismo in base alla RAM disponibile
         using var semaphore = new SemaphoreSlim(GetOptimalConcurrency(fileList[0]));
         
         var tasks = fileList.Select(async (fileRef, i) =>
@@ -54,10 +53,8 @@ public class AutomaticCometAlignmentStrategy : AlignmentStrategyBase
             try 
             {
                 token.ThrowIfCancellationRequested();
-                
                 var guess = (guessList != null && i < guessList.Count) ? guessList[i] : null;
 
-                // Passiamo l'intero fileRef per gestire i metadati di sessione
                 results[i] = await ExecuteWithRetryAsync(
                     operation: async () => await FindObjectCoreAsync(fileRef, guess),
                     itemIndex: i
@@ -82,52 +79,27 @@ public class AutomaticCometAlignmentStrategy : AlignmentStrategyBase
     {
         var data = await DataManager.GetDataAsync(fileRef.FilePath);
         
-        // 1. PRIORITÀ METADATI: Usiamo l'header modificato se presente
         var header = fileRef.ModifiedHeader ?? data.Header;
         double bScale = _metadataService.GetDoubleValue(header, "BSCALE", 1.0);
         double bZero = _metadataService.GetDoubleValue(header, "BZERO", 0.0);
         
-        // 2. CARICAMENTO INTELLIGENTE: targetBitDepth = null delega al convertitore 
-        // la scelta tra 32 e 64 bit per preservare la precisione originale.
         using var rawMat = _converter.RawToMat(data.PixelData, bScale, bZero);
 
-        // ====================================================================
-        // 3. SANITIZZAZIONE E CROP DINAMICO
-        // ====================================================================
-        // Ritagliamo l'immagine sui dati validi, espandendo se necessario per includere il guess.
-        // I NaN interni vengono sostituiti con 0.0 per permettere l'analisi matematica.
-        // 'mat' è l'immagine pulita, 'offset' è la posizione del crop rispetto all'originale.
+        // 1. Sanitizzazione e ritaglio automatico sui dati validi (rimuove il padding NaN)
         var (mat, offset) = SanitizeAndCrop(rawMat, guess);
 
         try
         {
-            // ====================================================================
-            // 4. PRE-PROCESSING (Analisi sulla matrice sanitizzata)
-            // ====================================================================
-            
-            // 1. PULIZIA MORFOLOGICA (In-place su 'mat')
-            // Rimuove stelle puntiformi per isolare la chioma diffusa della cometa.
+            // 2. Pulizia morfologica per isolare la chioma cometaria dalle stelle di fondo
             _effects.ApplyMorphologicalCleanup(mat, mat, kernelSize: 3);
 
-            // 2. PESO CENTRALE (VIGNETTATURA SINTETICA)
-            // Se non abbiamo un punto di partenza, aiutiamo l'algoritmo a cercare verso il centro.
-            if (!guess.HasValue)
-            {
-                _effects.ApplyCentralWeighting(mat, mat, sigmaScale: 0.7);
-            }
-
-            // ====================================================================
-            // 5. RICERCA E CENTRATURA LOCALE
-            // ====================================================================
-
+            // 3. Calcolo del centroide locale
             Point2D localResult;
 
             if (guess.HasValue) 
             {
-                // Adattiamo il guess alle coordinate locali del crop
+                // Raffinamento locale attorno al punto suggerito (NASA/JPL o giro precedente)
                 var localGuess = new Point2D(guess.Value.X - offset.X, guess.Value.Y - offset.Y);
-
-                // Stima dinamica del raggio di ricerca in base alla densità del segnale
                 int smartRadius = EstimateSmartRadius(mat);
                 
                 var roiRect = new Rect(
@@ -145,38 +117,33 @@ public class AutomaticCometAlignmentStrategy : AlignmentStrategyBase
                 }
                 else
                 {
-                    // Fallback se la ROI è troppo piccola o fuori dai bordi
                     localResult = localGuess;
                 }
             }
             else
             {
-                // Ricerca globale sull'intero crop trattato
+                // Ricerca globale sull'intera area valida (Blind Search)
                 localResult = _analysis.FindCenterOfLocalRegion(mat);
             }
 
-            // ====================================================================
-            // 6. RICONVERSIONE COORDINATE GLOBALI
-            // ====================================================================
-            // Sommiamo l'offset del crop per ottenere le coordinate nell'immagine originale
+            // 4. Riconversione in coordinate assolute dell'immagine originale
             return new Point2D(localResult.X + offset.X, localResult.Y + offset.Y);
         }
         finally
         {
-            // Importante: rilasciare la matrice croppata creata da SanitizeAndCrop
             mat.Dispose();
         }
     }
 
     private int EstimateSmartRadius(Mat mat) 
     {
-        // Logica euristica per determinare quanto "allargare" la vista
+        // Calcola dinamicamente il raggio di ricerca in base alla concentrazione del segnale
         int baseRadius = Math.Min(mat.Width, mat.Height) / 16;
         
         Cv2.MeanStdDev(mat, out Scalar mean, out Scalar stddev);
         using var thresh = new Mat();
         
-        // Soglia statistica a $5\sigma$ per isolare il nucleo
+        // Isola il nucleo luminoso (soglia statistica 5-sigma)
         Cv2.Threshold(mat, thresh, mean.Val0 + (5 * stddev.Val0), 255, ThresholdTypes.Binary);
         
         double density = (double)Cv2.CountNonZero(thresh) / (mat.Width * mat.Height);
