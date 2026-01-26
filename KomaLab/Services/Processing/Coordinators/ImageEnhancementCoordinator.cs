@@ -24,7 +24,6 @@ public class ImageEnhancementCoordinator : IImageEnhancementCoordinator
     private readonly IFitsDataManager _dataManager;
     private readonly IFitsOpenCvConverter _converter;
 
-    // I 3 Nuovi Engine Specializzati
     private readonly IGradientRadialEngine _radialEngine;
     private readonly IStructureShapeEngine _shapeEngine;
     private readonly ILocalContrastEngine _contrastEngine;
@@ -50,19 +49,18 @@ public class ImageEnhancementCoordinator : IImageEnhancementCoordinator
     public async Task<Array> CalculatePreviewDataAsync(
         FitsFileReference sourceFile,
         ImageEnhancementMode mode,
-        ImageEnhancementParameters parameters)
+        ImageEnhancementParameters parameters,
+        CancellationToken token = default) // <--- AGGIUNTO TOKEN
     {
         var data = await _dataManager.GetDataAsync(sourceFile.FilePath);
+        token.ThrowIfCancellationRequested();
         
-        // Usiamo sempre Double per la massima precisione nell'anteprima
-        // (Il convertitore gestirà l'ottimizzazione se l'input è float)
         using Mat src = _converter.RawToMat(data.PixelData, 1.0, 0.0, FitsBitDepth.Double);
         using Mat dst = new Mat();
         
-        // Eseguiamo la logica dell'engine appropriato
-        await RunEngineLogicAsync(src, dst, mode, parameters);
+        // Passiamo il token alla logica
+        await RunEngineLogicAsync(src, dst, mode, parameters, null, token);
 
-        // Se l'operazione ha fallito o la matrice è vuota, restituisci l'originale
         if (dst.Empty()) return data.PixelData;
 
         return _converter.MatToRaw(dst, FitsBitDepth.Double);
@@ -75,38 +73,35 @@ public class ImageEnhancementCoordinator : IImageEnhancementCoordinator
         IProgress<BatchProgressReport>? progress = null,
         CancellationToken token = default)
     {
-        // Definiamo l'operazione che verrà eseguita per ogni file
         Func<Mat, Mat, FitsHeader, int, Task> processOpAsync = async (src, dst, header, index) =>
         {
+            // Check preventivo
+            token.ThrowIfCancellationRequested();
+
             using Mat processingResult = new Mat();
             
-            // Eseguiamo il motore specifico
-            await RunEngineLogicAsync(src, processingResult, mode, parameters, progress: null);
+            // Passiamo il token alla logica di elaborazione del singolo file
+            await RunEngineLogicAsync(src, processingResult, mode, parameters, null, token);
 
-            // Gestione ridimensionamento (es. Mosaic o Polar Transforms)
+            // Check post-elaborazione
+            token.ThrowIfCancellationRequested();
+
             if (processingResult.Size() != src.Size())
             {
                 dst.Create(processingResult.Size(), src.Type());
                 _metadataService.AddValue(header, "NAXIS1", processingResult.Cols, "New Width");
                 _metadataService.AddValue(header, "NAXIS2", processingResult.Rows, "New Height");
                 
-                // Se è una trasformazione polare, aggiorniamo la history
                 if (mode == ImageEnhancementMode.InverseRho || mode == ImageEnhancementMode.AzimuthalAverage)
                      _metadataService.AddValue(header, "HISTORY", "Geometry: Radial/Polar Transform applied");
             }
 
-            // Normalizzazione a 16-bit per il salvataggio FITS sicuro
-            // Molti algoritmi (Frangi, LSN) producono float fuori scala o negativi.
-            // La normalizzazione MinMax 0-65535 garantisce che il FITS sia visibile.
             Cv2.Normalize(processingResult, processingResult, 0, 65535, NormTypes.MinMax);
-            
-            // Convertiamo nel tipo della matrice di destinazione (di solito Double dal BatchService)
             processingResult.ConvertTo(dst, src.Type());
 
             UpdateHeaderHistory(header, mode, parameters);
         };
 
-        // Chiamata al Batch Service (usa il nuovo overload asincrono che abbiamo creato)
         return await _batchService.ProcessFilesAsync(
             sourceFiles,
             $"Enhancement_{mode}", 
@@ -116,17 +111,20 @@ public class ImageEnhancementCoordinator : IImageEnhancementCoordinator
     }
 
     // =========================================================
-    // DISPATCHER CENTRALE (Switch Mode -> Engine)
+    // DISPATCHER CENTRALE (Propaga il token agli engine)
     // =========================================================
     private async Task RunEngineLogicAsync(
         Mat src, Mat dst, 
         ImageEnhancementMode mode, 
         ImageEnhancementParameters p, 
-        IProgress<double>? progress = null)
+        IProgress<double>? progress,
+        CancellationToken token) // <--- AGGIUNTO TOKEN
     {
+        // Se l'operazione è già stata annullata, non avviamo l'engine
+        token.ThrowIfCancellationRequested();
+
         switch (mode)
         {
-            // --- GRUPPO 1: GRADIENT & RADIAL (Ieri: Structure & Radial Engine) ---
             case ImageEnhancementMode.LarsonSekaninaStandard:
                 await _radialEngine.ApplyLarsonSekaninaAsync(src, dst, p.RotationAngle, p.ShiftX, p.ShiftY, false); break;
             case ImageEnhancementMode.LarsonSekaninaSymmetric:
@@ -137,16 +135,16 @@ public class ImageEnhancementCoordinator : IImageEnhancementCoordinator
                 await _radialEngine.ApplyRVSFMosaicAsync(src, dst, (p.ParamA_1, p.ParamA_2), (p.ParamB_1, p.ParamB_2), (p.ParamN_1, p.ParamN_2), p.UseLog); break;
             
             case ImageEnhancementMode.InverseRho:
-                await Task.Run(() => _radialEngine.ApplyInverseRho(src, dst, p.RadialSubsampling)); break;
+                // Passiamo il token a Task.Run
+                await Task.Run(() => _radialEngine.ApplyInverseRho(src, dst, p.RadialSubsampling), token); break;
 
             case ImageEnhancementMode.AzimuthalAverage:
-                await RunPolarFilterAsync(src, dst, polar => _radialEngine.ApplyAzimuthalAverage(polar, p.AzimuthalRejSigma)); break;
+                await RunPolarFilterAsync(src, dst, polar => _radialEngine.ApplyAzimuthalAverage(polar, p.AzimuthalRejSigma), token); break;
             case ImageEnhancementMode.AzimuthalMedian:
-                await RunPolarFilterAsync(src, dst, polar => _radialEngine.ApplyAzimuthalMedian(polar)); break;
+                await RunPolarFilterAsync(src, dst, polar => _radialEngine.ApplyAzimuthalMedian(polar), token); break;
             case ImageEnhancementMode.AzimuthalRenormalization:
-                await RunPolarFilterAsync(src, dst, polar => _radialEngine.ApplyAzimuthalRenormalization(polar, p.AzimuthalRejSigma, p.AzimuthalNormSigma)); break;
+                await RunPolarFilterAsync(src, dst, polar => _radialEngine.ApplyAzimuthalRenormalization(polar, p.AzimuthalRejSigma, p.AzimuthalNormSigma), token); break;
 
-            // --- GRUPPO 2: SHAPE & FEATURES ---
             case ImageEnhancementMode.FrangiVesselnessFilter:
                 await _shapeEngine.ApplyFrangiVesselnessAsync(src, dst, p.FrangiSigma, p.FrangiBeta, p.FrangiC, progress); break;
             case ImageEnhancementMode.StructureTensorCoherence:
@@ -154,7 +152,6 @@ public class ImageEnhancementCoordinator : IImageEnhancementCoordinator
             case ImageEnhancementMode.WhiteTopHatExtraction:
                 await _shapeEngine.ApplyWhiteTopHatAsync(src, dst, p.TopHatKernelSize); break;
 
-            // --- GRUPPO 3: LOCAL CONTRAST ---
             case ImageEnhancementMode.UnsharpMaskingMedian:
                 await _contrastEngine.ApplyUnsharpMaskingMedianAsync(src, dst, p.KernelSize, progress); break;
             case ImageEnhancementMode.ClaheLocalContrast:
@@ -167,30 +164,33 @@ public class ImageEnhancementCoordinator : IImageEnhancementCoordinator
         }
     }
 
-    /// <summary>
-    /// Helper per eseguire filtri nel dominio polare: Cartesiano -> Polare -> Filtro -> Cartesiano
-    /// </summary>
-    private async Task RunPolarFilterAsync(Mat src, Mat dst, Action<Mat> polarFilterAction)
+    private async Task RunPolarFilterAsync(Mat src, Mat dst, Action<Mat> polarFilterAction, CancellationToken token)
     {
+        // Check prima della trasformazione pesante
+        token.ThrowIfCancellationRequested();
+
         await Task.Run(() =>
         {
-            // Calcolo dimensioni ottimali polari (raggio = metà lato minore)
             int nRad = Math.Min(src.Cols, src.Rows) / 2;
-            int nTheta = nRad * 3; // Sovracampionamento angolare x3 per qualità
+            int nTheta = nRad * 3;
 
             using Mat polar = _radialEngine.ToPolar(src, nRad, nTheta);
             
-            // Applica il filtro sull'immagine polare
+            // Check intermedio prima di applicare il filtro
+            if (token.IsCancellationRequested) return;
+
             polarFilterAction(polar);
 
-            // Torna in cartesiano
+            // Check finale prima di tornare in cartesiano
+            if (token.IsCancellationRequested) return;
+
             _radialEngine.FromPolar(polar, dst, src.Cols, src.Rows);
-        });
+        }, token);
     }
 
     private void UpdateHeaderHistory(FitsHeader header, ImageEnhancementMode mode, ImageEnhancementParameters p)
     {
-        _metadataService.AddValue(header, "HISTORY", $"KomaLab: Enhancement Mode={mode}");
+        _metadataService.AddValue(header, "HISTORY", $"KomaLab - Enhancement Mode={mode}");
         
         string paramsLog = mode switch
         {
@@ -205,6 +205,6 @@ public class ImageEnhancementCoordinator : IImageEnhancementCoordinator
         };
 
         if (!string.IsNullOrEmpty(paramsLog))
-            _metadataService.AddValue(header, "HISTORY", $"Params: {paramsLog}");
+            _metadataService.AddValue(header, "HISTORY", $"KomaLab - Enhancement Params: {paramsLog}");
     }
 }

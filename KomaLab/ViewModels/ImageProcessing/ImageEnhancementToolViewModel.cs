@@ -35,14 +35,11 @@ public partial class ImageEnhancementToolViewModel : ObservableObject, IDisposab
 
     // --- DATI INTERNI ---
     private readonly List<FitsFileReference> _sourceFiles;
-    private readonly EnhancementCategory _category; // Categoria corrente
+    private readonly EnhancementCategory _category;
     private CancellationTokenSource? _loadingCts;
 
     // --- PROPRIETÀ PUBBLICHE ---
-    
-    // ESPONIAMO LA CATEGORIA (Per Binding del Titolo)
     public EnhancementCategory CurrentCategory => _category;
-
     public TaskCompletionSource<bool> ImageLoadedTcs { get; } = new();
     public SequenceNavigator Navigator { get; } = new();
     public EnhancementImageViewport Viewport { get; } = new();
@@ -79,10 +76,8 @@ public partial class ImageEnhancementToolViewModel : ObservableObject, IDisposab
     [ObservableProperty] private string _statusText = "Pronto";
     [ObservableProperty] private double _progressValue;
 
-
     // --- MODALITÀ SELEZIONATA ---
     [ObservableProperty]
-    // Notifiche per aggiornare la visibilità dei pannelli parametri
     [NotifyPropertyChangedFor(nameof(IsLarsonSekaninaVisible))]
     [NotifyPropertyChangedFor(nameof(IsRvsfMosaicVisible))]
     [NotifyPropertyChangedFor(nameof(IsRvsfSingleVisible))]
@@ -93,16 +88,12 @@ public partial class ImageEnhancementToolViewModel : ObservableObject, IDisposab
     [NotifyPropertyChangedFor(nameof(IsClaheVisible))]
     [NotifyPropertyChangedFor(nameof(IsLocalNormVisible))]
     [NotifyPropertyChangedFor(nameof(IsKernelVisible))]
-    private ImageEnhancementMode _selectedMode; // Settata nel costruttore
-
+    private ImageEnhancementMode _selectedMode;
 
     // --- PARAMETRI SCIENTIFICI ---
-
-    // 1. Radial & Rotational
     [ObservableProperty] private double _rotationAngle = 3.0;
     [ObservableProperty] private double _shiftX = 0.0;
     [ObservableProperty] private double _shiftY = 0.0;
-    
     [ObservableProperty] private bool _useLogScale = true;
     [ObservableProperty] private double _rvsfA_1 = 1.0;
     [ObservableProperty] private double _rvsfA_2 = 5.0; 
@@ -110,59 +101,44 @@ public partial class ImageEnhancementToolViewModel : ObservableObject, IDisposab
     [ObservableProperty] private double _rvsfB_2 = 0.5;
     [ObservableProperty] private double _rvsfN_1 = 1.0;
     [ObservableProperty] private double _rvsfN_2 = 0.5;
-
     [ObservableProperty] private int _radialSubsampling = 5;
     [ObservableProperty] private double _azimuthalRejSigma = 3.0;
     [ObservableProperty] private double _azimuthalNormSigma = 20.0;
-
-    // 2. Shape Extraction
     [ObservableProperty] private double _frangiSigma = 1.5;
     [ObservableProperty] private double _frangiBeta = 0.5;
     [ObservableProperty] private double _frangiC = 0.001;
     [ObservableProperty] private int _tensorSigma = 1;
     [ObservableProperty] private int _tensorRho = 3;
     [ObservableProperty] private int _topHatKernelSize = 21;
-
-    // 3. Local Contrast
     [ObservableProperty] private int _kernelSize = 25; 
     [ObservableProperty] private double _claheClipLimit = 3.0;
     [ObservableProperty] private int _claheTileSize = 8;
     [ObservableProperty] private int _localNormWindowSize = 41;
     [ObservableProperty] private double _localNormIntensity = 1.0;
 
-
-    // --- ESPOSIZIONE LISTE FILTRATE ---
-    // Questa proprietà espone SOLO le modalità della categoria corrente
     public IEnumerable<ImageEnhancementMode> AvailableModes { get; }
-
 
     // --- PROPRIETÀ VISIBILITÀ ---
     public bool IsInteractionEnabled => !IsBusy && ActiveRenderer != null && CurrentState != EnhancementToolState.Processing;
     public bool IsSetupControlsEnabled => CurrentState == EnhancementToolState.Initial && !IsBusy;
     public bool IsCalculateButtonVisible => CurrentState == EnhancementToolState.Initial && !IsBusy;
-    public bool IsApplyCancelButtonsVisible => CurrentState == EnhancementToolState.ResultsReady && !IsBusy;
+    public bool IsApplyCancelButtonsVisible => (CurrentState == EnhancementToolState.ResultsReady || CurrentState == EnhancementToolState.Processing) && !IsBusy;
     public bool IsProcessingVisible => IsBusy;
-
     public string CurrentImageText => $"{Navigator.DisplayIndex} / {Navigator.TotalCount}";
     
-    // Logica Visibilità Pannelli Parametri
     public bool IsLarsonSekaninaVisible => SelectedMode is ImageEnhancementMode.LarsonSekaninaStandard or ImageEnhancementMode.LarsonSekaninaSymmetric;
     public bool IsRvsfSingleVisible => SelectedMode == ImageEnhancementMode.AdaptiveLaplacianRVSF;
     public bool IsRvsfMosaicVisible => SelectedMode == ImageEnhancementMode.AdaptiveLaplacianMosaic;
     public bool IsAzimuthalVisible => SelectedMode is ImageEnhancementMode.AzimuthalAverage or ImageEnhancementMode.AzimuthalRenormalization or ImageEnhancementMode.InverseRho or ImageEnhancementMode.AzimuthalMedian;
-    
     public bool IsFrangiVisible => SelectedMode == ImageEnhancementMode.FrangiVesselnessFilter;
     public bool IsTensorVisible => SelectedMode == ImageEnhancementMode.StructureTensorCoherence;
     public bool IsTopHatVisible => SelectedMode == ImageEnhancementMode.WhiteTopHatExtraction;
-
     public bool IsKernelVisible => SelectedMode == ImageEnhancementMode.UnsharpMaskingMedian;
     public bool IsClaheVisible => SelectedMode == ImageEnhancementMode.ClaheLocalContrast;
     public bool IsLocalNormVisible => SelectedMode == ImageEnhancementMode.AdaptiveLocalNormalization;
 
-
-    // --- COSTRUTTORE ---
     public ImageEnhancementToolViewModel(
-        EnhancementCategory targetCategory, // <--- Parametro Categoria
+        EnhancementCategory targetCategory,
         List<FitsFileReference> files,
         IFitsDataManager dataManager,
         IFitsRendererFactory rendererFactory,
@@ -176,13 +152,11 @@ public partial class ImageEnhancementToolViewModel : ObservableObject, IDisposab
         _coordinator = coordinator;
         _metadataService = metadataService;
 
-        // FILTRO DINAMICO: Mostriamo solo le modalità della categoria scelta
         AvailableModes = Enum.GetValues<ImageEnhancementMode>()
                              .Cast<ImageEnhancementMode>()
                              .Where(m => m.GetCategory() == _category)
                              .ToList();
 
-        // Seleziona la prima disponibile per evitare ComboBox vuota
         if (AvailableModes.Any()) SelectedMode = AvailableModes.First();
 
         Navigator.UpdateStatus(0, _sourceFiles.Count);
@@ -209,6 +183,8 @@ public partial class ImageEnhancementToolViewModel : ObservableObject, IDisposab
     {
         IsBusy = true;
         ProgressValue = 0;
+        
+        // --- GESTIONE TOKEN CARICAMENTO ---
         _loadingCts?.Cancel();
         _loadingCts = new CancellationTokenSource();
         var token = _loadingCts.Token;
@@ -224,7 +200,9 @@ public partial class ImageEnhancementToolViewModel : ObservableObject, IDisposab
                 StatusText = "Elaborazione anteprima...";
                 var parameters = BuildParameters();
                 
+                // --- FIX 1: Passiamo il token al calcolo dell'anteprima ---
                 Array processedPixels = await _coordinator.CalculatePreviewDataAsync(fileRef, SelectedMode, parameters);
+                token.ThrowIfCancellationRequested();
 
                 var originalData = await _dataManager.GetDataAsync(fileRef.FilePath);
                 var header = fileRef.ModifiedHeader ?? originalData.Header;
@@ -242,6 +220,7 @@ public partial class ImageEnhancementToolViewModel : ObservableObject, IDisposab
             else
             {
                 var data = await _dataManager.GetDataAsync(fileRef.FilePath);
+                token.ThrowIfCancellationRequested();
                 newRenderer = await _rendererFactory.CreateAsync(data.PixelData, fileRef.ModifiedHeader ?? data.Header);
                 StatusText = "Pronto";
             }
@@ -265,7 +244,10 @@ public partial class ImageEnhancementToolViewModel : ObservableObject, IDisposab
             Viewport.ImageSize = ActiveRenderer.ImageSize;
             OnPropertyChanged(nameof(CurrentImageText));
         }
-        catch (OperationCanceledException) { }
+        catch (OperationCanceledException) 
+        { 
+            StatusText = "Caricamento interrotto";
+        }
         catch (Exception ex) 
         { 
             StatusText = $"Errore: {ex.Message}";
@@ -317,12 +299,24 @@ public partial class ImageEnhancementToolViewModel : ObservableObject, IDisposab
     {
         CurrentState = EnhancementToolState.Processing;
         IsBusy = true;
+
+        // --- FIX 2: Creiamo un nuovo CTS per l'operazione Batch ---
+        _loadingCts?.Cancel();
+        _loadingCts = new CancellationTokenSource();
+        var token = _loadingCts.Token;
+
         try
         {
             var progress = new Progress<BatchProgressReport>(p =>
                 StatusText = $"File {p.CurrentFileIndex} / {p.TotalFiles}...");
 
-            var results = await _coordinator.ExecuteBatchAsync(_sourceFiles, SelectedMode, BuildParameters(), progress);
+            // --- FIX 3: Passiamo il token al Batch Service ---
+            var results = await _coordinator.ExecuteBatchAsync(
+                _sourceFiles, 
+                SelectedMode, 
+                BuildParameters(), 
+                progress, 
+                token);
 
             if (results?.Any() == true)
             {
@@ -330,6 +324,11 @@ public partial class ImageEnhancementToolViewModel : ObservableObject, IDisposab
                 DialogResult = true;
                 RequestClose?.Invoke();
             }
+        }
+        catch (OperationCanceledException)
+        {
+            StatusText = "Elaborazione batch annullata.";
+            CurrentState = EnhancementToolState.ResultsReady;
         }
         catch (Exception ex)
         {
@@ -343,10 +342,19 @@ public partial class ImageEnhancementToolViewModel : ObservableObject, IDisposab
     [RelayCommand]
     private async Task Cancel()
     {
+        // --- FIX 4: Se stiamo processando o caricando, fermiamo tutto ---
+        _loadingCts?.Cancel();
+
         if (CurrentState == EnhancementToolState.ResultsReady)
         {
             CurrentState = EnhancementToolState.Initial;
             await LoadImageAtIndexAsync(Navigator.CurrentIndex, resetVisuals: true);
+        }
+        else if (CurrentState == EnhancementToolState.Processing)
+        {
+            // Torniamo allo stato di visualizzazione risultati preparati
+            CurrentState = EnhancementToolState.ResultsReady;
+            StatusText = "Operazione interrotta";
         }
         else
         {
@@ -363,7 +371,9 @@ public partial class ImageEnhancementToolViewModel : ObservableObject, IDisposab
 
     public void Dispose()
     {
+        // Fondamentale: ferma ogni operazione pendente prima della distruzione degli oggetti
         _loadingCts?.Cancel();
+        _loadingCts?.Dispose();
         ActiveRenderer?.Dispose();
     }
 }
