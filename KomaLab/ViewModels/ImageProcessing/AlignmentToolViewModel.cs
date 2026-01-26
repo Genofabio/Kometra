@@ -343,7 +343,7 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
     #endregion
 
     #region Comando JPL (Astrometria)
-
+    
     [RelayCommand(CanExecute = nameof(CanVerifyJpl))]
     private async Task VerifyJpl()
     {
@@ -351,30 +351,44 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
 
         IsVerifyingJpl = true;
         AstrometryStatus = JplStatus.Verifying;
-        AstrometryStatusMessage = "Verifica disponibilità dati...";
+        AstrometryStatusMessage = "Verifica integrità sequenza...";
 
         try
         {
-            var points = await _coordinator.DiscoverStartingPointsAsync(_files, SelectedTarget, TargetName);
-            bool anyFound = points.Any(p => p.HasValue);
+            // DiscoverStartingPointsAsync esegue il loop su TUTTI i file internamente
+            var pointsResult = await _coordinator.DiscoverStartingPointsAsync(_files, SelectedTarget, TargetName);
+            var points = pointsResult.ToList();
+        
+            int totalFiles = points.Count;
+            int validFiles = points.Count(p => p.HasValue);
 
-            if (anyFound)
+            // CONTROLLO RIGIDO: Tutti i file devono essere validi
+            if (validFiles == totalFiles)
             {
-                if (SelectedMode == AlignmentMode.Guided) ApplyCoordinatesToUi(points);
-                else ClearUiCoordinates(); 
+                if (SelectedMode == AlignmentMode.Guided) 
+                    ApplyCoordinatesToUi(points);
+                else 
+                    ClearUiCoordinates(); 
 
-                AstrometryStatusMessage = SelectedTarget == AlignmentTarget.Stars ? "WCS Valido." : "Dati JPL disponibili.";
+                AstrometryStatusMessage = SelectedTarget == AlignmentTarget.Stars 
+                    ? "WCS verificato su tutta la sequenza." 
+                    : "Dati JPL/WCS validi per tutti i file.";
                 AstrometryStatus = JplStatus.Success;
             }
             else
             {
-                AstrometryStatusMessage = "Dati non trovati.";
+                // Segnaliamo l'errore specifico con il conteggio dei fallimenti
+                int failedCount = totalFiles - validFiles;
+                AstrometryStatusMessage = $"Dati mancanti in {failedCount} immagini su {totalFiles}. Risolvi (Plate Solve) prima di procedere.";
                 AstrometryStatus = JplStatus.Error;
+            
+                // Puliamo i risultati parziali per evitare stati incoerenti
+                ClearUiCoordinates();
             }
         }
         catch (Exception ex)
         {
-            AstrometryStatusMessage = $"Errore: {ex.Message}";
+            AstrometryStatusMessage = $"Errore critico: {ex.Message}";
             AstrometryStatus = JplStatus.Error;
         }
         finally
@@ -508,15 +522,33 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
 
     private bool CanCalculate()
     {
+        // 1. Se il sistema è occupato o sta ancora verificando JPL, non si può cliccare.
         if (IsBusy || IsVerifyingJpl) return false;
-        
+    
+        // 2. VINCOLO JPL/WCS:
+        // Se l'opzione JPL è attiva (e non siamo in manuale), il tasto è cliccabile 
+        // SOLO SE lo stato è "Success" (ovvero tutti i file hanno passato il controllo).
+        if (UseJplAstrometry && SelectedMode != AlignmentMode.Manual)
+        {
+            if (AstrometryStatus != JplStatus.Success) return false;
+        }
+
+        // 3. Logiche specifiche per le diverse modalità (già esistenti)
         if (SelectedMode == AlignmentMode.Manual) 
             return CoordinateEntries.All(e => e.Coordinate != null);
 
-        if (UseJplAstrometry && SelectedTarget == AlignmentTarget.Comet && string.IsNullOrWhiteSpace(TargetName)) return false;
-        if (SelectedTarget == AlignmentTarget.Stars || SelectedMode == AlignmentMode.Automatic) return true;
-        if (SelectedMode == AlignmentMode.Guided) return CoordinateEntries[0].Coordinate != null && CoordinateEntries[^1].Coordinate != null;
-        
+        if (SelectedTarget == AlignmentTarget.Comet)
+        {
+            // Se usiamo JPL, il nome è obbligatorio (già coperto dal punto 2, ma per sicurezza...)
+            if (UseJplAstrometry && string.IsNullOrWhiteSpace(TargetName)) return false;
+        }
+
+        if (SelectedTarget == AlignmentTarget.Stars || SelectedMode == AlignmentMode.Automatic) 
+            return true;
+
+        if (SelectedMode == AlignmentMode.Guided) 
+            return CoordinateEntries[0].Coordinate != null && CoordinateEntries[^1].Coordinate != null;
+    
         return false;
     }
 
