@@ -2,10 +2,11 @@
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
-using Avalonia.Threading; // Per Dispatcher
+using Avalonia.Threading;
 using System;
 using System.ComponentModel;
 using KomaLab.ViewModels.ImageProcessing;
+using System.Threading.Tasks;
 
 namespace KomaLab.Views;
 
@@ -30,17 +31,14 @@ public partial class StructureExtractionToolView : Window
         if (DataContext is StructureExtractionToolViewModel vm)
         {
             _vm = vm;
-            
-            // 1. Sottoscrizione eventi VM (VM -> UI)
             _vm.PropertyChanged += OnViewModelPropertyChanged;
             
-            // 2. Inizializzazione manuale TextBox
             UpdateUiValues();
 
             try 
             {
                 await vm.ImageLoadedTcs.Task;
-                UpdateUiValues(); // Aggiorna nuovamente dopo il caricamento
+                UpdateUiValues(); 
                 CenterImage();
             }
             catch { }
@@ -58,7 +56,6 @@ public partial class StructureExtractionToolView : Window
 
     // =======================================================================
     // GESTIONE MANUALE DATI (VM -> UI)
-    // Aggiorna le TextBox quando il ViewModel cambia proprietà
     // =======================================================================
 
     private void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
@@ -67,168 +64,159 @@ public partial class StructureExtractionToolView : Window
         {
             if (_vm == null) return;
 
-            // Recuperiamo i controlli (Null check robusto)
-            var rotBox = this.FindControl<TextBox>("RotationBox");
-            var sxBox = this.FindControl<TextBox>("ShiftXBox");
-            var syBox = this.FindControl<TextBox>("ShiftYBox");
-            var kBox = this.FindControl<TextBox>("KernelSizeBox");
-
-            // RVSF Single
-            var rA1 = this.FindControl<TextBox>("RvsfA1Box");
-            var rB1 = this.FindControl<TextBox>("RvsfB1Box");
-            var rN1 = this.FindControl<TextBox>("RvsfN1Box");
-
-            // RVSF Mosaic (Condividono valori con Single per Min, separati per Max)
-            var rAMin = this.FindControl<TextBox>("RvsfAMinBox");
-            var rAMax = this.FindControl<TextBox>("RvsfAMaxBox");
-            var rBMin = this.FindControl<TextBox>("RvsfBMinBox");
-            var rBMax = this.FindControl<TextBox>("RvsfBMaxBox");
-            var rNMin = this.FindControl<TextBox>("RvsfNMinBox");
-            var rNMax = this.FindControl<TextBox>("RvsfNMaxBox");
-
             switch (e.PropertyName)
             {
-                case nameof(StructureExtractionToolViewModel.RotationAngle):
-                    if (rotBox != null && !rotBox.IsFocused) rotBox.Text = _vm.RotationAngle.ToString("F1");
-                    break;
-                case nameof(StructureExtractionToolViewModel.ShiftX):
-                    if (sxBox != null && !sxBox.IsFocused) sxBox.Text = _vm.ShiftX.ToString("F1");
-                    break;
-                case nameof(StructureExtractionToolViewModel.ShiftY):
-                    if (syBox != null && !syBox.IsFocused) syBox.Text = _vm.ShiftY.ToString("F1");
-                    break;
-                case nameof(StructureExtractionToolViewModel.KernelSize):
-                    if (kBox != null && !kBox.IsFocused) kBox.Text = _vm.KernelSize.ToString("F0");
-                    break;
+                // Larson & Median
+                case nameof(_vm.RotationAngle): UpdateTextBox("RotationBox", _vm.RotationAngle.ToString("F1")); break;
+                case nameof(_vm.ShiftX): UpdateTextBox("ShiftXBox", _vm.ShiftX.ToString("F1")); break;
+                case nameof(_vm.ShiftY): UpdateTextBox("ShiftYBox", _vm.ShiftY.ToString("F1")); break;
+                case nameof(_vm.KernelSize): UpdateTextBox("KernelSizeBox", _vm.KernelSize.ToString("F0")); break;
 
-                // RVSF Logic (Aggiorna sia box Single che Min Mosaic)
-                case nameof(StructureExtractionToolViewModel.RvsfA_1):
-                    if (rA1 != null && !rA1.IsFocused) rA1.Text = _vm.RvsfA_1.ToString("F2");
-                    if (rAMin != null && !rAMin.IsFocused) rAMin.Text = _vm.RvsfA_1.ToString("F2");
+                // RVSF
+                case nameof(_vm.RvsfA_1):
+                    UpdateTextBox("RvsfA1Box", _vm.RvsfA_1.ToString("F2"));
+                    UpdateTextBox("RvsfAMinBox", _vm.RvsfA_1.ToString("F2"));
                     break;
-                case nameof(StructureExtractionToolViewModel.RvsfA_2):
-                    if (rAMax != null && !rAMax.IsFocused) rAMax.Text = _vm.RvsfA_2.ToString("F2");
+                case nameof(_vm.RvsfA_2): UpdateTextBox("RvsfAMaxBox", _vm.RvsfA_2.ToString("F2")); break;
+                case nameof(_vm.RvsfB_1):
+                    UpdateTextBox("RvsfB1Box", _vm.RvsfB_1.ToString("F2"));
+                    UpdateTextBox("RvsfBMinBox", _vm.RvsfB_1.ToString("F2"));
                     break;
+                case nameof(_vm.RvsfB_2): UpdateTextBox("RvsfBMaxBox", _vm.RvsfB_2.ToString("F2")); break;
+                case nameof(_vm.RvsfN_1):
+                    UpdateTextBox("RvsfN1Box", _vm.RvsfN_1.ToString("F2"));
+                    UpdateTextBox("RvsfNMinBox", _vm.RvsfN_1.ToString("F2"));
+                    break;
+                case nameof(_vm.RvsfN_2): UpdateTextBox("RvsfNMaxBox", _vm.RvsfN_2.ToString("F2")); break;
 
-                case nameof(StructureExtractionToolViewModel.RvsfB_1):
-                    if (rB1 != null && !rB1.IsFocused) rB1.Text = _vm.RvsfB_1.ToString("F2");
-                    if (rBMin != null && !rBMin.IsFocused) rBMin.Text = _vm.RvsfB_1.ToString("F2");
-                    break;
-                case nameof(StructureExtractionToolViewModel.RvsfB_2):
-                    if (rBMax != null && !rBMax.IsFocused) rBMax.Text = _vm.RvsfB_2.ToString("F2");
-                    break;
+                // Frangi Filter
+                case nameof(_vm.FrangiSigma): UpdateTextBox("FrangiSigmaBox", _vm.FrangiSigma.ToString("F2")); break;
+                case nameof(_vm.FrangiBeta): UpdateTextBox("FrangiBetaBox", _vm.FrangiBeta.ToString("F2")); break;
+                case nameof(_vm.FrangiC): UpdateTextBox("FrangiCBox", _vm.FrangiC.ToString("F4")); break;
 
-                case nameof(StructureExtractionToolViewModel.RvsfN_1):
-                    if (rN1 != null && !rN1.IsFocused) rN1.Text = _vm.RvsfN_1.ToString("F2");
-                    if (rNMin != null && !rNMin.IsFocused) rNMin.Text = _vm.RvsfN_1.ToString("F2");
-                    break;
-                case nameof(StructureExtractionToolViewModel.RvsfN_2):
-                    if (rNMax != null && !rNMax.IsFocused) rNMax.Text = _vm.RvsfN_2.ToString("F2");
-                    break;
+                // Structure Tensor
+                case nameof(_vm.TensorSigma): UpdateTextBox("TensorSigmaBox", _vm.TensorSigma.ToString()); break;
+                case nameof(_vm.TensorRho): UpdateTextBox("TensorRhoBox", _vm.TensorRho.ToString()); break;
+
+                // Top-Hat
+                case nameof(_vm.TopHatKernelSize): UpdateTextBox("TopHatBox", _vm.TopHatKernelSize.ToString()); break;
+
+                // CLAHE
+                case nameof(_vm.ClaheClipLimit): UpdateTextBox("ClaheClipBox", _vm.ClaheClipLimit.ToString("F1")); break;
+                case nameof(_vm.ClaheTileSize): UpdateTextBox("ClaheTileBox", _vm.ClaheTileSize.ToString()); break;
+
+                // LSN (Local Norm)
+                case nameof(_vm.LocalNormWindowSize): UpdateTextBox("LocalNormWindowBox", _vm.LocalNormWindowSize.ToString()); break;
+                case nameof(_vm.LocalNormIntensity): UpdateTextBox("LocalNormIntensityBox", _vm.LocalNormIntensity.ToString("F1")); break;
             }
         });
+    }
+
+    private void UpdateTextBox(string name, string text)
+    {
+        var box = this.FindControl<TextBox>(name);
+        if (box != null && !box.IsFocused) box.Text = text;
     }
 
     private void UpdateUiValues()
     {
         if (_vm == null) return;
         
-        void SetText(string name, string val)
+        var boxes = new (string Name, string Value)[]
+        {
+            ("RotationBox", _vm.RotationAngle.ToString("F1")),
+            ("ShiftXBox", _vm.ShiftX.ToString("F1")),
+            ("ShiftYBox", _vm.ShiftY.ToString("F1")),
+            ("KernelSizeBox", _vm.KernelSize.ToString("F0")),
+            ("RvsfA1Box", _vm.RvsfA_1.ToString("F2")),
+            ("RvsfAMinBox", _vm.RvsfA_1.ToString("F2")),
+            ("RvsfAMaxBox", _vm.RvsfA_2.ToString("F2")),
+            ("RvsfB1Box", _vm.RvsfB_1.ToString("F2")),
+            ("RvsfBMinBox", _vm.RvsfB_1.ToString("F2")),
+            ("RvsfBMaxBox", _vm.RvsfB_2.ToString("F2")),
+            ("RvsfN1Box", _vm.RvsfN_1.ToString("F2")),
+            ("RvsfNMinBox", _vm.RvsfN_1.ToString("F2")),
+            ("RvsfNMaxBox", _vm.RvsfN_2.ToString("F2")),
+            ("FrangiSigmaBox", _vm.FrangiSigma.ToString("F2")),
+            ("FrangiBetaBox", _vm.FrangiBeta.ToString("F2")),
+            ("FrangiCBox", _vm.FrangiC.ToString("F4")),
+            ("TensorSigmaBox", _vm.TensorSigma.ToString()),
+            ("TensorRhoBox", _vm.TensorRho.ToString()),
+            ("TopHatBox", _vm.TopHatKernelSize.ToString()),
+            ("ClaheClipBox", _vm.ClaheClipLimit.ToString("F1")),
+            ("ClaheTileBox", _vm.ClaheTileSize.ToString()),
+            ("LocalNormWindowBox", _vm.LocalNormWindowSize.ToString()),
+            ("LocalNormIntensityBox", _vm.LocalNormIntensity.ToString("F1"))
+        };
+
+        foreach (var (name, value) in boxes)
         {
             var box = this.FindControl<TextBox>(name);
-            if (box != null) box.Text = val;
+            if (box != null) box.Text = value;
         }
-
-        SetText("RotationBox", _vm.RotationAngle.ToString("F1"));
-        SetText("ShiftXBox", _vm.ShiftX.ToString("F1"));
-        SetText("ShiftYBox", _vm.ShiftY.ToString("F1"));
-        SetText("KernelSizeBox", _vm.KernelSize.ToString("F0"));
-
-        SetText("RvsfA1Box", _vm.RvsfA_1.ToString("F2"));
-        SetText("RvsfAMinBox", _vm.RvsfA_1.ToString("F2"));
-        SetText("RvsfAMaxBox", _vm.RvsfA_2.ToString("F2"));
-
-        SetText("RvsfB1Box", _vm.RvsfB_1.ToString("F2"));
-        SetText("RvsfBMinBox", _vm.RvsfB_1.ToString("F2"));
-        SetText("RvsfBMaxBox", _vm.RvsfB_2.ToString("F2"));
-
-        SetText("RvsfN1Box", _vm.RvsfN_1.ToString("F2"));
-        SetText("RvsfNMinBox", _vm.RvsfN_1.ToString("F2"));
-        SetText("RvsfNMaxBox", _vm.RvsfN_2.ToString("F2"));
     }
 
     // =======================================================================
     // GESTIONE MANUALE INPUT (UI -> VM)
-    // Validazione, Commit e Revert su errore
     // =======================================================================
 
     private void OnManualInputCommit(object? sender, RoutedEventArgs e)
     {
         if (_vm == null || sender is not TextBox textBox) return;
 
-        bool isValid = double.TryParse(textBox.Text, out double val);
+        bool isDouble = double.TryParse(textBox.Text, out double dVal);
+        bool isInt = int.TryParse(textBox.Text, out int iVal);
 
-        if (isValid)
+        if (isDouble || isInt)
         {
             switch (textBox.Name)
             {
-                case "RotationBox": _vm.RotationAngle = val; break;
-                case "ShiftXBox": _vm.ShiftX = val; break;
-                case "ShiftYBox": _vm.ShiftY = val; break;
-                case "KernelSizeBox": _vm.KernelSize = Math.Max(1, Math.Round(val)); break;
-
-                // RVSF - A
+                case "RotationBox": _vm.RotationAngle = dVal; break;
+                case "ShiftXBox": _vm.ShiftX = dVal; break;
+                case "ShiftYBox": _vm.ShiftY = dVal; break;
+                case "KernelSizeBox": _vm.KernelSize = (int)Math.Max(1, Math.Round(dVal)); break;
+                
                 case "RvsfA1Box": 
-                case "RvsfAMinBox": _vm.RvsfA_1 = val; break;
-                case "RvsfAMaxBox": _vm.RvsfA_2 = val; break;
-
-                // RVSF - B
+                case "RvsfAMinBox": _vm.RvsfA_1 = dVal; break;
+                case "RvsfAMaxBox": _vm.RvsfA_2 = dVal; break;
                 case "RvsfB1Box":
-                case "RvsfBMinBox": _vm.RvsfB_1 = val; break;
-                case "RvsfBMaxBox": _vm.RvsfB_2 = val; break;
-
-                // RVSF - N
+                case "RvsfBMinBox": _vm.RvsfB_1 = dVal; break;
+                case "RvsfBMaxBox": _vm.RvsfB_2 = dVal; break;
                 case "RvsfN1Box":
-                case "RvsfNMinBox": _vm.RvsfN_1 = val; break;
-                case "RvsfNMaxBox": _vm.RvsfN_2 = val; break;
+                case "RvsfNMinBox": _vm.RvsfN_1 = dVal; break;
+                case "RvsfNMaxBox": _vm.RvsfN_2 = dVal; break;
+                
+                case "FrangiSigmaBox": _vm.FrangiSigma = Math.Max(0.1, dVal); break;
+                case "FrangiBetaBox": _vm.FrangiBeta = Math.Clamp(dVal, 0.1, 1.0); break;
+                case "FrangiCBox": _vm.FrangiC = dVal; break;
+                
+                case "TensorSigmaBox": _vm.TensorSigma = Math.Max(1, iVal); break;
+                case "TensorRhoBox": _vm.TensorRho = Math.Max(1, iVal); break;
+                
+                case "TopHatBox": _vm.TopHatKernelSize = Math.Max(3, iVal); break;
+                
+                case "ClaheClipBox": _vm.ClaheClipLimit = Math.Max(0, dVal); break;
+                case "ClaheTileBox": _vm.ClaheTileSize = Math.Max(2, iVal); break;
+                
+                case "LocalNormWindowBox": _vm.LocalNormWindowSize = Math.Max(3, iVal); break;
+                case "LocalNormIntensityBox": _vm.LocalNormIntensity = dVal; break;
             }
         }
-        else
-        {
-            // REVERT: Se parsing fallisce, ripristina valore dal VM
-            switch (textBox.Name)
-            {
-                case "RotationBox": textBox.Text = _vm.RotationAngle.ToString("F1"); break;
-                case "ShiftXBox": textBox.Text = _vm.ShiftX.ToString("F1"); break;
-                case "ShiftYBox": textBox.Text = _vm.ShiftY.ToString("F1"); break;
-                case "KernelSizeBox": textBox.Text = _vm.KernelSize.ToString("F0"); break;
-
-                case "RvsfA1Box": 
-                case "RvsfAMinBox": textBox.Text = _vm.RvsfA_1.ToString("F2"); break;
-                case "RvsfAMaxBox": textBox.Text = _vm.RvsfA_2.ToString("F2"); break;
-
-                case "RvsfB1Box": 
-                case "RvsfBMinBox": textBox.Text = _vm.RvsfB_1.ToString("F2"); break;
-                case "RvsfBMaxBox": textBox.Text = _vm.RvsfB_2.ToString("F2"); break;
-
-                case "RvsfN1Box": 
-                case "RvsfNMinBox": textBox.Text = _vm.RvsfN_1.ToString("F2"); break;
-                case "RvsfNMaxBox": textBox.Text = _vm.RvsfN_2.ToString("F2"); break;
-            }
-        }
+        
+        UpdateUiValues();
     }
 
     private void OnInputKeyDown(object? sender, KeyEventArgs e)
     {
         if (e.Key == Key.Enter)
         {
-            this.Focus(); // Toglie il focus -> Scatena OnManualInputCommit
+            this.Focus(); 
             e.Handled = true;
         }
     }
     
     // =======================================================================
-    // GESTIONE VIEWPORT E MOUSE (Standard)
+    // GESTIONE VIEWPORT E MOUSE
     // =======================================================================
 
     private void OnPreviewSizeChanged(object? sender, SizeChangedEventArgs e)
@@ -291,7 +279,6 @@ public partial class StructureExtractionToolView : Window
         var border = sender as Border;
         if (border == null) return;
 
-        // ZOOM (Ctrl + Wheel)
         if (e.KeyModifiers.HasFlag(KeyModifiers.Control))
         {
             var pos = e.GetPosition(border);
@@ -301,40 +288,23 @@ public partial class StructureExtractionToolView : Window
         }
         else
         {
-            // STRETCHING ISTOGRAMMA
             double currentRange = Math.Abs(vm.ActiveRenderer.WhitePoint - vm.ActiveRenderer.BlackPoint);
-            double baseStep = (currentRange > 0.00001) ? currentRange * 0.05 : 1.0;
-            double step = Math.Max(0.0001, baseStep);
-
-            if (e.Delta.Y < 0) step = -step;
+            double baseStep = (currentRange > 1e-7) ? currentRange * 0.05 : 0.001;
+            double step = e.Delta.Y < 0 ? -baseStep : baseStep;
 
             if (e.KeyModifiers.HasFlag(KeyModifiers.Shift))
             {
-                // BLACK POINT
                 double newBlack = vm.ActiveRenderer.BlackPoint + step;
-                if (step > 0)
-                {
-                    double maxAllowed = vm.ActiveRenderer.WhitePoint - (step * 0.1);
-                    vm.ActiveRenderer.BlackPoint = Math.Min(newBlack, maxAllowed);
-                }
-                else
-                {
-                    vm.ActiveRenderer.BlackPoint = newBlack;
-                }
+                vm.ActiveRenderer.BlackPoint = step > 0 
+                    ? Math.Min(newBlack, vm.ActiveRenderer.WhitePoint - (Math.Abs(step) * 0.1)) 
+                    : newBlack;
             }
             else
             {
-                // WHITE POINT
                 double newWhite = vm.ActiveRenderer.WhitePoint + step;
-                if (step < 0)
-                {
-                    double minAllowed = vm.ActiveRenderer.BlackPoint + (Math.Abs(step) * 0.1);
-                    vm.ActiveRenderer.WhitePoint = Math.Max(newWhite, minAllowed);
-                }
-                else
-                {
-                    vm.ActiveRenderer.WhitePoint = newWhite;
-                }
+                vm.ActiveRenderer.WhitePoint = step < 0 
+                    ? Math.Max(newWhite, vm.ActiveRenderer.BlackPoint + (Math.Abs(step) * 0.1)) 
+                    : newWhite;
             }
             e.Handled = true;
         }

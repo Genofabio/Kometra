@@ -6,56 +6,45 @@ namespace KomaLab.Services.Processing.Engines;
 
 public interface IStructureExtractionEngine
 {
-    /// <summary>
-    /// Applica il filtro Larson-Sekanina (Gradiente Rotazionale) in background.
-    /// </summary>
-    /// <param name="src">Immagine sorgente.</param>
-    /// <param name="dst">Immagine destinazione.</param>
-    /// <param name="angleDeg">Angolo di rotazione in gradi.</param>
-    /// <param name="radialShiftX">Spostamento radiale X (pixel).</param>
-    /// <param name="radialShiftY">Spostamento radiale Y (pixel).</param>
-    /// <param name="isSymmetric">
-    /// Se false: Standard ($I - Rot$). 
-    /// Se true: Simmetrico ($2 \cdot I - Rot(+) - Rot(-)$).
-    /// </param>
+    /// <summary> Applica il filtro Larson-Sekanina per evidenziare morfologie rotazionali. </summary>
     Task ApplyLarsonSekaninaAsync(Mat src, Mat dst, double angleDeg, double radialShiftX, double radialShiftY, bool isSymmetric);
 
-    /// <summary>
-    /// Applica un filtro High-Pass sottraendo il background stimato tramite mediana.
-    /// Gestisce kernel grandi (>5) su immagini float/double in parallelo senza bloccare la UI.
-    /// </summary>
-    /// <param name="src">Immagine sorgente.</param>
-    /// <param name="dst">Immagine destinazione.</param>
-    /// <param name="kernelSize">Dimensione del kernel mediana (deve essere dispari).</param>
-    /// <param name="progress">Oggetto opzionale per monitorare la percentuale di completamento (0-100).</param>
+    /// <summary> Applica un filtro High-Pass tramite sottrazione della mediana locale. </summary>
     Task ApplyUnsharpMaskingMedianAsync(Mat src, Mat dst, int kernelSize, IProgress<double> progress = null);
 
-    /// <summary>
-    /// Applica il filtro RVSF (Radial Variable Slope Filter) adattivo in parallelo.
-    /// Formula raggio kernel: $R = A + B \cdot \rho^N$
-    /// </summary>
-    /// <param name="src">Immagine sorgente.</param>
-    /// <param name="dst">Immagine destinazione.</param>
-    /// <param name="paramA">Termine costante (offset raggio).</param>
-    /// <param name="paramB">Termine lineare (scala).</param>
-    /// <param name="paramN">Termine esponenziale (potenza di rho).</param>
-    /// <param name="useLog">Se true, converte l'immagine in $Log_{10}$ prima del calcolo.</param>
-    /// <param name="progress">Oggetto opzionale per monitorare il progresso (0-100).</param>
+    /// <summary> Applica il filtro RVSF (Radial Variable Slope Filter) adattivo. </summary>
     Task ApplyAdaptiveRVSFAsync(Mat src, Mat dst, double paramA, double paramB, double paramN, bool useLog, IProgress<double> progress = null);
 
+    /// <summary> Genera un Mosaico (4x2) applicando l'RVSF con 8 combinazioni di parametri. </summary>
+    Task ApplyRVSFMosaicAsync(Mat src, Mat dst, (double v1, double v2) paramA, (double v1, double v2) paramB, (double v1, double v2) paramN, bool useLog);
+
     /// <summary>
-    /// Genera un Mosaico (4x2) applicando l'RVSF 8 volte in parallelo.
-    /// Utilizza semafori interni per evitare la saturazione della memoria RAM.
+    /// Applica il Filtro di Frangi (Vesselness).
+    /// Basato sull'analisi dell'Hessiana, è eccellente per isolare getti filamentosi anche se curvi.
     /// </summary>
-    /// <param name="src">Immagine sorgente.</param>
-    /// <param name="dst">Immagine destinazione (Grande mosaico).</param>
-    /// <param name="paramA">Coppia di valori per il parametro A.</param>
-    /// <param name="paramB">Coppia di valori per il parametro B.</param>
-    /// <param name="paramN">Coppia di valori per il parametro N.</param>
-    /// <param name="useLog">Se true, converte l'immagine in $Log_{10}$.</param>
-    Task ApplyRVSFMosaicAsync(Mat src, Mat dst, 
-                              (double v1, double v2) paramA, 
-                              (double v1, double v2) paramB, 
-                              (double v1, double v2) paramN, 
-                              bool useLog);
+    Task ApplyFrangiVesselnessAsync(Mat src, Mat dst, double sigma, double beta, double c, IProgress<double> progress = null);
+
+    /// <summary>
+    /// Applica CLAHE (Contrast Limited Adaptive Histogram Equalization).
+    /// Normalizzazione dinamica del contrasto tramite istogrammi locali (workflow a 16-bit).
+    /// </summary>
+    Task ApplyClaheAsync(Mat src, Mat dst, double clipLimit, int tileGridSize);
+
+    /// <summary>
+    /// Applica la Normalizzazione Statistica Locale (LSN).
+    /// Workflow 100% Floating Point. Normalizza ogni pixel basandosi sulla media e deviazione standard locale.
+    /// </summary>
+    Task ApplyLocalNormalizationAsync(Mat src, Mat dst, int windowSize, double intensity, IProgress<double> progress = null);
+
+    /// <summary>
+    /// Applica la Trasformata White Top-Hat.
+    /// Operazione morfologica che "spiana" il bagliore della chioma per lasciare solo le strutture strette (getti).
+    /// </summary>
+    Task ApplyWhiteTopHatAsync(Mat src, Mat dst, int kernelSize);
+    
+    // <summary>
+    /// Esalta le strutture basandosi sulla coerenza del Tensore di Struttura.
+    /// Isola i flussi laminari e i getti lineari attenuando il rumore isotropico.
+    /// </summary>
+    Task ApplyStructureTensorEnhancementAsync(Mat src, Mat dst, int sigma, int rho, IProgress<double> progress = null);
 }

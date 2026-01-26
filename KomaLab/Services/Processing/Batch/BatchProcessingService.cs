@@ -30,12 +30,50 @@ public class BatchProcessingService : IBatchProcessingService
         _converter = converter ?? throw new ArgumentNullException(nameof(converter));
     }
 
-    public async Task<List<string>> ProcessFilesAsync(
+    // =========================================================================================
+    // OVERLOAD 1: Sincrono / Legacy (Action)
+    // Mantiene la compatibilità con le parti del progetto che usano semplici Action sincrone
+    // =========================================================================================
+    public Task<List<string>> ProcessFilesAsync(
         IEnumerable<FitsFileReference> sourceFiles,
         string outputFolder,
-        Action<Mat, Mat, FitsHeader, int> processor, // Firma aggiornata
+        Action<Mat, Mat, FitsHeader, int> processor,
         IProgress<BatchProgressReport>? progress = null,
         CancellationToken token = default)
+    {
+        // Avvolgiamo l'Action sincrona in un Func<Task> per riutilizzare il Core asincrono
+        return ProcessFilesCoreAsync(sourceFiles, outputFolder, (s, d, h, i) => 
+        {
+            processor(s, d, h, i);
+            return Task.CompletedTask;
+        }, progress, token);
+    }
+
+    // =========================================================================================
+    // OVERLOAD 2: Asincrono (Func<Task>) - [NUOVO]
+    // Risolve il bug nel StructureExtractionCoordinator permettendo l'await corretto
+    // =========================================================================================
+    public Task<List<string>> ProcessFilesAsync(
+        IEnumerable<FitsFileReference> sourceFiles,
+        string outputFolder,
+        Func<Mat, Mat, FitsHeader, int, Task> processor,
+        IProgress<BatchProgressReport>? progress = null,
+        CancellationToken token = default)
+    {
+        // Passiamo direttamente la funzione asincrona al Core
+        return ProcessFilesCoreAsync(sourceFiles, outputFolder, processor, progress, token);
+    }
+
+    // =========================================================================================
+    // CORE LOGIC (Private)
+    // Contiene la logica unificata ed esegue l'await reale
+    // =========================================================================================
+    private async Task<List<string>> ProcessFilesCoreAsync(
+        IEnumerable<FitsFileReference> sourceFiles,
+        string outputFolder,
+        Func<Mat, Mat, FitsHeader, int, Task> processorAsync,
+        IProgress<BatchProgressReport>? progress,
+        CancellationToken token)
     {
         var files = sourceFiles.ToList();
         var results = new List<string>();
@@ -57,7 +95,6 @@ public class BatchProcessingService : IBatchProcessingService
                 FitsBitDepth originalDepth = _metadata.GetBitDepth(sourceHeader);
 
                 // 2. ISOLAMENTO: Creiamo la copia di lavoro (workingHeader)
-                // Questo evita di "sporcare" i metadati del file originale in RAM
                 var workingHeader = _metadata.CloneHeader(sourceHeader);
 
                 // 3. CONVERSIONE E PREPARAZIONE MATRICI
@@ -67,9 +104,10 @@ public class BatchProcessingService : IBatchProcessingService
                 using Mat srcMat = _converter.RawToMat(data.PixelData, bScale, bZero, FitsBitDepth.Double);
                 using Mat dstMat = new Mat(srcMat.Size(), srcMat.Type());
 
-                // 4. ESECUZIONE LOGICA: Il processor ora ha tutto per lavorare
-                // Modificherà dstMat (pixel) e workingHeader (WCS, History)
-                processor(srcMat, dstMat, workingHeader, i);
+                // 4. ESECUZIONE LOGICA (CRITICAL FIX)
+                // Attendiamo il completamento del Task.
+                // Il blocco 'using Mat srcMat' NON farà Dispose finché questa riga non è completata.
+                await processorAsync(srcMat, dstMat, workingHeader, i);
 
                 // 5. SMART PROMOTION (NaN Detection)
                 bool hasSpecialValues = !Cv2.CheckRange(dstMat, quiet: true);
@@ -77,9 +115,6 @@ public class BatchProcessingService : IBatchProcessingService
 
                 // 6. RICONVERSIONE E FINALIZZAZIONE HEADER
                 var finalPixels = _converter.MatToRaw(dstMat, outputDepth);
-                
-                // CreateHeaderFromTemplate prenderà il workingHeader (già shiftato nel WCS)
-                // e scriverà NAXIS e BITPIX definitivi in cima al nuovo header.
                 var finalHeader = _metadata.CreateHeaderFromTemplate(workingHeader, finalPixels, outputDepth);
 
                 // 7. SALVATAGGIO
@@ -94,28 +129,18 @@ public class BatchProcessingService : IBatchProcessingService
         return results;
     }
 
-    /// <summary>
-    /// Decide se mantenere il formato originale o promuoverlo a Floating Point.
-    /// Segue le regole: Int32 -> Double (-64), Int16/Byte -> Float (-32) se ci sono NaN.
-    /// </summary>
+    // Metodo helper (mantenuto per riferimento/uso interno se necessario)
     private FitsBitDepth DetermineOptimalOutputDepth(FitsBitDepth original, Mat processedMat)
     {
-        // Se il file è già in virgola mobile, non facciamo downgrade
         if ((int)original < 0) return original;
-
-        // Verifichiamo la presenza di NaN o Infiniti (tipici del padding post-allineamento)
         bool hasSpecialValues = !Cv2.CheckRange(processedMat, quiet: true);
 
         if (hasSpecialValues)
         {
-            // Promozione intelligente per preservare la precisione dei dati scientifici
-            // - Gli interi a 32 bit necessitano di Double per non perdere precisione nella mantissa
-            // - Per 8 e 16 bit, il Float (32 bit) è più che sufficiente
             return (original == FitsBitDepth.Int32) 
                 ? FitsBitDepth.Double 
                 : FitsBitDepth.Float;
         }
-
         return original;
     }
 }

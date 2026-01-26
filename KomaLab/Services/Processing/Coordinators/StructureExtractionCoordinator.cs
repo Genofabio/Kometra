@@ -37,33 +37,21 @@ public class StructureExtractionCoordinator : IStructureExtractionCoordinator
         _converter = converter;
     }
 
-    // =======================================================================
-    // 1. ANTEPRIMA (CALCOLO ASINCRONO)
-    // =======================================================================
-    
     public async Task<Array> CalculatePreviewDataAsync(
         FitsFileReference sourceFile,
         StructureExtractionMode mode,
         StructureExtractionParameters parameters)
     {
-        // 1. Carica i dati Raw (Asincrono)
         var data = await _dataManager.GetDataAsync(sourceFile.FilePath);
-
-        // 2. Conversione Raw -> Mat 
         using Mat src = _converter.RawToMat(data.PixelData);
-
-        // 3. Esecuzione Logica Engine (Asincrona)
         using Mat dst = new Mat();
-        // Passiamo un progresso nullo per l'anteprima, o potresti collegarlo a una mini-bar
+        
         await RunEngineLogicAsync(src, dst, mode, parameters);
 
-        // 4. Conversione Mat -> Array C# per la UI
         return _converter.MatToRaw(dst, FitsBitDepth.Double);
     }
 
-    // =======================================================================
-    // 2. BATCH (Elaborazione su file)
-    // =======================================================================
+    // File: StructureExtractionCoordinator.cs
 
     public async Task<List<string>> ExecuteBatchAsync(
         IEnumerable<FitsFileReference> sourceFiles,
@@ -72,21 +60,16 @@ public class StructureExtractionCoordinator : IStructureExtractionCoordinator
         IProgress<BatchProgressReport>? progress = null,
         CancellationToken token = default)
     {
-        // Definiamo l'operazione di processing che il BatchService eseguirà per ogni file
-        // Poiché il BatchService è solitamente sincrono nel suo loop interno per file, 
-        // usiamo .GetAwaiter().GetResult() o Task.Run se necessario, ma qui
-        // la cosa migliore è rendere l'Action asincrona se il BatchService lo supporta.
-        
-        // Se il tuo IBatchProcessingService accetta un Func<..., Task>, usa quello.
-        // Altrimenti, usiamo questa logica interna:
+        // 1. Definisci la logica di elaborazione asincrona
+        // La firma corrisponde esattamente al nuovo overload: Func<Mat, Mat, FitsHeader, int, Task>
         Func<Mat, Mat, FitsHeader, int, Task> processOpAsync = async (src, dst, header, index) =>
         {
             using Mat processingResult = new Mat();
-
-            // 1. Esecuzione Logica (Asincrona)
+        
+            // Eseguiamo il motore (asincrono)
             await RunEngineLogicAsync(src, processingResult, mode, parameters);
 
-            // 2. Gestione Output Mosaico vs Singolo
+            // Gestione ridimensionamento (es. Mosaic)
             if (processingResult.Size() != src.Size())
             {
                 dst.Create(processingResult.Size(), src.Type());
@@ -94,66 +77,55 @@ public class StructureExtractionCoordinator : IStructureExtractionCoordinator
                 _metadataService.AddValue(header, "NAXIS2", processingResult.Rows, "Height");
             }
 
-            // 3. Normalizzazione MinMax (0-65535) per il salvataggio
+            // Normalizzazione e conversione finale
             Cv2.Normalize(processingResult, processingResult, 0, 65535, NormTypes.MinMax);
-            
-            // 4. Conversione verso dst
             processingResult.ConvertTo(dst, src.Type());
 
-            // 5. Log Header
             UpdateHeaderHistory(header, mode, parameters);
         };
 
-        // NOTA: Assicurati che il tuo BatchService supporti l'overload asincrono.
-        // Se non lo supporta, dovrai chiamare processOpAsync(...).Wait() dentro l'Action.
+        // 2. CHIAMATA AL SERVIZIO (Nativa Async)
+        // Grazie all'overload che abbiamo creato nel Service, passiamo direttamente 'processOpAsync'.
+        // Il Service farà l'await corretto, mantenendo aperto il 'using Mat src' finché necessario.
         return await _batchService.ProcessFilesAsync(
             sourceFiles,
             $"Structure_{mode}", 
-            async (s, d, h, i) => await processOpAsync(s, d, h, i),
+            processOpAsync, // Il compilatore sceglie automaticamente l'overload Func<..., Task>
             progress,
             token);
     }
-
-    // =======================================================================
-    // 3. LOGICA DI MAPPING (Mappata sui nuovi Task dell'Engine)
-    // =======================================================================
 
     private async Task RunEngineLogicAsync(Mat src, Mat dst, StructureExtractionMode mode, StructureExtractionParameters p, IProgress<double>? progress = null)
     {
         switch (mode)
         {
             case StructureExtractionMode.LarsonSekaninaStandard:
-                await _engine.ApplyLarsonSekaninaAsync(src, dst, p.RotationAngle, p.ShiftX, p.ShiftY, false);
-                break;
-
+                await _engine.ApplyLarsonSekaninaAsync(src, dst, p.RotationAngle, p.ShiftX, p.ShiftY, false); break;
             case StructureExtractionMode.LarsonSekaninaSymmetric:
-                await _engine.ApplyLarsonSekaninaAsync(src, dst, p.RotationAngle, p.ShiftX, p.ShiftY, true);
-                break;
-
+                await _engine.ApplyLarsonSekaninaAsync(src, dst, p.RotationAngle, p.ShiftX, p.ShiftY, true); break;
             case StructureExtractionMode.UnsharpMaskingMedian:
-                await _engine.ApplyUnsharpMaskingMedianAsync(src, dst, p.KernelSize, progress);
-                break;
-
+                await _engine.ApplyUnsharpMaskingMedianAsync(src, dst, p.KernelSize, progress); break;
             case StructureExtractionMode.AdaptiveLaplacianRVSF:
-                await _engine.ApplyAdaptiveRVSFAsync(src, dst, p.ParamA_1, p.ParamB_1, p.ParamN_1, p.UseLog, progress);
-                break;
-
+                await _engine.ApplyAdaptiveRVSFAsync(src, dst, p.ParamA_1, p.ParamB_1, p.ParamN_1, p.UseLog, progress); break;
             case StructureExtractionMode.AdaptiveLaplacianMosaic:
-                await _engine.ApplyRVSFMosaicAsync(src, dst,
-                    (p.ParamA_1, p.ParamA_2),
-                    (p.ParamB_1, p.ParamB_2),
-                    (p.ParamN_1, p.ParamN_2),
-                    p.UseLog);
-                break;
+                await _engine.ApplyRVSFMosaicAsync(src, dst, (p.ParamA_1, p.ParamA_2), (p.ParamB_1, p.ParamB_2), (p.ParamN_1, p.ParamN_2), p.UseLog); break;
+            
+            // --- NUOVI MAPPING ---
+            case StructureExtractionMode.FrangiVesselnessFilter:
+                await _engine.ApplyFrangiVesselnessAsync(src, dst, p.FrangiSigma, p.FrangiBeta, p.FrangiC, progress); break;
+            case StructureExtractionMode.StructureTensorCoherence:
+                await _engine.ApplyStructureTensorEnhancementAsync(src, dst, p.TensorSigma, p.TensorRho, progress); break;
+            case StructureExtractionMode.WhiteTopHatExtraction:
+                await _engine.ApplyWhiteTopHatAsync(src, dst, p.TopHatKernelSize); break;
+            case StructureExtractionMode.ClaheLocalContrast:
+                await _engine.ApplyClaheAsync(src, dst, p.ClaheClipLimit, p.ClaheTileSize); break;
+            case StructureExtractionMode.AdaptiveLocalNormalization:
+                await _engine.ApplyLocalNormalizationAsync(src, dst, p.LocalNormWindowSize, p.LocalNormIntensity, progress); break;
 
             default:
-                throw new ArgumentOutOfRangeException(nameof(mode), mode, "Modalità di estrazione non supportata.");
+                throw new ArgumentOutOfRangeException(nameof(mode), mode, null);
         }
     }
-
-    // =======================================================================
-    // 4. LOGGING HEADER
-    // =======================================================================
 
     private void UpdateHeaderHistory(FitsHeader header, StructureExtractionMode mode, StructureExtractionParameters p)
     {
@@ -161,25 +133,19 @@ public class StructureExtractionCoordinator : IStructureExtractionCoordinator
 
         string paramsLog = mode switch
         {
-            StructureExtractionMode.LarsonSekaninaStandard or 
-            StructureExtractionMode.LarsonSekaninaSymmetric => 
+            StructureExtractionMode.LarsonSekaninaStandard or StructureExtractionMode.LarsonSekaninaSymmetric => 
                 $"Angle={p.RotationAngle:F2}, Shift=({p.ShiftX:F1}, {p.ShiftY:F1})",
-            
-            StructureExtractionMode.UnsharpMaskingMedian => 
-                $"Kernel={p.KernelSize} px",
-            
-            StructureExtractionMode.AdaptiveLaplacianRVSF => 
-                $"RVSF A={p.ParamA_1:F2}, B={p.ParamB_1:F2}, N={p.ParamN_1:F2}, Log={p.UseLog}",
-            
-            StructureExtractionMode.AdaptiveLaplacianMosaic => 
-                $"Mosaic Ranges: A[{p.ParamA_1}-{p.ParamA_2}], B[{p.ParamB_1}-{p.ParamB_2}], N[{p.ParamN_1}-{p.ParamN_2}]",
-            
+            StructureExtractionMode.UnsharpMaskingMedian => $"Kernel={p.KernelSize} px",
+            StructureExtractionMode.AdaptiveLaplacianRVSF => $"RVSF A={p.ParamA_1:F2}, B={p.ParamB_1:F2}, N={p.ParamN_1:F2}, Log={p.UseLog}",
+            StructureExtractionMode.FrangiVesselnessFilter => $"Sigma={p.FrangiSigma:F2}, Beta={p.FrangiBeta:F2}, C={p.FrangiC:F4}",
+            StructureExtractionMode.StructureTensorCoherence => $"Sigma={p.TensorSigma}, Rho={p.TensorRho}",
+            StructureExtractionMode.WhiteTopHatExtraction => $"Kernel={p.TopHatKernelSize} px",
+            StructureExtractionMode.ClaheLocalContrast => $"Clip={p.ClaheClipLimit:F1}, Tiles={p.ClaheTileSize}",
+            StructureExtractionMode.AdaptiveLocalNormalization => $"Window={p.LocalNormWindowSize}, Intensity={p.LocalNormIntensity:F1}",
             _ => ""
         };
 
         if (!string.IsNullOrEmpty(paramsLog))
-        {
             _metadataService.AddValue(header, "HISTORY", $"Params: {paramsLog}");
-        }
     }
 }

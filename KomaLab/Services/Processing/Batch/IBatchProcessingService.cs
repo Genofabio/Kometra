@@ -15,20 +15,19 @@ namespace KomaLab.Services.Processing.Batch;
 /// </summary>
 public interface IBatchProcessingService
 {
-    /// <summary>
-    /// Esegue una trasformazione su una lista di file FITS.
-    /// </summary>
-    /// <param name="sourcePaths">Percorsi dei file originali.</param>
-    /// <param name="outputFolder">Cartella di destinazione.</param>
-    /// <param name="processor">Azione da eseguire sulla Matrice (riceve la Mat sorgente e quella di destinazione).</param>
-    /// <param name="progress">Callback per l'aggiornamento della UI.</param>
-    /// <param name="token">Token per annullare l'operazione.</param>
-    /// <returns>Lista dei percorsi dei file generati.</returns>
+    // Vecchio metodo (mantiene la compatibilità col resto del progetto)
     Task<List<string>> ProcessFilesAsync(
         IEnumerable<FitsFileReference> sourceFiles,
         string outputFolder,
-        // Aggiornata la firma dell'Action qui sotto
-        Action<Mat, Mat, FitsHeader, int> processor, 
+        Action<Mat, Mat, FitsHeader, int> processor,
+        IProgress<BatchProgressReport>? progress = null,
+        CancellationToken token = default);
+
+    // NUOVO overload (per gestire il tuo StructureExtractionCoordinator)
+    Task<List<string>> ProcessFilesAsync(
+        IEnumerable<FitsFileReference> sourceFiles,
+        string outputFolder,
+        Func<Mat, Mat, FitsHeader, int, Task> processor,
         IProgress<BatchProgressReport>? progress = null,
         CancellationToken token = default);
 }

@@ -2,9 +2,14 @@
 
 public enum StructureExtractionMode
 {
-    LarsonSekaninaStandard,    // I - Rot
-    LarsonSekaninaSymmetric,   // 2I - Rot(+) - Rot(-)
-    UnsharpMaskingMedian,      // Ex "RVSF" semplice (sottrazione mediana)
-    AdaptiveLaplacianRVSF,     // RVSF Singolo (A, B, N)
-    AdaptiveLaplacianMosaic    // RVSF Mosaico (8 combinazioni)
+    LarsonSekaninaStandard,
+    LarsonSekaninaSymmetric,
+    UnsharpMaskingMedian,
+    AdaptiveLaplacianRVSF,
+    AdaptiveLaplacianMosaic,
+    FrangiVesselnessFilter,      // Coerenza basata su Hessiana (Curve)
+    StructureTensorCoherence,    // Coerenza basata su Gradiente (Flusso/Rette)
+    WhiteTopHatExtraction,
+    ClaheLocalContrast,
+    AdaptiveLocalNormalization
 }
