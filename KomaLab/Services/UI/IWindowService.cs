@@ -2,6 +2,7 @@
 using System.Threading.Tasks;
 using KomaLab.Models.Fits;
 using KomaLab.Models.Fits.Structure;
+using KomaLab.Models.Processing.Enhancement;
 using KomaLab.Models.Visualization;
 using KomaLab.ViewModels.Nodes;
 
@@ -26,13 +27,13 @@ public interface IWindowService
     // Aggiungi questo metodo all'interfaccia
     Task<List<string>?> ShowImportWindowAsync();
     
-    Task<List<string>?> ShowRadialEnhancementWindowAsync(List<FitsFileReference> files, VisualizationMode mode);
+    Task<(List<string> Paths, ImageEnhancementMode Mode)?> ShowRadialEnhancementWindowAsync(List<FitsFileReference> files, VisualizationMode mode);
 
-    public Task<List<string>?> ShowStructureExtractionWindowAsync(
+    Task<(List<string> Paths, ImageEnhancementMode Mode)?> ShowStructureExtractionWindowAsync(
         List<FitsFileReference> sourceFiles,
         VisualizationMode initialMode);
 
-    public Task<List<string>?> ShowLocalContrastWindowAsync(
+    Task<(List<string> Paths, ImageEnhancementMode Mode)?> ShowLocalContrastWindowAsync(
         List<FitsFileReference> sourceFiles,
         VisualizationMode initialMode);
 }

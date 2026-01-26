@@ -133,67 +133,66 @@ public class WindowService : IWindowService
     }
     
     // =======================================================================
-    // 6. ENHANCEMENT: MODELLI RADIALI (Radial & Rotational)
+    // 6. ENHANCEMENT: MODELLI RADIALI
     // =======================================================================
-    public async Task<List<string>?> ShowRadialEnhancementWindowAsync(
+    // Cambiamo il tipo di ritorno in una Tupla (Percorsi, Modalità)
+    public async Task<(List<string> Paths, ImageEnhancementMode Mode)?> ShowRadialEnhancementWindowAsync(
         List<FitsFileReference> sourceFiles,
         VisualizationMode initialMode)
     {
-        // Richiamiamo il metodo generico con la categoria RadialRotational
         return await ShowImageEnhancementToolAsync(sourceFiles, EnhancementCategory.RadialRotational);
     }
 
     // =======================================================================
-    // 7. ENHANCEMENT: ESTRAZIONE STRUTTURE (Features)
+    // 7. ENHANCEMENT: ESTRAZIONE STRUTTURE
     // =======================================================================
-    public async Task<List<string>?> ShowStructureExtractionWindowAsync(
+    public async Task<(List<string> Paths, ImageEnhancementMode Mode)?> ShowStructureExtractionWindowAsync(
         List<FitsFileReference> sourceFiles,
         VisualizationMode initialMode)
     {
-        // Richiamiamo il metodo generico con la categoria FeatureExtraction
         return await ShowImageEnhancementToolAsync(sourceFiles, EnhancementCategory.FeatureExtraction);
     }
 
     // =======================================================================
-    // 8. ENHANCEMENT: CONTRASTO LOCALE (Local Contrast)
+    // 8. ENHANCEMENT: CONTRASTO LOCALE
     // =======================================================================
-    public async Task<List<string>?> ShowLocalContrastWindowAsync(
+    public async Task<(List<string> Paths, ImageEnhancementMode Mode)?> ShowLocalContrastWindowAsync(
         List<FitsFileReference> sourceFiles,
         VisualizationMode initialMode)
     {
-        // Richiamiamo il metodo generico con la categoria LocalContrast
         return await ShowImageEnhancementToolAsync(sourceFiles, EnhancementCategory.LocalContrast);
     }
 
-
     // =======================================================================
-    // HELPER GENERICO PER IMAGE ENHANCEMENT (DRY Principle)
+    // HELPER GENERICO AGGIORNATO
     // =======================================================================
-    private async Task<List<string>?> ShowImageEnhancementToolAsync(
+    private async Task<(List<string> Paths, ImageEnhancementMode Mode)?> ShowImageEnhancementToolAsync(
         List<FitsFileReference> sourceFiles,
         EnhancementCategory category)
     {
         if (_mainWindow == null) throw new InvalidOperationException("Finestra principale non registrata.");
 
-        // Risoluzione Dipendenze
         var dataManager = _serviceProvider.GetRequiredService<IFitsDataManager>();
         var rendererFactory = _serviceProvider.GetRequiredService<IFitsRendererFactory>();
-        var coordinator = _serviceProvider.GetRequiredService<IImageEnhancementCoordinator>(); // Nuovo Coordinator Unico
+        var coordinator = _serviceProvider.GetRequiredService<IImageEnhancementCoordinator>();
         var metadataService = _serviceProvider.GetRequiredService<IFitsMetadataService>();
 
-        // Creazione VM Unico con categoria specifica
         using var viewModel = new ImageEnhancementToolViewModel(
-            category, // Passiamo la categoria
+            category, 
             sourceFiles, 
             dataManager, 
             rendererFactory, 
             coordinator, 
             metadataService);
 
-        // Creazione View Unica
         var view = new ImageEnhancementToolView { DataContext = viewModel };
 
-        return await ShowDialogAndGetResultAsync(view, viewModel, vm => vm.ResultPaths);
+        // ORA RESTITUIAMO SIA I PATH CHE LA MODALITÀ SELEZIONATA DAL VM
+        return await ShowDialogAndGetResultAsync(
+            view, 
+            viewModel, 
+            vm => (vm.ResultPaths, vm.SelectedMode) // <--- Estrazione Tupla
+        );
     }
 
 

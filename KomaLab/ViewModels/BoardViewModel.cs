@@ -10,6 +10,7 @@ using CommunityToolkit.Mvvm.Input;
 using KomaLab.Models.Fits;
 using KomaLab.Models.Nodes;
 using KomaLab.Models.Processing;
+using KomaLab.Models.Processing.Enhancement;
 using KomaLab.Models.Visualization;
 using KomaLab.Services.Factories;
 using KomaLab.Services.Fits;
@@ -23,10 +24,6 @@ using SequenceNavigator = KomaLab.ViewModels.Shared.SequenceNavigator;
 
 namespace KomaLab.ViewModels;
 
-/// <summary>
-/// ViewModel principale della Board. Gestisce il grafo dei nodi e coordina i tool di elaborazione.
-/// Architettura centralizzata basata sul contratto IImageNavigator e FitsFileReference.
-/// </summary>
 public partial class BoardViewModel : ObservableObject
 {
     // --- Dipendenze ---
@@ -39,7 +36,7 @@ public partial class BoardViewModel : ObservableObject
     private readonly IStackingCoordinator _stackingCoordinator;
     private readonly IVideoExportCoordinator _videoCoordinator;
 
-    // --- Stato Navigazione (Delegato al Viewport) ---
+    // --- Stato Navigazione ---
     public BoardViewport Viewport { get; } = new();
     
     // --- Stato Selezione ---
@@ -47,7 +44,6 @@ public partial class BoardViewModel : ObservableObject
 
     partial void OnSelectedNodeChanged(BaseNodeViewModel? value)
     {
-        // Notifica ai comandi di ricalcolare CanExecute quando cambia la selezione
         ResetNormalizationCommand.NotifyCanExecuteChanged();
         ResetNodeViewCommand.NotifyCanExecuteChanged();
         ShowAlignmentWindowCommand.NotifyCanExecuteChanged();
@@ -59,8 +55,6 @@ public partial class BoardViewModel : ObservableObject
         ShowPlateSolvingWindowCommand.NotifyCanExecuteChanged();
         SetVisualizationModeCommand.NotifyCanExecuteChanged();
         ShowPosterizationWindowCommand.NotifyCanExecuteChanged();
-        
-        // I 3 comandi di enhancement
         ShowRadialEnhancementWindowCommand.NotifyCanExecuteChanged();
         ShowStructureExtractionWindowCommand.NotifyCanExecuteChanged();
         ShowLocalContrastWindowCommand.NotifyCanExecuteChanged();
@@ -95,32 +89,12 @@ public partial class BoardViewModel : ObservableObject
         _videoCoordinator = videoCoordinator ?? throw new ArgumentNullException(nameof(videoCoordinator));
     }
 
-    // ---------------------------------------------------------------------------
-    // GESTIONE GRAFO (ADD / REMOVE) CON UNDO
-    // ---------------------------------------------------------------------------
-
+    // [GRAFO: Add/Remove/Register]
     private void AddNodeToGraph(BaseNodeViewModel node, string undoLabel)
     {
         var action = new DelegateAction(undoLabel,
-            execute: () => 
-            {
-                if (!Nodes.Contains(node))
-                {
-                    Nodes.Add(node);
-                    RegisterNodeEvents(node);
-                    node.ZIndex = ++_maxZIndex;
-                }
-                SetSelectedNode(node);
-            },
-            undo: () => 
-            {
-                if (Nodes.Contains(node))
-                {
-                    UnregisterNodeEvents(node);
-                    Nodes.Remove(node);
-                    DeselectAllNodes();
-                }
-            }
+            execute: () => { if (!Nodes.Contains(node)) { Nodes.Add(node); RegisterNodeEvents(node); node.ZIndex = ++_maxZIndex; } SetSelectedNode(node); },
+            undo: () => { if (Nodes.Contains(node)) { UnregisterNodeEvents(node); Nodes.Remove(node); DeselectAllNodes(); } }
         );
         action.Execute();
         _undoService.RecordAction(action);
@@ -129,10 +103,8 @@ public partial class BoardViewModel : ObservableObject
     private void RemoveNodeFromGraph(BaseNodeViewModel node)
     {
         var connectionsToRemove = Connections.Where(c => c.Source == node || c.Target == node).ToList();
-
         var action = new DelegateAction("Rimuovi Nodo",
-            execute: () =>
-            {
+            execute: () => {
                 if (node is ImageNodeViewModel { Navigator: SequenceNavigator sn }) sn.Stop();
                 if (SelectedNode == node) DeselectAllNodes();
                 UnregisterNodeEvents(node);
@@ -140,16 +112,8 @@ public partial class BoardViewModel : ObservableObject
                 Nodes.Remove(node);
                 OnPropertyChanged(nameof(IsGlobalAnimationRunning));
             },
-            undo: () =>
-            {
-                if (!Nodes.Contains(node))
-                {
-                    Nodes.Add(node);
-                    RegisterNodeEvents(node);
-                    foreach (var conn in connectionsToRemove) Connections.Add(conn);
-                    SetSelectedNode(node);
-                    OnPropertyChanged(nameof(IsGlobalAnimationRunning));
-                }
+            undo: () => {
+                if (!Nodes.Contains(node)) { Nodes.Add(node); RegisterNodeEvents(node); foreach (var conn in connectionsToRemove) Connections.Add(conn); SetSelectedNode(node); OnPropertyChanged(nameof(IsGlobalAnimationRunning)); }
             }
         );
         action.Execute();
@@ -160,226 +124,120 @@ public partial class BoardViewModel : ObservableObject
     {
         var action = new DelegateAction(undoLabel,
             execute: () => {
-                if (!Nodes.Contains(newNode))
-                {
-                    Nodes.Add(newNode);
-                    RegisterNodeEvents(newNode);
-                    newNode.ZIndex = ++_maxZIndex;
-                    CreateConnection(sourceNode, newNode);
-                }
+                if (!Nodes.Contains(newNode)) { Nodes.Add(newNode); RegisterNodeEvents(newNode); newNode.ZIndex = ++_maxZIndex; CreateConnection(sourceNode, newNode); }
                 SetSelectedNode(newNode);
             },
             undo: () => {
-                if (Nodes.Contains(newNode))
-                {
+                if (Nodes.Contains(newNode)) {
                     var link = Connections.FirstOrDefault(c => c.Source == sourceNode && c.Target == newNode);
                     if (link != null) Connections.Remove(link);
                     if (SelectedNode == newNode) DeselectAllNodes();
-                    UnregisterNodeEvents(newNode);
-                    Nodes.Remove(newNode);
+                    UnregisterNodeEvents(newNode); Nodes.Remove(newNode);
                 }
             },
-            onDispose: (wasExecuted) => {
-                if (!wasExecuted && !string.IsNullOrEmpty(tempFilePath))
-                    _dataManager.DeleteTemporaryData(tempFilePath);
-            }
+            onDispose: (wasExecuted) => { if (!wasExecuted && !string.IsNullOrEmpty(tempFilePath)) _dataManager.DeleteTemporaryData(tempFilePath); }
         );
         action.Execute();
         _undoService.RecordAction(action);
     }
 
-    // ---------------------------------------------------------------------------
-    // EVENTI E CONNESSIONI
-    // ---------------------------------------------------------------------------
-
-    private void RegisterNodeEvents(BaseNodeViewModel node)
-    {
-        node.RequestRemove += OnNodeRequestRemove;
-        node.RequestBringToFront += n => n.ZIndex = ++_maxZIndex;
-    }
-
+    private void RegisterNodeEvents(BaseNodeViewModel node) { node.RequestRemove += OnNodeRequestRemove; node.RequestBringToFront += n => n.ZIndex = ++_maxZIndex; }
     private void UnregisterNodeEvents(BaseNodeViewModel node) => node.RequestRemove -= OnNodeRequestRemove;
     private void OnNodeRequestRemove(BaseNodeViewModel node) => RemoveNodeFromGraph(node);
-
-    public void CreateConnection(BaseNodeViewModel source, BaseNodeViewModel target)
-    {
-        var connection = new ConnectionViewModel(
-            new ConnectionModel { SourceNodeId = source.Id, TargetNodeId = target.Id }, 
-            source, target);
+    public void CreateConnection(BaseNodeViewModel source, BaseNodeViewModel target) {
+        var connection = new ConnectionViewModel(new ConnectionModel { SourceNodeId = source.Id, TargetNodeId = target.Id }, source, target);
         Connections.Add(connection);
     }
 
     // ---------------------------------------------------------------------------
-    // COMANDI PRINCIPALI
-    // ---------------------------------------------------------------------------
-    
-    [RelayCommand]
-    private async Task AddNodeAsync()
-    {
-        // 1. Apertura della finestra di Importazione avanzata
-        var resultPaths = await _windowService.ShowImportWindowAsync();
-        if (resultPaths == null || !resultPaths.Any()) return;
-
-        // 2. Recupero metadati e ordinamento
-        var tasks = resultPaths.Select(async path => 
-        {
-            var header = await _dataManager.GetHeaderOnlyAsync(path);
-            var date = _metadataService.GetObservationDate(header) ?? DateTime.MinValue; 
-            return (Path: path, Date: date);
-        });
-
-        var results = await Task.WhenAll(tasks);
-
-        var sortedPaths = results
-            .OrderBy(x => x.Date)
-            .Select(x => x.Path)
-            .ToList();
-
-        Point centerScreen = new Point(Viewport.ViewportSize.Width / 2.0, Viewport.ViewportSize.Height / 2.0);
-        Point pos = Viewport.ToWorldCoordinates(centerScreen);
-
-        // 3. Creazione del nodo tramite Factory
-        BaseNodeViewModel newNode = sortedPaths.Count == 1 
-            ? await _nodeFactory.CreateSingleImageNodeAsync(sortedPaths[0], pos.X, pos.Y)
-            : await _nodeFactory.CreateMultipleImagesNodeAsync(sortedPaths, pos.X, pos.Y);
-
-        // 4. Gestione dinamica del titolo
-        bool isCalibrated = sortedPaths.Any(p => p.Contains("Calibrated", StringComparison.OrdinalIgnoreCase));
-        if (isCalibrated)
-        {
-            newNode.Title += " (Calibrata)";
-        }
-
-        AddNodeToGraph(newNode, sortedPaths.Count == 1 ? "Aggiungi Immagine" : "Aggiungi Sequenza");
-    }
-
-    [RelayCommand]
-    private void PanBoard(string direction)
-    {
-        double step = 100; 
-        switch (direction.ToLower())
-        {
-            case "left": Viewport.ApplyPan(step, 0); break;
-            case "right": Viewport.ApplyPan(-step, 0); break;
-            case "up": Viewport.ApplyPan(0, step); break;
-            case "down": Viewport.ApplyPan(0, -step); break;
-        }
-    }
-
-    [RelayCommand]
-    private void ZoomBoard(string direction)
-    {
-        double factor = direction.ToLower() == "in" ? 1.2 : 0.8;
-        var center = new Point(Viewport.ViewportSize.Width / 2, Viewport.ViewportSize.Height / 2);
-        Viewport.ApplyZoomAtPoint(factor, center);
-    }
-
-    // ---------------------------------------------------------------------------
-    // TOOL E ELABORAZIONE
+    // TOOL DI ELABORAZIONE
     // ---------------------------------------------------------------------------
 
-    [RelayCommand(CanExecute = nameof(CanStackImages))]
-    private async Task StackImages(StackingMode mode)
-    {
-        if (SelectedNode is not ImageNodeViewModel source) return;
-        try
-        {
-            var resultRef = await _stackingCoordinator.ExecuteStackingAsync(source.CurrentFiles, mode);
-        
-            double sourceCenterX = source.X + (1.5 * source.EstimatedTotalSize.Width);
-            double sourceCenterY = source.Y + (source.EstimatedTotalSize.Height / 2.0);
-
-            var newNode = await _nodeFactory.CreateSingleImageNodeAsync(resultRef.FilePath, sourceCenterX + 400, sourceCenterY);
-        
-            newNode.Title = $"{source.Title} ({mode})";
-            if (newNode is ImageNodeViewModel resNode) resNode.VisualizationMode = source.VisualizationMode;
-            RegisterProcessingResult(newNode, source, resultRef.FilePath, "Stacking");
-        }
-        catch (Exception ex) { Debug.WriteLine($"Stacking failed: {ex.Message}"); }
-    }
-
-    [RelayCommand(CanExecute = nameof(CanSaveNode))]
-    private async Task SaveSelectedNode()
-    {
-        if (SelectedNode is not ImageNodeViewModel imgNode || imgNode.ActiveFile == null) return;
-        var savePath = await _dialogService.ShowSaveFitsFileDialogAsync(imgNode.ActiveFile.FileName);
-        if (string.IsNullOrWhiteSpace(savePath)) return;
-        try {
-            var fileRef = imgNode.ActiveFile;
-            var data = await _dataManager.GetDataAsync(fileRef.FilePath);
-            await _dataManager.SaveDataAsync(savePath, data.PixelData, fileRef.ModifiedHeader ?? data.Header);
-        } catch (Exception ex) { Debug.WriteLine($"Save failed: {ex.Message}"); }
-    }
-
-    [RelayCommand(CanExecute = nameof(CanSaveVideo))]
-    private async Task SaveVideo()
-    {
-        if (SelectedNode is not ImageNodeViewModel imgNode || imgNode.ActiveRenderer == null) return;
-        var path = await _dialogService.ShowSaveFileDialogAsync($"{imgNode.Title}.avi", "Video", "*.avi");
-        if (string.IsNullOrWhiteSpace(path)) return;
-        await _videoCoordinator.ExportVideoAsync(imgNode.CurrentFiles, path, 5.0, imgNode.ActiveRenderer.CaptureContrastProfile(), imgNode.VisualizationMode);
-    }
-
-    // --- COMANDI FINESTRE ENHANCEMENT ---
-
+    // 1. MODELLI RADIALI
     [RelayCommand(CanExecute = nameof(CanExecuteOnImageNode))]
     private async Task ShowRadialEnhancementWindow()
     {
-        await RunGenericProcessing(
-            (files, mode) => _windowService.ShowRadialEnhancementWindowAsync(files, mode), 
-            "Miglioramento Radiale", 
-            "(Radiale)");
+        await RunGenericProcessing(async (files, mode) => 
+        {
+            var result = await _windowService.ShowRadialEnhancementWindowAsync(files, mode);
+            if (result == null) return null; // Annullato dall'utente
+            
+            // Estraiamo il path e calcoliamo il suffisso dal Mode
+            string suffix = GetEnhancementSuffix(result.Value.Mode);
+            return (result.Value.Paths, suffix);
+        }, "Miglioramento Radiale");
     }
 
+    // 2. ESTRAZIONE STRUTTURE
     [RelayCommand(CanExecute = nameof(CanExecuteOnImageNode))]
     private async Task ShowStructureExtractionWindow()
     {
-        await RunGenericProcessing(
-            (files, mode) => _windowService.ShowStructureExtractionWindowAsync(files, mode), 
-            "Estrazione Strutture", 
-            "(Features)");
+        await RunGenericProcessing(async (files, mode) => 
+        {
+            var result = await _windowService.ShowStructureExtractionWindowAsync(files, mode);
+            if (result == null) return null;
+
+            string suffix = GetEnhancementSuffix(result.Value.Mode);
+            return (result.Value.Paths, suffix);
+        }, "Estrazione Strutture");
     }
 
+    // 3. CONTRASTO LOCALE
     [RelayCommand(CanExecute = nameof(CanExecuteOnImageNode))]
     private async Task ShowLocalContrastWindow()
     {
-        await RunGenericProcessing(
-            (files, mode) => _windowService.ShowLocalContrastWindowAsync(files, mode), 
-            "Contrasto Locale", 
-            "(Contrasto)");
+        await RunGenericProcessing(async (files, mode) => 
+        {
+            var result = await _windowService.ShowLocalContrastWindowAsync(files, mode);
+            if (result == null) return null;
+
+            string suffix = GetEnhancementSuffix(result.Value.Mode);
+            return (result.Value.Paths, suffix);
+        }, "Contrasto Locale");
     }
 
+    // 4. POSTERIZZAZIONE (Adattamento Tupla Manuale)
     [RelayCommand(CanExecute = nameof(CanExecuteOnImageNode))]
     private async Task ShowPosterizationWindow()
     {
-        await RunGenericProcessing(
-            (files, mode) => _windowService.ShowPosterizationWindowAsync(files, mode), 
-            "Posterizzazione", 
-            "(Posterizzata)");
+        await RunGenericProcessing(async (files, mode) => 
+        {
+            var paths = await _windowService.ShowPosterizationWindowAsync(files, mode);
+            // Avvolgiamo la lista semplice in una Tupla con un suffisso fisso
+            return paths != null ? (paths, "(Posterizzata)") : null;
+        }, "Posterizzazione");
     }
     
+    // 5. ALLINEAMENTO (Adattamento Tupla Manuale)
     [RelayCommand(CanExecute = nameof(CanExecuteOnImageNode))]
     private async Task ShowAlignmentWindow()
     {
-        await RunGenericProcessing(
-            (files, mode) => _windowService.ShowAlignmentWindowAsync(files, mode), 
-            "Allineamento", 
-            "(Allineata)");
+        await RunGenericProcessing(async (files, mode) => 
+        {
+            var paths = await _windowService.ShowAlignmentWindowAsync(files, mode);
+            return paths != null ? (paths, "(Allineata)") : null;
+        }, "Allineamento");
     }
     
-    // --- HELPER DRY PER ELABORAZIONI GENERICHE ---
+    // --- HELPER GENERICO (DRY) ---
+    // Firma corretta: Func ritorna Task<(List<string> Paths, string Suffix)?>
     private async Task RunGenericProcessing(
-        Func<List<FitsFileReference>, VisualizationMode, Task<List<string>?>> windowAction, 
-        string undoLabel, 
-        string titleSuffix)
+        Func<List<FitsFileReference>, VisualizationMode, Task<(List<string> Paths, string Suffix)?>> windowAction, 
+        string undoLabel)
     {
         if (SelectedNode is not ImageNodeViewModel imgNode) return;
         
         var inputFiles = imgNode.CurrentFiles.ToList();
         if (!inputFiles.Any()) return;
     
-        var resultPaths = await windowAction(inputFiles, imgNode.VisualizationMode);
-        if (resultPaths == null || !resultPaths.Any()) return;
+        // Esegue l'azione (apre finestra, attende OK)
+        var result = await windowAction(inputFiles, imgNode.VisualizationMode);
+        
+        // Se null o lista vuota, non fare nulla (utente ha annullato)
+        if (result == null || !result.Value.Paths.Any()) return;
+
+        // Deconstruct del risultato (Path + Nome filtro)
+        var (resultPaths, titleSuffix) = result.Value;
 
         double centerX = imgNode.X + (1.5 * imgNode.EstimatedTotalSize.Width);
         double centerY = imgNode.Y + (imgNode.EstimatedTotalSize.Height / 2.0);
@@ -388,74 +246,75 @@ public partial class BoardViewModel : ObservableObject
             ? await _nodeFactory.CreateSingleImageNodeAsync(resultPaths[0], centerX + 400, centerY)
             : await _nodeFactory.CreateMultipleImagesNodeAsync(resultPaths, centerX + 400, centerY);
 
+        // Imposta il titolo dinamico
         newNode.Title = $"{imgNode.Title} {titleSuffix}";
+        
         if (newNode is ImageNodeViewModel resNode) resNode.VisualizationMode = imgNode.VisualizationMode;
         
         RegisterProcessingResult(newNode, imgNode, resultPaths[0], undoLabel);
     }
 
-    // --- ALTRI COMANDI ---
-
-    [RelayCommand(CanExecute = nameof(CanExecuteOnImageNode))]
-    private async Task ShowPlateSolvingWindow() 
-    { if (SelectedNode is ImageNodeViewModel n) await _windowService.ShowPlateSolvingWindowAsync(n); }
-
-    [RelayCommand(CanExecute = nameof(CanEditHeader))]
-    private async Task EditSelectedNodeHeader()
+    // --- HELPER NOMI FILTRI ---
+    private string GetEnhancementSuffix(ImageEnhancementMode mode)
     {
-        if (SelectedNode is ImageNodeViewModel imgNode)
+        return mode switch
         {
-            await _windowService.ShowHeaderEditorAsync(imgNode.CurrentFiles, imgNode.Navigator);
-        }
+            ImageEnhancementMode.LarsonSekaninaStandard => "(Larson-Sekanina)",
+            ImageEnhancementMode.LarsonSekaninaSymmetric => "(Larson-Sek. Simm.)",
+            ImageEnhancementMode.AdaptiveLaplacianRVSF => "(RVSF Adattivo)",
+            ImageEnhancementMode.AdaptiveLaplacianMosaic => "(RVSF Mosaico)",
+            ImageEnhancementMode.InverseRho => "(1/Rho)",
+            ImageEnhancementMode.AzimuthalAverage => "(Media Azimutale)",
+            ImageEnhancementMode.AzimuthalMedian => "(Mediana Azimutale)",
+            ImageEnhancementMode.AzimuthalRenormalization => "(Rinormalizzazione)",
+            ImageEnhancementMode.FrangiVesselnessFilter => "(Frangi Vesselness)",
+            ImageEnhancementMode.StructureTensorCoherence => "(Tensore Struttura)",
+            ImageEnhancementMode.WhiteTopHatExtraction => "(Top-Hat)",
+            ImageEnhancementMode.UnsharpMaskingMedian => "(Unsharp Masking)",
+            ImageEnhancementMode.ClaheLocalContrast => "(CLAHE)",
+            ImageEnhancementMode.AdaptiveLocalNormalization => "(LSN)",
+            _ => "(Filtrata)"
+        };
     }
 
-    [RelayCommand(CanExecute = nameof(CanExecuteOnImageNode))]
-    private async Task ResetNormalization() { if (SelectedNode is ImageNodeViewModel n) await n.ResetThresholdsAsync(); }
-
-    [RelayCommand(CanExecute = nameof(CanExecuteOnImageNode))]
-    private void ResetNodeView() { if (SelectedNode is ImageNodeViewModel n) n.ResetView(); }
-
+    // [ALTRI COMANDI]
     [RelayCommand]
-    private void ResetBoard()
+    private async Task AddNodeAsync()
     {
-        Viewport.ResetView();
-        OnPropertyChanged(nameof(Viewport));
+        var resultPaths = await _windowService.ShowImportWindowAsync();
+        if (resultPaths == null || !resultPaths.Any()) return;
+        var tasks = resultPaths.Select(async path => { var header = await _dataManager.GetHeaderOnlyAsync(path); var date = _metadataService.GetObservationDate(header) ?? DateTime.MinValue; return (Path: path, Date: date); });
+        var results = await Task.WhenAll(tasks);
+        var sortedPaths = results.OrderBy(x => x.Date).Select(x => x.Path).ToList();
+        Point centerScreen = new Point(Viewport.ViewportSize.Width / 2.0, Viewport.ViewportSize.Height / 2.0);
+        Point pos = Viewport.ToWorldCoordinates(centerScreen);
+        BaseNodeViewModel newNode = sortedPaths.Count == 1 ? await _nodeFactory.CreateSingleImageNodeAsync(sortedPaths[0], pos.X, pos.Y) : await _nodeFactory.CreateMultipleImagesNodeAsync(sortedPaths, pos.X, pos.Y);
+        bool isCalibrated = sortedPaths.Any(p => p.Contains("Calibrated", StringComparison.OrdinalIgnoreCase));
+        if (isCalibrated) newNode.Title += " (Calibrata)";
+        AddNodeToGraph(newNode, sortedPaths.Count == 1 ? "Aggiungi Immagine" : "Aggiungi Sequenza");
     }
 
-    [RelayCommand(CanExecute = nameof(CanSetVisualizationMode))]
-    private void SetVisualizationMode(VisualizationMode mode) { if (SelectedNode is ImageNodeViewModel n) n.VisualizationMode = mode; }
-
-    [RelayCommand(CanExecute = nameof(CanToggleAnimation))]
-    private void ToggleNodeAnimation()
-    {
-        if (SelectedNode is ImageNodeViewModel { Navigator: SequenceNavigator sn })
-        {
-            sn.ToggleLoop();
-            OnPropertyChanged(nameof(IsGlobalAnimationRunning));
-        }
-    }
-
+    [RelayCommand] private void PanBoard(string direction) { double s = 100; switch(direction.ToLower()){ case "left": Viewport.ApplyPan(s,0); break; case "right": Viewport.ApplyPan(-s,0); break; case "up": Viewport.ApplyPan(0,s); break; case "down": Viewport.ApplyPan(0,-s); break; } }
+    [RelayCommand] private void ZoomBoard(string direction) { double f = direction.ToLower()=="in"?1.2:0.8; Viewport.ApplyZoomAtPoint(f, new Point(Viewport.ViewportSize.Width/2, Viewport.ViewportSize.Height/2)); }
+    [RelayCommand(CanExecute = nameof(CanStackImages))] private async Task StackImages(StackingMode mode) { if(SelectedNode is not ImageNodeViewModel s) return; try { var r = await _stackingCoordinator.ExecuteStackingAsync(s.CurrentFiles, mode); double x=s.X+1.5*s.EstimatedTotalSize.Width; double y=s.Y+s.EstimatedTotalSize.Height/2.0; var n = await _nodeFactory.CreateSingleImageNodeAsync(r.FilePath, x+400, y); n.Title=$"{s.Title} ({mode})"; if(n is ImageNodeViewModel res) res.VisualizationMode=s.VisualizationMode; RegisterProcessingResult(n, s, r.FilePath, "Stacking"); } catch(Exception ex) { Debug.WriteLine($"Stacking failed: {ex.Message}"); } }
+    [RelayCommand(CanExecute = nameof(CanSaveNode))] private async Task SaveSelectedNode() { if(SelectedNode is not ImageNodeViewModel n || n.ActiveFile==null) return; var p = await _dialogService.ShowSaveFitsFileDialogAsync(n.ActiveFile.FileName); if(string.IsNullOrWhiteSpace(p)) return; try { var fr=n.ActiveFile; var d=await _dataManager.GetDataAsync(fr.FilePath); await _dataManager.SaveDataAsync(p, d.PixelData, fr.ModifiedHeader??d.Header); } catch(Exception ex) { Debug.WriteLine($"Save failed: {ex.Message}"); } }
+    [RelayCommand(CanExecute = nameof(CanSaveVideo))] private async Task SaveVideo() { if(SelectedNode is not ImageNodeViewModel n || n.ActiveRenderer==null) return; var p = await _dialogService.ShowSaveFileDialogAsync($"{n.Title}.avi", "Video", "*.avi"); if(string.IsNullOrWhiteSpace(p)) return; await _videoCoordinator.ExportVideoAsync(n.CurrentFiles, p, 5.0, n.ActiveRenderer.CaptureContrastProfile(), n.VisualizationMode); }
+    [RelayCommand(CanExecute = nameof(CanExecuteOnImageNode))] private async Task ShowPlateSolvingWindow() { if(SelectedNode is ImageNodeViewModel n) await _windowService.ShowPlateSolvingWindowAsync(n); }
+    [RelayCommand(CanExecute = nameof(CanEditHeader))] private async Task EditSelectedNodeHeader() { if(SelectedNode is ImageNodeViewModel n) await _windowService.ShowHeaderEditorAsync(n.CurrentFiles, n.Navigator); }
+    [RelayCommand(CanExecute = nameof(CanExecuteOnImageNode))] private async Task ResetNormalization() { if(SelectedNode is ImageNodeViewModel n) await n.ResetThresholdsAsync(); }
+    [RelayCommand(CanExecute = nameof(CanExecuteOnImageNode))] private void ResetNodeView() { if(SelectedNode is ImageNodeViewModel n) n.ResetView(); }
+    [RelayCommand] private void ResetBoard() { Viewport.ResetView(); OnPropertyChanged(nameof(Viewport)); }
+    [RelayCommand(CanExecute = nameof(CanSetVisualizationMode))] private void SetVisualizationMode(VisualizationMode mode) { if(SelectedNode is ImageNodeViewModel n) n.VisualizationMode = mode; }
+    [RelayCommand(CanExecute = nameof(CanToggleAnimation))] private void ToggleNodeAnimation() { if(SelectedNode is ImageNodeViewModel { Navigator: SequenceNavigator sn }) { sn.ToggleLoop(); OnPropertyChanged(nameof(IsGlobalAnimationRunning)); } }
     [RelayCommand] public void FitView() => Viewport.ZoomToFit(Nodes);
     [RelayCommand(CanExecute = nameof(CanUndo))] private void Undo() => _undoService.Undo();
     [RelayCommand(CanExecute = nameof(CanRedo))] private void Redo() => _undoService.Redo();
     private bool CanUndo() => _undoService.CanUndo;
     private bool CanRedo() => _undoService.CanRedo;
-
     public void Pan(Vector delta) => Viewport.ApplyPan(delta.X, delta.Y);
-    public void Zoom(double deltaY, Point mousePosition)
-    {
-        double factor = deltaY > 0 ? 1.1 : 0.9;
-        Viewport.ApplyZoomAtPoint(factor, mousePosition);
-    }
-
-    public void SetSelectedNode(BaseNodeViewModel? node)
-    {
-        if (SelectedNode != null) SelectedNode.IsSelected = false;
-        SelectedNode = node;
-        if (SelectedNode != null) SelectedNode.IsSelected = true;
-    }
+    public void Zoom(double deltaY, Point mousePosition) { double factor = deltaY > 0 ? 1.1 : 0.9; Viewport.ApplyZoomAtPoint(factor, mousePosition); }
+    public void SetSelectedNode(BaseNodeViewModel? node) { if(SelectedNode != null) SelectedNode.IsSelected = false; SelectedNode = node; if(SelectedNode != null) SelectedNode.IsSelected = true; }
     public void DeselectAllNodes() => SetSelectedNode(null);
-
     private bool CanExecuteOnImageNode() => SelectedNode is ImageNodeViewModel;
     private bool CanEditHeader() => SelectedNode is ImageNodeViewModel n && n.ActiveFile != null;
     private bool CanSetVisualizationMode(VisualizationMode mode) => SelectedNode is ImageNodeViewModel n && n.VisualizationMode != mode;
