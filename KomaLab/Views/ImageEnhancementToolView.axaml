@@ -1,0 +1,300 @@
+﻿<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:avalonia="clr-namespace:Material.Icons.Avalonia;assembly=Material.Icons.Avalonia"
+        xmlns:converters="clr-namespace:KomaLab.Converters"
+        xmlns:vm="clr-namespace:KomaLab.ViewModels.ImageProcessing"
+        mc:Ignorable="d" d:DesignWidth="1100" d:DesignHeight="750"
+        x:Class="KomaLab.Views.ImageEnhancementToolView"
+        x:DataType="vm:ImageEnhancementToolViewModel"
+        
+        Width="900" Height="650" MinHeight="600" MinWidth="850"
+        WindowStartupLocation="CenterScreen"
+        Background="{DynamicResource ToolWindowBackgroundBrush}"
+        Focusable="True">
+
+    <Window.Title>
+        <Binding Path="CurrentCategory">
+            <Binding.Converter>
+                <converters:EnhancementCategoryTitleConverter/>
+            </Binding.Converter>
+        </Binding>
+    </Window.Title>
+
+    <Window.Resources>
+        <converters:EnhancementCategoryTitleConverter x:Key="TitleConverter" />
+        <converters:ImageEnhancementModeConverter x:Key="ModeConverter" />
+        <converters:ImageEnhancementDescriptionConverter x:Key="DescConverter" />
+        <converters:EnumToBoolConverter x:Key="EnumToBool" />
+    </Window.Resources>
+
+    <Window.Styles>
+        <StyleInclude Source="/Styles/AlignmentToolStyles.axaml" />
+        <Style Selector="TextBox.compact">
+            <Setter Property="MinHeight" Value="24"/>
+            <Setter Property="Padding" Value="5,3"/>
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="VerticalContentAlignment" Value="Center"/>
+            <Setter Property="Margin" Value="0,0,5,0"/> 
+        </Style>
+    </Window.Styles>
+
+    <Grid ColumnDefinitions="380, *">
+        
+        <Border Grid.Column="0" Background="{DynamicResource ToolPanelBackgroundBrush}" Padding="15" IsEnabled="{Binding IsInteractionEnabled}">
+            <Grid RowDefinitions="Auto, Auto, Auto, *, Auto, Auto">
+                
+                <TextBlock Grid.Row="0" Text="{Binding CurrentCategory, Converter={StaticResource TitleConverter}}" 
+                           FontSize="20" FontWeight="Bold" Foreground="White" 
+                           TextWrapping="Wrap" Margin="0,0,0,20"/>
+
+                <StackPanel Grid.Row="1" Spacing="8" IsEnabled="{Binding IsSetupControlsEnabled}">
+                    <TextBlock Text="Algoritmo Selezionato" FontWeight="SemiBold"/>
+                    <ComboBox ItemsSource="{Binding AvailableModes}" 
+                              SelectedItem="{Binding SelectedMode}" 
+                              HorizontalAlignment="Stretch">
+                        <ComboBox.ItemTemplate>
+                            <DataTemplate>
+                                <TextBlock Text="{Binding ., Converter={StaticResource ModeConverter}}"/> 
+                            </DataTemplate>
+                        </ComboBox.ItemTemplate>
+                    </ComboBox>
+                </StackPanel>
+
+                <Border Grid.Row="2" Height="1" Background="{DynamicResource ActionDisabledBackgroundBrush}" Margin="0,15"/>
+
+                <ScrollViewer Grid.Row="3" HorizontalScrollBarVisibility="Disabled" IsEnabled="{Binding IsSetupControlsEnabled}">
+                    <StackPanel Spacing="25">
+                        
+                        <StackPanel Spacing="5">
+                            <TextBlock Text="Descrizione" FontSize="11" Opacity="0.5" FontWeight="Bold"/>
+                            <TextBlock Text="{Binding SelectedMode, Converter={StaticResource DescConverter}}" 
+                                       FontStyle="Italic" Opacity="0.8" TextWrapping="Wrap" FontSize="12"/>
+                        </StackPanel>
+
+                        <StackPanel Spacing="10" IsVisible="{Binding IsLarsonSekaninaVisible}">
+                            <TextBlock Text="Parametri Rotazione" FontWeight="SemiBold"/>
+                            <Grid ColumnDefinitions="*, 80" RowDefinitions="Auto, Auto, Auto" RowSpacing="8">
+                                <TextBlock Grid.Row="0" Text="Angolo (deg):" VerticalAlignment="Center" Opacity="0.8"/>
+                                <TextBox x:Name="RotationBox" Text="{Binding RotationAngle, Mode=OneWay, StringFormat={}{0:F1}}"
+                                         Grid.Row="0" Grid.Column="1" Classes="compact" LostFocus="OnManualInputCommit" KeyDown="OnInputKeyDown"/>
+
+                                <TextBlock Grid.Row="1" Text="Shift X (px):" VerticalAlignment="Center" Opacity="0.8"/>
+                                <TextBox x:Name="ShiftXBox" Text="{Binding ShiftX, Mode=OneWay, StringFormat={}{0:F1}}"
+                                         Grid.Row="1" Grid.Column="1" Classes="compact" LostFocus="OnManualInputCommit" KeyDown="OnInputKeyDown"/>
+                                         
+                                <TextBlock Grid.Row="2" Text="Shift Y (px):" VerticalAlignment="Center" Opacity="0.8"/>
+                                <TextBox x:Name="ShiftYBox" Text="{Binding ShiftY, Mode=OneWay, StringFormat={}{0:F1}}"
+                                         Grid.Row="2" Grid.Column="1" Classes="compact" LostFocus="OnManualInputCommit" KeyDown="OnInputKeyDown"/>
+                            </Grid>
+                        </StackPanel>
+
+                        <StackPanel Spacing="10" IsVisible="{Binding IsAzimuthalVisible}">
+                            <TextBlock Text="Geometria Polare" FontWeight="SemiBold"/>
+                            <Grid ColumnDefinitions="*, 80" RowDefinitions="Auto, Auto, Auto" RowSpacing="8">
+                                <TextBlock Grid.Row="0" Text="Subsampling:" VerticalAlignment="Center" Opacity="0.8"/>
+                                <TextBox x:Name="SubsamplingBox" Text="{Binding RadialSubsampling, Mode=OneWay}"
+                                         Grid.Row="0" Grid.Column="1" Classes="compact" LostFocus="OnManualInputCommit" KeyDown="OnInputKeyDown"/>
+
+                                <TextBlock Grid.Row="1" Text="Sigma Rej:" VerticalAlignment="Center" Opacity="0.8"/>
+                                <TextBox x:Name="AzimuthalRejBox" Text="{Binding AzimuthalRejSigma, Mode=OneWay, StringFormat={}{0:F1}}"
+                                         Grid.Row="1" Grid.Column="1" Classes="compact" LostFocus="OnManualInputCommit" KeyDown="OnInputKeyDown"/>
+                                
+                                <TextBlock Grid.Row="2" Text="Norm Scale:" VerticalAlignment="Center" Opacity="0.8"/>
+                                <TextBox x:Name="AzimuthalNormBox" Text="{Binding AzimuthalNormSigma, Mode=OneWay, StringFormat={}{0:F1}}"
+                                         Grid.Row="2" Grid.Column="1" Classes="compact" LostFocus="OnManualInputCommit" KeyDown="OnInputKeyDown"/>
+                            </Grid>
+                        </StackPanel>
+
+                        <StackPanel Spacing="10" IsVisible="{Binding IsRvsfSingleVisible}">
+                            <TextBlock Text="Parametri RVSF (Singolo)" FontWeight="SemiBold"/>
+                            <CheckBox Content="Scala Logaritmica" IsChecked="{Binding UseLogScale}"/>
+                            
+                            <Grid ColumnDefinitions="*, 80" RowDefinitions="Auto, Auto, Auto" RowSpacing="8">
+                                <TextBlock Grid.Row="0" Text="Param A (Offset):" VerticalAlignment="Center" Opacity="0.8"/>
+                                <TextBox x:Name="RvsfA1Box" Text="{Binding RvsfA_1, Mode=OneWay, StringFormat={}{0:F2}}"
+                                         Grid.Row="0" Grid.Column="1" Classes="compact" LostFocus="OnManualInputCommit" KeyDown="OnInputKeyDown"/>
+
+                                <TextBlock Grid.Row="1" Text="Param B (Scale):" VerticalAlignment="Center" Opacity="0.8"/>
+                                <TextBox x:Name="RvsfB1Box" Text="{Binding RvsfB_1, Mode=OneWay, StringFormat={}{0:F2}}"
+                                         Grid.Row="1" Grid.Column="1" Classes="compact" LostFocus="OnManualInputCommit" KeyDown="OnInputKeyDown"/>
+
+                                <TextBlock Grid.Row="2" Text="Param N (Power):" VerticalAlignment="Center" Opacity="0.8"/>
+                                <TextBox x:Name="RvsfN1Box" Text="{Binding RvsfN_1, Mode=OneWay, StringFormat={}{0:F2}}"
+                                         Grid.Row="2" Grid.Column="1" Classes="compact" LostFocus="OnManualInputCommit" KeyDown="OnInputKeyDown"/>
+                            </Grid>
+                        </StackPanel>
+
+                        <StackPanel Spacing="10" IsVisible="{Binding IsRvsfMosaicVisible}">
+                             <TextBlock Text="RVSF Mosaico (Range Parametri)" FontWeight="SemiBold"/>
+                             <CheckBox Content="Scala Logaritmica" IsChecked="{Binding UseLogScale}"/>
+                             
+                             <Grid ColumnDefinitions="*, 60, 10, 60" RowDefinitions="Auto, Auto, Auto" RowSpacing="8">
+                                
+                                <TextBlock Grid.Row="0" Text="Range A:" VerticalAlignment="Center" Opacity="0.8"/>
+                                <TextBox x:Name="RvsfAMinBox" Grid.Row="0" Grid.Column="1" Text="{Binding RvsfA_1, Mode=OneWay, StringFormat={}{0:F2}}"
+                                         Classes="compact" HorizontalContentAlignment="Center" LostFocus="OnManualInputCommit" KeyDown="OnInputKeyDown"/>
+                                <TextBlock Grid.Row="0" Grid.Column="2" Text="-" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                <TextBox x:Name="RvsfAMaxBox" Grid.Row="0" Grid.Column="3" Text="{Binding RvsfA_2, Mode=OneWay, StringFormat={}{0:F2}}"
+                                         Classes="compact" HorizontalContentAlignment="Center" LostFocus="OnManualInputCommit" KeyDown="OnInputKeyDown"/>
+
+                                <TextBlock Grid.Row="1" Text="Range B:" VerticalAlignment="Center" Opacity="0.8"/>
+                                <TextBox x:Name="RvsfBMinBox" Grid.Row="1" Grid.Column="1" Text="{Binding RvsfB_1, Mode=OneWay, StringFormat={}{0:F2}}"
+                                         Classes="compact" HorizontalContentAlignment="Center" LostFocus="OnManualInputCommit" KeyDown="OnInputKeyDown"/>
+                                <TextBlock Grid.Row="1" Grid.Column="2" Text="-" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                <TextBox x:Name="RvsfBMaxBox" Grid.Row="1" Grid.Column="3" Text="{Binding RvsfB_2, Mode=OneWay, StringFormat={}{0:F2}}"
+                                         Classes="compact" HorizontalContentAlignment="Center" LostFocus="OnManualInputCommit" KeyDown="OnInputKeyDown"/>
+
+                                <TextBlock Grid.Row="2" Text="Range N:" VerticalAlignment="Center" Opacity="0.8"/>
+                                <TextBox x:Name="RvsfNMinBox" Grid.Row="2" Grid.Column="1" Text="{Binding RvsfN_1, Mode=OneWay, StringFormat={}{0:F2}}"
+                                         Classes="compact" HorizontalContentAlignment="Center" LostFocus="OnManualInputCommit" KeyDown="OnInputKeyDown"/>
+                                <TextBlock Grid.Row="2" Grid.Column="2" Text="-" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                <TextBox x:Name="RvsfNMaxBox" Grid.Row="2" Grid.Column="3" Text="{Binding RvsfN_2, Mode=OneWay, StringFormat={}{0:F2}}"
+                                         Classes="compact" HorizontalContentAlignment="Center" LostFocus="OnManualInputCommit" KeyDown="OnInputKeyDown"/>
+                            </Grid>
+                        </StackPanel>
+
+                        <StackPanel Spacing="10" IsVisible="{Binding IsFrangiVisible}">
+                            <TextBlock Text="Filtro Hessiana" FontWeight="SemiBold"/>
+                            <Grid ColumnDefinitions="*, 80" RowDefinitions="Auto, Auto, Auto" RowSpacing="8">
+                                <TextBlock Grid.Row="0" Text="Sigma (Scala):" VerticalAlignment="Center" Opacity="0.8"/>
+                                <TextBox x:Name="FrangiSigmaBox" Text="{Binding FrangiSigma, Mode=OneWay, StringFormat={}{0:F2}}"
+                                         Grid.Row="0" Grid.Column="1" Classes="compact" LostFocus="OnManualInputCommit" KeyDown="OnInputKeyDown"/>
+
+                                <TextBlock Grid.Row="1" Text="Beta (Shape):" VerticalAlignment="Center" Opacity="0.8"/>
+                                <TextBox x:Name="FrangiBetaBox" Text="{Binding FrangiBeta, Mode=OneWay, StringFormat={}{0:F2}}"
+                                         Grid.Row="1" Grid.Column="1" Classes="compact" LostFocus="OnManualInputCommit" KeyDown="OnInputKeyDown"/>
+
+                                <TextBlock Grid.Row="2" Text="C (Noise):" VerticalAlignment="Center" Opacity="0.8"/>
+                                <TextBox x:Name="FrangiCBox" Text="{Binding FrangiC, Mode=OneWay, StringFormat={}{0:F4}}"
+                                         Grid.Row="2" Grid.Column="1" Classes="compact" LostFocus="OnManualInputCommit" KeyDown="OnInputKeyDown"/>
+                            </Grid>
+                        </StackPanel>
+
+                        <StackPanel Spacing="10" IsVisible="{Binding IsTensorVisible}">
+                            <TextBlock Text="Parametri Flusso" FontWeight="SemiBold"/>
+                            <Grid ColumnDefinitions="*, 80" RowDefinitions="Auto, Auto" RowSpacing="8">
+                                <TextBlock Grid.Row="0" Text="Sigma (Grad):" VerticalAlignment="Center" Opacity="0.8"/>
+                                <TextBox x:Name="TensorSigmaBox" Text="{Binding TensorSigma, Mode=OneWay}"
+                                         Grid.Row="0" Grid.Column="1" Classes="compact" LostFocus="OnManualInputCommit" KeyDown="OnInputKeyDown"/>
+
+                                <TextBlock Grid.Row="1" Text="Rho (Smooth):" VerticalAlignment="Center" Opacity="0.8"/>
+                                <TextBox x:Name="TensorRhoBox" Text="{Binding TensorRho, Mode=OneWay}"
+                                         Grid.Row="1" Grid.Column="1" Classes="compact" LostFocus="OnManualInputCommit" KeyDown="OnInputKeyDown"/>
+                            </Grid>
+                        </StackPanel>
+
+                        <StackPanel Spacing="10" IsVisible="{Binding IsTopHatVisible}">
+                            <TextBlock Text="Morfologia" FontWeight="SemiBold"/>
+                            <Grid ColumnDefinitions="*, 80" RowSpacing="8">
+                                <TextBlock Text="Kernel Size:" VerticalAlignment="Center" Opacity="0.8"/>
+                                <TextBox x:Name="TopHatBox" Text="{Binding TopHatKernelSize, Mode=OneWay}"
+                                         Grid.Column="1" Classes="compact" LostFocus="OnManualInputCommit" KeyDown="OnInputKeyDown"/>
+                            </Grid>
+                        </StackPanel>
+
+                        <StackPanel Spacing="10" IsVisible="{Binding IsClaheVisible}">
+                            <TextBlock Text="CLAHE (16-bit)" FontWeight="SemiBold"/>
+                            <Grid ColumnDefinitions="*, 80" RowDefinitions="Auto, Auto" RowSpacing="8">
+                                <TextBlock Grid.Row="0" Text="Clip Limit:" VerticalAlignment="Center" Opacity="0.8"/>
+                                <TextBox x:Name="ClaheClipBox" Text="{Binding ClaheClipLimit, Mode=OneWay, StringFormat={}{0:F1}}"
+                                         Grid.Row="0" Grid.Column="1" Classes="compact" LostFocus="OnManualInputCommit" KeyDown="OnInputKeyDown"/>
+
+                                <TextBlock Grid.Row="1" Text="Grid Size:" VerticalAlignment="Center" Opacity="0.8"/>
+                                <TextBox x:Name="ClaheTileBox" Text="{Binding ClaheTileSize, Mode=OneWay}"
+                                         Grid.Row="1" Grid.Column="1" Classes="compact" LostFocus="OnManualInputCommit" KeyDown="OnInputKeyDown"/>
+                            </Grid>
+                        </StackPanel>
+
+                        <StackPanel Spacing="10" IsVisible="{Binding IsLocalNormVisible}">
+                            <TextBlock Text="Statistica Locale" FontWeight="SemiBold"/>
+                            <Grid ColumnDefinitions="*, 80" RowDefinitions="Auto, Auto" RowSpacing="8">
+                                <TextBlock Grid.Row="0" Text="Window Size:" VerticalAlignment="Center" Opacity="0.8"/>
+                                <TextBox x:Name="LocalNormWindowBox" Text="{Binding LocalNormWindowSize, Mode=OneWay}"
+                                         Grid.Row="0" Grid.Column="1" Classes="compact" LostFocus="OnManualInputCommit" KeyDown="OnInputKeyDown"/>
+
+                                <TextBlock Grid.Row="1" Text="Intensità:" VerticalAlignment="Center" Opacity="0.8"/>
+                                <TextBox x:Name="LocalNormIntensityBox" Text="{Binding LocalNormIntensity, Mode=OneWay, StringFormat={}{0:F1}}"
+                                         Grid.Row="1" Grid.Column="1" Classes="compact" LostFocus="OnManualInputCommit" KeyDown="OnInputKeyDown"/>
+                            </Grid>
+                        </StackPanel>
+
+                        <StackPanel Spacing="10" IsVisible="{Binding IsKernelVisible}">
+                            <Grid ColumnDefinitions="*, 80" RowSpacing="8">
+                                <TextBlock Text="Kernel Size:" VerticalAlignment="Center" Opacity="0.8"/>
+                                <TextBox x:Name="KernelSizeBox" Text="{Binding KernelSize, Mode=OneWay}"
+                                         Grid.Column="1" Classes="compact" LostFocus="OnManualInputCommit" KeyDown="OnInputKeyDown"/>
+                            </Grid>
+                        </StackPanel>
+
+                    </StackPanel>
+                </ScrollViewer>
+
+                <Border Grid.Row="4" Height="1" Background="{DynamicResource ActionDisabledBackgroundBrush}" Margin="0,15"/>
+
+                <Panel Grid.Row="5">
+                    <StackPanel Spacing="10" IsVisible="{Binding IsBusy}">
+                        <TextBlock Text="{Binding StatusText}" HorizontalAlignment="Center" FontSize="12" FontStyle="Italic"/>
+                        <ProgressBar Value="{Binding ProgressValue}" 
+                                     IsIndeterminate="{Binding ProgressValue, Converter={x:Static converters:ObjectConverters.IsZero}}" 
+                                     Height="4" HorizontalAlignment="Stretch" 
+                                     Foreground="{DynamicResource ActionPrimaryBackgroundBrush}"/>
+                    </StackPanel>
+
+                    <Button Content="Calcola Anteprima" Command="{Binding CalculatePreviewCommand}" 
+                            HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
+                            Classes="actionBtn calculate" IsVisible="{Binding IsCalculateButtonVisible}"/>
+
+                    <Grid ColumnDefinitions="*, *" ColumnSpacing="10" IsVisible="{Binding IsApplyCancelButtonsVisible}">
+                        <Button Grid.Column="0" Content="Indietro" Command="{Binding CancelCommand}" 
+                                HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" Classes="actionBtn cancel"/>
+                        <Button Grid.Column="1" Content="Applica Batch" Command="{Binding ApplyBatchCommand}" 
+                                HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" Classes="actionBtn apply"/>
+                    </Grid>
+                </Panel>
+            </Grid>
+        </Border>
+
+        <Border Grid.Column="1" Background="{DynamicResource ToolWindowBackgroundBrush}" Padding="10">
+            <Border Name="PreviewBorder" Background="{DynamicResource ToolPreviewBackgroundBrush}" ClipToBounds="True"
+                    PointerPressed="OnPreviewPointerPressed" PointerReleased="OnPreviewPointerReleased" 
+                    PointerMoved="OnPreviewPointerMoved" PointerWheelChanged="OnPreviewPointerWheelChanged">
+                <Grid>
+                    <Canvas Name="ViewportCanvas" RenderTransformOrigin="0,0">
+                        <Canvas.RenderTransform>
+                            <TransformGroup>
+                                <ScaleTransform ScaleX="{Binding Viewport.Scale}" ScaleY="{Binding Viewport.Scale}"/>
+                                <TranslateTransform X="{Binding Viewport.OffsetX}" Y="{Binding Viewport.OffsetY}"/>
+                            </TransformGroup>
+                        </Canvas.RenderTransform>
+                        <Image Source="{Binding ActiveRenderer.Image}" Stretch="None" RenderOptions.BitmapInterpolationMode="None"/>
+                    </Canvas>
+
+                    <StackPanel Orientation="Horizontal" Spacing="4" Margin="10" 
+                                HorizontalAlignment="Left" VerticalAlignment="Bottom" ZIndex="1" 
+                                PointerPressed="OnControlsPointerPressed" IsEnabled="{Binding !IsBusy}">
+                        <Button Command="{Binding Navigator.MoveToFirstCommand}"><avalonia:MaterialIcon Kind="ChevronDoubleLeft" Width="16" Height="16"/></Button>
+                        <Button Command="{Binding Navigator.PreviousCommand}"><avalonia:MaterialIcon Kind="ChevronLeft" Width="16" Height="16"/></Button>
+                        <TextBlock Text="{Binding CurrentImageText}" VerticalAlignment="Center" Margin="10,0" Foreground="White" FontWeight="Bold"/>
+                        <Button Command="{Binding Navigator.NextCommand}"><avalonia:MaterialIcon Kind="ChevronRight" Width="16" Height="16"/></Button>
+                        <Button Command="{Binding Navigator.MoveToLastCommand}"><avalonia:MaterialIcon Kind="ChevronDoubleRight" Width="16" Height="16"/></Button>
+                    </StackPanel>
+                    
+                    <StackPanel Orientation="Horizontal" Spacing="4" Margin="10" HorizontalAlignment="Right" VerticalAlignment="Bottom" ZIndex="1" PointerPressed="OnControlsPointerPressed">
+                        <Button Click="OnZoomOutClicked"><avalonia:MaterialIcon Kind="Minus" Width="16" Height="16"/></Button>
+                        <Button Click="OnZoomInClicked"><avalonia:MaterialIcon Kind="Plus" Width="16" Height="16"/></Button>
+                        <Button Click="OnResetViewClicked"><avalonia:MaterialIcon Kind="FitToScreen" Width="16" Height="16"/></Button>
+                        <Path Data="M0,0 V18" Stroke="#666666" StrokeThickness="1" Margin="8,4,8,4" VerticalAlignment="Center" />
+                        <Button Command="{Binding ResetThresholdsCommand}"><avalonia:MaterialIcon Kind="Contrast" Width="16" Height="16"/></Button>
+                    </StackPanel>
+                    
+                    <Border HorizontalAlignment="Left" VerticalAlignment="Top" Margin="10" Padding="8,4" 
+                            Background="{DynamicResource OverlayTextBackgroundBrush}" CornerRadius="4">
+                        <TextBlock Text="{Binding Viewport.Scale, StringFormat={}{0:P0}}" Foreground="White" FontSize="14"/>
+                    </Border>
+                </Grid>
+            </Border>
+        </Border>
+    </Grid>
+</Window>

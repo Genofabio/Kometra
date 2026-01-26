@@ -93,11 +93,19 @@
                     </MenuItem.Icon>
                 </MenuItem>
 
-                <MenuItem Header="Estrazione Strutture (LS/RVSF)"
+                <MenuItem Header="Estrazione Strutture"
                           Classes="innerMenuItem"
                           Command="{Binding BoardVm.ShowStructureExtractionWindowCommand}">
                     <MenuItem.Icon>
                         <avalonia:MaterialIcon Kind="Radar" />
+                    </MenuItem.Icon>
+                </MenuItem>
+
+                <MenuItem Header="Contrasto Locale"
+                          Classes="innerMenuItem"
+                          Command="{Binding BoardVm.ShowLocalContrastWindowCommand}">
+                    <MenuItem.Icon>
+                        <avalonia:MaterialIcon Kind="ContrastBox" />
                     </MenuItem.Icon>
                 </MenuItem>
             </MenuItem>

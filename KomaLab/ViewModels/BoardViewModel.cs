@@ -47,6 +47,7 @@ public partial class BoardViewModel : ObservableObject
 
     partial void OnSelectedNodeChanged(BaseNodeViewModel? value)
     {
+        // Notifica ai comandi di ricalcolare CanExecute quando cambia la selezione
         ResetNormalizationCommand.NotifyCanExecuteChanged();
         ResetNodeViewCommand.NotifyCanExecuteChanged();
         ShowAlignmentWindowCommand.NotifyCanExecuteChanged();
@@ -58,8 +59,11 @@ public partial class BoardViewModel : ObservableObject
         ShowPlateSolvingWindowCommand.NotifyCanExecuteChanged();
         SetVisualizationModeCommand.NotifyCanExecuteChanged();
         ShowPosterizationWindowCommand.NotifyCanExecuteChanged();
+        
+        // I 3 comandi di enhancement
         ShowRadialEnhancementWindowCommand.NotifyCanExecuteChanged();
-        ShowStructureExtractionWindowCommand.NotifyCanExecuteChanged(); // <--- AGGIUNTO
+        ShowStructureExtractionWindowCommand.NotifyCanExecuteChanged();
+        ShowLocalContrastWindowCommand.NotifyCanExecuteChanged();
     }
     
     public bool IsGlobalAnimationRunning => 
@@ -212,11 +216,11 @@ public partial class BoardViewModel : ObservableObject
     [RelayCommand]
     private async Task AddNodeAsync()
     {
-        // 1. Apertura della finestra di Importazione avanzata invece del semplice file picker
+        // 1. Apertura della finestra di Importazione avanzata
         var resultPaths = await _windowService.ShowImportWindowAsync();
         if (resultPaths == null || !resultPaths.Any()) return;
 
-        // 2. Recupero metadati e ordinamento per data
+        // 2. Recupero metadati e ordinamento
         var tasks = resultPaths.Select(async path => 
         {
             var header = await _dataManager.GetHeaderOnlyAsync(path);
@@ -239,8 +243,7 @@ public partial class BoardViewModel : ObservableObject
             ? await _nodeFactory.CreateSingleImageNodeAsync(sortedPaths[0], pos.X, pos.Y)
             : await _nodeFactory.CreateMultipleImagesNodeAsync(sortedPaths, pos.X, pos.Y);
 
-        // 4. Gestione dinamica del titolo: se i path puntano alla cartella temporanea "Calibrated",
-        // aggiungiamo il suffisso al nome standard creato dalla factory.
+        // 4. Gestione dinamica del titolo
         bool isCalibrated = sortedPaths.Any(p => p.Contains("Calibrated", StringComparison.OrdinalIgnoreCase));
         if (isCalibrated)
         {
@@ -272,7 +275,7 @@ public partial class BoardViewModel : ObservableObject
     }
 
     // ---------------------------------------------------------------------------
-    // TOOL E ELABORAZIONE (Utilizzano FitsFileReference)
+    // TOOL E ELABORAZIONE
     // ---------------------------------------------------------------------------
 
     [RelayCommand(CanExecute = nameof(CanStackImages))]
@@ -317,15 +320,8 @@ public partial class BoardViewModel : ObservableObject
         await _videoCoordinator.ExportVideoAsync(imgNode.CurrentFiles, path, 5.0, imgNode.ActiveRenderer.CaptureContrastProfile(), imgNode.VisualizationMode);
     }
 
-    [RelayCommand(CanExecute = nameof(CanExecuteOnImageNode))]
-    private async Task ShowPosterizationWindow()
-    {
-        await RunGenericProcessing(
-            (files, mode) => _windowService.ShowPosterizationWindowAsync(files, mode), 
-            "Posterizzazione", 
-            "(Posterizzata)");
-    }
-    
+    // --- COMANDI FINESTRE ENHANCEMENT ---
+
     [RelayCommand(CanExecute = nameof(CanExecuteOnImageNode))]
     private async Task ShowRadialEnhancementWindow()
     {
@@ -336,14 +332,32 @@ public partial class BoardViewModel : ObservableObject
     }
 
     [RelayCommand(CanExecute = nameof(CanExecuteOnImageNode))]
-    private async Task ShowStructureExtractionWindow() // <--- AGGIUNTO
+    private async Task ShowStructureExtractionWindow()
     {
         await RunGenericProcessing(
             (files, mode) => _windowService.ShowStructureExtractionWindowAsync(files, mode), 
             "Estrazione Strutture", 
-            "(Strutture)");
+            "(Features)");
     }
 
+    [RelayCommand(CanExecute = nameof(CanExecuteOnImageNode))]
+    private async Task ShowLocalContrastWindow()
+    {
+        await RunGenericProcessing(
+            (files, mode) => _windowService.ShowLocalContrastWindowAsync(files, mode), 
+            "Contrasto Locale", 
+            "(Contrasto)");
+    }
+
+    [RelayCommand(CanExecute = nameof(CanExecuteOnImageNode))]
+    private async Task ShowPosterizationWindow()
+    {
+        await RunGenericProcessing(
+            (files, mode) => _windowService.ShowPosterizationWindowAsync(files, mode), 
+            "Posterizzazione", 
+            "(Posterizzata)");
+    }
+    
     [RelayCommand(CanExecute = nameof(CanExecuteOnImageNode))]
     private async Task ShowAlignmentWindow()
     {
@@ -353,6 +367,7 @@ public partial class BoardViewModel : ObservableObject
             "(Allineata)");
     }
     
+    // --- HELPER DRY PER ELABORAZIONI GENERICHE ---
     private async Task RunGenericProcessing(
         Func<List<FitsFileReference>, VisualizationMode, Task<List<string>?>> windowAction, 
         string undoLabel, 
@@ -378,6 +393,8 @@ public partial class BoardViewModel : ObservableObject
         
         RegisterProcessingResult(newNode, imgNode, resultPaths[0], undoLabel);
     }
+
+    // --- ALTRI COMANDI ---
 
     [RelayCommand(CanExecute = nameof(CanExecuteOnImageNode))]
     private async Task ShowPlateSolvingWindow() 

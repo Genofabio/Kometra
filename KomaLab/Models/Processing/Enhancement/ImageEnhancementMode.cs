@@ -1,0 +1,24 @@
+﻿namespace KomaLab.Models.Processing.Enhancement;
+
+public enum ImageEnhancementMode
+{
+    // --- 1. RADIAL & ROTATIONAL ENHANCEMENT (Morfologia Cometa) ---
+    LarsonSekaninaStandard,
+    LarsonSekaninaSymmetric,
+    AdaptiveLaplacianRVSF,
+    AdaptiveLaplacianMosaic,
+    InverseRho,
+    AzimuthalAverage,
+    AzimuthalMedian,
+    AzimuthalRenormalization,
+
+    // --- 2. SHAPE & FEATURE EXTRACTION (Estrazione Forme) ---
+    FrangiVesselnessFilter,
+    StructureTensorCoherence,
+    WhiteTopHatExtraction,
+
+    // --- 3. LOCAL CONTRAST ENHANCEMENT (Contrasto Locale) ---
+    UnsharpMaskingMedian,
+    ClaheLocalContrast,
+    AdaptiveLocalNormalization
+}

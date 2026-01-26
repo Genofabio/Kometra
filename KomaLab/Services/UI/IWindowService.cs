@@ -31,4 +31,8 @@ public interface IWindowService
     public Task<List<string>?> ShowStructureExtractionWindowAsync(
         List<FitsFileReference> sourceFiles,
         VisualizationMode initialMode);
+
+    public Task<List<string>?> ShowLocalContrastWindowAsync(
+        List<FitsFileReference> sourceFiles,
+        VisualizationMode initialMode);
 }

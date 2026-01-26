@@ -11,14 +11,13 @@ using KomaLab.Models.Processing.Enhancement;
 using KomaLab.Services.Factories;
 using KomaLab.Services.Fits;
 using KomaLab.Services.Fits.Metadata;
-using KomaLab.Services.Processing.Batch;
 using KomaLab.Services.Processing.Coordinators;
 using KomaLab.ViewModels.Visualization;
 using SequenceNavigator = KomaLab.ViewModels.Shared.SequenceNavigator;
 
 namespace KomaLab.ViewModels.ImageProcessing;
 
-public enum StructureToolState
+public enum EnhancementToolState
 {
     Initial,
     Calculating,
@@ -26,18 +25,25 @@ public enum StructureToolState
     Processing
 }
 
-public partial class StructureExtractionToolViewModel : ObservableObject, IDisposable
+public partial class ImageEnhancementToolViewModel : ObservableObject, IDisposable
 {
+    // --- DIPENDENZE ---
     private readonly IFitsDataManager _dataManager;
     private readonly IFitsRendererFactory _rendererFactory;
-    private readonly IStructureExtractionCoordinator _coordinator;
-    private readonly IFitsMetadataService _metadataService; 
+    private readonly IImageEnhancementCoordinator _coordinator;
+    private readonly IFitsMetadataService _metadataService;
 
+    // --- DATI INTERNI ---
     private readonly List<FitsFileReference> _sourceFiles;
+    private readonly EnhancementCategory _category; // Categoria corrente
     private CancellationTokenSource? _loadingCts;
 
-    public TaskCompletionSource<bool> ImageLoadedTcs { get; } = new();
+    // --- PROPRIETÀ PUBBLICHE ---
+    
+    // ESPONIAMO LA CATEGORIA (Per Binding del Titolo)
+    public EnhancementCategory CurrentCategory => _category;
 
+    public TaskCompletionSource<bool> ImageLoadedTcs { get; } = new();
     public SequenceNavigator Navigator { get; } = new();
     public EnhancementImageViewport Viewport { get; } = new();
 
@@ -58,7 +64,7 @@ public partial class StructureExtractionToolViewModel : ObservableObject, IDispo
     [NotifyCanExecuteChangedFor(nameof(CalculatePreviewCommand))]
     [NotifyCanExecuteChangedFor(nameof(ApplyBatchCommand))]
     [NotifyCanExecuteChangedFor(nameof(CancelCommand))]
-    private StructureToolState _currentState = StructureToolState.Initial;
+    private EnhancementToolState _currentState = EnhancementToolState.Initial;
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(IsInteractionEnabled))]
@@ -68,115 +74,116 @@ public partial class StructureExtractionToolViewModel : ObservableObject, IDispo
     [NotifyPropertyChangedFor(nameof(IsProcessingVisible))]
     [NotifyCanExecuteChangedFor(nameof(CalculatePreviewCommand))]
     [NotifyCanExecuteChangedFor(nameof(ApplyBatchCommand))]
-    [NotifyCanExecuteChangedFor(nameof(CancelCommand))]
     private bool _isBusy;
 
     [ObservableProperty] private string _statusText = "Pronto";
     [ObservableProperty] private double _progressValue;
 
-    // --- PARAMETRI SCIENTIFICI ---
 
+    // --- MODALITÀ SELEZIONATA ---
     [ObservableProperty]
+    // Notifiche per aggiornare la visibilità dei pannelli parametri
     [NotifyPropertyChangedFor(nameof(IsLarsonSekaninaVisible))]
-    [NotifyPropertyChangedFor(nameof(IsUnsharpMaskingVisible))]
-    [NotifyPropertyChangedFor(nameof(IsRvsfSingleVisible))]
     [NotifyPropertyChangedFor(nameof(IsRvsfMosaicVisible))]
+    [NotifyPropertyChangedFor(nameof(IsRvsfSingleVisible))]
+    [NotifyPropertyChangedFor(nameof(IsAzimuthalVisible))]
     [NotifyPropertyChangedFor(nameof(IsFrangiVisible))]
-    [NotifyPropertyChangedFor(nameof(IsStructureTensorVisible))]
+    [NotifyPropertyChangedFor(nameof(IsTensorVisible))]
     [NotifyPropertyChangedFor(nameof(IsTopHatVisible))]
     [NotifyPropertyChangedFor(nameof(IsClaheVisible))]
     [NotifyPropertyChangedFor(nameof(IsLocalNormVisible))]
-    [NotifyPropertyChangedFor(nameof(DescriptionText))]
-    private StructureExtractionMode _selectedMode = StructureExtractionMode.LarsonSekaninaStandard;
+    [NotifyPropertyChangedFor(nameof(IsKernelVisible))]
+    private ImageEnhancementMode _selectedMode; // Settata nel costruttore
 
-    // 1. Larson-Sekanina
-    [ObservableProperty] private double _rotationAngle = 3.0; 
+
+    // --- PARAMETRI SCIENTIFICI ---
+
+    // 1. Radial & Rotational
+    [ObservableProperty] private double _rotationAngle = 3.0;
     [ObservableProperty] private double _shiftX = 0.0;
     [ObservableProperty] private double _shiftY = 0.0;
-
-    // 2. Unsharp Masking
-    [ObservableProperty] private double _kernelSize = 25.0;
-
-    // 3. Adaptive RVSF
+    
+    [ObservableProperty] private bool _useLogScale = true;
     [ObservableProperty] private double _rvsfA_1 = 1.0;
     [ObservableProperty] private double _rvsfA_2 = 5.0; 
-    [ObservableProperty] private double _rvsfB_1 = 0.2; 
-    [ObservableProperty] private double _rvsfB_2 = 0.5; 
+    [ObservableProperty] private double _rvsfB_1 = 0.2;
+    [ObservableProperty] private double _rvsfB_2 = 0.5;
     [ObservableProperty] private double _rvsfN_1 = 1.0;
     [ObservableProperty] private double _rvsfN_2 = 0.5;
-    [ObservableProperty] private bool _useLogScale = true;
 
-    // 4. Frangi Vesselness
+    [ObservableProperty] private int _radialSubsampling = 5;
+    [ObservableProperty] private double _azimuthalRejSigma = 3.0;
+    [ObservableProperty] private double _azimuthalNormSigma = 20.0;
+
+    // 2. Shape Extraction
     [ObservableProperty] private double _frangiSigma = 1.5;
     [ObservableProperty] private double _frangiBeta = 0.5;
     [ObservableProperty] private double _frangiC = 0.001;
-
-    // 5. Structure Tensor
     [ObservableProperty] private int _tensorSigma = 1;
     [ObservableProperty] private int _tensorRho = 3;
-
-    // 6. White Top-Hat
     [ObservableProperty] private int _topHatKernelSize = 21;
 
-    // 7. CLAHE
+    // 3. Local Contrast
+    [ObservableProperty] private int _kernelSize = 25; 
     [ObservableProperty] private double _claheClipLimit = 3.0;
     [ObservableProperty] private int _claheTileSize = 8;
-
-    // 8. Local Statistical Normalization (LSN)
     [ObservableProperty] private int _localNormWindowSize = 41;
     [ObservableProperty] private double _localNormIntensity = 1.0;
 
 
-    // --- PROPRIETÀ VISIBILITÀ UI ---
+    // --- ESPOSIZIONE LISTE FILTRATE ---
+    // Questa proprietà espone SOLO le modalità della categoria corrente
+    public IEnumerable<ImageEnhancementMode> AvailableModes { get; }
 
-    public bool IsInteractionEnabled => !IsBusy && ActiveRenderer != null && CurrentState != StructureToolState.Processing;
-    public bool IsSetupControlsEnabled => CurrentState == StructureToolState.Initial && !IsBusy;
-    
-    public bool IsCalculateButtonVisible => CurrentState == StructureToolState.Initial && !IsBusy;
-    public bool IsApplyCancelButtonsVisible => CurrentState == StructureToolState.ResultsReady && !IsBusy;
+
+    // --- PROPRIETÀ VISIBILITÀ ---
+    public bool IsInteractionEnabled => !IsBusy && ActiveRenderer != null && CurrentState != EnhancementToolState.Processing;
+    public bool IsSetupControlsEnabled => CurrentState == EnhancementToolState.Initial && !IsBusy;
+    public bool IsCalculateButtonVisible => CurrentState == EnhancementToolState.Initial && !IsBusy;
+    public bool IsApplyCancelButtonsVisible => CurrentState == EnhancementToolState.ResultsReady && !IsBusy;
     public bool IsProcessingVisible => IsBusy;
 
-    public bool IsLarsonSekaninaVisible => SelectedMode is StructureExtractionMode.LarsonSekaninaStandard or StructureExtractionMode.LarsonSekaninaSymmetric;
-    public bool IsUnsharpMaskingVisible => SelectedMode == StructureExtractionMode.UnsharpMaskingMedian;
-    public bool IsRvsfSingleVisible => SelectedMode == StructureExtractionMode.AdaptiveLaplacianRVSF;
-    public bool IsRvsfMosaicVisible => SelectedMode == StructureExtractionMode.AdaptiveLaplacianMosaic;
-    public bool IsFrangiVisible => SelectedMode == StructureExtractionMode.FrangiVesselnessFilter;
-    public bool IsStructureTensorVisible => SelectedMode == StructureExtractionMode.StructureTensorCoherence;
-    public bool IsTopHatVisible => SelectedMode == StructureExtractionMode.WhiteTopHatExtraction;
-    public bool IsClaheVisible => SelectedMode == StructureExtractionMode.ClaheLocalContrast;
-    public bool IsLocalNormVisible => SelectedMode == StructureExtractionMode.AdaptiveLocalNormalization;
-
-    public StructureExtractionMode[] AvailableModes => Enum.GetValues<StructureExtractionMode>();
-
     public string CurrentImageText => $"{Navigator.DisplayIndex} / {Navigator.TotalCount}";
+    
+    // Logica Visibilità Pannelli Parametri
+    public bool IsLarsonSekaninaVisible => SelectedMode is ImageEnhancementMode.LarsonSekaninaStandard or ImageEnhancementMode.LarsonSekaninaSymmetric;
+    public bool IsRvsfSingleVisible => SelectedMode == ImageEnhancementMode.AdaptiveLaplacianRVSF;
+    public bool IsRvsfMosaicVisible => SelectedMode == ImageEnhancementMode.AdaptiveLaplacianMosaic;
+    public bool IsAzimuthalVisible => SelectedMode is ImageEnhancementMode.AzimuthalAverage or ImageEnhancementMode.AzimuthalRenormalization or ImageEnhancementMode.InverseRho or ImageEnhancementMode.AzimuthalMedian;
+    
+    public bool IsFrangiVisible => SelectedMode == ImageEnhancementMode.FrangiVesselnessFilter;
+    public bool IsTensorVisible => SelectedMode == ImageEnhancementMode.StructureTensorCoherence;
+    public bool IsTopHatVisible => SelectedMode == ImageEnhancementMode.WhiteTopHatExtraction;
 
-    public string DescriptionText => SelectedMode switch
-    {
-        StructureExtractionMode.LarsonSekaninaStandard => "Sottrae l'immagine ruotata ($I - Rot$). Ideale per spirali e getti curvi.",
-        StructureExtractionMode.LarsonSekaninaSymmetric => "Sottrae rotazioni opposte ($2I - Rot+ - Rot-$). Più contrasto, meno artefatti.",
-        StructureExtractionMode.UnsharpMaskingMedian => "Sottrae il fondo stimato via mediana locale. Isola rapidamente dettagli fini.",
-        StructureExtractionMode.AdaptiveLaplacianRVSF => "Filtro radiale adattivo ($A + B \\cdot \\rho^N$). Esalta scie ed espansioni dal nucleo.",
-        StructureExtractionMode.AdaptiveLaplacianMosaic => "Testa 8 combinazioni RVSF. Ideale per la ricerca empirica dei parametri.",
-        StructureExtractionMode.FrangiVesselnessFilter => "Analisi multiscala dell'Hessiana. Isola getti filamentosi e curvi sopprimendo stelle.",
-        StructureExtractionMode.StructureTensorCoherence => "Analisi anisotropia locale. Isola i flussi direzionali e i getti rettilinei.",
-        StructureExtractionMode.WhiteTopHatExtraction => "Estrae dettagli luminosi più piccoli del kernel. Ottimo per 'pulire' il bagliore del nucleo.",
-        StructureExtractionMode.ClaheLocalContrast => "Equalizzazione adattiva (16-bit). Esalta il contrasto locale in zone HDR (chioma vs nucleo).",
-        StructureExtractionMode.AdaptiveLocalNormalization => "Normalizzazione statistica ($z-score$). 100% Float-safe, preserva l'integrità del dato FITS.",
-        _ => ""
-    };
+    public bool IsKernelVisible => SelectedMode == ImageEnhancementMode.UnsharpMaskingMedian;
+    public bool IsClaheVisible => SelectedMode == ImageEnhancementMode.ClaheLocalContrast;
+    public bool IsLocalNormVisible => SelectedMode == ImageEnhancementMode.AdaptiveLocalNormalization;
 
-    public StructureExtractionToolViewModel(
+
+    // --- COSTRUTTORE ---
+    public ImageEnhancementToolViewModel(
+        EnhancementCategory targetCategory, // <--- Parametro Categoria
         List<FitsFileReference> files,
         IFitsDataManager dataManager,
         IFitsRendererFactory rendererFactory,
-        IStructureExtractionCoordinator coordinator,
+        IImageEnhancementCoordinator coordinator,
         IFitsMetadataService metadataService)
     {
+        _category = targetCategory;
         _sourceFiles = files;
         _dataManager = dataManager;
         _rendererFactory = rendererFactory;
         _coordinator = coordinator;
         _metadataService = metadataService;
+
+        // FILTRO DINAMICO: Mostriamo solo le modalità della categoria scelta
+        AvailableModes = Enum.GetValues<ImageEnhancementMode>()
+                             .Cast<ImageEnhancementMode>()
+                             .Where(m => m.GetCategory() == _category)
+                             .ToList();
+
+        // Seleziona la prima disponibile per evitare ComboBox vuota
+        if (AvailableModes.Any()) SelectedMode = AvailableModes.First();
 
         Navigator.UpdateStatus(0, _sourceFiles.Count);
         Navigator.IndexChanged += async (_, idx) => await LoadImageAtIndexAsync(idx, resetVisuals: false);
@@ -212,19 +219,17 @@ public partial class StructureExtractionToolViewModel : ObservableObject, IDispo
             var fileRef = _sourceFiles[index];
             FitsRenderer newRenderer;
 
-            if (CurrentState == StructureToolState.ResultsReady)
+            if (CurrentState == EnhancementToolState.ResultsReady)
             {
                 StatusText = "Elaborazione anteprima...";
                 var parameters = BuildParameters();
-                var progress = new Progress<double>(p => ProgressValue = p);
-
-                // Calcolo asincrono tramite coordinator
+                
                 Array processedPixels = await _coordinator.CalculatePreviewDataAsync(fileRef, SelectedMode, parameters);
 
                 var originalData = await _dataManager.GetDataAsync(fileRef.FilePath);
                 var header = fileRef.ModifiedHeader ?? originalData.Header;
 
-                if (SelectedMode == StructureExtractionMode.AdaptiveLaplacianMosaic)
+                if (SelectedMode == ImageEnhancementMode.AdaptiveLaplacianMosaic)
                 {
                     header = header.Clone();
                     _metadataService.AddValue(header, "NAXIS1", originalData.PixelData.GetLength(1) * 4, "Mosaic Width");
@@ -264,38 +269,27 @@ public partial class StructureExtractionToolViewModel : ObservableObject, IDispo
         catch (Exception ex) 
         { 
             StatusText = $"Errore: {ex.Message}";
-            if (CurrentState == StructureToolState.ResultsReady) CurrentState = StructureToolState.Initial;
+            if (CurrentState == EnhancementToolState.ResultsReady) CurrentState = EnhancementToolState.Initial;
         }
         finally { IsBusy = false; ProgressValue = 0; }
     }
 
-    private StructureExtractionParameters BuildParameters()
+    private ImageEnhancementParameters BuildParameters()
     {
-        return new StructureExtractionParameters
+        return new ImageEnhancementParameters
         {
-            RotationAngle = RotationAngle,
-            ShiftX = ShiftX,
-            ShiftY = ShiftY,
-            KernelSize = (int)KernelSize,
+            RotationAngle = RotationAngle, ShiftX = ShiftX, ShiftY = ShiftY,
             UseLog = UseLogScale,
-            ParamA_1 = RvsfA_1,
-            ParamA_2 = SelectedMode == StructureExtractionMode.AdaptiveLaplacianMosaic ? RvsfA_2 : RvsfA_1,
-            ParamB_1 = RvsfB_1,
-            ParamB_2 = SelectedMode == StructureExtractionMode.AdaptiveLaplacianMosaic ? RvsfB_2 : RvsfB_1,
-            ParamN_1 = RvsfN_1,
-            ParamN_2 = SelectedMode == StructureExtractionMode.AdaptiveLaplacianMosaic ? RvsfN_2 : RvsfN_1,
-            
-            // Nuovi parametri scientifici
-            FrangiSigma = FrangiSigma,
-            FrangiBeta = FrangiBeta,
-            FrangiC = FrangiC,
-            TensorSigma = TensorSigma,
-            TensorRho = TensorRho,
-            TopHatKernelSize = TopHatKernelSize,
-            ClaheClipLimit = ClaheClipLimit,
-            ClaheTileSize = ClaheTileSize,
-            LocalNormWindowSize = LocalNormWindowSize,
-            LocalNormIntensity = LocalNormIntensity
+            ParamA_1 = RvsfA_1, ParamA_2 = RvsfA_2,
+            ParamB_1 = RvsfB_1, ParamB_2 = RvsfB_2,
+            ParamN_1 = RvsfN_1, ParamN_2 = RvsfN_2,
+            RadialSubsampling = RadialSubsampling,
+            AzimuthalRejSigma = AzimuthalRejSigma, AzimuthalNormSigma = AzimuthalNormSigma,
+            FrangiSigma = FrangiSigma, FrangiBeta = FrangiBeta, FrangiC = FrangiC,
+            TensorSigma = TensorSigma, TensorRho = TensorRho, TopHatKernelSize = TopHatKernelSize,
+            KernelSize = KernelSize,
+            ClaheClipLimit = ClaheClipLimit, ClaheTileSize = ClaheTileSize,
+            LocalNormWindowSize = LocalNormWindowSize, LocalNormIntensity = LocalNormIntensity
         };
     }
 
@@ -306,22 +300,22 @@ public partial class StructureExtractionToolViewModel : ObservableObject, IDispo
         IsBusy = true;
         try
         {
-            CurrentState = StructureToolState.ResultsReady;
+            CurrentState = EnhancementToolState.ResultsReady;
             await LoadImageAtIndexAsync(Navigator.CurrentIndex, resetVisuals: true);
         }
         catch (Exception ex)
         {
             StatusText = $"Errore Calcolo: {ex.Message}";
-            CurrentState = StructureToolState.Initial;
+            CurrentState = EnhancementToolState.Initial;
         }
         finally { IsBusy = false; }
     }
-    private bool CanCalculate() => !IsBusy && CurrentState == StructureToolState.Initial;
+    private bool CanCalculate() => !IsBusy && CurrentState == EnhancementToolState.Initial;
 
     [RelayCommand(CanExecute = nameof(CanApply))]
     private async Task ApplyBatch()
     {
-        CurrentState = StructureToolState.Processing;
+        CurrentState = EnhancementToolState.Processing;
         IsBusy = true;
         try
         {
@@ -340,18 +334,18 @@ public partial class StructureExtractionToolViewModel : ObservableObject, IDispo
         catch (Exception ex)
         {
             StatusText = $"Errore Batch: {ex.Message}";
-            CurrentState = StructureToolState.ResultsReady;
+            CurrentState = EnhancementToolState.ResultsReady;
         }
         finally { IsBusy = false; }
     }
-    private bool CanApply() => !IsBusy && CurrentState == StructureToolState.ResultsReady;
+    private bool CanApply() => !IsBusy && CurrentState == EnhancementToolState.ResultsReady;
 
     [RelayCommand]
     private async Task Cancel()
     {
-        if (CurrentState == StructureToolState.ResultsReady)
+        if (CurrentState == EnhancementToolState.ResultsReady)
         {
-            CurrentState = StructureToolState.Initial;
+            CurrentState = EnhancementToolState.Initial;
             await LoadImageAtIndexAsync(Navigator.CurrentIndex, resetVisuals: true);
         }
         else

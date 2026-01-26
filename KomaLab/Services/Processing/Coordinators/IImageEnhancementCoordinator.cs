@@ -5,28 +5,28 @@ using System.Threading.Tasks;
 using KomaLab.Models.Fits;
 using KomaLab.Models.Processing;
 using KomaLab.Models.Processing.Enhancement;
-using KomaLab.Services.Processing.Batch;
 
 namespace KomaLab.Services.Processing.Coordinators;
 
-public interface IStructureExtractionCoordinator
+public interface IImageEnhancementCoordinator
 {
     /// <summary>
-    /// Esegue il calcolo completo sui dati raw e restituisce l'array di pixel processati.
-    /// Il tipo di ritorno è Array (può essere float[] o double[]) per rispettare la precisione originale.
+    /// Calcola l'anteprima in RAM per una singola immagine.
+    /// Restituisce l'array di pixel raw (di solito double/float) pronto per il renderer.
     /// </summary>
     Task<Array> CalculatePreviewDataAsync(
         FitsFileReference sourceFile,
-        StructureExtractionMode mode,
-        StructureExtractionParameters parameters);
+        ImageEnhancementMode mode,
+        ImageEnhancementParameters parameters);
 
     /// <summary>
-    /// Esegue l'elaborazione su file multipli salvando i risultati su disco.
+    /// Esegue l'elaborazione batch su una lista di file, salvando i risultati su disco.
+    /// Restituisce la lista dei percorsi dei file generati.
     /// </summary>
     Task<List<string>> ExecuteBatchAsync(
         IEnumerable<FitsFileReference> sourceFiles,
-        StructureExtractionMode mode,
-        StructureExtractionParameters parameters,
+        ImageEnhancementMode mode,
+        ImageEnhancementParameters parameters,
         IProgress<BatchProgressReport>? progress = null,
         CancellationToken token = default);
 }

@@ -1,6 +1,5 @@
 using System;
 using System.IO;
-using System.Collections.Generic;
 using Avalonia;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
@@ -16,6 +15,7 @@ using KomaLab.Services.Processing.Alignment;
 using KomaLab.Services.Processing.Batch;
 using KomaLab.Services.Processing.Coordinators;
 using KomaLab.Services.Processing.Engines;
+using KomaLab.Services.Processing.Engines.Enhancement;
 using KomaLab.Services.Processing.Rendering;
 using KomaLab.Services.UI;
 using KomaLab.Services.Undo;
@@ -24,12 +24,12 @@ using KomaLab.ViewModels.Fits;
 using KomaLab.ViewModels.ImageProcessing;
 using KomaLab.Views;
 
-// Alias per evitare ambiguità nei ViewModel dei Tool
+// Alias per chiarezza (opzionali se non ci sono conflitti)
 using AlignmentToolViewModel = KomaLab.ViewModels.ImageProcessing.AlignmentToolViewModel;
 using HeaderEditorToolViewModel = KomaLab.ViewModels.Fits.HeaderEditorToolViewModel;
 using PlateSolvingToolViewModel = KomaLab.ViewModels.Astrometry.PlateSolvingToolViewModel;
 using PosterizationToolViewModel = KomaLab.ViewModels.ImageProcessing.PosterizationToolViewModel;
-using RadialEnhancementToolViewModel = KomaLab.ViewModels.ImageProcessing.RadialEnhancementToolViewModel;
+// Nota: Radial e Structure sono stati sostituiti dal ImageEnhancementToolViewModel unificato
 
 namespace KomaLab;
 
@@ -97,11 +97,10 @@ public class App : Application
         services.AddSingleton<IImagePresentationService, ImagePresentationService>();
         services.AddSingleton<ICalibrationEngine, CalibrationEngine>();
         
-        // Registrazione motore radiale (ToPolar/FromPolar/Sub-sampling)
-        services.AddSingleton<IRadialEnhancementEngine, RadialEnhancementEngine>();
-
-        // Registrazione motore Larson-Sekanina / RVSF (Rotazione/Shift)
-        services.AddSingleton<IStructureExtractionEngine, StructureExtractionEngine>(); // <--- AGGIUNTO
+        // NUOVO: Motore Unificato per Enhancement (Radial + Structure + Contrast)
+        services.AddSingleton<IGradientRadialEngine, GradientRadialEngine>();
+        services.AddSingleton<ILocalContrastEngine, LocalContrastEngine>();
+        services.AddSingleton<IStructureShapeEngine, StructureShapeEngine>();
 
         // --- 4. Servizi di Dominio ---
         services.AddSingleton<IPlateSolvingService, PlateSolvingService>();
@@ -118,11 +117,8 @@ public class App : Application
         services.AddSingleton<IStackingCoordinator, StackingCoordinator>();
         services.AddSingleton<ICalibrationCoordinator, CalibrationCoordinator>();
         
-        // Coordinatore per la regia tra UI e Engine radiale
-        services.AddSingleton<IRadialEnhancementCoordinator, RadialEnhancementCoordinator>();
-
-        // Coordinatore per la regia tra UI e Engine strutture
-        services.AddSingleton<IStructureExtractionCoordinator, StructureExtractionCoordinator>(); // <--- AGGIUNTO
+        // NUOVO: Coordinatore Unificato (Sostituisce Radial/Structure Coordinators)
+        services.AddSingleton<IImageEnhancementCoordinator, ImageEnhancementCoordinator>();
 
         // --- 6. Factories ---
         services.AddSingleton<INodeViewModelFactory, NodeViewModelFactory>();
@@ -136,11 +132,14 @@ public class App : Application
         // --- 8. Tool ViewModels (Transient) ---
         services.AddTransient<HeaderEditorToolViewModel>();
         services.AddTransient<PosterizationToolViewModel>();
-        services.AddTransient<RadialEnhancementToolViewModel>();
-        services.AddTransient<StructureExtractionToolViewModel>(); // <--- AGGIUNTO
         services.AddTransient<PlateSolvingToolViewModel>();
         services.AddTransient<AlignmentToolViewModel>();
         services.AddTransient<ImportViewModel>();
+        
+        // NUOVO: ViewModel Unificato per i tool di enhancement
+        // (Nota: Spesso istanziato manualmente in WindowService con parametro Categoria, 
+        // ma utile registrarlo per coerenza o factory resolution)
+        services.AddTransient<ImageEnhancementToolViewModel>();
 
         return services.BuildServiceProvider();
     }

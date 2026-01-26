@@ -4,25 +4,19 @@ using System.Threading.Tasks;
 using Avalonia.Controls;
 using KomaLab.Models.Fits;
 using KomaLab.Models.Fits.Structure;
+using KomaLab.Models.Processing.Enhancement; // Per EnhancementCategory
 using KomaLab.Models.Visualization;
 using KomaLab.Services.Astrometry;
-using KomaLab.Services.Fits;
 using KomaLab.Services.Factories;
+using KomaLab.Services.Fits;
 using KomaLab.Services.Fits.Metadata;
 using KomaLab.Services.Processing.Coordinators;
+using KomaLab.ViewModels.Astrometry;
 using KomaLab.ViewModels.Fits;
 using KomaLab.ViewModels.ImageProcessing;
 using KomaLab.ViewModels.Nodes;
 using KomaLab.Views;
 using Microsoft.Extensions.DependencyInjection;
-
-// Alias per evitare ambiguità
-using AlignmentToolViewModel = KomaLab.ViewModels.ImageProcessing.AlignmentToolViewModel;
-using HeaderEditorToolViewModel = KomaLab.ViewModels.Fits.HeaderEditorToolViewModel;
-using PlateSolvingToolViewModel = KomaLab.ViewModels.Astrometry.PlateSolvingToolViewModel;
-using PosterizationToolViewModel = KomaLab.ViewModels.ImageProcessing.PosterizationToolViewModel;
-using RadialEnhancementToolViewModel = KomaLab.ViewModels.ImageProcessing.RadialEnhancementToolViewModel;
-using StructureExtractionToolViewModel = KomaLab.ViewModels.ImageProcessing.StructureExtractionToolViewModel;
 
 namespace KomaLab.Services.UI;
 
@@ -48,7 +42,6 @@ public class WindowService : IWindowService
     // =======================================================================
     // 1. TOOL DI ALLINEAMENTO
     // =======================================================================
-
     public async Task<List<string>?> ShowAlignmentWindowAsync(
         List<FitsFileReference> sourceFiles,
         VisualizationMode initialMode = VisualizationMode.Linear) 
@@ -62,19 +55,12 @@ public class WindowService : IWindowService
         using var viewModel = new AlignmentToolViewModel(sourceFiles, coordinator, dataManager, rendererFactory);
         var view = new AlignmentToolView { DataContext = viewModel };
 
-        Action closeHandler = () => view.Close();
-        viewModel.RequestClose += closeHandler;
-
-        await view.ShowDialog<object>(_mainWindow); 
-
-        viewModel.RequestClose -= closeHandler;
-        return viewModel.DialogResult ? viewModel.FinalProcessedPaths : null; 
+        return await ShowDialogAndGetResultAsync(view, viewModel, vm => vm.FinalProcessedPaths);
     }
     
     // =======================================================================
     // 2. EDITOR DELL'HEADER
     // =======================================================================
-
     public async Task<FitsHeader?> ShowHeaderEditorAsync(
         IReadOnlyList<FitsFileReference> files, 
         IImageNavigator navigator)
@@ -88,12 +74,7 @@ public class WindowService : IWindowService
         using var viewModel = new HeaderEditorToolViewModel(files, navigator, coordinator, healthEvaluator, mapper);
         var view = new HeaderEditorToolView { DataContext = viewModel };
 
-        Action closeHandler = () => view.Close();
-        viewModel.RequestClose += closeHandler;
-
-        await view.ShowDialog(_mainWindow);
-
-        viewModel.RequestClose -= closeHandler;
+        await ShowDialogAsync(view, viewModel);
 
         return navigator.CurrentIndex < files.Count ? files[navigator.CurrentIndex].ModifiedHeader : null;
     }
@@ -101,7 +82,6 @@ public class WindowService : IWindowService
     // =======================================================================
     // 3. PLATE SOLVING
     // =======================================================================
-
     public async Task ShowPlateSolvingWindowAsync(ImageNodeViewModel node)
     {
         if (_mainWindow == null) return;
@@ -114,18 +94,12 @@ public class WindowService : IWindowService
         using var viewModel = new PlateSolvingToolViewModel(node.CurrentFiles, targetName, coordinator, metadataService);
         var view = new PlateSolvingToolView { DataContext = viewModel };
 
-        Action closeHandler = () => view.Close();
-        viewModel.RequestClose += closeHandler;
-
-        await view.ShowDialog(_mainWindow);
-
-        viewModel.RequestClose -= closeHandler;
+        await ShowDialogAsync(view, viewModel);
     }
     
     // =======================================================================
     // 4. POSTERIZZAZIONE
     // =======================================================================
-
     public async Task<List<string>?> ShowPosterizationWindowAsync(
         List<FitsFileReference> sourceFiles,
         VisualizationMode initialMode)
@@ -139,19 +113,12 @@ public class WindowService : IWindowService
         using var viewModel = new PosterizationToolViewModel(sourceFiles, dataManager, rendererFactory, coordinator);
         var view = new PosterizationToolView { DataContext = viewModel };
 
-        Action closeHandler = () => view.Close();
-        viewModel.RequestClose += closeHandler;
-
-        await view.ShowDialog(_mainWindow);
-
-        viewModel.RequestClose -= closeHandler;
-        return viewModel.DialogResult ? viewModel.ResultPaths : null;
+        return await ShowDialogAndGetResultAsync(view, viewModel, vm => vm.ResultPaths);
     }
     
     // =======================================================================
     // 5. IMPORTAZIONE
     // =======================================================================
-
     public async Task<List<string>?> ShowImportWindowAsync()
     {
         if (_mainWindow == null) return null;
@@ -162,76 +129,107 @@ public class WindowService : IWindowService
         var viewModel = new ImportViewModel(dialogService, coordinator);
         var view = new ImportView { DataContext = viewModel };
 
-        Action closeHandler = () => view.Close();
-        viewModel.RequestClose += closeHandler;
-
-        await view.ShowDialog(_mainWindow);
-
-        viewModel.RequestClose -= closeHandler;
-        return viewModel.DialogResult ? viewModel.CalibratedResultPaths : null;
+        return await ShowDialogAndGetResultAsync(view, viewModel, vm => vm.CalibratedResultPaths);
     }
     
     // =======================================================================
-    // 6. MODELLI RADIALI
+    // 6. ENHANCEMENT: MODELLI RADIALI (Radial & Rotational)
     // =======================================================================
-
     public async Task<List<string>?> ShowRadialEnhancementWindowAsync(
         List<FitsFileReference> sourceFiles,
         VisualizationMode initialMode)
     {
-        if (_mainWindow == null) throw new InvalidOperationException("Finestra principale non registrata.");
-
-        var dataManager = _serviceProvider.GetRequiredService<IFitsDataManager>();
-        var rendererFactory = _serviceProvider.GetRequiredService<IFitsRendererFactory>();
-        var coordinator = _serviceProvider.GetRequiredService<IRadialEnhancementCoordinator>();
-
-        using var viewModel = new RadialEnhancementToolViewModel(sourceFiles, dataManager, rendererFactory, coordinator);
-        var view = new RadialEnhancementToolView { DataContext = viewModel };
-
-        Action closeHandler = () => view.Close();
-        viewModel.RequestClose += closeHandler;
-
-        await view.ShowDialog(_mainWindow);
-
-        viewModel.RequestClose -= closeHandler;
-        return viewModel.DialogResult ? viewModel.ResultPaths : null;
+        // Richiamiamo il metodo generico con la categoria RadialRotational
+        return await ShowImageEnhancementToolAsync(sourceFiles, EnhancementCategory.RadialRotational);
     }
 
     // =======================================================================
-    // 7. ESTRAZIONE STRUTTURE (Larson-Sekanina / RVSF)
+    // 7. ENHANCEMENT: ESTRAZIONE STRUTTURE (Features)
     // =======================================================================
-
     public async Task<List<string>?> ShowStructureExtractionWindowAsync(
         List<FitsFileReference> sourceFiles,
         VisualizationMode initialMode)
     {
+        // Richiamiamo il metodo generico con la categoria FeatureExtraction
+        return await ShowImageEnhancementToolAsync(sourceFiles, EnhancementCategory.FeatureExtraction);
+    }
+
+    // =======================================================================
+    // 8. ENHANCEMENT: CONTRASTO LOCALE (Local Contrast)
+    // =======================================================================
+    public async Task<List<string>?> ShowLocalContrastWindowAsync(
+        List<FitsFileReference> sourceFiles,
+        VisualizationMode initialMode)
+    {
+        // Richiamiamo il metodo generico con la categoria LocalContrast
+        return await ShowImageEnhancementToolAsync(sourceFiles, EnhancementCategory.LocalContrast);
+    }
+
+
+    // =======================================================================
+    // HELPER GENERICO PER IMAGE ENHANCEMENT (DRY Principle)
+    // =======================================================================
+    private async Task<List<string>?> ShowImageEnhancementToolAsync(
+        List<FitsFileReference> sourceFiles,
+        EnhancementCategory category)
+    {
         if (_mainWindow == null) throw new InvalidOperationException("Finestra principale non registrata.");
 
-        // 1. Risoluzione dipendenze specifiche
+        // Risoluzione Dipendenze
         var dataManager = _serviceProvider.GetRequiredService<IFitsDataManager>();
         var rendererFactory = _serviceProvider.GetRequiredService<IFitsRendererFactory>();
-        var coordinator = _serviceProvider.GetRequiredService<IStructureExtractionCoordinator>();
-        
-        // AGGIUNTO: MetadataService per gestire il ridimensionamento header nel Mosaico
+        var coordinator = _serviceProvider.GetRequiredService<IImageEnhancementCoordinator>(); // Nuovo Coordinator Unico
         var metadataService = _serviceProvider.GetRequiredService<IFitsMetadataService>();
 
-        // 2. Inizializzazione
-        using var viewModel = new StructureExtractionToolViewModel(
+        // Creazione VM Unico con categoria specifica
+        using var viewModel = new ImageEnhancementToolViewModel(
+            category, // Passiamo la categoria
             sourceFiles, 
             dataManager, 
             rendererFactory, 
             coordinator, 
-            metadataService); // <--- Iniettato qui
+            metadataService);
 
-        var view = new StructureExtractionToolView { DataContext = viewModel };
+        // Creazione View Unica
+        var view = new ImageEnhancementToolView { DataContext = viewModel };
 
-        // 3. Gestione chiusura e risultati
+        return await ShowDialogAndGetResultAsync(view, viewModel, vm => vm.ResultPaths);
+    }
+
+
+    // =======================================================================
+    // HELPER PER APERTURA DIALOGHI (Riduce duplicazione codice)
+    // =======================================================================
+    
+    private async Task ShowDialogAsync<TVm>(Window view, TVm viewModel) 
+        where TVm : class
+    {
+        // Pattern standard: Subscribe -> ShowDialog -> Unsubscribe
         Action closeHandler = () => view.Close();
-        viewModel.RequestClose += closeHandler;
+        
+        // Reflection per trovare l'evento RequestClose (comune a tutti i tuoi VM)
+        var eventInfo = typeof(TVm).GetEvent("RequestClose");
+        if (eventInfo != null)
+            eventInfo.AddEventHandler(viewModel, closeHandler);
 
-        await view.ShowDialog(_mainWindow);
+        await view.ShowDialog(_mainWindow!);
 
-        viewModel.RequestClose -= closeHandler;
-        return viewModel.DialogResult ? viewModel.ResultPaths : null;
+        if (eventInfo != null)
+            eventInfo.RemoveEventHandler(viewModel, closeHandler);
+    }
+
+    private async Task<TReturn?> ShowDialogAndGetResultAsync<TVm, TReturn>(
+        Window view, 
+        TVm viewModel, 
+        Func<TVm, TReturn> resultSelector) 
+        where TVm : class
+    {
+        await ShowDialogAsync(view, viewModel);
+
+        // Reflection per leggere DialogResult
+        var propInfo = typeof(TVm).GetProperty("DialogResult");
+        bool success = (bool)(propInfo?.GetValue(viewModel) ?? false);
+
+        return success ? resultSelector(viewModel) : default;
     }
 }
