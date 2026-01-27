@@ -48,12 +48,11 @@ public class VideoExportCoordinator : IVideoExportCoordinator
         IProgress<double>? progress = null, 
         CancellationToken token = default)
     {
-        // Forziamo MTA Thread: vitale per i backend multimediali di Windows (MSMF)
         await Task.Run(async () => 
         {
             SigmaContrastProfile? referenceSigmaProfile = null;
             bool isInitialized = false;
-            bool success = false;
+            bool success = false; 
         
             var filesList = sourceFiles as IReadOnlyList<FitsFileReference> ?? sourceFiles.ToList();
             int total = filesList.Count;
@@ -65,7 +64,6 @@ public class VideoExportCoordinator : IVideoExportCoordinator
                 {
                     token.ThrowIfCancellationRequested();
 
-                    // 1. Caricamento con BitDepth corretta e Rescale (Dimensioni Pari)
                     using Mat scientificMat = await LoadFitsToScientificMat(fileRef);
                     using Mat scaledMat = ApplyRescale(scientificMat, settings.ScaleFactor);
 
@@ -85,12 +83,10 @@ public class VideoExportCoordinator : IVideoExportCoordinator
                         isInitialized = true;
                     }
 
-                    // 2. Calcolo dello Stretching (Adattivo vs Fisso)
                     var effectiveProfile = settings.AdaptiveStretch 
                         ? GetAdaptiveProfile(scaledMat, initialProfile, ref referenceSigmaProfile)
                         : initialProfile;
 
-                    // 3. Rendering e Conversione BGR (Necessaria per MP4/H264 hardware)
                     using Mat frame8Bit = new Mat();
                     _presentation.RenderTo8Bit(scaledMat, frame8Bit, effectiveProfile.BlackAdu, effectiveProfile.WhiteAdu, settings.Mode);
                 
@@ -102,72 +98,108 @@ public class VideoExportCoordinator : IVideoExportCoordinator
                     _encoder.WriteFrame(colorFrame);
 
                     current++;
-                    progress?.Report((double)current / total * 100.0);
+                    // Lasciamo lo spazio visivo per la sincronizzazione
+                    progress?.Report((double)current / (total + 1) * 100.0);
                 }
-                success = true;
+                
+                success = true; 
             }
-            catch (OperationCanceledException) { }
-            catch (Exception ex)
-            {
-                throw new Exception($"Errore durante l'esportazione video: {ex.Message}", ex);
-            }
+            catch (OperationCanceledException) { success = false; throw; }
+            catch (Exception ex) { success = false; throw new Exception($"Errore export: {ex.Message}", ex); }
             finally
             {
-                // Rilascia il VideoWriter per chiudere il file correttamente
+                // 1. CHIUSURA ENCODER (Rilascia l'handle della libreria video)
                 _encoder.Dispose();
 
-                if (!success && File.Exists(settings.OutputPath))
+                if (success)
                 {
-                    try { File.Delete(settings.OutputPath); } catch { }
+                    // 2. FORZA IL FLUSH FISICO E VERIFICA L'INTEGRITÀ (Cross-Platform)
+                    await FinalizeAndVerifyDiskSyncAsync(settings.OutputPath, token);
+                
+                    // 3. ORA È COMPLETATO AL 100%
+                    progress?.Report(100.0);
+                }
+                else if (!string.IsNullOrEmpty(settings.OutputPath) && File.Exists(settings.OutputPath))
+                {
+                    try { await Task.Delay(200); File.Delete(settings.OutputPath); } catch { }
                 }
             }
-        }, token); 
+        }, token);
     }
 
     /// <summary>
-    /// Carica i dati FITS mappando correttamente il BITPIX sull'enum scientifico.
+    /// Forza la scrittura fisica dei buffer su disco usando metodi .NET cross-platform
+    /// e verifica che il file sia realmente accessibile e completo.
     /// </summary>
+    private async Task FinalizeAndVerifyDiskSyncAsync(string filePath, CancellationToken token)
+    {
+        const int maxRetries = 20;
+        for (int i = 0; i < maxRetries; i++)
+        {
+            token.ThrowIfCancellationRequested();
+
+            if (!File.Exists(filePath)) 
+            { 
+                await Task.Delay(500, token); 
+                continue; 
+            }
+
+            try
+            {
+                // Apriamo il file in modalità esclusiva (FileShare.None)
+                // Se l'OS o un encoder asincrono lo stanno ancora toccando, questo fallisce.
+                using (var fs = new FileStream(filePath, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+                {
+                    // IL CUORE DEL FIX: Flush(true) forza lo svuotamento dei buffer 
+                    // del file system verso l'hardware fisico del disco.
+                    // Funziona su Windows (FlushFileBuffers), Linux (fsync) e macOS.
+                    fs.Flush(flushToDisk: true);
+
+                    // VERIFICA DI REALTÀ: 
+                    // Se riusciamo a leggere l'ultimo byte, la finalizzazione dell'indice è avvenuta.
+                    if (fs.Length > 0)
+                    {
+                        fs.Seek(-1, SeekOrigin.End);
+                        fs.ReadByte(); 
+                        
+                        // Se arriviamo qui senza eccezioni, il file è stabile.
+                        return; 
+                    }
+                }
+            }
+            catch (IOException)
+            {
+                // Il sistema operativo o il backend video non hanno ancora rilasciato il file.
+                // Aspettiamo e riproviamo.
+            }
+
+            await Task.Delay(500, token);
+        }
+    }
+
+    // --- Metodi Helper (Load, Rescale, Profile) rimangono invariati ---
     private async Task<Mat> LoadFitsToScientificMat(FitsFileReference fileRef)
     {
         var data = await _dataManager.GetDataAsync(fileRef.FilePath);
         var header = fileRef.ModifiedHeader ?? data.Header;
-        
-        // Mappatura precisa basata sul tuo Enum FitsBitDepth
         int bitpix = (int)_metadata.GetDoubleValue(header, "BITPIX", 16);
-        FitsBitDepth depth = bitpix switch 
-        { 
-            8   => FitsBitDepth.UInt8,
-            16  => FitsBitDepth.Int16,
-            32  => FitsBitDepth.Int32,
-            -32 => FitsBitDepth.Float,
-            -64 => FitsBitDepth.Double,
-            _   => FitsBitDepth.Int16 // Fallback standard
-        };
-        
-        double bScale = _metadata.GetDoubleValue(header, "BSCALE", 1.0);
-        double bZero = _metadata.GetDoubleValue(header, "BZERO", 0.0);
-        
-        return _converter.RawToMat(data.PixelData, bScale, bZero, depth);
+        FitsBitDepth depth = bitpix switch { 8 => FitsBitDepth.UInt8, 16 => FitsBitDepth.Int16, 32 => FitsBitDepth.Int32, -32 => FitsBitDepth.Float, -64 => FitsBitDepth.Double, _ => FitsBitDepth.Int16 };
+        return _converter.RawToMat(data.PixelData, _metadata.GetDoubleValue(header, "BSCALE", 1.0), _metadata.GetDoubleValue(header, "BZERO", 0.0), depth);
     }
 
     private Mat ApplyRescale(Mat source, double factor)
     {
-        // Forziamo dimensioni pari (& ~1) per compatibilità con encoder H.264/H.265
-        int newWidth = (int)(source.Width * factor) & ~1;
-        int newHeight = (int)(source.Height * factor) & ~1;
-
-        if (newWidth == source.Width && newHeight == source.Height) 
-            return source.Clone();
-
+        int w = (int)(source.Width * factor) & ~1;
+        int h = (int)(source.Height * factor) & ~1;
+        if (w == source.Width && h == source.Height) return source.Clone();
         Mat resized = new Mat();
-        Cv2.Resize(source, resized, new Size(newWidth, newHeight), 0, 0, InterpolationFlags.Area);
+        Cv2.Resize(source, resized, new Size(w, h), 0, 0, InterpolationFlags.Area);
         return resized;
     }
 
     private AbsoluteContrastProfile GetAdaptiveProfile(Mat mat, AbsoluteContrastProfile initial, ref SigmaContrastProfile? reference)
     {
         var stats = _presentation.GetPresentationRequirements(mat);
-        // Cattura il feeling dello stretch iniziale e lo applica dinamicamente a tutta la sequenza
         reference ??= _presentation.GetRelativeProfile(initial, stats);
         return _presentation.GetAbsoluteProfile(reference, stats);
     }

@@ -5,7 +5,7 @@ using Avalonia.Controls;
 using KomaLab.Infrastructure;
 using KomaLab.Models.Fits;
 using KomaLab.Models.Fits.Structure;
-using KomaLab.Models.Processing.Enhancement; // Per EnhancementCategory
+using KomaLab.Models.Processing.Enhancement;
 using KomaLab.Models.Visualization;
 using KomaLab.Services.Astrometry;
 using KomaLab.Services.Factories;
@@ -23,10 +23,6 @@ using VideoExportToolViewModel = KomaLab.ViewModels.ImportExport.VideoExportTool
 
 namespace KomaLab.Services.UI;
 
-/// <summary>
-/// Orchestratore delle Finestre. 
-/// Inizializza i ToolViewModel iniettando i Coordinatori e gestendo la chiusura delle View.
-/// </summary>
 public class WindowService : IWindowService
 {
     private Window? _mainWindow;
@@ -136,42 +132,18 @@ public class WindowService : IWindowService
     }
     
     // =======================================================================
-    // 6. ENHANCEMENT: MODELLI RADIALI
+    // 6-8. ENHANCEMENT HELPERS
     // =======================================================================
-    // Cambiamo il tipo di ritorno in una Tupla (Percorsi, Modalità)
-    public async Task<(List<string> Paths, ImageEnhancementMode Mode)?> ShowRadialEnhancementWindowAsync(
-        List<FitsFileReference> sourceFiles,
-        VisualizationMode initialMode)
-    {
-        return await ShowImageEnhancementToolAsync(sourceFiles, EnhancementCategory.RadialRotational);
-    }
+    public async Task<(List<string> Paths, ImageEnhancementMode Mode)?> ShowRadialEnhancementWindowAsync(List<FitsFileReference> sourceFiles, VisualizationMode initialMode)
+        => await ShowImageEnhancementToolAsync(sourceFiles, EnhancementCategory.RadialRotational);
 
-    // =======================================================================
-    // 7. ENHANCEMENT: ESTRAZIONE STRUTTURE
-    // =======================================================================
-    public async Task<(List<string> Paths, ImageEnhancementMode Mode)?> ShowStructureExtractionWindowAsync(
-        List<FitsFileReference> sourceFiles,
-        VisualizationMode initialMode)
-    {
-        return await ShowImageEnhancementToolAsync(sourceFiles, EnhancementCategory.FeatureExtraction);
-    }
+    public async Task<(List<string> Paths, ImageEnhancementMode Mode)?> ShowStructureExtractionWindowAsync(List<FitsFileReference> sourceFiles, VisualizationMode initialMode)
+        => await ShowImageEnhancementToolAsync(sourceFiles, EnhancementCategory.FeatureExtraction);
 
-    // =======================================================================
-    // 8. ENHANCEMENT: CONTRASTO LOCALE
-    // =======================================================================
-    public async Task<(List<string> Paths, ImageEnhancementMode Mode)?> ShowLocalContrastWindowAsync(
-        List<FitsFileReference> sourceFiles,
-        VisualizationMode initialMode)
-    {
-        return await ShowImageEnhancementToolAsync(sourceFiles, EnhancementCategory.LocalContrast);
-    }
+    public async Task<(List<string> Paths, ImageEnhancementMode Mode)?> ShowLocalContrastWindowAsync(List<FitsFileReference> sourceFiles, VisualizationMode initialMode)
+        => await ShowImageEnhancementToolAsync(sourceFiles, EnhancementCategory.LocalContrast);
 
-    // =======================================================================
-    // HELPER GENERICO AGGIORNATO
-    // =======================================================================
-    private async Task<(List<string> Paths, ImageEnhancementMode Mode)?> ShowImageEnhancementToolAsync(
-        List<FitsFileReference> sourceFiles,
-        EnhancementCategory category)
+    private async Task<(List<string> Paths, ImageEnhancementMode Mode)?> ShowImageEnhancementToolAsync(List<FitsFileReference> sourceFiles, EnhancementCategory category)
     {
         if (_mainWindow == null) throw new InvalidOperationException("Finestra principale non registrata.");
 
@@ -180,63 +152,15 @@ public class WindowService : IWindowService
         var coordinator = _serviceProvider.GetRequiredService<IImageEnhancementCoordinator>();
         var metadataService = _serviceProvider.GetRequiredService<IFitsMetadataService>();
 
-        using var viewModel = new ImageEnhancementToolViewModel(
-            category, 
-            sourceFiles, 
-            dataManager, 
-            rendererFactory, 
-            coordinator, 
-            metadataService);
-
+        using var viewModel = new ImageEnhancementToolViewModel(category, sourceFiles, dataManager, rendererFactory, coordinator, metadataService);
         var view = new ImageEnhancementToolView { DataContext = viewModel };
 
-        // ORA RESTITUIAMO SIA I PATH CHE LA MODALITÀ SELEZIONATA DAL VM
-        return await ShowDialogAndGetResultAsync(
-            view, 
-            viewModel, 
-            vm => (vm.ResultPaths, vm.SelectedMode) // <--- Estrazione Tupla
-        );
+        return await ShowDialogAndGetResultAsync(view, viewModel, vm => (vm.ResultPaths, vm.SelectedMode));
     }
 
 
     // =======================================================================
-    // HELPER PER APERTURA DIALOGHI (Riduce duplicazione codice)
-    // =======================================================================
-    
-    private async Task ShowDialogAsync<TVm>(Window view, TVm viewModel) 
-        where TVm : class
-    {
-        // Pattern standard: Subscribe -> ShowDialog -> Unsubscribe
-        Action closeHandler = () => view.Close();
-        
-        // Reflection per trovare l'evento RequestClose (comune a tutti i tuoi VM)
-        var eventInfo = typeof(TVm).GetEvent("RequestClose");
-        if (eventInfo != null)
-            eventInfo.AddEventHandler(viewModel, closeHandler);
-
-        await view.ShowDialog(_mainWindow!);
-
-        if (eventInfo != null)
-            eventInfo.RemoveEventHandler(viewModel, closeHandler);
-    }
-
-    private async Task<TReturn?> ShowDialogAndGetResultAsync<TVm, TReturn>(
-        Window view, 
-        TVm viewModel, 
-        Func<TVm, TReturn> resultSelector) 
-        where TVm : class
-    {
-        await ShowDialogAsync(view, viewModel);
-
-        // Reflection per leggere DialogResult
-        var propInfo = typeof(TVm).GetProperty("DialogResult");
-        bool success = (bool)(propInfo?.GetValue(viewModel) ?? false);
-
-        return success ? resultSelector(viewModel) : default;
-    }
-    
-    // =======================================================================
-    // 9. ESPORTAZIONE VIDEO (VERSIONE DEFINITIVA)
+    // 9. ESPORTAZIONE VIDEO (VERSIONE INTEGRATA)
     // =======================================================================
     public async Task<VideoExportSettings?> ShowVideoExportDialogAsync(
         ImageNodeViewModel node, 
@@ -244,60 +168,57 @@ public class WindowService : IWindowService
     {
         if (_mainWindow == null) throw new InvalidOperationException("Finestra principale non registrata.");
 
+        // Recupero di tutti i servizi necessari per l'operazione autonoma del tool
         var formatProvider = _serviceProvider.GetRequiredService<IVideoFormatProvider>();
         var dataManager = _serviceProvider.GetRequiredService<IFitsDataManager>();
         var rendererFactory = _serviceProvider.GetRequiredService<IFitsRendererFactory>();
+        var videoCoordinator = _serviceProvider.GetRequiredService<IVideoExportCoordinator>();
         var dialogService = _serviceProvider.GetRequiredService<IDialogService>();
 
-        // 1. Inizializzazione "On-Demand" dei codec (test hardware)
+        // Inizializzazione on-demand dei backend video (FFMPEG/MSMF)
         await formatProvider.InitializeAsync();
 
-        // 2. Gestione Nome File Suggerito
-        // Prendiamo il nome del file attivo e lo tronchiamo al primo punto (es: "M31.fits.fz" -> "M31")
-        string rawName = node.ActiveFile?.FileName ?? "VideoExport";
-        string defaultFileName = rawName.Contains('.') 
-            ? rawName.Substring(0, rawName.IndexOf('.')) 
-            : rawName;
-
-        // 3. Setup del ViewModel con le dipendenze per la Viewport interna
         var originalSize = node.ActiveRenderer.ImageSize;
         var sourceFiles = node.CurrentFiles; 
 
+        // Creazione del ViewModel con iniezione dei coordinatori
         using var viewModel = new VideoExportToolViewModel(
             formatProvider, 
             dataManager,
             rendererFactory,
+            videoCoordinator, // Iniettato per gestire l'export interno
+            dialogService,    // Iniettato per gestire il SaveFileDialog interno
             sourceFiles,
             currentMode, 
             originalSize);
 
         var view = new VideoExportToolView { DataContext = viewModel };
 
-        // 4. Apertura Dialogo Modale
-        await ShowDialogAsync(view, viewModel);
-
-        // 5. Gestione esito e salvataggio
-        if (viewModel.DialogResult)
-        {
-            string extension = formatProvider.GetExtension(viewModel.SelectedContainer);
-            string filterName = $"{viewModel.SelectedContainer} Video";
-
-            // Costruiamo il nome suggerito completo di estensione corretta
-            var outputPath = await dialogService.ShowSaveFileDialogAsync(
-                $"{defaultFileName}{extension}", 
-                filterName, 
-                $"*{extension}");
-
-            if (!string.IsNullOrWhiteSpace(outputPath))
-            {
-                // NOTA: GetSettings() ora cattura internamente le soglie ADU 
-                // regolate dall'utente nella viewport del tool prima di chiudersi.
-                return viewModel.GetSettings(outputPath);
-            }
-        }
-
-        return null;
+        // Apertura dialogo. Il controllo passa al ViewModel.
+        // Se l'utente preme "Esporta", il VM gestirà: 1. Selezione Path, 2. Export con Progress, 3. Chiusura.
+        return await ShowDialogAndGetResultAsync(view, viewModel, vm => vm.GetSettings(vm.OutputPath));
     }
+
+    // =======================================================================
+    // HELPERS PER APERTURA DIALOGHI
+    // =======================================================================
     
-    
+    private async Task ShowDialogAsync<TVm>(Window view, TVm viewModel) where TVm : class
+    {
+        Action closeHandler = () => view.Close();
+        var eventInfo = typeof(TVm).GetEvent("RequestClose");
+        if (eventInfo != null) eventInfo.AddEventHandler(viewModel, closeHandler);
+
+        await view.ShowDialog(_mainWindow!);
+
+        if (eventInfo != null) eventInfo.RemoveEventHandler(viewModel, closeHandler);
+    }
+
+    private async Task<TReturn?> ShowDialogAndGetResultAsync<TVm, TReturn>(Window view, TVm viewModel, Func<TVm, TReturn> resultSelector) where TVm : class
+    {
+        await ShowDialogAsync(view, viewModel);
+        var propInfo = typeof(TVm).GetProperty("DialogResult");
+        bool success = (bool)(propInfo?.GetValue(viewModel) ?? false);
+        return success ? resultSelector(viewModel) : default;
+    }
 }

@@ -78,14 +78,15 @@ public partial class VideoExportToolView : Window
     {
         if (_vm == null || sender is not TextBox box) return;
 
-        // Validazione numerica flessibile
-        if (double.TryParse(box.Text.Replace(",", "."), System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out double val))
+        // Sostituiamo la virgola con il punto per compatibilità universale
+        string cleanText = box.Text.Replace(",", ".");
+    
+        if (double.TryParse(cleanText, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out double val))
         {
-            // Applica limiti di sicurezza (es. 10% - 200%)
             _vm.ScaleFactor = Math.Clamp(val, 0.1, 2.0);
         }
-        
-        // Revert o formattazione finale
+    
+        // Forza la UI a mostrare il valore formattato correttamente
         UpdateUiValues();
     }
 
@@ -177,8 +178,7 @@ public partial class VideoExportToolView : Window
     /// </summary>
     private void OnBackgroundPointerPressed(object? sender, PointerPressedEventArgs e)
     {
-        // Rimuove il focus da qualsiasi elemento attualmente focalizzato (es. la TextBox)
-        // Questo triggera automaticamente l'evento LostFocus e quindi la validazione.
+        // Rimuove il focus dalle TextBox per triggerare il commit dei dati (ScaleFactor)
         this.Focus();
     }
 
