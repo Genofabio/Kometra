@@ -206,11 +206,20 @@ public class AlignmentService : IAlignmentService
                 {
                     var fileRef = files[index];
                     var data = await _dataManager.GetDataAsync(fileRef.FilePath);
-                    var header = fileRef.ModifiedHeader ?? data.Header;
+                    
+                    // [MODIFICA MEF] Accesso sicuro all'HDU immagine (gestisce multi-estensione)
+                    var imageHdu = data.FirstImageHdu ?? data.PrimaryHdu;
+                    
+                    if (imageHdu == null) return (0.0, 0.0);
+
+                    // Preferenza all'header modificato in RAM, altrimenti quello dell'HDU
+                    var header = fileRef.ModifiedHeader ?? imageHdu.Header;
+                    
                     double bScale = _metadataService.GetDoubleValue(header, "BSCALE", 1.0);
                     double bZero = _metadataService.GetDoubleValue(header, "BZERO", 0.0);
 
-                    using Mat mat = _converter.RawToMat(data.PixelData, bScale, bZero, FitsBitDepth.Float);
+                    // Usiamo i PixelData dell'HDU immagine
+                    using Mat mat = _converter.RawToMat(imageHdu.PixelData, bScale, bZero, FitsBitDepth.Float);
                     
                     Rect2D validBox = _analysis.FindValidDataBox(mat);
                     if (validBox.Width > 0)

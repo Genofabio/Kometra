@@ -624,9 +624,21 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
             var data = await _dataManager.GetDataAsync(file.FilePath);
             token.ThrowIfCancellationRequested();
 
+            // [MODIFICA MEF] Accesso sicuro all'HDU immagine
+            var imageHdu = data.FirstImageHdu ?? data.PrimaryHdu;
+            if (imageHdu == null)
+            {
+                StatusMessage = "Nessuna immagine valida trovata.";
+                return;
+            }
+
             // 1. Creazione del nuovo renderer tramite Factory
-            // Il renderer ora nasce già a 64-bit e libera la memoria dei pixel grezzi subito
-            var newRenderer = await _rendererFactory.CreateAsync(data.PixelData, file.ModifiedHeader ?? data.Header);
+            // Usiamo i PixelData dell'HDU e diamo priorità all'header modificato in RAM
+            var newRenderer = await _rendererFactory.CreateAsync(
+                imageHdu.PixelData, 
+                file.ModifiedHeader ?? imageHdu.Header
+            );
+            
             token.ThrowIfCancellationRequested();
 
             // 2. LOGICA ADATTIVA SENZA MATRICI
@@ -638,8 +650,7 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
                 // Sincronizziamo la modalità (Linear, Log, etc.)
                 newRenderer.VisualizationMode = ActiveRenderer.VisualizationMode;
                 
-                // Applichiamo lo stile al nuovo: il calcolo avviene internamente al newRenderer
-                // usando la Media e Sigma che ha calcolato durante la sua inizializzazione.
+                // Applichiamo lo stile al nuovo
                 newRenderer.ApplyRelativeProfile(currentStyle);
 
                 // Smaltiamo immediatamente i 64-bit del vecchio renderer dalla RAM

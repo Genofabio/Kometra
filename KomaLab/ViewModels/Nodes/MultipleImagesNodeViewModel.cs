@@ -121,9 +121,19 @@ public partial class MultipleImagesNodeViewModel : ImageNodeViewModel
             var data = await _dataManager.GetDataAsync(fileRef.FilePath);
             token.ThrowIfCancellationRequested();
 
+            // [MODIFICA MEF] Accesso sicuro all'HDU Immagine
+            var imageHdu = data.FirstImageHdu ?? data.PrimaryHdu;
+
+            if (imageHdu == null)
+            {
+                System.Diagnostics.Debug.WriteLine($"[MultipleImagesNode] SKIP: Nessuna immagine trovata in {fileRef.FilePath}");
+                return;
+            }
+
+            // Usiamo i PixelData dell'HDU e l'header (con priorità alla RAM)
             var newRenderer = await _rendererFactory.CreateAsync(
-                data.PixelData, 
-                fileRef.ModifiedHeader ?? data.Header
+                imageHdu.PixelData, 
+                fileRef.ModifiedHeader ?? imageHdu.Header
             );
             
             if (!forceReset && ActiveFitsImage != null)

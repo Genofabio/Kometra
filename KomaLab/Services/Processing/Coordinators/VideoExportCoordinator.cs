@@ -64,7 +64,16 @@ public class VideoExportCoordinator : IVideoExportCoordinator
                 {
                     token.ThrowIfCancellationRequested();
 
+                    // Caricamento frame scientifico (Mat float/double)
+                    // Nota: LoadFitsToScientificMat ora gestisce MEF internamente
                     using Mat scientificMat = await LoadFitsToScientificMat(fileRef);
+                    
+                    if (scientificMat.Empty()) 
+                    {
+                        // Skip se il frame è vuoto o non valido
+                        continue; 
+                    }
+
                     using Mat scaledMat = ApplyRescale(scientificMat, settings.ScaleFactor);
 
                     if (!isInitialized)
@@ -152,7 +161,6 @@ public class VideoExportCoordinator : IVideoExportCoordinator
                 {
                     // IL CUORE DEL FIX: Flush(true) forza lo svuotamento dei buffer 
                     // del file system verso l'hardware fisico del disco.
-                    // Funziona su Windows (FlushFileBuffers), Linux (fsync) e macOS.
                     fs.Flush(flushToDisk: true);
 
                     // VERIFICA DI REALTÀ: 
@@ -177,14 +185,39 @@ public class VideoExportCoordinator : IVideoExportCoordinator
         }
     }
 
-    // --- Metodi Helper (Load, Rescale, Profile) rimangono invariati ---
+    // --- Metodi Helper ---
+
     private async Task<Mat> LoadFitsToScientificMat(FitsFileReference fileRef)
     {
         var data = await _dataManager.GetDataAsync(fileRef.FilePath);
-        var header = fileRef.ModifiedHeader ?? data.Header;
+        
+        // [MODIFICA MEF] Accesso sicuro all'HDU immagine
+        var imageHdu = data.FirstImageHdu ?? data.PrimaryHdu;
+        if (imageHdu == null) 
+        {
+            // Restituisce una Mat vuota se non ci sono immagini, che verrà gestita dal loop principale
+            return new Mat();
+        }
+
+        // Priorità Header: RAM > HDU
+        var header = fileRef.ModifiedHeader ?? imageHdu.Header;
+        
         int bitpix = (int)_metadata.GetDoubleValue(header, "BITPIX", 16);
-        FitsBitDepth depth = bitpix switch { 8 => FitsBitDepth.UInt8, 16 => FitsBitDepth.Int16, 32 => FitsBitDepth.Int32, -32 => FitsBitDepth.Float, -64 => FitsBitDepth.Double, _ => FitsBitDepth.Int16 };
-        return _converter.RawToMat(data.PixelData, _metadata.GetDoubleValue(header, "BSCALE", 1.0), _metadata.GetDoubleValue(header, "BZERO", 0.0), depth);
+        FitsBitDepth depth = bitpix switch { 
+            8 => FitsBitDepth.UInt8, 
+            16 => FitsBitDepth.Int16, 
+            32 => FitsBitDepth.Int32, 
+            -32 => FitsBitDepth.Float, 
+            -64 => FitsBitDepth.Double, 
+            _ => FitsBitDepth.Int16 
+        };
+
+        // Usiamo i PixelData dell'HDU
+        return _converter.RawToMat(
+            imageHdu.PixelData, 
+            _metadata.GetDoubleValue(header, "BSCALE", 1.0), 
+            _metadata.GetDoubleValue(header, "BZERO", 0.0), 
+            depth);
     }
 
     private Mat ApplyRescale(Mat source, double factor)

@@ -4,6 +4,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using KomaLab.Models.Fits;
+using KomaLab.Models.Fits.Structure;
 using KomaLab.Models.Primitives;
 using KomaLab.Models.Processing;
 using KomaLab.Services.Fits;
@@ -70,7 +71,7 @@ public class GuidedCometAlignmentStrategy : AlignmentStrategyBase
         // =========================================================================================
         // FASE A: PRE-CALCOLO TRAIETTORIA VISIVA (Solo se non abbiamo dati densi/JPL)
         // =========================================================================================
-        Point2D[] starDriftPath = null;
+        Point2D[]? starDriftPath = null;
         Point2D cometProperMotionTotal = new Point2D(0, 0);
 
         if (!isDenseTrajectory && lastIndex > firstIndex)
@@ -215,13 +216,16 @@ public class GuidedCometAlignmentStrategy : AlignmentStrategyBase
     private async Task<Mat?> LoadMatForFftAsync(FitsFileReference fileRef)
     {
         var data = await DataManager.GetDataAsync(fileRef.FilePath);
-        var header = fileRef.ModifiedHeader ?? data.Header;
+        
+        // [MODIFICA MEF] Accesso sicuro all'immagine
+        var imageHdu = data.FirstImageHdu ?? data.PrimaryHdu;
+        if (imageHdu == null) return null;
+
+        var header = fileRef.ModifiedHeader ?? imageHdu.Header;
         double bScale = _metadataService.GetDoubleValue(header, "BSCALE", 1.0);
         double bZero = _metadataService.GetDoubleValue(header, "BZERO", 0.0);
 
-        // Usiamo targetBitDepth = null per lasciare che il convertitore decida (o 32 o 64)
-        // PatchNaNsInPlace (ereditato) gestirà entrambi i casi grazie a SafePatchNaNs
-        var mat = _converter.RawToMat(data.PixelData, bScale, bZero);
+        var mat = _converter.RawToMat(imageHdu.PixelData, bScale, bZero);
         
         PatchNaNsInPlace(mat);
         return mat;
@@ -230,13 +234,18 @@ public class GuidedCometAlignmentStrategy : AlignmentStrategyBase
     private async Task<Point2D?> RefineCenterAsync(FitsFileReference fileRef, Point2D guess, int radius)
     {
         var data = await DataManager.GetDataAsync(fileRef.FilePath);
-        var header = fileRef.ModifiedHeader ?? data.Header;
+        
+        // [MODIFICA MEF] Accesso sicuro all'immagine
+        var imageHdu = data.FirstImageHdu ?? data.PrimaryHdu;
+        if (imageHdu == null) return null;
+
+        var header = fileRef.ModifiedHeader ?? imageHdu.Header;
         double bScale = _metadataService.GetDoubleValue(header, "BSCALE", 1.0);
         double bZero = _metadataService.GetDoubleValue(header, "BZERO", 0.0);
         
-        using var fullMat = _converter.RawToMat(data.PixelData, bScale, bZero);
+        using var fullMat = _converter.RawToMat(imageHdu.PixelData, bScale, bZero);
         
-        // SanitizeAndCrop (ereditato) è safe per i double
+        // SanitizeAndCrop (ereditato) è safe
         var (workMat, offset) = SanitizeAndCrop(fullMat, guess);
 
         using (workMat)

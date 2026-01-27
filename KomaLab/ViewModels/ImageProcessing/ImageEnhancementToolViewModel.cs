@@ -201,17 +201,24 @@ public partial class ImageEnhancementToolViewModel : ObservableObject, IDisposab
                 var parameters = BuildParameters();
                 
                 // --- FIX 1: Passiamo il token al calcolo dell'anteprima ---
-                Array processedPixels = await _coordinator.CalculatePreviewDataAsync(fileRef, SelectedMode, parameters);
+                // Nota: CalculatePreviewDataAsync ora gestisce internamente il recupero dell'HDU corretto
+                Array processedPixels = await _coordinator.CalculatePreviewDataAsync(fileRef, SelectedMode, parameters, token);
                 token.ThrowIfCancellationRequested();
 
                 var originalData = await _dataManager.GetDataAsync(fileRef.FilePath);
-                var header = fileRef.ModifiedHeader ?? originalData.Header;
+                
+                // [MODIFICA MEF] Accesso sicuro all'HDU immagine originale per header e dimensioni
+                var originalHdu = originalData.FirstImageHdu ?? originalData.PrimaryHdu;
+                if (originalHdu == null) throw new InvalidOperationException("File sorgente privo di immagini.");
+
+                var header = fileRef.ModifiedHeader ?? originalHdu.Header;
 
                 if (SelectedMode == ImageEnhancementMode.AdaptiveLaplacianMosaic)
                 {
                     header = header.Clone();
-                    _metadataService.AddValue(header, "NAXIS1", originalData.PixelData.GetLength(1) * 4, "Mosaic Width");
-                    _metadataService.AddValue(header, "NAXIS2", originalData.PixelData.GetLength(0) * 2, "Mosaic Height");
+                    // Accesso alle dimensioni tramite originalHdu.PixelData
+                    _metadataService.AddValue(header, "NAXIS1", originalHdu.PixelData.GetLength(1) * 4, "Mosaic Width");
+                    _metadataService.AddValue(header, "NAXIS2", originalHdu.PixelData.GetLength(0) * 2, "Mosaic Height");
                 }
 
                 newRenderer = await _rendererFactory.CreateAsync(processedPixels, header);
@@ -221,7 +228,12 @@ public partial class ImageEnhancementToolViewModel : ObservableObject, IDisposab
             {
                 var data = await _dataManager.GetDataAsync(fileRef.FilePath);
                 token.ThrowIfCancellationRequested();
-                newRenderer = await _rendererFactory.CreateAsync(data.PixelData, fileRef.ModifiedHeader ?? data.Header);
+                
+                // [MODIFICA MEF] Accesso sicuro all'HDU immagine
+                var imageHdu = data.FirstImageHdu ?? data.PrimaryHdu;
+                if (imageHdu == null) throw new InvalidOperationException("Nessuna immagine valida trovata.");
+
+                newRenderer = await _rendererFactory.CreateAsync(imageHdu.PixelData, fileRef.ModifiedHeader ?? imageHdu.Header);
                 StatusText = "Pronto";
             }
 

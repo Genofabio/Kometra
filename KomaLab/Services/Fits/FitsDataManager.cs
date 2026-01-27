@@ -1,7 +1,9 @@
 ﻿using System;
 using System.Collections.Concurrent;
+using System.Collections.Generic; // Necessario per List<>
 using System.IO;
-using System.Runtime.InteropServices; // Necessario per Marshal.SizeOf
+using System.Linq; // Necessario per Sum() e Linq
+using System.Runtime.InteropServices;
 using System.Threading.Tasks;
 using KomaLab.Models.Fits;
 using KomaLab.Models.Fits.Structure;
@@ -25,7 +27,7 @@ public class FitsDataManager : IFitsDataManager
     }
 
     // =======================================================================
-    // 1. LETTURA (Logica di Caching)
+    // 1. LETTURA (Logica di Caching Aggiornata per MEF)
     // =======================================================================
 
     public async Task<FitsDataPackage> GetDataAsync(string path)
@@ -36,24 +38,34 @@ public class FitsDataManager : IFitsDataManager
         {
             entry.SlidingExpiration = CacheExpiration;
 
-            var header = await _ioService.ReadHeaderAsync(path);
-            var pixels = await _ioService.ReadPixelDataAsync(path);
+            // [MODIFICA MEF] Leggiamo TUTTI gli HDU invece di solo Header+Pixel fissi.
+            // Nota: Casting esplicito a FitsIoService se l'interfaccia IFitsIoService 
+            // non è stata ancora aggiornata con ReadAllHdusAsync. 
+            // L'ideale è aver aggiornato anche l'interfaccia.
+            var hdus = await ((FitsIoService)_ioService).ReadAllHdusAsync(path);
 
-            if (header == null || pixels == null)
-                throw new FileNotFoundException($"File non valido: {path}");
+            if (hdus == null || hdus.Count == 0)
+                throw new FileNotFoundException($"File non valido o vuoto: {path}");
 
-            // MODIFICA: Calcolo deterministico della dimensione per il limite globale
-            entry.Size = CalculateArraySize(pixels); 
+            // [MODIFICA] Calcolo dimensione totale sommando tutti gli HDU
+            long totalSize = hdus.Sum(h => CalculateArraySize(h.PixelData));
+            entry.Size = totalSize;
             
-            return new FitsDataPackage(path, header, pixels);
+            // Creiamo il pacchetto con la lista completa
+            return new FitsDataPackage(path, hdus);
         }) ?? throw new InvalidOperationException("Errore cache");
     }
 
     public async Task<FitsHeader?> GetHeaderOnlyAsync(string path)
     {
+        // Se il pacchetto completo è in cache, estraiamo l'header da lì senza rileggere il file
         if (_cache.TryGetValue(path, out FitsDataPackage? package) && package != null)
-            return package.Header;
+        {
+            // Preferiamo l'header della prima immagine valida, altrimenti il primario
+            return package.FirstImageHdu?.Header ?? package.PrimaryHdu?.Header;
+        }
 
+        // Se non è in cache, usiamo il metodo "Smart" del servizio IO che cerca la prima immagine
         return await _ioService.ReadHeaderAsync(path);
     }
 
@@ -63,13 +75,20 @@ public class FitsDataManager : IFitsDataManager
 
     public async Task SaveDataAsync(string path, Array pixels, FitsHeader header)
     {
+        // Scrittura fisica su disco (Single HDU per ora)
         await _ioService.WriteFileAsync(path, pixels, header);
 
-        var package = new FitsDataPackage(path, header, pixels);
+        // [MODIFICA MEF] Per aggiornare la cache, dobbiamo creare un pacchetto
+        // conforme alla nuova struttura (List<FitsHdu>).
+        // Creiamo una lista con un singolo HDU.
+        var singleHdu = new FitsHdu(header, pixels, false);
+        var hdus = new List<FitsHdu> { singleHdu };
+
+        var package = new FitsDataPackage(path, hdus);
+        
         _cache.Set(path, package, new MemoryCacheEntryOptions 
         { 
             SlidingExpiration = CacheExpiration,
-            // MODIFICA: Calcolo deterministico della dimensione per il limite globale
             Size = CalculateArraySize(pixels)
         });
     }
@@ -140,7 +159,13 @@ public class FitsDataManager : IFitsDataManager
     private long CalculateArraySize(Array array)
     {
         if (array == null) return 0;
-        // Numero totale di elementi * dimensione in byte del tipo (short, int, double, etc.)
-        return (long)array.Length * Marshal.SizeOf(array.GetType().GetElementType()!);
+        // Numero totale di elementi * dimensione in byte del tipo
+        // Se l'array è vuoto (0x0), SizeOf potrebbe fallire o tornare 0, gestiamolo
+        if (array.Length == 0) return 0;
+
+        var elementType = array.GetType().GetElementType();
+        if (elementType == null) return 0;
+
+        return (long)array.Length * Marshal.SizeOf(elementType);
     }
 }

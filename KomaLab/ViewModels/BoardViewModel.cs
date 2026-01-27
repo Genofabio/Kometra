@@ -199,19 +199,18 @@ public partial class BoardViewModel : ObservableObject
         }, "Contrasto Locale");
     }
 
-    // 4. POSTERIZZAZIONE (Adattamento Tupla Manuale)
+    // 4. POSTERIZZAZIONE
     [RelayCommand(CanExecute = nameof(CanExecuteOnImageNode))]
     private async Task ShowPosterizationWindow()
     {
         await RunGenericProcessing(async (files, mode) => 
         {
             var paths = await _windowService.ShowPosterizationWindowAsync(files, mode);
-            // Avvolgiamo la lista semplice in una Tupla con un suffisso fisso
             return paths != null ? (paths, "(Posterizzata)") : null;
         }, "Posterizzazione");
     }
     
-    // 5. ALLINEAMENTO (Adattamento Tupla Manuale)
+    // 5. ALLINEAMENTO
     [RelayCommand(CanExecute = nameof(CanExecuteOnImageNode))]
     private async Task ShowAlignmentWindow()
     {
@@ -223,7 +222,6 @@ public partial class BoardViewModel : ObservableObject
     }
     
     // --- HELPER GENERICO (DRY) ---
-    // Firma corretta: Func ritorna Task<(List<string> Paths, string Suffix)?>
     private async Task RunGenericProcessing(
         Func<List<FitsFileReference>, VisualizationMode, Task<(List<string> Paths, string Suffix)?>> windowAction, 
         string undoLabel)
@@ -233,13 +231,10 @@ public partial class BoardViewModel : ObservableObject
         var inputFiles = imgNode.CurrentFiles.ToList();
         if (!inputFiles.Any()) return;
     
-        // Esegue l'azione (apre finestra, attende OK)
         var result = await windowAction(inputFiles, imgNode.VisualizationMode);
         
-        // Se null o lista vuota, non fare nulla (utente ha annullato)
         if (result == null || !result.Value.Paths.Any()) return;
 
-        // Deconstruct del risultato (Path + Nome filtro)
         var (resultPaths, titleSuffix) = result.Value;
 
         double centerX = imgNode.X + (1.5 * imgNode.EstimatedTotalSize.Width);
@@ -249,7 +244,6 @@ public partial class BoardViewModel : ObservableObject
             ? await _nodeFactory.CreateSingleImageNodeAsync(resultPaths[0], centerX + 400, centerY)
             : await _nodeFactory.CreateMultipleImagesNodeAsync(resultPaths, centerX + 400, centerY);
 
-        // Imposta il titolo dinamico
         newNode.Title = $"{imgNode.Title} {titleSuffix}";
         
         if (newNode is ImageNodeViewModel resNode) resNode.VisualizationMode = imgNode.VisualizationMode;
@@ -300,7 +294,32 @@ public partial class BoardViewModel : ObservableObject
     [RelayCommand] private void PanBoard(string direction) { double s = 100; switch(direction.ToLower()){ case "left": Viewport.ApplyPan(s,0); break; case "right": Viewport.ApplyPan(-s,0); break; case "up": Viewport.ApplyPan(0,s); break; case "down": Viewport.ApplyPan(0,-s); break; } }
     [RelayCommand] private void ZoomBoard(string direction) { double f = direction.ToLower()=="in"?1.2:0.8; Viewport.ApplyZoomAtPoint(f, new Point(Viewport.ViewportSize.Width/2, Viewport.ViewportSize.Height/2)); }
     [RelayCommand(CanExecute = nameof(CanStackImages))] private async Task StackImages(StackingMode mode) { if(SelectedNode is not ImageNodeViewModel s) return; try { var r = await _stackingCoordinator.ExecuteStackingAsync(s.CurrentFiles, mode); double x=s.X+1.5*s.EstimatedTotalSize.Width; double y=s.Y+s.EstimatedTotalSize.Height/2.0; var n = await _nodeFactory.CreateSingleImageNodeAsync(r.FilePath, x+400, y); n.Title=$"{s.Title} ({mode})"; if(n is ImageNodeViewModel res) res.VisualizationMode=s.VisualizationMode; RegisterProcessingResult(n, s, r.FilePath, "Stacking"); } catch(Exception ex) { Debug.WriteLine($"Stacking failed: {ex.Message}"); } }
-    [RelayCommand(CanExecute = nameof(CanSaveNode))] private async Task SaveSelectedNode() { if(SelectedNode is not ImageNodeViewModel n || n.ActiveFile==null) return; var p = await _dialogService.ShowSaveFitsFileDialogAsync(n.ActiveFile.FileName); if(string.IsNullOrWhiteSpace(p)) return; try { var fr=n.ActiveFile; var d=await _dataManager.GetDataAsync(fr.FilePath); await _dataManager.SaveDataAsync(p, d.PixelData, fr.ModifiedHeader??d.Header); } catch(Exception ex) { Debug.WriteLine($"Save failed: {ex.Message}"); } }
+    
+    [RelayCommand(CanExecute = nameof(CanSaveNode))] 
+    private async Task SaveSelectedNode() 
+    { 
+        if(SelectedNode is not ImageNodeViewModel n || n.ActiveFile == null) return; 
+        
+        var p = await _dialogService.ShowSaveFitsFileDialogAsync(n.ActiveFile.FileName); 
+        if(string.IsNullOrWhiteSpace(p)) return; 
+        
+        try 
+        { 
+            var fr = n.ActiveFile;
+            var data = await _dataManager.GetDataAsync(fr.FilePath);
+            
+            // [MODIFICA MEF] Accesso sicuro all'immagine da salvare
+            var imageHdu = data.FirstImageHdu ?? data.PrimaryHdu;
+            if (imageHdu == null) return; // Niente da salvare
+            
+            // Salviamo i pixel dell'HDU e l'header (con priorità alla RAM)
+            await _dataManager.SaveDataAsync(p, imageHdu.PixelData, fr.ModifiedHeader ?? imageHdu.Header); 
+        } 
+        catch(Exception ex) 
+        { 
+            Debug.WriteLine($"Save failed: {ex.Message}"); 
+        } 
+    }
     
     [RelayCommand(CanExecute = nameof(CanSaveVideo))]
     private async Task SaveVideo()
@@ -308,29 +327,21 @@ public partial class BoardViewModel : ObservableObject
         var node = SelectedImageNode;
         if (node?.ActiveRenderer == null) return;
 
-        // 1. Il WindowService fa tutto: apre il tool, valida i codec, 
-        // fa scegliere il percorso di salvataggio e cattura le soglie ADU.
         var settings = await _windowService.ShowVideoExportDialogAsync(node, node.VisualizationMode);
-    
-        // Se settings è null, l'utente ha annullato in uno dei passaggi
         if (settings == null) return;
 
         try 
         {
-            // 2. Eseguiamo l'export. 
-            // Non serve calcolare nulla qui: Path, Codec, FPS e Soglie sono già dentro 'settings'.
             await _videoCoordinator.ExportVideoAsync(
                 node.CurrentFiles, 
                 settings, 
                 settings.InitialProfile);
             
-            // Opzionale: un semplice log o notifica di fine lavori
             System.Diagnostics.Debug.WriteLine("Esportazione completata con successo.");
         }
         catch (Exception ex)
         {
             System.Diagnostics.Debug.WriteLine($"Export fallito: {ex.Message}");
-            // Qui potresti chiamare un _dialogService.ShowErrorAsync("Errore", ex.Message);
         }
     }
     

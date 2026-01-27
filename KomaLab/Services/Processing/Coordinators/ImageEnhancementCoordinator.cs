@@ -50,18 +50,24 @@ public class ImageEnhancementCoordinator : IImageEnhancementCoordinator
         FitsFileReference sourceFile,
         ImageEnhancementMode mode,
         ImageEnhancementParameters parameters,
-        CancellationToken token = default) // <--- AGGIUNTO TOKEN
+        CancellationToken token = default) 
     {
         var data = await _dataManager.GetDataAsync(sourceFile.FilePath);
         token.ThrowIfCancellationRequested();
         
-        using Mat src = _converter.RawToMat(data.PixelData, 1.0, 0.0, FitsBitDepth.Double);
+        // [MODIFICA MEF] Accesso sicuro all'HDU immagine
+        var imageHdu = data.FirstImageHdu ?? data.PrimaryHdu;
+        if (imageHdu == null) 
+            throw new InvalidOperationException("No valid image found for preview.");
+
+        // Usiamo i PixelData dell'HDU
+        using Mat src = _converter.RawToMat(imageHdu.PixelData, 1.0, 0.0, FitsBitDepth.Double);
         using Mat dst = new Mat();
         
         // Passiamo il token alla logica
         await RunEngineLogicAsync(src, dst, mode, parameters, null, token);
 
-        if (dst.Empty()) return data.PixelData;
+        if (dst.Empty()) return imageHdu.PixelData;
 
         return _converter.MatToRaw(dst, FitsBitDepth.Double);
     }
@@ -118,7 +124,7 @@ public class ImageEnhancementCoordinator : IImageEnhancementCoordinator
         ImageEnhancementMode mode, 
         ImageEnhancementParameters p, 
         IProgress<double>? progress,
-        CancellationToken token) // <--- AGGIUNTO TOKEN
+        CancellationToken token)
     {
         // Se l'operazione è già stata annullata, non avviamo l'engine
         token.ThrowIfCancellationRequested();

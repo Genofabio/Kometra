@@ -79,11 +79,21 @@ public class AutomaticCometAlignmentStrategy : AlignmentStrategyBase
     {
         var data = await DataManager.GetDataAsync(fileRef.FilePath);
         
-        var header = fileRef.ModifiedHeader ?? data.Header;
+        // [MODIFICA MEF] Accesso sicuro all'HDU immagine
+        // FirstImageHdu restituisce la prima estensione valida (non vuota)
+        var imageHdu = data.FirstImageHdu ?? data.PrimaryHdu;
+
+        if (imageHdu == null) 
+            throw new InvalidOperationException("Nessuna immagine valida trovata nel file FITS.");
+
+        // Preferenza all'header modificato in RAM, altrimenti quello dell'HDU
+        var header = fileRef.ModifiedHeader ?? imageHdu.Header;
+
         double bScale = _metadataService.GetDoubleValue(header, "BSCALE", 1.0);
         double bZero = _metadataService.GetDoubleValue(header, "BZERO", 0.0);
         
-        using var rawMat = _converter.RawToMat(data.PixelData, bScale, bZero);
+        // Usiamo i PixelData dell'HDU immagine specifica
+        using var rawMat = _converter.RawToMat(imageHdu.PixelData, bScale, bZero);
 
         // 1. Sanitizzazione e ritaglio automatico sui dati validi (rimuove il padding NaN)
         var (mat, offset) = SanitizeAndCrop(rawMat, guess);

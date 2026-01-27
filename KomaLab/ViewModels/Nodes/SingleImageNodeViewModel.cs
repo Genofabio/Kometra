@@ -100,11 +100,19 @@ public partial class SingleImageNodeViewModel : ImageNodeViewModel
             // 1. Recupero dati tramite DataManager (Cache-aware)
             var data = await _dataManager.GetDataAsync(_fileReference.FilePath);
             
+            // [MODIFICA MEF] Accesso sicuro all'HDU immagine
+            // Recuperiamo la prima estensione valida contenente un'immagine
+            var imageHdu = data.FirstImageHdu ?? data.PrimaryHdu;
+
+            if (imageHdu == null)
+                throw new InvalidOperationException("Il file FITS non contiene estensioni immagine valide.");
+
             // 2. CREAZIONE & INIZIALIZZAZIONE ATOMICA
             // Se esiste un ModifiedHeader in RAM (es. dall'editor), usiamo quello.
-            var headerToUse = _fileReference.ModifiedHeader ?? data.Header;
+            var headerToUse = _fileReference.ModifiedHeader ?? imageHdu.Header;
             
-            var newRenderer = await _rendererFactory.CreateAsync(data.PixelData, headerToUse);
+            // Usiamo i PixelData dell'HDU specifico
+            var newRenderer = await _rendererFactory.CreateAsync(imageHdu.PixelData, headerToUse);
             
             // 3. Swap Atomico
             // La classe base gestisce automaticamente l'ereditarietà del contrasto

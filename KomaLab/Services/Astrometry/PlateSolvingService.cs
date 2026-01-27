@@ -57,7 +57,6 @@ public class PlateSolvingService : IPlateSolvingService
         try
         {
             // 1. Preparazione Ambiente
-            // Recuperiamo l'header corrente (quello in memoria se modificato, o da disco)
             var currentHeader = fileRef.ModifiedHeader ?? await _dataManager.GetHeaderOnlyAsync(fileRef.FilePath);
             
             // Creiamo il file temporaneo per ASTAP
@@ -93,9 +92,9 @@ public class PlateSolvingService : IPlateSolvingService
             }, token);
 
             // 4. Verifica e Arricchimento (Logica Chirurgica)
-            _dataManager.Invalidate(tempFilePath); // Puliamo la cache per leggere il file modificato da ASTAP
+            _dataManager.Invalidate(tempFilePath); 
             
-            // Leggiamo l'header prodotto da ASTAP (che contiene il WCS ma potrebbe essere "sporco")
+            // Leggiamo l'header prodotto da ASTAP
             var astapOutputHeader = await _dataManager.GetHeaderOnlyAsync(tempFilePath);
             
             bool hasWcs = astapOutputHeader != null && 
@@ -107,48 +106,46 @@ public class PlateSolvingService : IPlateSolvingService
                 result.Message = "Risoluzione OK";
 
                 // A. CLONAZIONE PULITA
-                // Partiamo dall'header originale del file (preservando TELESCOP, OBJECT, HISTORY vecchie, ecc.)
-                // e garantendo che la struttura (incluso END) sia corretta.
                 var finalHeader = _metadataService.CloneHeader(currentHeader!);
 
-                // B. TRASFERIMENTO CHIRURGICO DEL WCS
-                // Copiamo solo le chiavi astrometriche dall'output di ASTAP al nostro header pulito.
-                var wcsKeys = new[] { 
+                // B. TRASFERIMENTO CHIRURGICO DEL WCS (Incluso TPV/SIP)
+                // Lista chiavi standard WCS
+                var standardWcsKeys = new[] { 
                     "CTYPE1", "CTYPE2", "CRVAL1", "CRVAL2", "CRPIX1", "CRPIX2", 
-                    "CD1_1", "CD1_2", "CD2_1", "CD2_2", // Matrice standard
+                    "CD1_1", "CD1_2", "CD2_1", "CD2_2", 
                     "CUNIT1", "CUNIT2", 
-                    "CROTA1", "CROTA2",                 // Rotazione legacy
+                    "CROTA1", "CROTA2",                 
                     "EQUINOX", "RADESYS", "LONPOLE", "LATPOLE" 
                 };
 
-                foreach (var key in wcsKeys)
+                // Iteriamo tutte le card di output per catturare anche le distorsioni
+                foreach (var card in astapOutputHeader!.Cards)
                 {
-                    // Cerchiamo la card nel risultato di ASTAP
-                    var newCard = astapOutputHeader!.Cards.FirstOrDefault(c => c.Key.Equals(key, StringComparison.OrdinalIgnoreCase));
+                    string k = card.Key.ToUpperInvariant();
                     
-                    if (newCard != null)
+                    // Condizione: È una chiave standard WCS O è un coefficiente di distorsione (PV, A_, B_)
+                    bool isWcsKey = standardWcsKeys.Contains(k) ||
+                                    k.StartsWith("PV") ||      // Distorsione TPV
+                                    k.StartsWith("A_") ||      // Distorsione SIP A
+                                    k.StartsWith("B_") ||      // Distorsione SIP B
+                                    k.StartsWith("AP_") ||     // Distorsione SIP AP
+                                    k.StartsWith("BP_");       // Distorsione SIP BP
+
+                    if (isWcsKey)
                     {
-                        // Rimuoviamo la vecchia chiave WCS se esisteva
-                        finalHeader.RemoveCard(key);
-                        // Aggiungiamo la nuova calcolata da ASTAP
-                        finalHeader.AddCard(newCard); 
+                        finalHeader.RemoveCard(k); // Rimuovi vecchia (se esiste)
+                        finalHeader.AddCard(card); // Aggiungi nuova da ASTAP
                     }
                 }
 
                 // C. ARRICCHIMENTO METADATI KOMALAB
-                // Usiamo il MetadataService per impostare i valori in modo sicuro.
-                
                 _metadataService.SetValue(finalHeader, "PLTSOLVD", true, "KomaLab - Plate has been solved");
                 _metadataService.SetValue(finalHeader, "SOLVER", "ASTAP", "KomaLab - Engine used for solving");
-                
-                // DATE-SOL: Data della risoluzione matematica (diverso da DATE creazione file)
                 _metadataService.SetValue(finalHeader, "DATE-SOL", DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ss"), "KomaLab - Solution timestamp (UTC)");
 
-                // HISTORY: Nota per l'utente
                 string historyEntry = FormattableString.Invariant($"KomaLab - Plate solved via ASTAP (Radius: {radius} deg).");
                 _metadataService.AddValue(finalHeader, "HISTORY", historyEntry, null);
 
-                // Assegniamo l'header pulito e aggiornato al risultato
                 result.SolvedHeader = finalHeader;
             }
             else
@@ -195,10 +192,8 @@ public class PlateSolvingService : IPlateSolvingService
                l.Contains("used stars");
     }
     
-
     private async Task RunProcessInternalAsync(string exe, string args, Action<string> onLineReceived, CancellationToken token)
     {
-        // LOG 1: Vediamo esattamente cosa stiamo lanciando
         Debug.WriteLine($"[ASTAP-LAUNCH] CMD: {exe}");
         Debug.WriteLine($"[ASTAP-LAUNCH] ARGS: {args}");
 
@@ -214,7 +209,6 @@ public class PlateSolvingService : IPlateSolvingService
 
         using var process = new Process { StartInfo = startInfo };
         
-        // LOG 2: Verifica se il processo parte davvero
         try 
         {
             process.Start();
@@ -223,7 +217,7 @@ public class PlateSolvingService : IPlateSolvingService
         catch (Exception ex)
         {
             Debug.WriteLine($"[ASTAP-ERROR] Impossibile avviare il processo: {ex.Message}");
-            throw; // Rilancia per gestire l'errore a monte
+            throw; 
         }
 
         using var registration = token.Register(() => 
@@ -236,26 +230,16 @@ public class PlateSolvingService : IPlateSolvingService
         var errorDone = new TaskCompletionSource<bool>();
 
         process.OutputDataReceived += (s, e) => {
-            if (e.Data == null) 
-            {
-                outputDone.TrySetResult(true);
-            }
-            else 
-            {
-                // LOG 3: Leggiamo cosa dice ASTAP in tempo reale
+            if (e.Data == null) outputDone.TrySetResult(true);
+            else {
                 Debug.WriteLine($"[ASTAP-STDOUT] {e.Data}");
                 onLineReceived(e.Data);
             }
         };
         
         process.ErrorDataReceived += (s, e) => {
-            if (e.Data == null) 
-            {
-                errorDone.TrySetResult(true);
-            }
-            else 
-            {
-                // LOG 4: Leggiamo eventuali errori di ASTAP
+            if (e.Data == null) errorDone.TrySetResult(true);
+            else {
                 Debug.WriteLine($"[ASTAP-STDERR] {e.Data}");
                 onLineReceived($"[STDERR] {e.Data}");
             }
@@ -282,9 +266,25 @@ public class PlateSolvingService : IPlateSolvingService
         if (fileRef.ModifiedHeader != null)
         {
             var package = await _dataManager.GetDataAsync(fileRef.FilePath);
-            var temp = await _dataManager.SaveAsTemporaryAsync(package.PixelData, fileRef.ModifiedHeader, "Astrometry_Mem");
+            
+            // [MODIFICA MEF] 
+            // Recuperiamo la prima immagine valida (o il primario se non ce ne sono altre)
+            // Non possiamo più usare .PixelData direttamente dal package.
+            var imageHdu = package.FirstImageHdu ?? package.PrimaryHdu;
+
+            if (imageHdu == null) 
+                throw new InvalidOperationException("Impossibile eseguire il plate solving: Il file FITS non contiene immagini.");
+
+            // Salviamo un file temporaneo con l'header modificato dall'utente e i pixel originali
+            var temp = await _dataManager.SaveAsTemporaryAsync(
+                imageHdu.PixelData, 
+                fileRef.ModifiedHeader, // Usa l'header modificato in RAM
+                "Astrometry_Mem");
+            
             return temp.FilePath;
         }
+        
+        // Se non ci sono modifiche in RAM, copia fisica del file originale
         return await _dataManager.CreateSandboxCopyAsync(fileRef.FilePath, "Astrometry_Disk");
     }
 

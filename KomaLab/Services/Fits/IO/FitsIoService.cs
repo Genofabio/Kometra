@@ -1,5 +1,7 @@
 ﻿using System;
+using System.Collections.Generic; // Necessario per List<>
 using System.IO;
+using System.Linq; // Necessario per FirstOrDefault
 using System.Threading.Tasks;
 using KomaLab.Infrastructure;
 using KomaLab.Models.Fits;
@@ -11,7 +13,7 @@ public class FitsIoService : IFitsIoService
 {
     private readonly IFileStreamProvider _streamProvider;
     private readonly FitsReader _reader;
-    private readonly FitsWriter _writer; // <--- Nuova Dipendenza
+    private readonly FitsWriter _writer; 
 
     public FitsIoService(
         IFileStreamProvider streamProvider, 
@@ -24,44 +26,95 @@ public class FitsIoService : IFitsIoService
     }
 
     // =======================================================================
-    // 1. OPERAZIONI DI LETTURA (I/O READ)
+    // 1. OPERAZIONI DI LETTURA (FULL MEF SUPPORT)
     // =======================================================================
 
+    // NUOVO: Legge tutte le estensioni (HDU) per popolare il FitsDataPackage completo
+    public async Task<List<FitsHdu>> ReadAllHdusAsync(string path) => await Task.Run(() => {
+        try 
+        { 
+            using var s = _streamProvider.Open(path);
+            return ReadAllHdus(s);
+        }
+        catch { return new List<FitsHdu>(); }
+    });
+
+    // Mantenuto per retrocompatibilità: restituisce l'header della prima immagine valida
     public async Task<FitsHeader?> ReadHeaderAsync(string path) => await Task.Run(() => {
         try 
         { 
-            using var s = _streamProvider.Open(path); 
-            return _reader.ReadHeader(s); 
+            using var s = _streamProvider.Open(path);
+            var hdus = ReadAllHdus(s);
+            // Restituisce l'header della prima immagine non vuota, oppure il primario se tutto vuoto
+            return hdus.FirstOrDefault(h => !h.IsEmpty)?.Header ?? hdus.FirstOrDefault()?.Header;
         }
         catch { return null; }
     });
 
+    // Mantenuto per retrocompatibilità: restituisce i pixel della prima immagine valida
     public async Task<Array?> ReadPixelDataAsync(string path) => await Task.Run(() => {
-        try { 
+        try 
+        { 
             using var s = _streamProvider.Open(path);
-            var h = _reader.ReadHeader(s);
-            var m = _reader.ReadMatrix(s, h);
-            
-            // Flip per visualizzazione (Top-Down)
-            if (m != null) FlipArrayVertical(m);
-            return m;
+            var hdus = ReadAllHdus(s);
+            // Restituisce i pixel della prima immagine non vuota
+            return hdus.FirstOrDefault(h => !h.IsEmpty)?.PixelData;
         } 
         catch { return null; }
     });
+
+    // --- Metodo helper sincrono per il loop di lettura ---
+    private List<FitsHdu> ReadAllHdus(Stream s)
+    {
+        var list = new List<FitsHdu>();
+        
+        // Loop attraverso tutto il file
+        while (s.Position < s.Length)
+        {
+            // 1. Legge l'Header
+            var header = _reader.ReadHeader(s);
+            
+            // 2. Determina il tipo di estensione
+            string xtension = GetString(header, "XTENSION");
+            bool isTable = xtension.Contains("TABLE");
+
+            if (isTable)
+            {
+                // Le tabelle le saltiamo per ora (Skip dei dati)
+                // Nota: FitsReader deve avere il metodo SkipDataBlock pubblico
+                _reader.SkipDataBlock(s, header);
+            }
+            else
+            {
+                // È un'immagine (o Primary vuoto) -> Leggiamo i pixel
+                // Se NAXIS=0, ReadMatrix ritorna un array vuoto e gestisce lo skip
+                var data = _reader.ReadMatrix(s, header);
+                
+                // Flip verticale per visualizzazione (FITS è bottom-up)
+                if (data != null && data.Length > 0) FlipArrayVertical(data);
+
+                bool isEmpty = data == null || data.Length == 0;
+                
+                // Creiamo l'HDU e lo aggiungiamo alla lista
+                list.Add(new FitsHdu(header, data ?? Array.CreateInstance(typeof(byte), 0, 0), isEmpty));
+            }
+        }
+        return list;
+    }
+
+    private string GetString(FitsHeader h, string key)
+    {
+         var c = h.Cards.FirstOrDefault(x => x.Key == key);
+         return c?.Value?.Trim()?.ToUpperInvariant() ?? "";
+    }
 
     // =======================================================================
     // 2. OPERAZIONI DI SCRITTURA (I/O WRITE)
     // =======================================================================
 
     public async Task WriteFileAsync(string path, Array data, FitsHeader header) => await Task.Run(() => {
-        // FileMode.Create sovrascrive il file se esiste
         using var fs = new FileStream(path, FileMode.Create, FileAccess.Write);
-        
-        // Deleghiamo interamente al Writer
-        // Il Writer gestisce: Padding 80 char, blocco 2880 header
         _writer.WriteHeader(fs, header);
-
-        // Il Writer gestisce: Reverse Flip (Bottom-Up), Endianness, Padding dati
         _writer.WriteMatrix(fs, data); 
     });
 
@@ -75,10 +128,7 @@ public class FitsIoService : IFitsIoService
     public string BuildRawPath(string subFolder, string fileName)
     {
         string path = Path.Combine(Path.GetTempPath(), "KomaLab", subFolder);
-        
-        if (!Directory.Exists(path)) 
-            Directory.CreateDirectory(path);
-            
+        if (!Directory.Exists(path)) Directory.CreateDirectory(path);
         return Path.Combine(path, fileName);
     }
 
@@ -88,11 +138,9 @@ public class FitsIoService : IFitsIoService
     }
 
     // =======================================================================
-    // 4. HELPERS PRIVATI (Manipolazione Memoria)
+    // 4. HELPERS PRIVATI (Flip)
     // =======================================================================
 
-    // Manteniamo questo metodo perché serve per il READ (visualizzazione)
-    // Il Write usa un flip on-the-fly dentro FitsWriter per non duplicare la RAM.
     private void FlipArrayVertical(Array matrix) 
     { 
         switch (matrix)

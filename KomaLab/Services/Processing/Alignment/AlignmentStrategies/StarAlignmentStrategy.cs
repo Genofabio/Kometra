@@ -166,7 +166,7 @@ public class StarAlignmentStrategy : AlignmentStrategyBase
     }
 
     // =======================================================================
-    // HELPERS DI CARICAMENTO (Corretti per Nullable Structs)
+    // HELPERS DI CARICAMENTO (Corretti per Nullable Structs e MEF)
     // =======================================================================
 
     private async Task<Mat?> LoadMatWithRetryAsync(FitsFileReference fileRef)
@@ -175,11 +175,19 @@ public class StarAlignmentStrategy : AlignmentStrategyBase
         return await ExecuteWithRetryAsync<Mat?>(async () =>
         {
             var data = await DataManager.GetDataAsync(fileRef.FilePath);
-            var header = fileRef.ModifiedHeader ?? data.Header;
+            
+            // [MODIFICA MEF] Recupero sicuro dell'HDU Immagine
+            var imageHdu = data.FirstImageHdu ?? data.PrimaryHdu;
+            if (imageHdu == null) return null; // Nessun dato pixel disponibile
+
+            // Priorità Header: Modificato in RAM > Header HDU
+            var header = fileRef.ModifiedHeader ?? imageHdu.Header;
+            
             double bScale = _metadataService.GetDoubleValue(header, "BSCALE", 1.0);
             double bZero = _metadataService.GetDoubleValue(header, "BZERO", 0.0);
 
-            var mat = _converter.RawToMat(data.PixelData, bScale, bZero);
+            // Carichiamo i pixel dall'HDU corretto
+            var mat = _converter.RawToMat(imageHdu.PixelData, bScale, bZero);
 
             // GESTIONE NAN PER FFT:
             // Sostituiamo i NaN (bordi o pixel caldi) con 0.0 mantenendo la dimensione originale.

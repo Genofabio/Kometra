@@ -39,5 +39,5 @@ public interface IAlignmentService
     /// </summary>
     Action<Mat, Mat, FitsHeader, int> GetWarpingProcessor(
         AlignmentMap map, 
-        Func<double, double, string>? historyGenerator = null) ;
+        Func<double, double, string>? historyGenerator = null);
 }

@@ -7,7 +7,9 @@ using System.Threading;
 using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using KomaLab.Models.Fits.Structure; // Necessario per FitsHdu
 using KomaLab.Models.Processing;
+using KomaLab.Services.Fits;         // Necessario per IFitsDataManager
 using KomaLab.Services.Processing.Coordinators;
 using KomaLab.Services.UI;
 
@@ -15,11 +17,14 @@ namespace KomaLab.ViewModels.ImportExport;
 
 /// <summary>
 /// ViewModel per la gestione dell'importazione di file FITS con calibrazione opzionale.
+/// Gestisce automaticamente i file MEF (Multi-Extension FITS) separandoli in file singoli.
 /// </summary>
 public partial class ImportViewModel : ObservableObject
 {
     private readonly IDialogService _dialogService;
     private readonly ICalibrationCoordinator _calibrationCoordinator;
+    private readonly IFitsDataManager _dataManager; // <--- NUOVA DIPENDENZA
+
     private CancellationTokenSource? _processingCts;
 
     // --- Collezioni File ---
@@ -30,27 +35,30 @@ public partial class ImportViewModel : ObservableObject
 
     // --- Stato UI ---
     [ObservableProperty] 
-    [NotifyCanExecuteChangedFor(nameof(ImportViewModel.ConfirmCommand))]
+    [NotifyCanExecuteChangedFor(nameof(ConfirmCommand))]
     private bool _isProcessing;
     
     [ObservableProperty] private double _progressValue;
     [ObservableProperty] private string _statusText = "Pronto";
+    [ObservableProperty] private bool _isInteractionEnabled = true;
 
     // --- Risultati per la Board ---
     public List<string>? CalibratedResultPaths { get; private set; }
     public bool DialogResult { get; private set; }
     public event Action? RequestClose;
 
-    public ImportViewModel(IDialogService dialogService, ICalibrationCoordinator calibrationCoordinator)
+    public ImportViewModel(
+        IDialogService dialogService, 
+        ICalibrationCoordinator calibrationCoordinator,
+        IFitsDataManager dataManager) // <--- Iniettato qui
     {
         _dialogService = dialogService ?? throw new ArgumentNullException(nameof(dialogService));
         _calibrationCoordinator = calibrationCoordinator ?? throw new ArgumentNullException(nameof(calibrationCoordinator));
+        _dataManager = dataManager ?? throw new ArgumentNullException(nameof(dataManager));
         
         Debug.WriteLine("[ImportVM] Inizializzato.");
     }
     
-    
-
     // =======================================================================
     // 1. COMANDI DI SELEZIONE
     // =======================================================================
@@ -58,16 +66,8 @@ public partial class ImportViewModel : ObservableObject
     [RelayCommand]
     private async Task AddLights()
     {
-        IsInteractionEnabled = false;
-        try {
-            var paths = await _dialogService.ShowOpenFitsFileDialogAsync();
-            if (paths != null) {
-                foreach (var p in paths) LightFiles.Add(p);
-                NotifyLightChanges(); // Aggiorna stato Confirm e ClearLights
-            }
-        } finally {
-            IsInteractionEnabled = true;
-        }
+        await AddToCollection(LightFiles, "LIGHTS");
+        NotifyLightChanges();
     }
     
     public bool HasLights => LightFiles.Any();
@@ -76,34 +76,85 @@ public partial class ImportViewModel : ObservableObject
     private async Task AddDarkAsync()
     {
         await AddToCollection(DarkFiles, "DARKS");
-        ClearDarksCommand.NotifyCanExecuteChanged(); // <--- AGGIUNTO
+        ClearDarksCommand.NotifyCanExecuteChanged(); 
     }
 
     [RelayCommand]
     private async Task AddFlatAsync()
     {
         await AddToCollection(FlatFiles, "FLATS");
-        ClearFlatsCommand.NotifyCanExecuteChanged(); // <--- AGGIUNTO
+        ClearFlatsCommand.NotifyCanExecuteChanged(); 
     }
 
     [RelayCommand]
     private async Task AddBiasAsync()
     {
         await AddToCollection(BiasFiles, "BIAS");
-        ClearBiasCommand.NotifyCanExecuteChanged(); // <--- AGGIUNTO
+        ClearBiasCommand.NotifyCanExecuteChanged(); 
     }
 
-    // Nel tuo ImportViewModel.cs
-    [ObservableProperty] private bool _isInteractionEnabled = true;
-
-    private async Task AddToCollection(ObservableCollection<string> collection, string label)
+    // --- LOGICA SMART ADD (MEF Support) ---
+    private async Task AddToCollection(ObservableCollection<string> collection, string contextLabel)
     {
         IsInteractionEnabled = false; 
-        try {
+        try 
+        {
             var paths = await _dialogService.ShowOpenFitsFileDialogAsync();
             if (paths == null) return;
-            foreach (var path in paths) if (!collection.Contains(path)) collection.Add(path);
-        } finally {
+
+            foreach (var path in paths)
+            {
+                // Se è già presente, saltiamo
+                if (collection.Contains(path)) continue;
+
+                try
+                {
+                    // 1. Ispezioniamo il file per vedere se è un MEF (Multi-Extension)
+                    var dataPackage = await _dataManager.GetDataAsync(path);
+                    
+                    // Contiamo quanti HDU contengono immagini valide
+                    var imageHdus = dataPackage.Hdus.Where(h => !h.IsEmpty).ToList();
+
+                    if (imageHdus.Count > 1)
+                    {
+                        // CASO MEF: Il file contiene più immagini. Le esplodiamo.
+                        StatusText = $"Estrazione estensioni da {System.IO.Path.GetFileName(path)}...";
+                        
+                        for (int i = 0; i < imageHdus.Count; i++)
+                        {
+                            var hdu = imageHdus[i];
+                            
+                            // Salviamo ogni estensione come file temporaneo singolo
+                            // Aggiungiamo metadati per tracciare l'origine
+                            var header = hdu.Header.Clone(); // Clone per non sporcare cache
+                            // Nota: NON usiamo _metadataService qui per brevità, usiamo accesso diretto se necessario
+                            // o lasciamo l'header così com'è.
+                            
+                            var tempRef = await _dataManager.SaveAsTemporaryAsync(
+                                hdu.PixelData, 
+                                header, 
+                                $"{contextLabel}_Ext_{i+1}");
+
+                            collection.Add(tempRef.FilePath);
+                        }
+                    }
+                    else
+                    {
+                        // CASO STANDARD: Singola immagine o Primary HDU
+                        collection.Add(path);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"[ImportVM] Errore analisi file {path}: {ex.Message}");
+                    // Fallback: lo aggiungiamo così com'è se non riusciamo a leggerlo
+                    collection.Add(path);
+                }
+            }
+            StatusText = "Pronto";
+        } 
+        finally 
+        {
             IsInteractionEnabled = true;
             ConfirmCommand.NotifyCanExecuteChanged();
         }
@@ -123,21 +174,21 @@ public partial class ImportViewModel : ObservableObject
     private void RemoveDark(string path) 
     {
         RemoveFromCollection(DarkFiles, path);
-        ClearDarksCommand.NotifyCanExecuteChanged(); // <--- AGGIUNTO
+        ClearDarksCommand.NotifyCanExecuteChanged(); 
     }
 
     [RelayCommand] 
     private void RemoveFlat(string path) 
     {
         RemoveFromCollection(FlatFiles, path);
-        ClearFlatsCommand.NotifyCanExecuteChanged(); // <--- AGGIUNTO
+        ClearFlatsCommand.NotifyCanExecuteChanged(); 
     }
 
     [RelayCommand] 
     private void RemoveBias(string path) 
     {
         RemoveFromCollection(BiasFiles, path);
-        ClearBiasCommand.NotifyCanExecuteChanged(); // <--- AGGIUNTO
+        ClearBiasCommand.NotifyCanExecuteChanged(); 
     }
 
     private void RemoveFromCollection(ObservableCollection<string> collection, string path)
@@ -153,12 +204,11 @@ public partial class ImportViewModel : ObservableObject
     private bool CanClearFlats() => FlatFiles.Count > 0;
     private bool CanClearBias() => BiasFiles.Count > 0;
 
-// Collega la condizione al comando tramite CanExecute
     [RelayCommand(CanExecute = nameof(CanClearLights))]
     private void ClearLights()
     {
         LightFiles.Clear();
-        NotifyLightChanges(); // Metodo helper per aggiornare UI e comandi
+        NotifyLightChanges();
     }
 
     [RelayCommand(CanExecute = nameof(CanClearDarks))]
@@ -211,7 +261,6 @@ public partial class ImportViewModel : ObservableObject
 
         try
         {
-            // Debug delle liste prima dell'invio
             Debug.WriteLine($"[ImportVM] Invio al Coordinator: L:{LightFiles.Count} D:{DarkFiles.Count} F:{FlatFiles.Count} B:{BiasFiles.Count}");
 
             var progress = new Progress<BatchProgressReport>(report =>
@@ -276,8 +325,8 @@ public partial class ImportViewModel : ObservableObject
     // Helper per centralizzare gli aggiornamenti relativi ai Lights
     private void NotifyLightChanges()
     {
-        OnPropertyChanged(nameof(HasLights));          // Aggiorna l'UI (es. ScrollViewer)
-        ConfirmCommand.NotifyCanExecuteChanged();      // Aggiorna pulsante Importa
-        ClearLightsCommand.NotifyCanExecuteChanged();  // Aggiorna pulsante Svuota
+        OnPropertyChanged(nameof(HasLights));          
+        ConfirmCommand.NotifyCanExecuteChanged();      
+        ClearLightsCommand.NotifyCanExecuteChanged();  
     }
 }

@@ -98,21 +98,21 @@ public class ManualCometAlignmentStrategy : AlignmentStrategyBase
         // 1. Recupero dati originali dalla cache
         var data = await DataManager.GetDataAsync(fileRef.FilePath);
         
+        // [MODIFICA MEF] Accesso sicuro all'immagine
+        var imageHdu = data.FirstImageHdu ?? data.PrimaryHdu;
+        if (imageHdu == null) return guess; // Impossibile raffinare senza pixel
+
         // 2. PRIORITÀ HEADER: Rispettiamo BSCALE/BZERO modificati in RAM
-        var header = fileRef.ModifiedHeader ?? data.Header;
+        var header = fileRef.ModifiedHeader ?? imageHdu.Header;
         double bScale = _metadataService.GetDoubleValue(header, "BSCALE", 1.0);
         double bZero = _metadataService.GetDoubleValue(header, "BZERO", 0.0);
 
-        // 3. SMART PROMOTION: Passando null, il convertitore sceglie 32 o 64 bit 
-        // in base al BITPIX originale del file, garantendo integrità scientifica.
-        using var fullMat = _converter.RawToMat(data.PixelData, bScale, bZero);
+        // 3. SMART PROMOTION & CONVERSIONE (Uso pixel dell'HDU)
+        using var fullMat = _converter.RawToMat(imageHdu.PixelData, bScale, bZero);
         
         // ====================================================================
         // 4. SANITIZZAZIONE E CROP DINAMICO
         // ====================================================================
-        // Ritagliamo l'immagine sui dati validi, espandendo se necessario per includere il guess.
-        // I NaN interni vengono sostituiti con 0.0 per permettere l'analisi matematica.
-        // 'workMat' è l'immagine pulita, 'offset' è la posizione del crop rispetto all'originale.
         var (workMat, offset) = SanitizeAndCrop(fullMat, guess);
 
         using (workMat)
@@ -120,7 +120,7 @@ public class ManualCometAlignmentStrategy : AlignmentStrategyBase
             // Adattiamo il guess (Globale) in coordinate locali del crop
             Point2D localGuess = new Point2D(guess.X - offset.X, guess.Y - offset.Y);
 
-            // Controllo limiti (se per caso il guess è ancora fuori dopo l'espansione, scenario estremo)
+            // Controllo limiti
             if (localGuess.X < 0 || localGuess.Y < 0 || 
                 localGuess.X >= workMat.Width || localGuess.Y >= workMat.Height)
                 return guess;
@@ -149,7 +149,6 @@ public class ManualCometAlignmentStrategy : AlignmentStrategyBase
             // ====================================================================
             // 7. RICONVERSIONE COORDINATE GLOBALI
             // ====================================================================
-            // Sommiamo l'offset del crop, l'offset della ROI e il risultato locale
             return new Point2D(
                 localCenter.X + roi.X + offset.X, 
                 localCenter.Y + roi.Y + offset.Y

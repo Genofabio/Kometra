@@ -32,7 +32,6 @@ public class BatchProcessingService : IBatchProcessingService
 
     // =========================================================================================
     // OVERLOAD 1: Sincrono / Legacy (Action)
-    // Mantiene la compatibilità con le parti del progetto che usano semplici Action sincrone
     // =========================================================================================
     public Task<List<string>> ProcessFilesAsync(
         IEnumerable<FitsFileReference> sourceFiles,
@@ -41,7 +40,6 @@ public class BatchProcessingService : IBatchProcessingService
         IProgress<BatchProgressReport>? progress = null,
         CancellationToken token = default)
     {
-        // Avvolgiamo l'Action sincrona in un Func<Task> per riutilizzare il Core asincrono
         return ProcessFilesCoreAsync(sourceFiles, outputFolder, (s, d, h, i) => 
         {
             processor(s, d, h, i);
@@ -50,8 +48,7 @@ public class BatchProcessingService : IBatchProcessingService
     }
 
     // =========================================================================================
-    // OVERLOAD 2: Asincrono (Func<Task>) - [NUOVO]
-    // Risolve il bug nel StructureExtractionCoordinator permettendo l'await corretto
+    // OVERLOAD 2: Asincrono (Func<Task>)
     // =========================================================================================
     public Task<List<string>> ProcessFilesAsync(
         IEnumerable<FitsFileReference> sourceFiles,
@@ -60,13 +57,11 @@ public class BatchProcessingService : IBatchProcessingService
         IProgress<BatchProgressReport>? progress = null,
         CancellationToken token = default)
     {
-        // Passiamo direttamente la funzione asincrona al Core
         return ProcessFilesCoreAsync(sourceFiles, outputFolder, processor, progress, token);
     }
 
     // =========================================================================================
     // CORE LOGIC (Private)
-    // Contiene la logica unificata ed esegue l'await reale
     // =========================================================================================
     private async Task<List<string>> ProcessFilesCoreAsync(
         IEnumerable<FitsFileReference> sourceFiles,
@@ -89,47 +84,60 @@ public class BatchProcessingService : IBatchProcessingService
 
             try
             {
-                // 1. RECUPERO DATI E HEADER SORGENTE
+                // 1. RECUPERO DATI
                 var data = await _dataManager.GetDataAsync(fileRef.FilePath);
-                var sourceHeader = fileRef.ModifiedHeader ?? data.Header;
+
+                // [MODIFICA MEF] Accesso sicuro all'HDU immagine
+                // FitsDataPackage ora è una lista di HDU, non contiene più PixelData diretti.
+                var imageHdu = data.FirstImageHdu ?? data.PrimaryHdu;
+
+                if (imageHdu == null)
+                {
+                    System.Diagnostics.Debug.WriteLine($"Batch Skip [{fileRef.FilePath}]: No valid image HDU found.");
+                    continue;
+                }
+
+                // 2. RECUPERO HEADER
+                // Usiamo l'header modificato in RAM (se esiste), altrimenti quello dell'HDU
+                var sourceHeader = fileRef.ModifiedHeader ?? imageHdu.Header;
+                
                 FitsBitDepth originalDepth = _metadata.GetBitDepth(sourceHeader);
 
-                // 2. ISOLAMENTO: Creiamo la copia di lavoro (workingHeader)
+                // 3. ISOLAMENTO: Creiamo la copia di lavoro dell'header
                 var workingHeader = _metadata.CloneHeader(sourceHeader);
 
-                // 3. CONVERSIONE E PREPARAZIONE MATRICI
+                // 4. CONVERSIONE PIXEL
                 double bScale = _metadata.GetDoubleValue(sourceHeader, "BSCALE", 1.0);
                 double bZero = _metadata.GetDoubleValue(sourceHeader, "BZERO", 0.0);
                 
-                using Mat srcMat = _converter.RawToMat(data.PixelData, bScale, bZero, FitsBitDepth.Double);
+                // Usiamo imageHdu.PixelData invece di data.PixelData
+                using Mat srcMat = _converter.RawToMat(imageHdu.PixelData, bScale, bZero, FitsBitDepth.Double);
                 using Mat dstMat = new Mat(srcMat.Size(), srcMat.Type());
 
-                // 4. ESECUZIONE LOGICA (CRITICAL FIX)
-                // Attendiamo il completamento del Task.
-                // Il blocco 'using Mat srcMat' NON farà Dispose finché questa riga non è completata.
+                // 5. ESECUZIONE LOGICA
                 await processorAsync(srcMat, dstMat, workingHeader, i);
 
-                // 5. SMART PROMOTION (NaN Detection)
+                // 6. SMART PROMOTION
                 bool hasSpecialValues = !Cv2.CheckRange(dstMat, quiet: true);
                 FitsBitDepth outputDepth = _metadata.ResolveOutputBitDepth(originalDepth, hasSpecialValues);
 
-                // 6. RICONVERSIONE E FINALIZZAZIONE HEADER
+                // 7. FINALIZZAZIONE
                 var finalPixels = _converter.MatToRaw(dstMat, outputDepth);
                 var finalHeader = _metadata.CreateHeaderFromTemplate(workingHeader, finalPixels, outputDepth);
 
-                // 7. SALVATAGGIO
+                // 8. SALVATAGGIO
                 var resultRef = await _dataManager.SaveAsTemporaryAsync(finalPixels, finalHeader, "BatchResult");
                 results.Add(resultRef.FilePath);
             }
             catch (Exception ex)
             {
                 System.Diagnostics.Debug.WriteLine($"Batch Error [{fileRef.FilePath}]: {ex.Message}");
+                // Opzionale: Rilanciare o gestire in base alle policy di errore
             }
         }
         return results;
     }
 
-    // Metodo helper (mantenuto per riferimento/uso interno se necessario)
     private FitsBitDepth DetermineOptimalOutputDepth(FitsBitDepth original, Mat processedMat)
     {
         if ((int)original < 0) return original;

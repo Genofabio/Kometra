@@ -124,7 +124,13 @@ public partial class VideoExportToolViewModel : ObservableObject, IDisposable
             if (index < 0 || index >= _sourceFiles.Count) return;
             var fileRef = _sourceFiles[index];
             var data = await _dataManager.GetDataAsync(fileRef.FilePath);
-            var newRenderer = await _rendererFactory.CreateAsync(data.PixelData, fileRef.ModifiedHeader ?? data.Header);
+        
+            // [MODIFICA MEF] Accesso sicuro all'HDU immagine
+            var imageHdu = data.FirstImageHdu ?? data.PrimaryHdu;
+            if (imageHdu == null) return; // O loggare errore
+
+            // Usiamo PixelData e Header dell'HDU
+            var newRenderer = await _rendererFactory.CreateAsync(imageHdu.PixelData, fileRef.ModifiedHeader ?? imageHdu.Header);
             newRenderer.VisualizationMode = Mode;
 
             if (ActiveRenderer != null)
@@ -136,7 +142,7 @@ public partial class VideoExportToolViewModel : ObservableObject, IDisposable
             ActiveRenderer = newRenderer;
             Viewport.ImageSize = ActiveRenderer.ImageSize;
             NotifyThresholdsChanged();
-            
+        
             if (!ImageLoadedTcs.Task.IsCompleted) ImageLoadedTcs.TrySetResult(true);
         }
         catch (Exception ex)

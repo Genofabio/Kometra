@@ -124,8 +124,11 @@ public class WindowService : IWindowService
 
         var dialogService = _serviceProvider.GetRequiredService<IDialogService>();
         var coordinator = _serviceProvider.GetRequiredService<ICalibrationCoordinator>();
+        
+        // [MODIFICA MEF] Ora serve anche IFitsDataManager per gestire file multi-estensione
+        var dataManager = _serviceProvider.GetRequiredService<IFitsDataManager>();
 
-        var viewModel = new ImportViewModel(dialogService, coordinator);
+        var viewModel = new ImportViewModel(dialogService, coordinator, dataManager);
         var view = new ImportView { DataContext = viewModel };
 
         return await ShowDialogAndGetResultAsync(view, viewModel, vm => vm.CalibratedResultPaths);

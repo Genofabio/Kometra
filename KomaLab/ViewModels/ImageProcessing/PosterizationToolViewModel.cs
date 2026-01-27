@@ -140,7 +140,12 @@ public partial class PosterizationToolViewModel : ObservableObject, IDisposable
             var data = await _dataManager.GetDataAsync(fileRef.FilePath);
             token.ThrowIfCancellationRequested();
 
-            var newRenderer = await _rendererFactory.CreateAsync(data.PixelData, fileRef.ModifiedHeader ?? data.Header);
+            // [MODIFICA MEF] Accesso sicuro all'HDU immagine
+            var imageHdu = data.FirstImageHdu ?? data.PrimaryHdu;
+            if (imageHdu == null) 
+                throw new InvalidOperationException("Nessuna immagine valida trovata nel file FITS.");
+
+            var newRenderer = await _rendererFactory.CreateAsync(imageHdu.PixelData, fileRef.ModifiedHeader ?? imageHdu.Header);
             
             // --- DEFAULT LIVELLI DINAMICO (Solo al primo avvio) ---
             if (!_hasLoadedFirstImage)
@@ -159,7 +164,7 @@ public partial class PosterizationToolViewModel : ObservableObject, IDisposable
                 }
             }
 
-            // Configurazione hook anteprima (usa il valore Levels appena calcolato o quello dell'utente)
+            // Configurazione hook anteprima
             newRenderer.PostProcessAction = _coordinator.GetPreviewEffect(Levels);
 
             if (_hasLoadedFirstImage && ActiveRenderer != null)

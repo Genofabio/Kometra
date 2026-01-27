@@ -43,17 +43,23 @@ public class StackingCoordinator : IStackingCoordinator
             throw new InvalidOperationException("Sono necessarie almeno 2 immagini per eseguire lo stacking.");
 
         // 1. Analisi Input e Setup
-        // Carichiamo solo il primo frame per decidere la strategia. È veloce e sicuro.
         var firstFrameData = await _dataManager.GetDataAsync(fileList[0].FilePath);
-        var baseHeader = fileList[0].ModifiedHeader ?? firstFrameData.Header;
+        
+        // [MODIFICA MEF] Accesso sicuro all'HDU
+        var firstImageHdu = firstFrameData.FirstImageHdu ?? firstFrameData.PrimaryHdu;
+        if (firstImageHdu == null) 
+            throw new InvalidOperationException($"Il primo file ({fileList[0].FilePath}) non contiene immagini valide.");
+
+        // Preferenza header modificato in RAM
+        var baseHeader = fileList[0].ModifiedHeader ?? firstImageHdu.Header;
         int width = _metadataService.GetIntValue(baseHeader, "NAXIS1");
         int height = _metadataService.GetIntValue(baseHeader, "NAXIS2");
 
         // 2. Analisi Dinamica della Precisione
         bool useDoubleAccumulator = false;
         
-        // Creiamo una Mat temporanea per analizzare i dati reali
-        using (var testMat = _converter.RawToMat(firstFrameData.PixelData, 1, 0, null))
+        // Creiamo una Mat temporanea usando i dati dell'HDU
+        using (var testMat = _converter.RawToMat(firstImageHdu.PixelData, 1, 0, null))
         {
             // A. Se l'input è già Double, restiamo in Double
             if (testMat.Depth() == MatType.CV_64F)
@@ -74,14 +80,11 @@ public class StackingCoordinator : IStackingCoordinator
                 }
                 else
                 {
-                    // Tentativo 2: Scansione reale del primo frame (molto veloce con OpenCV)
-                    // MinMaxLoc è ottimizzato in C++, su un frame 4k richiede pochi millisecondi.
+                    // Tentativo 2: Scansione reale del primo frame
                     testMat.MinMaxLoc(out _, out maxPixelValue);
                 }
 
                 // C. Calcolo del Rischio Overflow
-                // Aggiungiamo un margine di sicurezza (Safety Margin) del 20% (1.2)
-                // nel caso in cui i frame successivi siano leggermente più luminosi del primo.
                 double estimatedTotalSum = maxPixelValue * fileList.Count * 1.2;
 
                 if (estimatedTotalSum > FloatPrecisionLimit)
@@ -90,8 +93,6 @@ public class StackingCoordinator : IStackingCoordinator
                 }
             }
         }
-        
-        // Per Average e Median, Float basta sempre (se l'input non è Double)
         
         Mat finalMat = null;
 
@@ -105,11 +106,14 @@ public class StackingCoordinator : IStackingCoordinator
                 async (fileRef, rect) => 
                 {
                     var data = await _dataManager.GetDataAsync(fileRef.FilePath);
-                    var h = fileRef.ModifiedHeader ?? data.Header;
+                    var imgHdu = data.FirstImageHdu ?? data.PrimaryHdu;
+                    if (imgHdu == null) return new Mat(rect.Height, rect.Width, MatType.CV_32F, new Scalar(0));
+
+                    var h = fileRef.ModifiedHeader ?? imgHdu.Header;
                     double bScale = _metadataService.GetDoubleValue(h, "BSCALE", 1.0);
                     double bZero = _metadataService.GetDoubleValue(h, "BZERO", 0.0);
 
-                    using var fullMat = _converter.RawToMat(data.PixelData, bScale, bZero, targetDepth: null);
+                    using var fullMat = _converter.RawToMat(imgHdu.PixelData, bScale, bZero, targetDepth: null);
                     return fullMat.SubMat(rect).Clone();
                 });
         }
@@ -134,11 +138,16 @@ public class StackingCoordinator : IStackingCoordinator
                         foreach (var fileRef in fileList)
                         {
                             var data = await _dataManager.GetDataAsync(fileRef.FilePath);
-                            var h = fileRef.ModifiedHeader ?? data.Header;
+                            
+                            // [MODIFICA MEF] Accesso sicuro all'HDU
+                            var imgHdu = data.FirstImageHdu ?? data.PrimaryHdu;
+                            if (imgHdu == null) continue;
+
+                            var h = fileRef.ModifiedHeader ?? imgHdu.Header;
                             double bScale = _metadataService.GetDoubleValue(h, "BSCALE", 1.0);
                             double bZero = _metadataService.GetDoubleValue(h, "BZERO", 0.0);
 
-                            var mat = _converter.RawToMat(data.PixelData, bScale, bZero, targetDepth: null);
+                            var mat = _converter.RawToMat(imgHdu.PixelData, bScale, bZero, targetDepth: null);
                             await channel.Writer.WriteAsync(mat);
                         }
                     }

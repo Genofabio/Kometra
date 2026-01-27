@@ -30,11 +30,11 @@ public class CalibrationCoordinator : ICalibrationCoordinator
         IStackingEngine stackingEngine,
         ICalibrationEngine calibrationEngine)
     {
-        _dataManager = dataManager;
-        _metadata = metadata;
-        _converter = converter;
-        _stackingEngine = stackingEngine;
-        _calibrationEngine = calibrationEngine;
+        _dataManager = dataManager ?? throw new ArgumentNullException(nameof(dataManager));
+        _metadata = metadata ?? throw new ArgumentNullException(nameof(metadata));
+        _converter = converter ?? throw new ArgumentNullException(nameof(converter));
+        _stackingEngine = stackingEngine ?? throw new ArgumentNullException(nameof(stackingEngine));
+        _calibrationEngine = calibrationEngine ?? throw new ArgumentNullException(nameof(calibrationEngine));
     }
 
     public async Task<List<string>> ExecuteCalibrationAsync(
@@ -81,9 +81,20 @@ public class CalibrationCoordinator : ICalibrationCoordinator
                 {
                     // A. Caricamento Light
                     var data = await _dataManager.GetDataAsync(currentPath);
-                    var header = _metadata.CloneHeader(data.Header);
                     
-                    using var lightMat = _converter.RawToMat(data.PixelData, 
+                    // [MODIFICA MEF] Accesso sicuro all'HDU immagine
+                    var imageHdu = data.FirstImageHdu ?? data.PrimaryHdu;
+                    if (imageHdu == null) 
+                    {
+                        Debug.WriteLine($"[CalibrationCoordinator] SKIP: Nessuna immagine valida in {currentPath}");
+                        continue;
+                    }
+
+                    // Cloniamo l'header dell'HDU specifico
+                    var header = _metadata.CloneHeader(imageHdu.Header);
+                    
+                    // Usiamo i PixelData dell'HDU
+                    using var lightMat = _converter.RawToMat(imageHdu.PixelData, 
                         _metadata.GetDoubleValue(header, "BSCALE", 1.0),
                         _metadata.GetDoubleValue(header, "BZERO", 0.0));
                     
@@ -123,8 +134,6 @@ public class CalibrationCoordinator : ICalibrationCoordinator
                 catch (Exception ex)
                 {
                     Debug.WriteLine($"[CalibrationCoordinator] ERRORE durante l'elaborazione di {currentPath}: {ex.Message}");
-                    // Continuiamo con il prossimo file invece di rompere tutto il batch? 
-                    // Per ora rilanciamo per capire il problema
                     throw; 
                 }
             }
@@ -162,10 +171,17 @@ public class CalibrationCoordinator : ICalibrationCoordinator
             foreach (var p in pathList)
             {
                 var data = await _dataManager.GetDataAsync(p);
-                mats.Add(_converter.RawToMat(data.PixelData, 
-                    _metadata.GetDoubleValue(data.Header, "BSCALE", 1.0),
-                    _metadata.GetDoubleValue(data.Header, "BZERO", 0.0)));
+                
+                // [MODIFICA MEF] Accesso sicuro all'HDU immagine
+                var imageHdu = data.FirstImageHdu ?? data.PrimaryHdu;
+                if (imageHdu == null) continue;
+
+                mats.Add(_converter.RawToMat(imageHdu.PixelData, 
+                    _metadata.GetDoubleValue(imageHdu.Header, "BSCALE", 1.0),
+                    _metadata.GetDoubleValue(imageHdu.Header, "BZERO", 0.0)));
             }
+
+            if (mats.Count == 0) return null;
 
             // Usiamo l'engine di stacking esistente per fare la Media
             var master = await _stackingEngine.ComputeStackAsync(mats, StackingMode.Average);
