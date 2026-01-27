@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using KomaLab.Models.Astrometry;
 using KomaLab.Models.Astrometry.Wcs;
 using KomaLab.Models.Fits;
@@ -17,17 +18,42 @@ public static class WcsParser
         // Se manca CTYPE1, non c'è astrometria valida
         if (string.IsNullOrEmpty(ctype1)) return new WcsData { IsValid = false };
 
-        data.ProjectionType = ctype1.Contains("TPV") ? WcsProjectionType.Tpv : WcsProjectionType.Tan;
+        // 1. Rilevamento Tipo Proiezione
+        if (ctype1.Contains("-SIP")) 
+            data.ProjectionType = WcsProjectionType.Sip;
+        else if (ctype1.Contains("TPV") || ctype1.Contains("ZPN")) 
+            data.ProjectionType = WcsProjectionType.Tpv;
+        else 
+            data.ProjectionType = WcsProjectionType.Tan;
 
-        // Coordinate di Riferimento (CRVAL / CRPIX) - Standard universale
+        // 2. Coordinate di Riferimento (CRVAL / CRPIX) - Standard universale
         data.RefRaDeg = AstroParser.ParseDegrees(metadata.GetStringValue(header, "CRVAL1")) ?? 0;
         data.RefDecDeg = AstroParser.ParseDegrees(metadata.GetStringValue(header, "CRVAL2")) ?? 0;
         data.RefPixelX = metadata.GetDoubleValue(header, "CRPIX1");
         data.RefPixelY = metadata.GetDoubleValue(header, "CRPIX2");
         
-        // --- LOGICA DI RISOLUZIONE MATRICE DI TRASFORMAZIONE ---
-        
-        // 1. Proviamo a leggere la matrice CD moderna
+        // 3. Matrice Lineare (CD o Fallback Legacy)
+        ParseLinearMatrix(header, metadata, data);
+
+        // 4. Coefficienti Distorsione TPV (PV Keywords)
+        if (data.ProjectionType == WcsProjectionType.Tpv)
+        {
+            ParseTpvCoefficients(header, metadata, data);
+        }
+
+        // 5. Coefficienti Distorsione SIP (A/B Keywords) - [AGGIUNTA SCIENTIFICA]
+        if (data.ProjectionType == WcsProjectionType.Sip)
+        {
+            ParseSipCoefficients(header, metadata, data);
+        }
+
+        data.IsValid = true;
+        return data;
+    }
+
+    private static void ParseLinearMatrix(FitsHeader header, IFitsMetadataService metadata, WcsData data)
+    {
+        // Proviamo a leggere la matrice CD moderna
         double cd11 = metadata.GetDoubleValue(header, "CD1_1");
         double cd12 = metadata.GetDoubleValue(header, "CD1_2");
         double cd21 = metadata.GetDoubleValue(header, "CD2_1");
@@ -44,12 +70,29 @@ public static class WcsParser
         }
         else
         {
-            // 2. Fallback: Calcoliamo la matrice CD dai vecchi parametri (CDELT + CROTA)
-            //    Questo supporta file vecchi o generati da software semplici.
+            // Fallback: Calcoliamo la matrice CD dai vecchi parametri (CDELT + CROTA)
             ResolveLegacyRotation(header, metadata, data);
         }
+    }
 
-        // --- COEFFICIENTI DI DISTORSIONE (PV) ---
+    private static void ResolveLegacyRotation(FitsHeader header, IFitsMetadataService metadata, WcsData data)
+    {
+        double cdelt1 = metadata.GetDoubleValue(header, "CDELT1", 1.0); 
+        double cdelt2 = metadata.GetDoubleValue(header, "CDELT2", 1.0);
+        double rotDeg = metadata.GetDoubleValue(header, "CROTA2", 0.0);
+        
+        double rad = rotDeg * (Math.PI / 180.0);
+        double cos = Math.Cos(rad);
+        double sin = Math.Sin(rad);
+
+        data.Cd1_1 = cdelt1 * cos;
+        data.Cd1_2 = Math.Abs(cdelt2) * Math.Sign(cdelt1) * sin;
+        data.Cd2_1 = -Math.Abs(cdelt1) * Math.Sign(cdelt2) * sin;
+        data.Cd2_2 = cdelt2 * cos;
+    }
+
+    private static void ParseTpvCoefficients(FitsHeader header, IFitsMetadataService metadata, WcsData data)
+    {
         foreach (var card in header.Cards)
         {
             if (card.Key.StartsWith("PV") && TryParsePvKey(card.Key, out int ax, out int k))
@@ -57,48 +100,54 @@ public static class WcsParser
                 data.PvCoefficients[(ax, k)] = metadata.GetDoubleValue(header, card.Key);
             }
         }
-
-        data.IsValid = true;
-        return data;
     }
 
-    /// <summary>
-    /// Converte CDELT/CROTA (Legacy) in matrice CD (Standard Moderno).
-    /// </summary>
-    private static void ResolveLegacyRotation(FitsHeader header, IFitsMetadataService metadata, WcsData data)
+    private static void ParseSipCoefficients(FitsHeader header, IFitsMetadataService metadata, WcsData data)
     {
-        // Lettura Scala (gradi per pixel)
-        // Default a 1.0 se manca, per evitare divisioni per zero, ma segnando l'anomalia
-        double cdelt1 = metadata.GetDoubleValue(header, "CDELT1", 1.0); 
-        double cdelt2 = metadata.GetDoubleValue(header, "CDELT2", 1.0);
-
-        // Lettura Rotazione (in gradi)
-        // Nota: CROTA2 è lo standard de-facto, CROTA1 è rarissimo
-        double rotDeg = metadata.GetDoubleValue(header, "CROTA2", 0.0);
+        // 1. Ordini dei polinomi (A=Forward X, B=Forward Y)
+        data.SipOrderA = metadata.GetIntValue(header, "A_ORDER", 0);
+        data.SipOrderB = metadata.GetIntValue(header, "B_ORDER", 0);
         
-        // Conversione in radianti
-        // Nota: La rotazione WCS è definita positiva verso Nord -> Est (senso antiorario)
-        // Ma spesso nei CCD l'asse Y è invertito, quindi va gestito con attenzione.
-        // La formula standard IAU per convertire CDELT/CROTA in CD è:
-        
-        double rad = rotDeg * (Math.PI / 180.0);
-        double cos = Math.Cos(rad);
-        double sin = Math.Sin(rad);
+        // 2. Ordini dei polinomi inversi (AP=Reverse X, BP=Reverse Y)
+        data.SipOrderAp = metadata.GetIntValue(header, "AP_ORDER", 0);
+        data.SipOrderBp = metadata.GetIntValue(header, "BP_ORDER", 0);
 
-        // A volte esiste anche una matrice PC parziale (PC1_1...)
-        // Per semplicità qui assumiamo il caso classico puro (solo rotazione semplice)
-        
-        // Formule standard:
-        // CD1_1 = CDELT1 * cos(rot)
-        // CD1_2 = |CDELT2| * sin(rot)  <-- Nota: CDELT2 spesso include il segno negativo per l'asse Dec
-        // CD2_1 = |CDELT1| * -sin(rot)
-        // CD2_2 = CDELT2 * cos(rot)
+        // 3. Parsing matrici Forward
+        if (data.SipOrderA > 0) ParsePolynomialMatrix(header, metadata, "A", data.SipOrderA, data.SipACoefficients);
+        if (data.SipOrderB > 0) ParsePolynomialMatrix(header, metadata, "B", data.SipOrderB, data.SipBCoefficients);
 
-        // Implementazione robusta semplificata (assume assi ortogonali standard)
-        data.Cd1_1 = cdelt1 * cos;
-        data.Cd1_2 = Math.Abs(cdelt2) * Math.Sign(cdelt1) * sin; // Gestione segni incrociati
-        data.Cd2_1 = -Math.Abs(cdelt1) * Math.Sign(cdelt2) * sin;
-        data.Cd2_2 = cdelt2 * cos;
+        // 4. Parsing matrici Reverse (Opzionali ma utili per World->Pixel)
+        if (data.SipOrderAp > 0) ParsePolynomialMatrix(header, metadata, "AP", data.SipOrderAp, data.SipApCoefficients);
+        if (data.SipOrderBp > 0) ParsePolynomialMatrix(header, metadata, "BP", data.SipOrderBp, data.SipBpCoefficients);
+    }
+
+    private static void ParsePolynomialMatrix(
+        FitsHeader header, 
+        IFitsMetadataService metadata, 
+        string prefix, 
+        int order, 
+        Dictionary<(int, int), double> targetDict)
+    {
+        // Lo standard SIP definisce le chiavi come A_p_q (es. A_2_0)
+        // Poiché l'ordine è basso (tipicamente <= 4), iteriamo gli indici invece di scansionare l'header
+        for (int p = 0; p <= order; p++)
+        {
+            for (int q = 0; q <= order; q++)
+            {
+                // Ottimizzazione: SIP standard richiede p+q <= order, ma alcune implementazioni (es. SCAMP)
+                // possono includere termini incrociati extra. Noi proviamo a leggerli tutti nel quadrato.
+                if (p + q > order && p != 0 && q != 0) continue; 
+
+                string key = $"{prefix}_{p}_{q}";
+                double val = metadata.GetDoubleValue(header, key, 0.0);
+
+                // Memorizziamo solo i coefficienti non nulli per risparmiare memoria
+                if (Math.Abs(val) > 1e-15)
+                {
+                    targetDict[(p, q)] = val;
+                }
+            }
+        }
     }
 
     private static bool TryParsePvKey(string key, out int axis, out int k)
