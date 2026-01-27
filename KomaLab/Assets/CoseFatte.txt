@@ -235,3 +235,24 @@ Lettura header per time per ordinare caricamento immagini MultipleImageNode
                                   Riduzione Allocazioni (ApplyAzimuthal...): Invece di allocare List<float> dentro ogni iterazione del Parallel.For (che causa pressione sul Garbage Collector), uso array pool o semplicemente calcoli diretti a due passaggi (un loop per la media, uno per la deviazione standard) evitando del tutto le liste dove possibile. Questo è molto più veloce e consuma meno RAM.
                                   
                                   Look-up Tables (LUT): Ho mantenuto le LUT per seno/coseno ma ottimizzato l'accesso.
+                                  
+    - Aggiunti  tutti gli altri filtri
+    
+- Aggiunto export video migliore
+    - non è stato possibile aggiungere h265 
+    
+- Fix problemi con gestione file fits per uniformarmi a standard
+    - gestione tempo acquisizione per media posizione cometa: Caratteristica	Versione Precedente	Versione Attuale (Scientific Compliant)
+                                                              Riferimento Temporale	DATE-OBS (Start Esposizione)	DATE-OBS + (EXPTIME / 2) (Mid-Point)
+                                                              Query JPL Horizons	"Dov'era l'oggetto all'inizio?"	"Dov'era l'oggetto in media durante lo scatto?"
+                                                              Errore Astrometrico	Sistematico (metà del moto durante l'exp)	Minimizzato (centrato sul flusso luminoso)
+                                                              Tracking Telescopio	Ignorato (Assunto Siderale)	Rilevato (MTFLAG / RA_RATE)
+                                                              Dati UI (Metadata)	Solo Nome e Data grezza	Flag IsTracked + Dati WCS validati                             
+                                  
+                                  
+                                  
+                                  
+                                  
+                                  
+                                  
+                                  

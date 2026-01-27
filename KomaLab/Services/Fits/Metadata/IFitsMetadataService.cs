@@ -19,12 +19,36 @@ public interface IFitsMetadataService
     
     // --- Accesso ai Dati (Interpretazione Scientifica) ---
     DateTime? GetObservationDate(FitsHeader header);
+    
+    // [SCIENTIFIC FIX] Nuovi metodi per precisione temporale e tracking
+    /// <summary>
+    /// Restituisce la durata dell'esposizione in secondi.
+    /// </summary>
+    double GetExposureDuration(FitsHeader header);
+
+    /// <summary>
+    /// Calcola il punto medio (Time Mid-Point) dell'esposizione.
+    /// Cruciale per l'astrometria di oggetti veloci (Comete/NEO).
+    /// </summary>
+    DateTime? GetObservationMidPoint(FitsHeader header);
+
+    /// <summary>
+    /// Restituisce il Modified Julian Date (MJD).
+    /// Preferibile per calcoli orbitali numerici continui.
+    /// </summary>
+    double? GetModifiedJulianDate(FitsHeader header);
+
+    /// <summary>
+    /// Rileva se il telescopio stava inseguendo un oggetto non siderale (MTFLAG o Rates).
+    /// </summary>
+    bool IsMovingTarget(FitsHeader header);
+
     double? GetFocalLength(FitsHeader header);
     double? GetPixelSize(FitsHeader header);
     FitsBitDepth GetBitDepth(FitsHeader header);
     WcsData ExtractWcs(FitsHeader header); // Necessario per Astrometria
     GeographicLocation? GetObservatoryLocation(FitsHeader header); // Necessario per Effemeridi
-    public SkyCoordinate? GetTargetCoordinates(FitsHeader header);
+    SkyCoordinate? GetTargetCoordinates(FitsHeader header);
     
     // --- Regole di Dominio (Validazione) ---
     bool IsStructuralKey(string key); // NECESSARIO: Il ViewModel chiede "Posso far modificare questa chiave?"

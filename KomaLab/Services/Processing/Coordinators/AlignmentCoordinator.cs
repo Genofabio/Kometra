@@ -31,11 +31,11 @@ public class AlignmentCoordinator : IAlignmentCoordinator
         IFitsMetadataService metadataService,
         IJplHorizonsService jplService)
     {
-        _alignmentService = alignmentService;
-        _batchService = batchService;
-        _dataManager = dataManager;
-        _metadataService = metadataService;
-        _jplService = jplService;
+        _alignmentService = alignmentService ?? throw new ArgumentNullException(nameof(alignmentService));
+        _batchService = batchService ?? throw new ArgumentNullException(nameof(batchService));
+        _dataManager = dataManager ?? throw new ArgumentNullException(nameof(dataManager));
+        _metadataService = metadataService ?? throw new ArgumentNullException(nameof(metadataService));
+        _jplService = jplService ?? throw new ArgumentNullException(nameof(jplService));
     }
 
     public async Task<AlignmentTargetMetadata> GetFileMetadataAsync(FitsFileReference file)
@@ -49,11 +49,14 @@ public class AlignmentCoordinator : IAlignmentCoordinator
 
         return new AlignmentTargetMetadata(
             ObjectName: string.IsNullOrWhiteSpace(obj) ? "Unknown" : obj,
-            ObservationDate: _metadataService.GetObservationDate(header),
+            ObservationDate: _metadataService.GetObservationDate(header), // Data ISO-8601 precisa
             Location: _metadataService.GetObservatoryLocation(header),
             HasWcs: wcs.IsValid,
             ImageWidth: _metadataService.GetIntValue(header, "NAXIS1"),
-            ImageHeight: _metadataService.GetIntValue(header, "NAXIS2")
+            ImageHeight: _metadataService.GetIntValue(header, "NAXIS2"),
+            // [SCIENTIFIC FIX] Segnalazione Tracking Non-Siderale (Stelle Strisciate)
+            // Nota: Assicurati di aggiungere 'bool IsTracked' al record AlignmentTargetMetadata
+            IsTracked: _metadataService.IsMovingTarget(header) 
         );
     }
 
@@ -114,12 +117,9 @@ public class AlignmentCoordinator : IAlignmentCoordinator
         return await _alignmentService.GenerateMapAsync(fileList, centers.ToList(), target);
     }
 
-    // AlignmentCoordinator.cs
-
     public async Task<List<string>> ExecuteWarpingAsync(
         IEnumerable<FitsFileReference> files,
         AlignmentMap map,
-        // Aggiungi qui i parametri di contesto che vuoi loggare
         AlignmentMode mode,
         int searchRadius,
         string? jplName, 
@@ -128,15 +128,14 @@ public class AlignmentCoordinator : IAlignmentCoordinator
     {
         if (map == null || !map.IsValid) throw new InvalidOperationException("Mappa non valida.");
 
-        // 1. Prepariamo la stringa "Statica" (quella che conosciamo già qui)
+        // 1. Prepariamo la stringa "Statica"
         string refInfo = "WCS";
         if (map.Target == AlignmentTarget.Comet)
         {
             refInfo = !string.IsNullOrEmpty(jplName) ? $"JPL ({jplName})" : "Manual";
         }
 
-        // 2. Definiamo la Strategia (Il Delegato)
-        // Questa funzione vive qui, vede 'mode' e 'refInfo', ma aspetta dx/dy dal service.
+        // 2. Definiamo la Strategia di Logging (HISTORY)
         Func<double, double, string> logStrategy = (dx, dy) => 
         {
             return FormattableString.Invariant(
@@ -144,11 +143,10 @@ public class AlignmentCoordinator : IAlignmentCoordinator
             );
         };
 
-        // 3. Passiamo la strategia al Service
-        // Non stiamo passando dati, stiamo passando un COMPORTAMENTO.
+        // 3. Otteniamo il processore di warping configurato
         var warpProcessor = _alignmentService.GetWarpingProcessor(map, logStrategy);
 
-        // 4. Eseguiamo
+        // 4. Eseguiamo il batch
         return await _batchService.ProcessFilesAsync(files, "Aligned", warpProcessor, progress, token);
     }
 
@@ -157,12 +155,19 @@ public class AlignmentCoordinator : IAlignmentCoordinator
     private async Task<Point2D?> FetchJplPointAsync(FitsFileReference file, string targetName)
     {
         var header = file.ModifiedHeader ?? await _dataManager.GetHeaderOnlyAsync(file.FilePath);
-        var date = _metadataService.GetObservationDate(header!);
+        
+        // [SCIENTIFIC FIX] Calcolo del tempo per orbite precise
+        // Per oggetti veloci (Comete/NEO), la posizione deve essere riferita al
+        // PUNTO MEDIO dell'esposizione (DATE-OBS + EXPTIME/2), non all'inizio.
+        var date = _metadataService.GetObservationMidPoint(header!) 
+                   ?? _metadataService.GetObservationDate(header!);
+                   
         var loc = _metadataService.GetObservatoryLocation(header!);
         var wcs = _metadataService.ExtractWcs(header!);
 
         if (date == null || loc == null || !wcs.IsValid) return null;
 
+        // Interrogazione JPL Horizons con il tempo corretto
         var ephem = await _jplService.GetEphemerisAsync(targetName, date.Value, loc);
         if (!ephem.HasValue) return null;
 
