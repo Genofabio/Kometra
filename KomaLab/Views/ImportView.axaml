@@ -5,9 +5,10 @@
         xmlns:avalonia="clr-namespace:Material.Icons.Avalonia;assembly=Material.Icons.Avalonia"
         xmlns:imageProcessing="clr-namespace:KomaLab.ViewModels.ImageProcessing"
         xmlns:conv="clr-namespace:KomaLab.Converters"
+        xmlns:importExport="clr-namespace:KomaLab.ViewModels.ImportExport"
         mc:Ignorable="d" d:DesignWidth="1100" d:DesignHeight="750"
         x:Class="KomaLab.Views.ImportView"
-        x:DataType="imageProcessing:ImportViewModel"
+        x:DataType="importExport:ImportViewModel"
         Title="Importazione e Calibrazione Scientifica"
         Width="1000" Height="668"
         WindowStartupLocation="CenterOwner"
@@ -60,7 +61,7 @@
                                                     <TextBlock Grid.Column="1" Text="{Binding}" VerticalAlignment="Center" FontSize="11" 
                                                              TextTrimming="PrefixCharacterEllipsis" Margin="18,0, 15, 0" Foreground="White"/>
                                                     
-                                                    <Button Grid.Column="2" Classes="delBtn" Command="{Binding $parent[Window].((imageProcessing:ImportViewModel)DataContext).RemoveLightCommand}" CommandParameter="{Binding}">
+                                                    <Button Grid.Column="2" Classes="delBtn" Command="{Binding $parent[Window].((importExport:ImportViewModel)DataContext).RemoveLightCommand}" CommandParameter="{Binding}">
                                                         <avalonia:MaterialIcon Kind="Close" Width="10" Height="10"/>
                                                     </Button>
                                                 </Grid>
@@ -99,7 +100,7 @@
                                                                 </TextBlock.Text>
                                                             </TextBlock>
                                                             <TextBlock Grid.Column="1" Text="{Binding}" FontSize="10" TextTrimming="PrefixCharacterEllipsis" VerticalAlignment="Center" Margin="14,0, 8,0"/>
-                                                            <Button Grid.Column="2" Classes="delBtn" Height="18" Width="18" Command="{Binding $parent[Window].((imageProcessing:ImportViewModel)DataContext).RemoveBiasCommand}" CommandParameter="{Binding}">
+                                                            <Button Grid.Column="2" Classes="delBtn" Height="18" Width="18" Command="{Binding $parent[Window].((importExport:ImportViewModel)DataContext).RemoveBiasCommand}" CommandParameter="{Binding}">
                                                                 <avalonia:MaterialIcon Kind="Close" Width="8" Height="8"/>
                                                             </Button>
                                                         </Grid>
@@ -133,7 +134,7 @@
                                                                 </TextBlock.Text>
                                                             </TextBlock>
                                                             <TextBlock Grid.Column="1" Text="{Binding}" FontSize="10" TextTrimming="PrefixCharacterEllipsis" VerticalAlignment="Center" Margin="14,0,8,0"/>
-                                                            <Button Grid.Column="2" Classes="delBtn" Height="18" Width="18" Command="{Binding $parent[Window].((imageProcessing:ImportViewModel)DataContext).RemoveDarkCommand}" CommandParameter="{Binding}">
+                                                            <Button Grid.Column="2" Classes="delBtn" Height="18" Width="18" Command="{Binding $parent[Window].((importExport:ImportViewModel)DataContext).RemoveDarkCommand}" CommandParameter="{Binding}">
                                                                 <avalonia:MaterialIcon Kind="Close" Width="8" Height="8"/>
                                                             </Button>
                                                         </Grid>
@@ -167,7 +168,7 @@
                                                                 </TextBlock.Text>
                                                             </TextBlock>
                                                             <TextBlock Grid.Column="1" Text="{Binding}" FontSize="10" TextTrimming="PrefixCharacterEllipsis" VerticalAlignment="Center" Margin="14,0,8,0"/>
-                                                            <Button Grid.Column="2" Classes="delBtn" Height="18" Width="18" Command="{Binding $parent[Window].((imageProcessing:ImportViewModel)DataContext).RemoveFlatCommand}" CommandParameter="{Binding}">
+                                                            <Button Grid.Column="2" Classes="delBtn" Height="18" Width="18" Command="{Binding $parent[Window].((importExport:ImportViewModel)DataContext).RemoveFlatCommand}" CommandParameter="{Binding}">
                                                                 <avalonia:MaterialIcon Kind="Close" Width="8" Height="8"/>
                                                             </Button>
                                                         </Grid>

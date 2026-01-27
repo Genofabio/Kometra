@@ -197,16 +197,53 @@ public partial class MultipleImagesNodeViewModel : ImageNodeViewModel
 
         try
         {
+            // 1. Determiniamo il container dall'estensione del file scelto
+            // Nota: In una versione finale, questo verrebbe passato da una Dialog di opzioni
+            string extension = Path.GetExtension(outputPath).ToLower();
+            VideoContainer container = extension switch
+            {
+                ".mp4" => VideoContainer.MP4,
+                ".mkv" => VideoContainer.MKV,
+                _ => VideoContainer.AVI
+            };
+
+            // 2. Scegliamo un codec predefinito compatibile con il container
+            VideoCodec codec = container switch
+            {
+                VideoContainer.MP4 => VideoCodec.H264,
+                VideoContainer.AVI => VideoCodec.MJPG,
+                _ => VideoCodec.XVID
+            };
+
+            // 3. Creazione dell'oggetto configurazione aggiornato
+            var settings = new VideoExportSettings(
+                OutputPath: outputPath,
+                Fps: 24.0,
+                Container: container, // Parametro aggiunto
+                Codec: codec,
+                ScaleFactor: 1.0,
+                Mode: this.VisualizationMode,
+                AdaptiveStretch: true
+            );
+
+            var progressReporter = new Progress<double>(p => ExportProgress = p);
+
+            // 4. Chiamata al Coordinator (ora coerente con i tipi di basso livello)
             await _videoCoordinator.ExportVideoAsync(
                 _files, 
-                outputPath, 
-                24.0, 
+                settings, 
                 ActiveRenderer.CaptureContrastProfile(), 
-                this.VisualizationMode,
-                adaptiveStretch: true,
-                token: _exportCts.Token);
+                progressReporter,
+                _exportCts.Token);
         }
-        catch (OperationCanceledException) { }
+        catch (OperationCanceledException) 
+        {
+            ExportProgress = 0;
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"[Export Error]: {ex.Message}");
+        }
         finally
         {
             IsExporting = false;

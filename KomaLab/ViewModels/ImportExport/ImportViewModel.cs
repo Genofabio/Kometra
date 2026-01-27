@@ -11,7 +11,7 @@ using KomaLab.Models.Processing;
 using KomaLab.Services.Processing.Coordinators;
 using KomaLab.Services.UI;
 
-namespace KomaLab.ViewModels.ImageProcessing;
+namespace KomaLab.ViewModels.ImportExport;
 
 /// <summary>
 /// ViewModel per la gestione dell'importazione di file FITS con calibrazione opzionale.
@@ -30,7 +30,7 @@ public partial class ImportViewModel : ObservableObject
 
     // --- Stato UI ---
     [ObservableProperty] 
-    [NotifyCanExecuteChangedFor(nameof(ConfirmCommand))]
+    [NotifyCanExecuteChangedFor(nameof(ImportViewModel.ConfirmCommand))]
     private bool _isProcessing;
     
     [ObservableProperty] private double _progressValue;

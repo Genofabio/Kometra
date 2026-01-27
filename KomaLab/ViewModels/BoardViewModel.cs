@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Diagnostics;
+using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
 using Avalonia;
@@ -41,6 +42,8 @@ public partial class BoardViewModel : ObservableObject
     
     // --- Stato Selezione ---
     [ObservableProperty] private BaseNodeViewModel? _selectedNode;
+    
+    private ImageNodeViewModel? SelectedImageNode => SelectedNode as ImageNodeViewModel;
 
     partial void OnSelectedNodeChanged(BaseNodeViewModel? value)
     {
@@ -298,7 +301,49 @@ public partial class BoardViewModel : ObservableObject
     [RelayCommand] private void ZoomBoard(string direction) { double f = direction.ToLower()=="in"?1.2:0.8; Viewport.ApplyZoomAtPoint(f, new Point(Viewport.ViewportSize.Width/2, Viewport.ViewportSize.Height/2)); }
     [RelayCommand(CanExecute = nameof(CanStackImages))] private async Task StackImages(StackingMode mode) { if(SelectedNode is not ImageNodeViewModel s) return; try { var r = await _stackingCoordinator.ExecuteStackingAsync(s.CurrentFiles, mode); double x=s.X+1.5*s.EstimatedTotalSize.Width; double y=s.Y+s.EstimatedTotalSize.Height/2.0; var n = await _nodeFactory.CreateSingleImageNodeAsync(r.FilePath, x+400, y); n.Title=$"{s.Title} ({mode})"; if(n is ImageNodeViewModel res) res.VisualizationMode=s.VisualizationMode; RegisterProcessingResult(n, s, r.FilePath, "Stacking"); } catch(Exception ex) { Debug.WriteLine($"Stacking failed: {ex.Message}"); } }
     [RelayCommand(CanExecute = nameof(CanSaveNode))] private async Task SaveSelectedNode() { if(SelectedNode is not ImageNodeViewModel n || n.ActiveFile==null) return; var p = await _dialogService.ShowSaveFitsFileDialogAsync(n.ActiveFile.FileName); if(string.IsNullOrWhiteSpace(p)) return; try { var fr=n.ActiveFile; var d=await _dataManager.GetDataAsync(fr.FilePath); await _dataManager.SaveDataAsync(p, d.PixelData, fr.ModifiedHeader??d.Header); } catch(Exception ex) { Debug.WriteLine($"Save failed: {ex.Message}"); } }
-    [RelayCommand(CanExecute = nameof(CanSaveVideo))] private async Task SaveVideo() { if(SelectedNode is not ImageNodeViewModel n || n.ActiveRenderer==null) return; var p = await _dialogService.ShowSaveFileDialogAsync($"{n.Title}.avi", "Video", "*.avi"); if(string.IsNullOrWhiteSpace(p)) return; await _videoCoordinator.ExportVideoAsync(n.CurrentFiles, p, 5.0, n.ActiveRenderer.CaptureContrastProfile(), n.VisualizationMode); }
+    
+    [RelayCommand(CanExecute = nameof(CanSaveVideo))]
+    private async Task SaveVideo()
+    {
+        // Verifica preliminare della presenza di dati validi
+        if (SelectedImageNode?.ActiveRenderer == null) return;
+
+        try 
+        {
+            // 1. Apriamo la finestra delle opzioni passando il nodo completo.
+            // Il WindowService ora estrae autonomamente dimensioni e numero di frame dal nodo.
+            var settings = await _windowService.ShowVideoExportDialogAsync(
+                SelectedImageNode, 
+                SelectedImageNode.VisualizationMode);
+
+            // 2. Se l'utente ha confermato e selezionato un percorso di salvataggio valido
+            if (settings != null)
+            {
+                // Lanciamo l'esportazione tramite il coordinatore.
+                // Il coordinatore eseguirà l'operazione in un thread MTA per garantire la 
+                // compatibilità con i codec hardware (MSMF/FFMPEG).
+                await _videoCoordinator.ExportVideoAsync(
+                    SelectedImageNode.CurrentFiles, 
+                    settings, 
+                    SelectedImageNode.ActiveRenderer.CaptureContrastProfile());
+                
+                // Opzionale: Aggiungi qui una notifica di successo (es. tramite un Toast o Dialog)
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // L'utente ha annullato l'operazione durante il rendering (se implementi il CancellationToken)
+        }
+        catch (Exception ex)
+        {
+            // Gestione degli errori di codifica o accesso al disco
+            System.Diagnostics.Debug.WriteLine($"Esportazione video fallita: {ex.Message}");
+        
+            // Suggerimento: Qui potresti richiamare un _dialogService.ShowErrorAsync(...) 
+            // per avvisare l'utente dell'insuccesso.
+        }
+    }
+    
     [RelayCommand(CanExecute = nameof(CanExecuteOnImageNode))] private async Task ShowPlateSolvingWindow() { if(SelectedNode is ImageNodeViewModel n) await _windowService.ShowPlateSolvingWindowAsync(n); }
     [RelayCommand(CanExecute = nameof(CanEditHeader))] private async Task EditSelectedNodeHeader() { if(SelectedNode is ImageNodeViewModel n) await _windowService.ShowHeaderEditorAsync(n.CurrentFiles, n.Navigator); }
     [RelayCommand(CanExecute = nameof(CanExecuteOnImageNode))] private async Task ResetNormalization() { if(SelectedNode is ImageNodeViewModel n) await n.ResetThresholdsAsync(); }
@@ -318,7 +363,7 @@ public partial class BoardViewModel : ObservableObject
     private bool CanExecuteOnImageNode() => SelectedNode is ImageNodeViewModel;
     private bool CanEditHeader() => SelectedNode is ImageNodeViewModel n && n.ActiveFile != null;
     private bool CanSetVisualizationMode(VisualizationMode mode) => SelectedNode is ImageNodeViewModel n && n.VisualizationMode != mode;
-    private bool CanSaveVideo() => SelectedNode is ImageNodeViewModel n && n.Navigator.TotalCount > 1;
+    private bool CanSaveVideo() => SelectedImageNode?.Navigator.TotalCount > 1;
     private bool CanToggleAnimation() => SelectedNode is ImageNodeViewModel n && n.Navigator.CanMove;
     private bool CanStackImages(StackingMode mode) => SelectedNode is ImageNodeViewModel n && n.Navigator.TotalCount > 1;
     private bool CanSaveNode() => SelectedNode is ImageNodeViewModel vm && vm.ActiveFile != null;

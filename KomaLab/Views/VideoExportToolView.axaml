@@ -1,0 +1,135 @@
+﻿<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:avalonia="clr-namespace:Material.Icons.Avalonia;assembly=Material.Icons.Avalonia"
+        xmlns:vm="clr-namespace:KomaLab.ViewModels.ImageProcessing"
+        x:Class="KomaLab.Views.VideoExportToolView"
+        x:DataType="vm:VideoExportToolViewModel"
+        Title="Configurazione Esportazione Video"
+        Width="750" Height="550"
+        MinWidth="710" MinHeight="500"
+        WindowStartupLocation="CenterOwner"
+        CanResize="True"
+        Background="{DynamicResource ToolWindowBackgroundBrush}">
+
+    <Grid RowDefinitions="*, Auto">
+        <Grid Grid.Row="0" ColumnDefinitions="350, *">
+            
+            <Border Grid.Column="0" Background="{DynamicResource ToolPanelBackgroundBrush}" Padding="20">
+                <StackPanel Spacing="18">
+                    <StackPanel Spacing="6">
+                        <TextBlock Text="ESPORTAZIONE VIDEO" FontWeight="Bold" Foreground="White" FontSize="18"/>
+                        <TextBlock Text="Configura il formato e la qualità dell'output" FontSize="11" Opacity="0.6" FontStyle="Italic"/>
+                    </StackPanel>
+
+                    <Separator Background="{DynamicResource Border.WhiteDimBrush}" Opacity="0.4" Margin="-5,0"/>
+
+                    <StackPanel Spacing="12">
+                        <StackPanel Spacing="5">
+                            <TextBlock Text="Formato Contenitore" FontSize="13" FontWeight="SemiBold" Margin="0,0,0,2"/>
+                            <ComboBox HorizontalAlignment="Stretch" ItemsSource="{Binding Containers}" SelectedItem="{Binding SelectedContainer}"/>
+                        </StackPanel>
+
+                        <StackPanel Spacing="5">
+                            <TextBlock Text="Compressione (Codec)" FontSize="13" FontWeight="SemiBold" Margin="0,0,0,2"/>
+                            <ComboBox HorizontalAlignment="Stretch" ItemsSource="{Binding AvailableCodecs}" SelectedItem="{Binding SelectedCodec}"/>
+                        </StackPanel>
+                    </StackPanel>
+
+                    <Separator Background="{DynamicResource Border.WhiteDimBrush}" Opacity="0.4" Margin="-5,0"/>
+
+                    <StackPanel Spacing="20">
+                        <StackPanel Spacing="5">
+                            <TextBlock Text="Frame Rate (FPS)" FontSize="13" FontWeight="SemiBold" Margin="0,0,0,2"/>
+                            <NumericUpDown Value="{Binding Fps}" 
+                                         Minimum="1" Maximum="120" 
+                                         FormatString="0"
+                                         HorizontalAlignment="Stretch"/> 
+                        </StackPanel>
+
+                        <StackPanel Spacing="5">
+                            <TextBlock Text="Riscalamento Fattore" FontSize="13" FontWeight="SemiBold" Margin="0,0,0,2"/>
+                            <Grid ColumnDefinitions="Auto, *" ColumnSpacing="10">
+                                <TextBox Grid.Column="0" Text="{Binding ScaleFactor, StringFormat={}{0:N2}}" 
+                                         MinWidth="60" VerticalAlignment="Center" HorizontalContentAlignment="Right"/>
+                                <Slider Grid.Column="1" Minimum="0.1" Maximum="2.0" 
+                                        Value="{Binding ScaleFactor}" 
+                                        TickFrequency="0.1" IsSnapToTickEnabled="True"
+                                        VerticalAlignment="Center"/>
+                            </Grid>
+                        </StackPanel>
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+
+            <Border Grid.Column="1" Padding="30">
+                <StackPanel VerticalAlignment="Center" Spacing="25">
+                    <avalonia:MaterialIcon Kind="MovieEdit" Width="80" Height="80" 
+                                           Foreground="{DynamicResource ActionPrimaryBackgroundBrush}" 
+                                           HorizontalAlignment="Center" Opacity="0.8"/>
+                    
+                    <StackPanel Spacing="10">
+                        <TextBlock Text="RIEPILOGO OUTPUT" FontWeight="Bold" HorizontalAlignment="Center" Opacity="0.5" LetterSpacing="1"/>
+                        
+                        <Border Background="{DynamicResource ToolPanelBackgroundBrush}" 
+                                CornerRadius="8" Padding="20" BorderBrush="{DynamicResource Border.WhiteDimBrush}" BorderThickness="1">
+                            <StackPanel Spacing="14">
+                                <Grid ColumnDefinitions="24, 12, *">
+                                    <avalonia:MaterialIcon Grid.Column="0" Kind="AspectRatio" Foreground="Gray" Width="18" Height="18" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                    <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="5" VerticalAlignment="Center">
+                                        <TextBlock Text="Dimensione:" Foreground="Gray"/>
+                                        <TextBlock Text="{Binding FinalWidth}" FontWeight="SemiBold"/>
+                                        <TextBlock Text="x" Foreground="Gray"/>
+                                        <TextBlock Text="{Binding FinalHeight}" FontWeight="SemiBold"/>
+                                        <TextBlock Text="px" Foreground="Gray" FontSize="12" Margin="2,0,0,0"/>
+                                    </StackPanel>
+                                </Grid>
+                                
+                                <Grid ColumnDefinitions="24, 12, *">
+                                    <avalonia:MaterialIcon Grid.Column="0" Kind="FileSettings" Foreground="Gray" Width="19" Height="19" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                    <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="5" VerticalAlignment="Center">
+                                        <TextBlock Text="Formato:" Foreground="Gray"/>
+                                        <TextBlock Text="{Binding SelectedContainer}" FontWeight="SemiBold"/>
+                                    </StackPanel>
+                                </Grid>
+
+                                <Grid ColumnDefinitions="24, 12, *">
+                                    <avalonia:MaterialIcon Grid.Column="0" Kind="Movie" Foreground="Gray" Width="19" Height="19" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                    <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="5" VerticalAlignment="Center">
+                                        <TextBlock Text="Codec:" Foreground="Gray"/>
+                                        <TextBlock Text="{Binding SelectedCodec}" FontWeight="SemiBold"/>
+                                    </StackPanel>
+                                </Grid>
+                                
+                                <Grid ColumnDefinitions="24, 12, *">
+                                    <avalonia:MaterialIcon Grid.Column="0" Kind="ClockOutline" Foreground="Gray" Width="21" Height="21" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                    <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="5" VerticalAlignment="Center">
+                                        <TextBlock Text="Durata stimata:" Foreground="Gray"/>
+                                        <TextBlock Text="{Binding DurationText}" FontWeight="SemiBold"/>
+                                    </StackPanel>
+                                </Grid>
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+        </Grid>
+
+        <Border Grid.Row="1" Background="{DynamicResource ToolPanelBackgroundBrush}" 
+                BorderBrush="{DynamicResource Border.WhiteDimBrush}" BorderThickness="0,1,0,0" 
+                Padding="20,15">
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="12">
+                <Button Content="Annulla" Command="{Binding CancelCommand}" 
+                        Width="120" Classes="cancel" 
+                        HorizontalContentAlignment="Center" FontWeight="Normal"/>
+                
+                <Button Content="Esporta" Command="{Binding ConfirmCommand}" 
+                        Width="150" Classes="apply" 
+                        HorizontalContentAlignment="Center" FontWeight="Normal">
+                    <Button.IsEnabled>
+                        <Binding Path="SelectedCodec" Converter="{x:Static ObjectConverters.IsNotNull}"/>
+                    </Button.IsEnabled>
+                </Button>
+            </StackPanel>
+        </Border>
+    </Grid>
+</Window>

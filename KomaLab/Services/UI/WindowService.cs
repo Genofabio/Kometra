@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Threading.Tasks;
 using Avalonia.Controls;
+using KomaLab.Infrastructure;
 using KomaLab.Models.Fits;
 using KomaLab.Models.Fits.Structure;
 using KomaLab.Models.Processing.Enhancement; // Per EnhancementCategory
@@ -17,6 +18,7 @@ using KomaLab.ViewModels.ImageProcessing;
 using KomaLab.ViewModels.Nodes;
 using KomaLab.Views;
 using Microsoft.Extensions.DependencyInjection;
+using ImportViewModel = KomaLab.ViewModels.ImportExport.ImportViewModel;
 
 namespace KomaLab.Services.UI;
 
@@ -231,4 +233,66 @@ public class WindowService : IWindowService
 
         return success ? resultSelector(viewModel) : default;
     }
+    
+    // =======================================================================
+    // 9. ESPORTAZIONE VIDEO (VERSIONE FINALE)
+    // =======================================================================
+    public async Task<VideoExportSettings?> ShowVideoExportDialogAsync(
+        ImageNodeViewModel node, // Passiamo il nodo per estrarre dimensioni e conteggio frame
+        VisualizationMode currentMode)
+    {
+        if (_mainWindow == null) throw new InvalidOperationException("Finestra principale non registrata.");
+
+        var formatProvider = _serviceProvider.GetRequiredService<IVideoFormatProvider>();
+        
+        // 1. INIZIALIZZAZIONE "ON-DEMAND"
+        // Esegue i test dei codec solo alla prima chiamata, garantendo che la finestra
+        // mostri solo opzioni realmente funzionanti sul sistema.
+        await formatProvider.InitializeAsync();
+
+        // 2. Recupero dati necessari dal nodo
+        // Estraiamo la dimensione originale dall'ultimo renderer attivo e il numero di file totali
+        var originalSize = node.ActiveRenderer.ImageSize;
+        int totalFrames = node.CurrentFiles.Count;
+        string defaultFileName = node.ActiveFile?.FileName ?? "VideoExport";
+
+        // 3. Setup del ViewModel
+        // Passiamo le dimensioni originali per il calcolo della risoluzione finale (FinalWidth/Height)
+        // e il numero di frame per il calcolo della durata (DurationText).
+        using var viewModel = new VideoExportToolViewModel(
+            formatProvider, 
+            currentMode, 
+            originalSize, 
+            totalFrames);
+
+        var view = new VideoExportToolView { DataContext = viewModel };
+
+        // Mostra il dialogo stile KomaLab
+        await ShowDialogAsync(view, viewModel);
+
+        if (viewModel.DialogResult)
+        {
+            var dialogService = _serviceProvider.GetRequiredService<IDialogService>();
+            
+            // Recuperiamo l'estensione corretta in base al container selezionato (es. .mp4)
+            string extension = formatProvider.GetExtension(viewModel.SelectedContainer);
+            string filterName = $"{viewModel.SelectedContainer} Video";
+
+            // Chiediamo all'utente dove salvare il file
+            var outputPath = await dialogService.ShowSaveFileDialogAsync(
+                $"{defaultFileName}{extension}", 
+                filterName, 
+                $"*{extension}");
+
+            if (!string.IsNullOrWhiteSpace(outputPath))
+            {
+                // Restituiamo le impostazioni pronte per il VideoExportCoordinator
+                return viewModel.GetSettings(outputPath);
+            }
+        }
+
+        return null;
+    }
+    
+    
 }

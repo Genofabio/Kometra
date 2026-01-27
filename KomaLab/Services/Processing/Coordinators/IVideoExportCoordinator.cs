@@ -1,4 +1,5 @@
-﻿using System.Collections.Generic;
+﻿using System;
+using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using KomaLab.Models.Fits;
@@ -9,11 +10,9 @@ namespace KomaLab.Services.Processing.Coordinators;
 public interface IVideoExportCoordinator
 {
     Task ExportVideoAsync(
-        IEnumerable<FitsFileReference> sourceFiles, // Cambiato da string a FitsFileReference
-        string outputFilePath, 
-        double fps,
+        IEnumerable<FitsFileReference> sourceFiles, 
+        VideoExportSettings settings,
         AbsoluteContrastProfile initialProfile,
-        VisualizationMode mode,
-        bool adaptiveStretch = true,
+        IProgress<double>? progress = null, // Supporto per la UI
         CancellationToken token = default);
 }

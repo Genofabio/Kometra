@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Collections.Generic;
 using Avalonia;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
@@ -20,16 +21,11 @@ using KomaLab.Services.Processing.Rendering;
 using KomaLab.Services.UI;
 using KomaLab.Services.Undo;
 using KomaLab.ViewModels;
+using KomaLab.ViewModels.Astrometry;
 using KomaLab.ViewModels.Fits;
 using KomaLab.ViewModels.ImageProcessing;
 using KomaLab.Views;
-
-// Alias per chiarezza (opzionali se non ci sono conflitti)
-using AlignmentToolViewModel = KomaLab.ViewModels.ImageProcessing.AlignmentToolViewModel;
-using HeaderEditorToolViewModel = KomaLab.ViewModels.Fits.HeaderEditorToolViewModel;
-using PlateSolvingToolViewModel = KomaLab.ViewModels.Astrometry.PlateSolvingToolViewModel;
-using PosterizationToolViewModel = KomaLab.ViewModels.ImageProcessing.PosterizationToolViewModel;
-// Nota: Radial e Structure sono stati sostituiti dal ImageEnhancementToolViewModel unificato
+using ImportViewModel = KomaLab.ViewModels.ImportExport.ImportViewModel;
 
 namespace KomaLab;
 
@@ -70,11 +66,10 @@ public class App : Application
         services.AddMemoryCache(); 
         services.AddHttpClient(); 
 
-        // --- 1. Infrastruttura ---
+        // --- 1. Infrastruttura & I/O ---
         services.AddSingleton<LocalFileStreamProvider>();
         services.AddSingleton<AvaloniaAssetStreamProvider>();
         services.AddSingleton<IFileStreamProvider, FileStreamResolver>();
-
         services.AddSingleton<IDialogService, DialogService>(); 
         services.AddSingleton<IWindowService, WindowService>();
         services.AddSingleton<IUndoService, UndoService>();
@@ -88,7 +83,7 @@ public class App : Application
         services.AddSingleton<IFitsOpenCvConverter, FitsOpenCvConverter>();
         services.AddSingleton<IFitsHeaderHealthEvaluator, FitsHeaderHealthEvaluator>();
 
-        // --- 3. Engine Scientifici ---
+        // --- 3. Engine Scientifici & Rendering ---
         services.AddSingleton<IStackingEngine, StackingEngine>();
         services.AddSingleton<IRadiometryEngine, RadiometryEngine>();
         services.AddSingleton<IImageEffectsEngine, ImageEffectsEngine>();
@@ -96,36 +91,39 @@ public class App : Application
         services.AddSingleton<IGeometricEngine, GeometricEngine>(); 
         services.AddSingleton<IImagePresentationService, ImagePresentationService>();
         services.AddSingleton<ICalibrationEngine, CalibrationEngine>();
-        
-        // NUOVO: Motore Unificato per Enhancement (Radial + Structure + Contrast)
         services.AddSingleton<IGradientRadialEngine, GradientRadialEngine>();
         services.AddSingleton<ILocalContrastEngine, LocalContrastEngine>();
         services.AddSingleton<IStructureShapeEngine, StructureShapeEngine>();
 
-        // --- 4. Servizi di Dominio ---
+        // --- 4. Servizi di Dominio & Multimedia ---
         services.AddSingleton<IPlateSolvingService, PlateSolvingService>();
         services.AddSingleton<IAlignmentService, AlignmentService>(); 
         services.AddSingleton<IBatchProcessingService, BatchProcessingService>(); 
         services.AddSingleton<IJplHorizonsService, JplHorizonsService>();
+        
+        // Infrastruttura Video (L'implementazione OpenCV per l'esportazione)
+        // Registrato come Transient perché il VideoWriter è stateful
+        services.AddSingleton<IVideoFormatProvider, VideoFormatProvider>();
+        services.AddTransient<IVideoEncoder, OpenCvVideoEncoder>();
 
-        // --- 5. Coordinatori ---
+        // --- 5. Coordinatori (Orchestratori) ---
         services.AddSingleton<IPlateSolvingCoordinator, PlateSolvingCoordinator>();
         services.AddSingleton<IHeaderEditorCoordinator, HeaderEditorCoordinator>(); 
         services.AddSingleton<IPosterizationCoordinator, PosterizationCoordinator>();
         services.AddSingleton<IAlignmentCoordinator, AlignmentCoordinator>(); 
-        services.AddSingleton<IVideoExportCoordinator, VideoExportCoordinator>();
         services.AddSingleton<IStackingCoordinator, StackingCoordinator>();
         services.AddSingleton<ICalibrationCoordinator, CalibrationCoordinator>();
-        
-        // NUOVO: Coordinatore Unificato (Sostituisce Radial/Structure Coordinators)
         services.AddSingleton<IImageEnhancementCoordinator, ImageEnhancementCoordinator>();
+        
+        // Registrazione del Coordinatore Video (Singleton perché non ha stato interno)
+        services.AddSingleton<IVideoExportCoordinator, VideoExportCoordinator>();
 
         // --- 6. Factories ---
         services.AddSingleton<INodeViewModelFactory, NodeViewModelFactory>();
         services.AddSingleton<IFitsRendererFactory, FitsRendererFactory>();
         services.AddSingleton<FitsHeaderUiMapper>();
         
-        // --- 7. ViewModels Principali (Singleton) ---
+        // --- 7. ViewModels Principali ---
         services.AddSingleton<MainWindowViewModel>();
         services.AddSingleton<BoardViewModel>();
 
@@ -135,10 +133,6 @@ public class App : Application
         services.AddTransient<PlateSolvingToolViewModel>();
         services.AddTransient<AlignmentToolViewModel>();
         services.AddTransient<ImportViewModel>();
-        
-        // NUOVO: ViewModel Unificato per i tool di enhancement
-        // (Nota: Spesso istanziato manualmente in WindowService con parametro Categoria, 
-        // ma utile registrarlo per coerenza o factory resolution)
         services.AddTransient<ImageEnhancementToolViewModel>();
 
         return services.BuildServiceProvider();
@@ -149,8 +143,11 @@ public class App : Application
         try
         {
             string tempRoot = Path.Combine(Path.GetTempPath(), "Komalab");
-            if (Directory.Exists(tempRoot)) Directory.Delete(tempRoot, true);
+            if (Directory.Exists(tempRoot)) 
+            {
+                Directory.Delete(tempRoot, true);
+            }
         }
-        catch { /* File in uso o già eliminati */ }
+        catch { /* Silenzioso: file bloccati da processi ancora attivi */ }
     }
 }

@@ -1,8 +1,10 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using KomaLab.Infrastructure;
 using KomaLab.Models.Fits;
 using KomaLab.Models.Fits.Structure;
 using KomaLab.Models.Visualization;
@@ -20,101 +22,145 @@ public class VideoExportCoordinator : IVideoExportCoordinator
     private readonly IFitsOpenCvConverter _converter;
     private readonly IImagePresentationService _presentation;
     private readonly IFitsMetadataService _metadata;
+    private readonly IVideoEncoder _encoder;
+    private readonly IVideoFormatProvider _formatProvider;
 
     public VideoExportCoordinator(
         IFitsDataManager dataManager, 
         IFitsOpenCvConverter converter,
         IImagePresentationService presentation,
-        IFitsMetadataService metadata) 
+        IFitsMetadataService metadata,
+        IVideoEncoder encoder,
+        IVideoFormatProvider formatProvider) 
     {
         _dataManager = dataManager;
         _converter = converter;
         _presentation = presentation;
         _metadata = metadata;
+        _encoder = encoder;
+        _formatProvider = formatProvider;
     }
 
     public async Task ExportVideoAsync(
         IEnumerable<FitsFileReference> sourceFiles, 
-        string outputFilePath, 
-        double fps,
+        VideoExportSettings settings,
         AbsoluteContrastProfile initialProfile,
-        VisualizationMode mode,
-        bool adaptiveStretch = true,
+        IProgress<double>? progress = null, 
         CancellationToken token = default)
     {
-        await Task.Run(async () =>
+        // Forziamo l'esecuzione in un Task separato (MTA Thread).
+        // Essenziale per i codec H265 di Windows e per non bloccare la UI di Avalonia.
+        await Task.Run(async () => 
         {
-            VideoWriter? writer = null;
-            Mat? frame8Bit = null;
-            
-            // Lo "stile" di contrasto espresso in Sigma (Z-Score)
             SigmaContrastProfile? referenceSigmaProfile = null;
+            bool isInitialized = false;
+            bool success = false;
+        
+            var filesList = sourceFiles as IReadOnlyList<FitsFileReference> ?? sourceFiles.ToList();
+            int total = filesList.Count;
+            int current = 0;
 
             try
             {
-                foreach (var fileRef in sourceFiles)
+                foreach (var fileRef in filesList)
                 {
                     token.ThrowIfCancellationRequested();
 
-                    // 1. Caricamento dati e metadati
-                    var data = await _dataManager.GetDataAsync(fileRef.FilePath);
-                    var header = fileRef.ModifiedHeader ?? data.Header;
+                    using Mat scientificMat = await LoadFitsToScientificMat(fileRef);
+                    using Mat scaledMat = ApplyRescale(scientificMat, settings.ScaleFactor);
 
-                    // 2. Decisione Bit-Depth (Ottimizzazione RAM/Precisione)
-                    int bitpix = (int)_metadata.GetDoubleValue(header, "BITPIX", 16);
-                    FitsBitDepth targetDepth = bitpix switch
+                    if (!isInitialized)
                     {
-                        32   => FitsBitDepth.Double, // Interi 32bit -> Double per evitare overflow/precisione
-                        -64  => FitsBitDepth.Double, 
-                        _    => FitsBitDepth.Float   // Default sicuro per 8, 16 e -32 bit
-                    };
-                    
-                    double bScale = _metadata.GetDoubleValue(header, "BSCALE", 1.0);
-                    double bZero = _metadata.GetDoubleValue(header, "BZERO", 0.0);
+                        // 1. Otteniamo il FourCC corretto per la combinazione scelta
+                        int fourCc = _formatProvider.GetFourCC(settings.Codec, settings.Container);
+    
+                        // 2. Recuperiamo l'API (FFMPEG, MSMF, etc.) che ha superato i test di validazione
+                        var bestApi = _formatProvider.GetBestAPI(settings.Container, settings.Codec);
 
-                    // 3. Conversione a Mat Scientifica (32/64 bit float)
-                    using Mat scientificMat = _converter.RawToMat(data.PixelData, bScale, bZero, targetDepth);
-
-                    // 4. Inizializzazione VideoWriter (solo al primo frame)
-                    if (writer == null)
-                    {
-                        var videoSize = new OpenCvSharp.Size(scientificMat.Width, scientificMat.Height);
-                        writer = new VideoWriter(outputFilePath, VideoWriter.FourCC('M','J','P','G'), fps, videoSize, isColor: false);
-                        frame8Bit = new Mat(scientificMat.Rows, scientificMat.Cols, MatType.CV_8UC1);
-                        
-                        if (!writer.IsOpened()) throw new IOException("Impossibile inizializzare il codec video.");
+                        // 3. Inizializzazione encoder con API specifica e isColor: true
+                        _encoder.Initialize(
+                            settings.OutputPath, 
+                            settings.Fps, 
+                            scaledMat.Width, 
+                            scaledMat.Height, 
+                            fourCc, 
+                            bestApi); 
+    
+                        isInitialized = true;
                     }
 
-                    // 5. LOGICA ANTI-FLICKER (Adaptive Stretch)
-                    // Calcoliamo le statistiche correnti (Mean/StdDev)
-                    var currentStats = _presentation.GetPresentationRequirements(scientificMat);
-                    
-                    AbsoluteContrastProfile effectiveProfile;
+                    var effectiveProfile = settings.AdaptiveStretch 
+                        ? GetAdaptiveProfile(scaledMat, initialProfile, ref referenceSigmaProfile)
+                        : initialProfile;
 
-                    if (adaptiveStretch)
-                    {
-                        // Se è il primo frame, definiamo lo "stile" basandoci sul profilo iniziale
-                        referenceSigmaProfile ??= _presentation.GetRelativeProfile(initialProfile, currentStats);
+                    using Mat frame8Bit = new Mat();
+                    _presentation.RenderTo8Bit(scaledMat, frame8Bit, effectiveProfile.BlackAdu, effectiveProfile.WhiteAdu, settings.Mode);
+                
+                    // CONVERSIONE BGR: Molti encoder hardware falliscono se ricevono 1 solo canale.
+                    // Trasformiamo il frame renderizzato in 3 canali per compatibilità totale.
+                    using Mat colorFrame = new Mat();
+                    Cv2.CvtColor(frame8Bit, colorFrame, ColorConversionCodes.GRAY2BGR);
 
-                        // Applichiamo lo stile alle statistiche del frame corrente
-                        effectiveProfile = _presentation.GetAbsoluteProfile(referenceSigmaProfile, currentStats);
-                    }
-                    else
-                    {
-                        // Se non è adattivo, usiamo i valori ADU fissi del profilo iniziale
-                        effectiveProfile = initialProfile;
-                    }
+                    _encoder.WriteFrame(colorFrame);
 
-                    // 6. Rendering & Scrittura
-                    _presentation.RenderTo8Bit(scientificMat, frame8Bit!, effectiveProfile.BlackAdu, effectiveProfile.WhiteAdu, mode);
-                    writer.Write(frame8Bit);
+                    current++;
+                    progress?.Report((double)current / total * 100.0);
                 }
+                success = true;
+            }
+            catch (OperationCanceledException)
+            {
+                // Esportazione annullata dall'utente
+            }
+            catch (Exception ex)
+            {
+                // Logga o gestisci l'errore di elaborazione
+                throw new Exception($"Errore durante l'esportazione video: {ex.Message}", ex);
             }
             finally
             {
-                writer?.Dispose();
-                frame8Bit?.Dispose();
+                // Fondamentale: Il Dispose chiude il VideoWriter. 
+                // Se non viene chiamato, l'header del file non viene scritto (file da 258 byte).
+                _encoder.Dispose();
+
+                // Se l'operazione è fallita o è stata annullata, puliamo il file parziale
+                if (!success && File.Exists(settings.OutputPath))
+                {
+                    try { File.Delete(settings.OutputPath); } catch { /* Ignore */ }
+                }
             }
-        }, token);
+        }); 
+    }
+
+    private async Task<Mat> LoadFitsToScientificMat(FitsFileReference fileRef)
+    {
+        var data = await _dataManager.GetDataAsync(fileRef.FilePath);
+        var header = fileRef.ModifiedHeader ?? data.Header;
+        int bitpix = (int)_metadata.GetDoubleValue(header, "BITPIX", 16);
+        FitsBitDepth depth = bitpix switch { 32 => FitsBitDepth.Double, -64 => FitsBitDepth.Double, _ => FitsBitDepth.Float };
+        double bScale = _metadata.GetDoubleValue(header, "BSCALE", 1.0);
+        double bZero = _metadata.GetDoubleValue(header, "BZERO", 0.0);
+        return _converter.RawToMat(data.PixelData, bScale, bZero, depth);
+    }
+
+    private Mat ApplyRescale(Mat source, double factor)
+    {
+        if (Math.Abs(factor - 1.0) < 0.001) return source.Clone();
+        
+        // I codec H264/H265 richiedono dimensioni PARI. 
+        // L'operatore '& ~1' azzera l'ultimo bit, garantendo numeri divisibili per 2.
+        int newWidth = (int)(source.Width * factor) & ~1;
+        int newHeight = (int)(source.Height * factor) & ~1;
+
+        Mat resized = new Mat();
+        Cv2.Resize(source, resized, new Size(newWidth, newHeight), 0, 0, InterpolationFlags.Area);
+        return resized;
+    }
+
+    private AbsoluteContrastProfile GetAdaptiveProfile(Mat mat, AbsoluteContrastProfile initial, ref SigmaContrastProfile? reference)
+    {
+        var stats = _presentation.GetPresentationRequirements(mat);
+        reference ??= _presentation.GetRelativeProfile(initial, stats);
+        return _presentation.GetAbsoluteProfile(reference, stats);
     }
 }
