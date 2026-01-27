@@ -118,20 +118,23 @@ public class WindowService : IWindowService
     // =======================================================================
     // 5. IMPORTAZIONE
     // =======================================================================
-    public async Task<List<string>?> ShowImportWindowAsync()
+    public async Task<(List<string> Paths, bool SeparateNodes)?> ShowImportWindowAsync()
     {
         if (_mainWindow == null) return null;
 
         var dialogService = _serviceProvider.GetRequiredService<IDialogService>();
         var coordinator = _serviceProvider.GetRequiredService<ICalibrationCoordinator>();
-        
-        // [MODIFICA MEF] Ora serve anche IFitsDataManager per gestire file multi-estensione
         var dataManager = _serviceProvider.GetRequiredService<IFitsDataManager>();
 
         var viewModel = new ImportViewModel(dialogService, coordinator, dataManager);
         var view = new ImportView { DataContext = viewModel };
 
-        return await ShowDialogAndGetResultAsync(view, viewModel, vm => vm.CalibratedResultPaths);
+        // Restituiamo una tupla con i percorsi E il flag booleano
+        return await ShowDialogAndGetResultAsync(
+            view, 
+            viewModel, 
+            vm => (vm.CalibratedResultPaths!, vm.ImportAsSeparateNodes) // Nota il ! per ignorare il warning nullable (gestito dal DialogResult true)
+        );
     }
     
     // =======================================================================

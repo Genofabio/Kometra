@@ -278,17 +278,71 @@ public partial class BoardViewModel : ObservableObject
     [RelayCommand]
     private async Task AddNodeAsync()
     {
-        var resultPaths = await _windowService.ShowImportWindowAsync();
-        if (resultPaths == null || !resultPaths.Any()) return;
-        var tasks = resultPaths.Select(async path => { var header = await _dataManager.GetHeaderOnlyAsync(path); var date = _metadataService.GetObservationDate(header) ?? DateTime.MinValue; return (Path: path, Date: date); });
+        // 1. Apriamo la finestra e riceviamo (Paths, SeparateNodes)
+        var result = await _windowService.ShowImportWindowAsync();
+        
+        if (result == null || result.Value.Paths == null || !result.Value.Paths.Any()) 
+            return;
+
+        var (paths, separateNodes) = result.Value;
+
+        // Pre-caricamento date per ordinamento (opzionale ma utile)
+        var tasks = paths.Select(async path => 
+        { 
+            var header = await _dataManager.GetHeaderOnlyAsync(path); 
+            var date = _metadataService.GetObservationDate(header) ?? DateTime.MinValue; 
+            return (Path: path, Date: date); 
+        });
+        
         var results = await Task.WhenAll(tasks);
         var sortedPaths = results.OrderBy(x => x.Date).Select(x => x.Path).ToList();
+
+        // Calcolo posizione centrale
         Point centerScreen = new Point(Viewport.ViewportSize.Width / 2.0, Viewport.ViewportSize.Height / 2.0);
         Point pos = Viewport.ToWorldCoordinates(centerScreen);
-        BaseNodeViewModel newNode = sortedPaths.Count == 1 ? await _nodeFactory.CreateSingleImageNodeAsync(sortedPaths[0], pos.X, pos.Y) : await _nodeFactory.CreateMultipleImagesNodeAsync(sortedPaths, pos.X, pos.Y);
-        bool isCalibrated = sortedPaths.Any(p => p.Contains("Calibrated", StringComparison.OrdinalIgnoreCase));
-        if (isCalibrated) newNode.Title += " (Calibrata)";
-        AddNodeToGraph(newNode, sortedPaths.Count == 1 ? "Aggiungi Immagine" : "Aggiungi Sequenza");
+
+        // LOGICA DI CREAZIONE
+        // Se l'utente vuole nodi separati, creiamo N nodi Singoli.
+        // Altrimenti, usiamo la logica standard (1 file -> Singolo, >1 file -> Multiplo).
+        
+        if (separateNodes)
+        {
+            // Creiamo un nodo per ogni file
+            double offsetX = 0;
+            double offsetY = 0;
+            
+            foreach (var path in sortedPaths)
+            {
+                var newNode = await _nodeFactory.CreateSingleImageNodeAsync(path, pos.X + offsetX, pos.Y + offsetY);
+                bool isCalibrated = path.Contains("Calibrated", StringComparison.OrdinalIgnoreCase);
+                if (isCalibrated) newNode.Title += " (Calibrata)";
+                
+                AddNodeToGraph(newNode, "Importa Immagine Singola");
+                
+                // Spostiamo leggermente il prossimo nodo a cascata
+                offsetX += 30;
+                offsetY += 30;
+            }
+        }
+        else
+        {
+            // Logica Standard (Raggruppa se possibile)
+            BaseNodeViewModel newNode;
+            
+            if (sortedPaths.Count == 1)
+            {
+                newNode = await _nodeFactory.CreateSingleImageNodeAsync(sortedPaths[0], pos.X, pos.Y);
+            }
+            else
+            {
+                newNode = await _nodeFactory.CreateMultipleImagesNodeAsync(sortedPaths, pos.X, pos.Y);
+            }
+
+            bool isCalibrated = sortedPaths.Any(p => p.Contains("Calibrated", StringComparison.OrdinalIgnoreCase));
+            if (isCalibrated) newNode.Title += " (Calibrata)";
+            
+            AddNodeToGraph(newNode, sortedPaths.Count == 1 ? "Aggiungi Immagine" : "Aggiungi Sequenza");
+        }
     }
 
     [RelayCommand] private void PanBoard(string direction) { double s = 100; switch(direction.ToLower()){ case "left": Viewport.ApplyPan(s,0); break; case "right": Viewport.ApplyPan(-s,0); break; case "up": Viewport.ApplyPan(0,s); break; case "down": Viewport.ApplyPan(0,-s); break; } }

@@ -39,44 +39,62 @@
 
                 <Grid Grid.Row="1" ColumnDefinitions="*, 25, 380">
                     
-                    <Border x:Name="LightsCard" Grid.Column="0" Background="{DynamicResource ToolPanelBackgroundBrush}" CornerRadius="4" Padding="12">
-                        <Grid RowDefinitions="Auto, *, Auto">
-                            <TextBlock Grid.Row="0" Text="Immagini del Soggetto" FontSize="14" FontWeight="Bold" Margin="0,0,0,10"/>
-                            
-                            <Border Grid.Row="1" Background="{DynamicResource ToolWindowBackgroundBrush}" CornerRadius="4" BorderBrush="{DynamicResource Border.WhiteDimBrush}" BorderThickness="1">
-                                <ListBox ItemsSource="{Binding LightFiles}" Background="Transparent">
-                                    <ListBox.ItemTemplate>
-                                        <DataTemplate>
-                                            <Border Padding="4,1">
-                                                <Grid ColumnDefinitions="14, *, 30">
-                                                    <TextBlock VerticalAlignment="Center" Foreground="{DynamicResource Text.MediumGreyBrush}" FontSize="11" TextAlignment="Center">
-                                                        <TextBlock.Text>
-                                                            <MultiBinding Converter="{StaticResource IndexConverter}">
-                                                                <Binding Path="."/>
-                                                                <Binding Path="$parent[ListBox].ItemsSource"/>
-                                                            </MultiBinding>
-                                                        </TextBlock.Text>
-                                                    </TextBlock>
-                                                    
-                                                    <TextBlock Grid.Column="1" Text="{Binding}" VerticalAlignment="Center" FontSize="11" 
-                                                             TextTrimming="PrefixCharacterEllipsis" Margin="18,0, 15, 0" Foreground="White"/>
-                                                    
-                                                    <Button Grid.Column="2" Classes="delBtn" Command="{Binding $parent[Window].((importExport:ImportViewModel)DataContext).RemoveLightCommand}" CommandParameter="{Binding}">
-                                                        <avalonia:MaterialIcon Kind="Close" Width="10" Height="10"/>
-                                                    </Button>
-                                                </Grid>
-                                            </Border>
-                                        </DataTemplate>
-                                    </ListBox.ItemTemplate>
-                                </ListBox>
-                            </Border>
+                    <Grid Grid.Column="0" RowDefinitions="*, 15, Auto">
+                        
+                        <Border x:Name="LightsCard" Grid.Row="0" Background="{DynamicResource ToolPanelBackgroundBrush}" CornerRadius="4" Padding="12">
+                            <Grid RowDefinitions="Auto, *, Auto">
+                                <TextBlock Grid.Row="0" Text="Immagini del Soggetto" FontSize="14" FontWeight="Bold" Margin="0,0,0,10"/>
+                                
+                                <Border Grid.Row="1" Background="{DynamicResource ToolWindowBackgroundBrush}" CornerRadius="4" BorderBrush="{DynamicResource Border.WhiteDimBrush}" BorderThickness="1">
+                                    <ListBox ItemsSource="{Binding LightFiles}" Background="Transparent">
+                                        <ListBox.ItemTemplate>
+                                            <DataTemplate>
+                                                <Border Padding="4,1">
+                                                    <Grid ColumnDefinitions="14, *, 30">
+                                                        <TextBlock VerticalAlignment="Center" Foreground="{DynamicResource Text.MediumGreyBrush}" FontSize="11" TextAlignment="Center">
+                                                            <TextBlock.Text>
+                                                                <MultiBinding Converter="{StaticResource IndexConverter}">
+                                                                    <Binding Path="."/>
+                                                                    <Binding Path="$parent[ListBox].ItemsSource"/>
+                                                                </MultiBinding>
+                                                            </TextBlock.Text>
+                                                        </TextBlock>
+                                                        
+                                                        <TextBlock Grid.Column="1" Text="{Binding}" VerticalAlignment="Center" FontSize="11" 
+                                                                 TextTrimming="PrefixCharacterEllipsis" Margin="18,0, 15, 0" Foreground="White"/>
+                                                        
+                                                        <Button Grid.Column="2" Classes="delBtn" Command="{Binding $parent[Window].((importExport:ImportViewModel)DataContext).RemoveLightCommand}" CommandParameter="{Binding}">
+                                                            <avalonia:MaterialIcon Kind="Close" Width="10" Height="10"/>
+                                                        </Button>
+                                                    </Grid>
+                                                </Border>
+                                            </DataTemplate>
+                                        </ListBox.ItemTemplate>
+                                    </ListBox>
+                                </Border>
 
-                            <Grid Grid.Row="2" ColumnDefinitions="*, *" Margin="0,12,0,0">
-                                <Button Grid.Column="0" Content="Aggiungi immagine" Command="{Binding AddLightsCommand}" Classes="addPrimary" Margin="0,0,4,0"/>
-                                <Button Grid.Column="1" Content="Svuota " Command="{Binding ClearLightsCommand}" Classes="clearDestructive" Margin="4,0,0,0"/>
+                                <Grid Grid.Row="2" ColumnDefinitions="*, *" Margin="0,12,0,0">
+                                    <Button Grid.Column="0" Content="Aggiungi immagine" Command="{Binding AddLightsCommand}" Classes="addPrimary" Margin="0,0,4,0"/>
+                                    <Button Grid.Column="1" Content="Svuota " Command="{Binding ClearLightsCommand}" Classes="clearDestructive" Margin="4,0,0,0"/>
+                                </Grid>
                             </Grid>
-                        </Grid>
-                    </Border>
+                        </Border>
+
+                        <Border Grid.Row="2" Background="{DynamicResource ToolPanelBackgroundBrush}" CornerRadius="4" Padding="12">
+                            <StackPanel Spacing="10">
+                                <TextBlock Text="Opzioni di Importazione" FontSize="14" FontWeight="Bold"/>
+                                
+                                <CheckBox IsChecked="{Binding ImportAsSeparateNodes}" 
+                                          Content="Importa come immagini separate"
+                                          Foreground="{DynamicResource Text.MainGreyBrush}"
+                                          ToolTip.Tip="Se attivo, crea un nodo indipendente per ogni immagine invece di raggrupparle in una sequenza."/>
+                                
+                                <TextBlock Text="Utile per analizzare singolarmente le estensioni di file mosaico o immagini indipendenti." 
+                                           FontSize="10" Foreground="{DynamicResource Text.MediumGreyBrush}" 
+                                           TextWrapping="Wrap" Margin="28,-18,0,0"/>
+                            </StackPanel>
+                        </Border>
+                    </Grid>
 
                     <ScrollViewer Grid.Column="2" VerticalScrollBarVisibility="Auto" 
                                  Opacity="{Binding HasLights, Converter={StaticResource BoolToOpacityConverter}}"
@@ -193,6 +211,7 @@
                 BorderBrush="{DynamicResource Border.WhiteDimBrush}" BorderThickness="0,1,0,0" 
                 Padding="20,15" IsEnabled="{Binding IsInteractionEnabled}">
             <Grid ColumnDefinitions="*, Auto">
+                
                 <StackPanel VerticalAlignment="Center" IsVisible="{Binding IsProcessing}">
                     <TextBlock Text="{Binding StatusText}" FontSize="12" FontStyle="Italic" Margin="0,0,0,6"/>
                     <ProgressBar Value="{Binding ProgressValue}" Maximum="100" Height="6" Width="{Binding #LightsCard.Bounds.Width}" HorizontalAlignment="Left" Foreground="{DynamicResource ActionPrimaryBackgroundBrush}"/>

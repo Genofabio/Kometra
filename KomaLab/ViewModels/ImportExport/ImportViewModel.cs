@@ -7,23 +7,19 @@ using System.Threading;
 using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
-using KomaLab.Models.Fits.Structure; // Necessario per FitsHdu
+using KomaLab.Models.Fits.Structure;
 using KomaLab.Models.Processing;
-using KomaLab.Services.Fits;         // Necessario per IFitsDataManager
+using KomaLab.Services.Fits;         
 using KomaLab.Services.Processing.Coordinators;
 using KomaLab.Services.UI;
 
 namespace KomaLab.ViewModels.ImportExport;
 
-/// <summary>
-/// ViewModel per la gestione dell'importazione di file FITS con calibrazione opzionale.
-/// Gestisce automaticamente i file MEF (Multi-Extension FITS) separandoli in file singoli.
-/// </summary>
 public partial class ImportViewModel : ObservableObject
 {
     private readonly IDialogService _dialogService;
     private readonly ICalibrationCoordinator _calibrationCoordinator;
-    private readonly IFitsDataManager _dataManager; // <--- NUOVA DIPENDENZA
+    private readonly IFitsDataManager _dataManager;
 
     private CancellationTokenSource? _processingCts;
 
@@ -42,6 +38,9 @@ public partial class ImportViewModel : ObservableObject
     [ObservableProperty] private string _statusText = "Pronto";
     [ObservableProperty] private bool _isInteractionEnabled = true;
 
+    // [NUOVO] Opzione per creare nodi separati sulla Board
+    [ObservableProperty] private bool _importAsSeparateNodes = false;
+
     // --- Risultati per la Board ---
     public List<string>? CalibratedResultPaths { get; private set; }
     public bool DialogResult { get; private set; }
@@ -50,7 +49,7 @@ public partial class ImportViewModel : ObservableObject
     public ImportViewModel(
         IDialogService dialogService, 
         ICalibrationCoordinator calibrationCoordinator,
-        IFitsDataManager dataManager) // <--- Iniettato qui
+        IFitsDataManager dataManager)
     {
         _dialogService = dialogService ?? throw new ArgumentNullException(nameof(dialogService));
         _calibrationCoordinator = calibrationCoordinator ?? throw new ArgumentNullException(nameof(calibrationCoordinator));
@@ -104,31 +103,21 @@ public partial class ImportViewModel : ObservableObject
 
             foreach (var path in paths)
             {
-                // Se è già presente, saltiamo
                 if (collection.Contains(path)) continue;
 
                 try
                 {
-                    // 1. Ispezioniamo il file per vedere se è un MEF (Multi-Extension)
+                    // Ispezione MEF
                     var dataPackage = await _dataManager.GetDataAsync(path);
-                    
-                    // Contiamo quanti HDU contengono immagini valide
                     var imageHdus = dataPackage.Hdus.Where(h => !h.IsEmpty).ToList();
 
                     if (imageHdus.Count > 1)
                     {
-                        // CASO MEF: Il file contiene più immagini. Le esplodiamo.
                         StatusText = $"Estrazione estensioni da {System.IO.Path.GetFileName(path)}...";
-                        
                         for (int i = 0; i < imageHdus.Count; i++)
                         {
                             var hdu = imageHdus[i];
-                            
-                            // Salviamo ogni estensione come file temporaneo singolo
-                            // Aggiungiamo metadati per tracciare l'origine
-                            var header = hdu.Header.Clone(); // Clone per non sporcare cache
-                            // Nota: NON usiamo _metadataService qui per brevità, usiamo accesso diretto se necessario
-                            // o lasciamo l'header così com'è.
+                            var header = hdu.Header.Clone(); 
                             
                             var tempRef = await _dataManager.SaveAsTemporaryAsync(
                                 hdu.PixelData, 
@@ -140,14 +129,12 @@ public partial class ImportViewModel : ObservableObject
                     }
                     else
                     {
-                        // CASO STANDARD: Singola immagine o Primary HDU
                         collection.Add(path);
                     }
                 }
                 catch (Exception ex)
                 {
                     Debug.WriteLine($"[ImportVM] Errore analisi file {path}: {ex.Message}");
-                    // Fallback: lo aggiungiamo così com'è se non riusciamo a leggerlo
                     collection.Add(path);
                 }
             }
@@ -164,39 +151,14 @@ public partial class ImportViewModel : ObservableObject
     // 2. COMANDI DI RIMOZIONE
     // =======================================================================
 
-    [RelayCommand] 
-    private void RemoveLight(string path) 
-    {
-        if (LightFiles.Remove(path)) NotifyLightChanges();
-    }
-
-    [RelayCommand] 
-    private void RemoveDark(string path) 
-    {
-        RemoveFromCollection(DarkFiles, path);
-        ClearDarksCommand.NotifyCanExecuteChanged(); 
-    }
-
-    [RelayCommand] 
-    private void RemoveFlat(string path) 
-    {
-        RemoveFromCollection(FlatFiles, path);
-        ClearFlatsCommand.NotifyCanExecuteChanged(); 
-    }
-
-    [RelayCommand] 
-    private void RemoveBias(string path) 
-    {
-        RemoveFromCollection(BiasFiles, path);
-        ClearBiasCommand.NotifyCanExecuteChanged(); 
-    }
+    [RelayCommand] private void RemoveLight(string path) { if (LightFiles.Remove(path)) NotifyLightChanges(); }
+    [RelayCommand] private void RemoveDark(string path) { RemoveFromCollection(DarkFiles, path); ClearDarksCommand.NotifyCanExecuteChanged(); }
+    [RelayCommand] private void RemoveFlat(string path) { RemoveFromCollection(FlatFiles, path); ClearFlatsCommand.NotifyCanExecuteChanged(); }
+    [RelayCommand] private void RemoveBias(string path) { RemoveFromCollection(BiasFiles, path); ClearBiasCommand.NotifyCanExecuteChanged(); }
 
     private void RemoveFromCollection(ObservableCollection<string> collection, string path)
     {
-        if (collection.Remove(path))
-        {
-            ConfirmCommand.NotifyCanExecuteChanged();
-        }
+        if (collection.Remove(path)) ConfirmCommand.NotifyCanExecuteChanged();
     }
     
     private bool CanClearLights() => LightFiles.Count > 0;
@@ -204,41 +166,15 @@ public partial class ImportViewModel : ObservableObject
     private bool CanClearFlats() => FlatFiles.Count > 0;
     private bool CanClearBias() => BiasFiles.Count > 0;
 
-    [RelayCommand(CanExecute = nameof(CanClearLights))]
-    private void ClearLights()
-    {
-        LightFiles.Clear();
-        NotifyLightChanges();
-    }
-
-    [RelayCommand(CanExecute = nameof(CanClearDarks))]
-    private void ClearDarks()
-    {
-        DarkFiles.Clear();
-        ClearDarksCommand.NotifyCanExecuteChanged();
-    }
-
-    [RelayCommand(CanExecute = nameof(CanClearFlats))]
-    private void ClearFlats()
-    {
-        FlatFiles.Clear();
-        ClearFlatsCommand.NotifyCanExecuteChanged();
-    }
-
-    [RelayCommand(CanExecute = nameof(CanClearBias))]
-    private void ClearBias()
-    {
-        BiasFiles.Clear();
-        ClearBiasCommand.NotifyCanExecuteChanged();
-    }
+    [RelayCommand(CanExecute = nameof(CanClearLights))] private void ClearLights() { LightFiles.Clear(); NotifyLightChanges(); }
+    [RelayCommand(CanExecute = nameof(CanClearDarks))] private void ClearDarks() { DarkFiles.Clear(); ClearDarksCommand.NotifyCanExecuteChanged(); }
+    [RelayCommand(CanExecute = nameof(CanClearFlats))] private void ClearFlats() { FlatFiles.Clear(); ClearFlatsCommand.NotifyCanExecuteChanged(); }
+    [RelayCommand(CanExecute = nameof(CanClearBias))] private void ClearBias() { BiasFiles.Clear(); ClearBiasCommand.NotifyCanExecuteChanged(); }
 
     [RelayCommand]
     private void ClearAll()
     {
-        LightFiles.Clear();
-        DarkFiles.Clear();
-        FlatFiles.Clear();
-        BiasFiles.Clear();
+        LightFiles.Clear(); DarkFiles.Clear(); FlatFiles.Clear(); BiasFiles.Clear();
         ConfirmCommand.NotifyCanExecuteChanged();
     }
 
@@ -251,7 +187,6 @@ public partial class ImportViewModel : ObservableObject
     [RelayCommand(CanExecute = nameof(CanConfirm))]
     private async Task Confirm()
     {
-        Debug.WriteLine("[ImportVM] Esecuzione Confirm avviata.");
         IsProcessing = true;
         StatusText = "Avvio calibrazione...";
         ProgressValue = 0;
@@ -261,46 +196,34 @@ public partial class ImportViewModel : ObservableObject
 
         try
         {
-            Debug.WriteLine($"[ImportVM] Invio al Coordinator: L:{LightFiles.Count} D:{DarkFiles.Count} F:{FlatFiles.Count} B:{BiasFiles.Count}");
-
             var progress = new Progress<BatchProgressReport>(report =>
             {
                 ProgressValue = report.Percentage;
                 StatusText = $"Processamento: {report.CurrentFileIndex}/{report.TotalFiles} ({report.CurrentFileName})";
             });
 
-            // ESECUZIONE CALIBRAZIONE
             CalibratedResultPaths = await _calibrationCoordinator.ExecuteCalibrationAsync(
-                LightFiles.ToList(),
-                DarkFiles.ToList(),
-                FlatFiles.ToList(),
-                BiasFiles.ToList(),
-                progress,
-                _processingCts.Token);
+                LightFiles.ToList(), DarkFiles.ToList(), FlatFiles.ToList(), BiasFiles.ToList(),
+                progress, _processingCts.Token);
 
             if (CalibratedResultPaths != null && CalibratedResultPaths.Any())
             {
-                Debug.WriteLine($"[ImportVM] Successo! Ricevuti {CalibratedResultPaths.Count} percorsi calibrati.");
                 DialogResult = true;
                 RequestClose?.Invoke();
             }
             else
             {
-                Debug.WriteLine("[ImportVM] ATTENZIONE: Il coordinator ha restituito una lista vuota o nulla.");
                 StatusText = "Nessun file generato.";
                 IsProcessing = false;
             }
         }
         catch (OperationCanceledException)
         {
-            Debug.WriteLine("[ImportVM] Operazione annullata dall'utente.");
             StatusText = "Operazione annullata.";
             IsProcessing = false;
         }
         catch (Exception ex)
         {
-            Debug.WriteLine($"[ImportVM] ERRORE CRITICO: {ex.Message}");
-            Debug.WriteLine($"[ImportVM] StackTrace: {ex.StackTrace}");
             StatusText = $"Errore: {ex.Message}";
             IsProcessing = false;
         }
@@ -309,20 +232,14 @@ public partial class ImportViewModel : ObservableObject
     [RelayCommand]
     private void Cancel()
     {
-        if (IsProcessing)
-        {
-            Debug.WriteLine("[ImportVM] Richiesta cancellazione task in corso...");
-            _processingCts?.Cancel();
-        }
+        if (IsProcessing) _processingCts?.Cancel();
         else
         {
-            Debug.WriteLine("[ImportVM] Chiusura finestra (Annulla).");
             DialogResult = false;
             RequestClose?.Invoke();
         }
     }
     
-    // Helper per centralizzare gli aggiornamenti relativi ai Lights
     private void NotifyLightChanges()
     {
         OnPropertyChanged(nameof(HasLights));          
