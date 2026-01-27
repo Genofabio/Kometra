@@ -19,6 +19,7 @@ using KomaLab.ViewModels.Nodes;
 using KomaLab.Views;
 using Microsoft.Extensions.DependencyInjection;
 using ImportViewModel = KomaLab.ViewModels.ImportExport.ImportViewModel;
+using VideoExportToolViewModel = KomaLab.ViewModels.ImportExport.VideoExportToolViewModel;
 
 namespace KomaLab.Services.UI;
 
@@ -235,50 +236,53 @@ public class WindowService : IWindowService
     }
     
     // =======================================================================
-    // 9. ESPORTAZIONE VIDEO (VERSIONE FINALE)
+    // 9. ESPORTAZIONE VIDEO (VERSIONE DEFINITIVA)
     // =======================================================================
     public async Task<VideoExportSettings?> ShowVideoExportDialogAsync(
-        ImageNodeViewModel node, // Passiamo il nodo per estrarre dimensioni e conteggio frame
+        ImageNodeViewModel node, 
         VisualizationMode currentMode)
     {
         if (_mainWindow == null) throw new InvalidOperationException("Finestra principale non registrata.");
 
         var formatProvider = _serviceProvider.GetRequiredService<IVideoFormatProvider>();
-        
-        // 1. INIZIALIZZAZIONE "ON-DEMAND"
-        // Esegue i test dei codec solo alla prima chiamata, garantendo che la finestra
-        // mostri solo opzioni realmente funzionanti sul sistema.
+        var dataManager = _serviceProvider.GetRequiredService<IFitsDataManager>();
+        var rendererFactory = _serviceProvider.GetRequiredService<IFitsRendererFactory>();
+        var dialogService = _serviceProvider.GetRequiredService<IDialogService>();
+
+        // 1. Inizializzazione "On-Demand" dei codec (test hardware)
         await formatProvider.InitializeAsync();
 
-        // 2. Recupero dati necessari dal nodo
-        // Estraiamo la dimensione originale dall'ultimo renderer attivo e il numero di file totali
-        var originalSize = node.ActiveRenderer.ImageSize;
-        int totalFrames = node.CurrentFiles.Count;
-        string defaultFileName = node.ActiveFile?.FileName ?? "VideoExport";
+        // 2. Gestione Nome File Suggerito
+        // Prendiamo il nome del file attivo e lo tronchiamo al primo punto (es: "M31.fits.fz" -> "M31")
+        string rawName = node.ActiveFile?.FileName ?? "VideoExport";
+        string defaultFileName = rawName.Contains('.') 
+            ? rawName.Substring(0, rawName.IndexOf('.')) 
+            : rawName;
 
-        // 3. Setup del ViewModel
-        // Passiamo le dimensioni originali per il calcolo della risoluzione finale (FinalWidth/Height)
-        // e il numero di frame per il calcolo della durata (DurationText).
+        // 3. Setup del ViewModel con le dipendenze per la Viewport interna
+        var originalSize = node.ActiveRenderer.ImageSize;
+        var sourceFiles = node.CurrentFiles; 
+
         using var viewModel = new VideoExportToolViewModel(
             formatProvider, 
+            dataManager,
+            rendererFactory,
+            sourceFiles,
             currentMode, 
-            originalSize, 
-            totalFrames);
+            originalSize);
 
         var view = new VideoExportToolView { DataContext = viewModel };
 
-        // Mostra il dialogo stile KomaLab
+        // 4. Apertura Dialogo Modale
         await ShowDialogAsync(view, viewModel);
 
+        // 5. Gestione esito e salvataggio
         if (viewModel.DialogResult)
         {
-            var dialogService = _serviceProvider.GetRequiredService<IDialogService>();
-            
-            // Recuperiamo l'estensione corretta in base al container selezionato (es. .mp4)
             string extension = formatProvider.GetExtension(viewModel.SelectedContainer);
             string filterName = $"{viewModel.SelectedContainer} Video";
 
-            // Chiediamo all'utente dove salvare il file
+            // Costruiamo il nome suggerito completo di estensione corretta
             var outputPath = await dialogService.ShowSaveFileDialogAsync(
                 $"{defaultFileName}{extension}", 
                 filterName, 
@@ -286,7 +290,8 @@ public class WindowService : IWindowService
 
             if (!string.IsNullOrWhiteSpace(outputPath))
             {
-                // Restituiamo le impostazioni pronte per il VideoExportCoordinator
+                // NOTA: GetSettings() ora cattura internamente le soglie ADU 
+                // regolate dall'utente nella viewport del tool prima di chiudersi.
                 return viewModel.GetSettings(outputPath);
             }
         }

@@ -6,13 +6,11 @@ using System.Threading;
 using System.Threading.Tasks;
 using Avalonia;
 using CommunityToolkit.Mvvm.ComponentModel;
-using CommunityToolkit.Mvvm.Input;
 using KomaLab.Models.Fits;
 using KomaLab.Models.Nodes;
 using KomaLab.Models.Visualization;
 using KomaLab.Services.Factories;
 using KomaLab.Services.Fits;
-using KomaLab.Services.Processing.Coordinators;
 using KomaLab.ViewModels.Visualization;
 using SequenceNavigator = KomaLab.ViewModels.Shared.SequenceNavigator;
 
@@ -21,13 +19,13 @@ namespace KomaLab.ViewModels.Nodes;
 /// <summary>
 /// Nodo per la gestione di sequenze di immagini FITS.
 /// Adotta il pattern Async Factory per garantire che i Renderer siano sempre validi.
+/// Gestisce esclusivamente i dati della sequenza e lo stato della visualizzazione.
 /// </summary>
 public partial class MultipleImagesNodeViewModel : ImageNodeViewModel
 {
     // --- Dipendenze ---
     private readonly IFitsDataManager _dataManager;
     private readonly IFitsRendererFactory _rendererFactory;
-    private readonly IVideoExportCoordinator _videoCoordinator;
 
     // --- Componenti e Stato ---
     private readonly List<FitsFileReference> _files = new();
@@ -35,12 +33,12 @@ public partial class MultipleImagesNodeViewModel : ImageNodeViewModel
     private readonly Size _maxImageSize;
     
     private CancellationTokenSource? _navigationCts;
-    private CancellationTokenSource? _exportCts;
 
     [ObservableProperty] 
     [NotifyPropertyChangedFor(nameof(ActiveRenderer))] 
     private FitsRenderer? _activeFitsImage;
 
+    // Proprietà di stato utilizzate dal Board durante i processi asincroni
     [ObservableProperty] private bool _isExporting;
     [ObservableProperty] private double _exportProgress;
 
@@ -49,10 +47,7 @@ public partial class MultipleImagesNodeViewModel : ImageNodeViewModel
     // ---------------------------------------------------------------------------
     
     public override IImageNavigator Navigator => _navigator;
-    
-    // Binding Proxy: La view deve bindare a ActiveFitsImage per aggiornamenti sicuri
     public override FitsRenderer? ActiveRenderer => ActiveFitsImage;
-    
     public override Size NodeContentSize => _maxImageSize;
     public override IReadOnlyList<FitsFileReference> CurrentFiles => _files;
     
@@ -64,6 +59,7 @@ public partial class MultipleImagesNodeViewModel : ImageNodeViewModel
     public ObservableCollection<string> ImageNames { get; } = new();
     public string CurrentImageText => $"{_navigator.DisplayIndex} / {_files.Count}";
     
+    // Indica se il nodo è pronto per l'esportazione (usato dal Board per il CanExecute)
     public bool CanExport => !IsExporting && !_navigator.IsLooping && _files.Count > 0 && ActiveRenderer != null;
 
     // ---------------------------------------------------------------------------
@@ -74,13 +70,11 @@ public partial class MultipleImagesNodeViewModel : ImageNodeViewModel
         MultipleImagesNodeModel model,
         IFitsDataManager dataManager,
         IFitsRendererFactory rendererFactory,
-        IVideoExportCoordinator videoCoordinator,
         Size maxSize) 
         : base(model)
     {
         _dataManager = dataManager ?? throw new ArgumentNullException(nameof(dataManager));
         _rendererFactory = rendererFactory ?? throw new ArgumentNullException(nameof(rendererFactory));
-        _videoCoordinator = videoCoordinator ?? throw new ArgumentNullException(nameof(videoCoordinator));
         _maxImageSize = maxSize;
 
         foreach (var path in model.ImagePaths)
@@ -89,7 +83,6 @@ public partial class MultipleImagesNodeViewModel : ImageNodeViewModel
             ImageNames.Add(Path.GetFileName(path));
         }
 
-        // Configurazione Navigatore
         _navigator.UpdateStatus(0, _files.Count);
         _navigator.IndexChanged += OnNavigatorIndexChanged;
     }
@@ -104,7 +97,7 @@ public partial class MultipleImagesNodeViewModel : ImageNodeViewModel
     {
         OnPropertyChanged(nameof(CurrentImageText));
         OnPropertyChanged(nameof(ActiveFile));
-        ExportVideoCommand.NotifyCanExecuteChanged();
+        OnPropertyChanged(nameof(CanExport));
         
         await LoadImageAtIndexAsync(index);
     }
@@ -128,33 +121,20 @@ public partial class MultipleImagesNodeViewModel : ImageNodeViewModel
             var data = await _dataManager.GetDataAsync(fileRef.FilePath);
             token.ThrowIfCancellationRequested();
 
-            // 1. CREAZIONE & INIZIALIZZAZIONE ATOMICA
-            // La Factory restituisce un renderer che ha già calcolato le sue statistiche 
-            // interne a 64-bit e ha già scaricato i _rawPixels per risparmiare RAM.
             var newRenderer = await _rendererFactory.CreateAsync(
                 data.PixelData, 
                 fileRef.ModifiedHeader ?? data.Header
             );
             
-            // 2. LOGICA ADATTIVA (Flicker-Free) - NIENTE PIÙ MATRICI!
             if (!forceReset && ActiveFitsImage != null)
             {
-                // Invece di clonare 400MB di matrice, chiediamo al renderer attuale 
-                // il suo "stile" di visualizzazione in termini di Sigma (2 numeri double).
                 var currentSigmaProfile = ActiveFitsImage.CaptureSigmaProfile();
-
-                // Applichiamo lo stesso stile relativo al nuovo renderer.
-                // Lui userà la sua Media e Sigma (già calcolate) per impostare i Black/White point corretti.
                 newRenderer.VisualizationMode = ActiveFitsImage.VisualizationMode;
                 newRenderer.ApplyRelativeProfile(currentSigmaProfile);
             }
 
-            // 3. SWAP ATOMICO
-            // Passiamo null come profilo assoluto perché lo abbiamo già applicato 
-            // internamente al newRenderer tramite il profilo relativo.
             await ApplyNewRendererAsync(newRenderer);
 
-            // 4. PREFETCH
             if (!token.IsCancellationRequested && !_navigator.IsLooping)
             {
                 _ = PrefetchImageAsync(index + 1, token);
@@ -179,81 +159,8 @@ public partial class MultipleImagesNodeViewModel : ImageNodeViewModel
                 await _dataManager.GetDataAsync(_files[idx].FilePath);
             }, token);
         } 
-        catch { /* Ignora errori prefetch */ }
+        catch { }
     }
-
-    // ---------------------------------------------------------------------------
-    // VIDEO EXPORT
-    // ---------------------------------------------------------------------------
-
-    [RelayCommand(CanExecute = nameof(CanExport))]
-    public async Task ExportVideoAsync(string outputPath)
-    {
-        if (ActiveRenderer == null || _files.Count == 0) return;
-
-        IsExporting = true;
-        ExportProgress = 0;
-        _exportCts = new CancellationTokenSource();
-
-        try
-        {
-            // 1. Determiniamo il container dall'estensione del file scelto
-            // Nota: In una versione finale, questo verrebbe passato da una Dialog di opzioni
-            string extension = Path.GetExtension(outputPath).ToLower();
-            VideoContainer container = extension switch
-            {
-                ".mp4" => VideoContainer.MP4,
-                ".mkv" => VideoContainer.MKV,
-                _ => VideoContainer.AVI
-            };
-
-            // 2. Scegliamo un codec predefinito compatibile con il container
-            VideoCodec codec = container switch
-            {
-                VideoContainer.MP4 => VideoCodec.H264,
-                VideoContainer.AVI => VideoCodec.MJPG,
-                _ => VideoCodec.XVID
-            };
-
-            // 3. Creazione dell'oggetto configurazione aggiornato
-            var settings = new VideoExportSettings(
-                OutputPath: outputPath,
-                Fps: 24.0,
-                Container: container, // Parametro aggiunto
-                Codec: codec,
-                ScaleFactor: 1.0,
-                Mode: this.VisualizationMode,
-                AdaptiveStretch: true
-            );
-
-            var progressReporter = new Progress<double>(p => ExportProgress = p);
-
-            // 4. Chiamata al Coordinator (ora coerente con i tipi di basso livello)
-            await _videoCoordinator.ExportVideoAsync(
-                _files, 
-                settings, 
-                ActiveRenderer.CaptureContrastProfile(), 
-                progressReporter,
-                _exportCts.Token);
-        }
-        catch (OperationCanceledException) 
-        {
-            ExportProgress = 0;
-        }
-        catch (Exception ex)
-        {
-            System.Diagnostics.Debug.WriteLine($"[Export Error]: {ex.Message}");
-        }
-        finally
-        {
-            IsExporting = false;
-            _exportCts?.Dispose();
-            ExportVideoCommand.NotifyCanExecuteChanged();
-        }
-    }
-
-    [RelayCommand]
-    public void CancelExport() => _exportCts?.Cancel();
 
     // ---------------------------------------------------------------------------
     // OVERRIDES E CLEANUP
@@ -261,9 +168,6 @@ public partial class MultipleImagesNodeViewModel : ImageNodeViewModel
 
     protected override void OnRendererSwapping(FitsRenderer newRenderer)
     {
-        // Questo setter generato da [ObservableProperty] scatena:
-        // 1. PropertyChanged("ActiveFitsImage")
-        // 2. PropertyChanged("ActiveRenderer") -> tramite [NotifyPropertyChangedFor]
         ActiveFitsImage = newRenderer;
     }
 
@@ -299,7 +203,6 @@ public partial class MultipleImagesNodeViewModel : ImageNodeViewModel
             _navigator.Stop(); 
             _navigator.IndexChanged -= OnNavigatorIndexChanged;
             _navigationCts?.Cancel(); _navigationCts?.Dispose();
-            _exportCts?.Cancel(); _exportCts?.Dispose();
             ActiveFitsImage?.Dispose();
         }
         base.Dispose(disposing);

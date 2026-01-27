@@ -8,7 +8,6 @@ using Avalonia;
 using KomaLab.Models.Nodes;
 using KomaLab.Services.Fits;
 using KomaLab.Services.Fits.Metadata;
-using KomaLab.Services.Processing.Coordinators;
 using KomaLab.ViewModels.Nodes;
 
 namespace KomaLab.Services.Factories;
@@ -18,23 +17,20 @@ public class NodeViewModelFactory : INodeViewModelFactory
     private readonly IFitsDataManager _dataManager;
     private readonly IFitsMetadataService _metadataService;
     private readonly IFitsRendererFactory _rendererFactory;
-    private readonly IVideoExportCoordinator _videoCoordinator;
 
     public NodeViewModelFactory(
         IFitsDataManager dataManager,
         IFitsMetadataService metadataService,
-        IFitsRendererFactory rendererFactory,
-        IVideoExportCoordinator videoCoordinator)
+        IFitsRendererFactory rendererFactory)
     {
         _dataManager = dataManager;
         _metadataService = metadataService;
         _rendererFactory = rendererFactory;
-        _videoCoordinator = videoCoordinator;
     }
 
     public async Task<SingleImageNodeViewModel> CreateSingleImageNodeAsync(string path, double x, double y)
     {
-        // 1. Calcoliamo le dimensioni reali dall'header PRIMA di creare il VM
+        // 1. Calcoliamo le dimensioni reali dall'header
         var size = await CalculateMaxDimensionsAsync(new List<string> { path });
 
         var model = new SingleImageNodeModel
@@ -45,12 +41,10 @@ public class NodeViewModelFactory : INodeViewModelFactory
             Y = y
         };
 
-        // 2. Passiamo la dimensione calcolata al costruttore
+        // 2. Creazione VM (Senza dipendenze di export)
         var vm = new SingleImageNodeViewModel(model, _dataManager, _rendererFactory, size);
     
         await vm.InitializeAsync();
-    
-        // Ora vm.EstimatedTotalSize restituirà 'size' e il centering funzionerà
         ApplyNodeCentering(vm, x, y);
     
         return vm;
@@ -60,7 +54,7 @@ public class NodeViewModelFactory : INodeViewModelFactory
     {
         if (paths == null || !paths.Any()) throw new ArgumentException("Nessun file selezionato.");
 
-        // 1. Analisi preliminare per il layout (NAXIS1/2)
+        // 1. Analisi preliminare per il layout e titolo intelligente
         var maxSize = await CalculateMaxDimensionsAsync(paths);
         string title = await DetermineSmartTitleAsync(paths[0], paths.Count);
 
@@ -72,12 +66,12 @@ public class NodeViewModelFactory : INodeViewModelFactory
             Y = y
         };
 
-        // 2. Istanziamento VM con il nuovo Video Coordinator
+        // 2. Istanziamento VM ripulito
+        // Passiamo solo le dipendenze necessarie alla gestione della sequenza
         var vm = new MultipleImagesNodeViewModel(
             model, 
             _dataManager, 
             _rendererFactory, 
-            _videoCoordinator, // Iniettato qui per l'export video
             maxSize);
         
         await vm.InitializeAsync();
@@ -101,7 +95,6 @@ public class NodeViewModelFactory : INodeViewModelFactory
 
     private async Task<Size> CalculateMaxDimensionsAsync(List<string> paths)
     {
-        // Limitiamo a 10 letture simultanee per non intasare il FileSystem
         using var semaphore = new SemaphoreSlim(10); 
     
         var tasks = paths.Select(async path =>
@@ -141,7 +134,6 @@ public class NodeViewModelFactory : INodeViewModelFactory
         }
         else
         {
-            // Fallback se la UI non è ancora pronta: usa valori di default o non centrare
             vm.X = x;
             vm.Y = y;
         }

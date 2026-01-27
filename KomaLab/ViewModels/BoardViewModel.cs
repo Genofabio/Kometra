@@ -305,42 +305,32 @@ public partial class BoardViewModel : ObservableObject
     [RelayCommand(CanExecute = nameof(CanSaveVideo))]
     private async Task SaveVideo()
     {
-        // Verifica preliminare della presenza di dati validi
-        if (SelectedImageNode?.ActiveRenderer == null) return;
+        var node = SelectedImageNode;
+        if (node?.ActiveRenderer == null) return;
+
+        // 1. Il WindowService fa tutto: apre il tool, valida i codec, 
+        // fa scegliere il percorso di salvataggio e cattura le soglie ADU.
+        var settings = await _windowService.ShowVideoExportDialogAsync(node, node.VisualizationMode);
+    
+        // Se settings è null, l'utente ha annullato in uno dei passaggi
+        if (settings == null) return;
 
         try 
         {
-            // 1. Apriamo la finestra delle opzioni passando il nodo completo.
-            // Il WindowService ora estrae autonomamente dimensioni e numero di frame dal nodo.
-            var settings = await _windowService.ShowVideoExportDialogAsync(
-                SelectedImageNode, 
-                SelectedImageNode.VisualizationMode);
-
-            // 2. Se l'utente ha confermato e selezionato un percorso di salvataggio valido
-            if (settings != null)
-            {
-                // Lanciamo l'esportazione tramite il coordinatore.
-                // Il coordinatore eseguirà l'operazione in un thread MTA per garantire la 
-                // compatibilità con i codec hardware (MSMF/FFMPEG).
-                await _videoCoordinator.ExportVideoAsync(
-                    SelectedImageNode.CurrentFiles, 
-                    settings, 
-                    SelectedImageNode.ActiveRenderer.CaptureContrastProfile());
-                
-                // Opzionale: Aggiungi qui una notifica di successo (es. tramite un Toast o Dialog)
-            }
-        }
-        catch (OperationCanceledException)
-        {
-            // L'utente ha annullato l'operazione durante il rendering (se implementi il CancellationToken)
+            // 2. Eseguiamo l'export. 
+            // Non serve calcolare nulla qui: Path, Codec, FPS e Soglie sono già dentro 'settings'.
+            await _videoCoordinator.ExportVideoAsync(
+                node.CurrentFiles, 
+                settings, 
+                settings.InitialProfile);
+            
+            // Opzionale: un semplice log o notifica di fine lavori
+            System.Diagnostics.Debug.WriteLine("Esportazione completata con successo.");
         }
         catch (Exception ex)
         {
-            // Gestione degli errori di codifica o accesso al disco
-            System.Diagnostics.Debug.WriteLine($"Esportazione video fallita: {ex.Message}");
-        
-            // Suggerimento: Qui potresti richiamare un _dialogService.ShowErrorAsync(...) 
-            // per avvisare l'utente dell'insuccesso.
+            System.Diagnostics.Debug.WriteLine($"Export fallito: {ex.Message}");
+            // Qui potresti chiamare un _dialogService.ShowErrorAsync("Errore", ex.Message);
         }
     }
     

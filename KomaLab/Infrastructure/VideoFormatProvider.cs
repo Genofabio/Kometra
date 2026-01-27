@@ -94,11 +94,18 @@ public class VideoFormatProvider : IVideoFormatProvider
 
     public int GetFourCC(VideoCodec codec, VideoContainer container) => (codec, container) switch
     {
-        // Tag universali per massima compatibilità cross-platform
-        (VideoCodec.H264, VideoContainer.MP4) => VideoWriter.FourCC('a','v','c','1'),
-        (VideoCodec.H264, VideoContainer.MKV) => VideoWriter.FourCC('H','2','6','4'),
-        (VideoCodec.MJPG, _) => VideoWriter.FourCC('M','J','P','G'),
-        (VideoCodec.XVID, _) => VideoWriter.FourCC('X','V','I','D'),
-        _ => VideoWriter.FourCC('M','J','P','G')
+        // MP4 + H264: 'avc1' è lo standard per Windows MSMF e macOS
+        (VideoCodec.H264, VideoContainer.MP4) => VideoWriter.FourCC('a', 'v', 'c', '1'),
+    
+        // MKV + H264: 'H264' o 'X264'
+        (VideoCodec.H264, VideoContainer.MKV) => VideoWriter.FourCC('H', '2', '6', '4'),
+    
+        // AVI + XVID: 'XVID' (Sempre maiuscolo)
+        (VideoCodec.XVID, VideoContainer.AVI) => VideoWriter.FourCC('X', 'V', 'I', 'D'),
+    
+        // Fallback universale MJPG
+        (VideoCodec.MJPG, _) => VideoWriter.FourCC('M', 'J', 'P', 'G'),
+    
+        _ => VideoWriter.FourCC('M', 'J', 'P', 'G')
     };
 }
