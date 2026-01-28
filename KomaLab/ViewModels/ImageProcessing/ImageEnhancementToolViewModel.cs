@@ -383,9 +383,33 @@ public partial class ImageEnhancementToolViewModel : ObservableObject, IDisposab
 
     public void Dispose()
     {
-        // Fondamentale: ferma ogni operazione pendente prima della distruzione degli oggetti
-        _loadingCts?.Cancel();
-        _loadingCts?.Dispose();
-        ActiveRenderer?.Dispose();
+        // 1. Gestione sicura del CancellationTokenSource
+        if (_loadingCts != null)
+        {
+            try
+            {
+                // Proviamo a cancellare solo se non è già stato disposto
+                // Nota: Non esiste una proprietà .IsDisposed pubblica, quindi il try-catch è necessario
+                _loadingCts.Cancel(); 
+            }
+            catch (ObjectDisposedException)
+            {
+                // Se entriamo qui, il token era già disposto. 
+                // Non dobbiamo fare nulla, l'obiettivo (fermare tutto) è già raggiunto.
+            }
+            finally
+            {
+                // Assicuriamoci di disporlo e di settarlo a null per evitare chiamate future
+                _loadingCts.Dispose();
+                _loadingCts = null; 
+            }
+        }
+
+        // 2. Gestione sicura dell'Immagine (per evitare il crash grafico di cui parlavamo prima)
+        // Stacchiamo il binding PRIMA di distruggere la risorsa
+        var rendererToDispose = ActiveRenderer;
+        ActiveRenderer = null; // Questo notifica la UI di rimuovere l'immagine
+    
+        rendererToDispose?.Dispose();
     }
 }

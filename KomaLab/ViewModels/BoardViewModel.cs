@@ -233,7 +233,8 @@ public partial class BoardViewModel : ObservableObject
     
         var result = await windowAction(inputFiles, imgNode.VisualizationMode);
         
-        if (result == null || !result.Value.Paths.Any()) return;
+        if (result == null) return;
+        if (result.Value.Paths == null || !result.Value.Paths.Any()) return;
 
         var (resultPaths, titleSuffix) = result.Value;
 

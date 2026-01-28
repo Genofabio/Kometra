@@ -52,8 +52,18 @@ public partial class ImageEnhancementToolView : Window
         if (_vm != null)
         {
             _vm.PropertyChanged -= OnViewModelPropertyChanged;
+        
+            // Aggiungi queste righe per pulizia extra
+            _vm.Dispose(); // Assicurati di chiamare il dispose se non lo fa il contenitore padre
             _vm = null;
         }
+    
+        // Stacca il DataContext per rompere tutti i binding residui immediatamente
+        this.DataContext = null;
+    
+        // Pulizia eventi controlli
+        var previewBorder = this.FindControl<Border>("PreviewBorder");
+        if (previewBorder != null) previewBorder.SizeChanged -= OnPreviewSizeChanged;
     }
 
     // =======================================================================
@@ -299,4 +309,6 @@ public partial class ImageEnhancementToolView : Window
         if (_vm != null && b != null) _vm.Viewport.ApplyZoomAtPoint(1.0/1.2, b.Bounds.Center);
     }
     private void OnControlsPointerPressed(object? sender, PointerPressedEventArgs e) => e.Handled = true;
+    
+    
 }
