@@ -40,7 +40,6 @@ public class AlignmentCoordinator : IAlignmentCoordinator
 
     public async Task<AlignmentTargetMetadata> GetFileMetadataAsync(FitsFileReference file)
     {
-        // Priorità all'header in RAM per rispettare le modifiche dell'utente durante la sessione
         var header = file.ModifiedHeader ?? await _dataManager.GetHeaderOnlyAsync(file.FilePath);
         if (header == null) throw new InvalidOperationException("Header FITS non leggibile.");
 
@@ -49,45 +48,85 @@ public class AlignmentCoordinator : IAlignmentCoordinator
 
         return new AlignmentTargetMetadata(
             ObjectName: string.IsNullOrWhiteSpace(obj) ? "Unknown" : obj,
-            ObservationDate: _metadataService.GetObservationDate(header), // Data ISO-8601 precisa
+            ObservationDate: _metadataService.GetObservationDate(header),
             Location: _metadataService.GetObservatoryLocation(header),
             HasWcs: wcs.IsValid,
             ImageWidth: _metadataService.GetIntValue(header, "NAXIS1"),
             ImageHeight: _metadataService.GetIntValue(header, "NAXIS2"),
-            // [SCIENTIFIC FIX] Segnalazione Tracking Non-Siderale (Stelle Strisciate)
-            // Nota: Assicurati di aggiungere 'bool IsTracked' al record AlignmentTargetMetadata
             IsTracked: _metadataService.IsMovingTarget(header) 
         );
     }
 
+    // --- FIX: Introduzione SemaphoreSlim per evitare ban API e conflitti I/O ---
     public async Task<List<Point2D?>> DiscoverStartingPointsAsync(
         IEnumerable<FitsFileReference> files,
         AlignmentTarget target,
         string? targetName)
     {
         var fileList = files.ToList();
-        var results = new List<Point2D?>();
+        
+        if (target == AlignmentTarget.Comet && string.IsNullOrEmpty(targetName))
+            return Enumerable.Repeat<Point2D?>(null, fileList.Count).ToList();
 
+        // Limitiamo a 4 richieste simultanee verso JPL/Disco per stabilità
+        using var semaphore = new SemaphoreSlim(2);
+
+        var tasks = fileList.Select(async file =>
+        {
+            // Per le stelle ritorniamo null qui (gestito dopo) per non bloccare il semaforo inutilmente
+            if (target == AlignmentTarget.Stars) return (Point2D?)null;
+
+            // Blocchiamo l'esecuzione finché non c'è uno slot libero (max 4)
+            await semaphore.WaitAsync();
+            try
+            {
+                if (target == AlignmentTarget.Comet)
+                {
+                    // Aggiungiamo un try-catch interno per evitare che un singolo errore
+                    // faccia fallire l'intero batch (ritornando null invece di crashare)
+                    try 
+                    {
+                        return await FetchJplPointAsync(file, targetName!);
+                    }
+                    catch 
+                    {
+                        return null; 
+                    }
+                }
+                return null;
+            }
+            finally
+            {
+                semaphore.Release();
+            }
+        }).ToList();
+
+        // Gestione Stelle (rimasta invariata, ma usa lo stesso pattern di lista)
         if (target == AlignmentTarget.Stars)
         {
             var firstFile = fileList[0];
             var refHeader = firstFile.ModifiedHeader ?? await _dataManager.GetHeaderOnlyAsync(firstFile.FilePath);
             var refWcs = _metadataService.ExtractWcs(refHeader!);
             
-            foreach (var f in fileList)
-                results.Add(await FetchWcsPointAsync(f, refWcs.RefRaDeg, refWcs.RefDecDeg));
-        }
-        else if (target == AlignmentTarget.Comet && !string.IsNullOrEmpty(targetName))
-        {
-            foreach (var f in fileList)
-                results.Add(await FetchJplPointAsync(f, targetName));
-        }
-        else
-        {
-            results.AddRange(Enumerable.Repeat<Point2D?>(null, fileList.Count));
+            // Qui possiamo parallelizzare anche il calcolo WCS stellare
+            // Usiamo lo stesso semaforo per sicurezza I/O disco
+            using var starSemaphore = new SemaphoreSlim(8); // Più alto perché è calcolo locale (CPU/Disk)
+
+            var starTasks = fileList.Select(async f => 
+            {
+                await starSemaphore.WaitAsync();
+                try 
+                {
+                    return await FetchWcsPointAsync(f, refWcs.RefRaDeg, refWcs.RefDecDeg);
+                }
+                finally { starSemaphore.Release(); }
+            });
+
+            return (await Task.WhenAll(starTasks)).ToList();
         }
 
-        return results;
+        var results = await Task.WhenAll(tasks);
+        return results.ToList();
     }
 
     public async Task<AlignmentMap> AnalyzeSequenceAsync(
@@ -104,16 +143,23 @@ public class AlignmentCoordinator : IAlignmentCoordinator
         var fileList = files.ToList();
         var guessList = guesses.ToList();
 
-        if (guessList.All(g => g == null) && !string.IsNullOrEmpty(jplTargetName))
+        // Logica di riempimento intelligente
+        if (guessList.Any(g => g == null) && !string.IsNullOrEmpty(jplTargetName))
         {
-            guessList = await DiscoverStartingPointsAsync(fileList, target, jplTargetName);
+            var discoveredPoints = await DiscoverStartingPointsAsync(fileList, target, jplTargetName);
+
+            for (int i = 0; i < guessList.Count; i++)
+            {
+                if (guessList[i] == null && i < discoveredPoints.Count)
+                {
+                    guessList[i] = discoveredPoints[i];
+                }
+            }
         }
 
-        // Delega allo specialista (AlignmentService) il calcolo dei centroidi reali
         var centers = await _alignmentService.CalculateCentersAsync(
             target, mode, method, fileList, guessList, searchRadius, progress, token);
 
-        // Genera la mappa geometrica (Canvas size e spostamenti relativi)
         return await _alignmentService.GenerateMapAsync(fileList, centers.ToList(), target);
     }
 
@@ -128,14 +174,12 @@ public class AlignmentCoordinator : IAlignmentCoordinator
     {
         if (map == null || !map.IsValid) throw new InvalidOperationException("Mappa non valida.");
 
-        // 1. Prepariamo la stringa "Statica"
         string refInfo = "WCS";
         if (map.Target == AlignmentTarget.Comet)
         {
             refInfo = !string.IsNullOrEmpty(jplName) ? $"JPL ({jplName})" : "Manual";
         }
 
-        // 2. Definiamo la Strategia di Logging (HISTORY)
         Func<double, double, string> logStrategy = (dx, dy) => 
         {
             return FormattableString.Invariant(
@@ -143,10 +187,8 @@ public class AlignmentCoordinator : IAlignmentCoordinator
             );
         };
 
-        // 3. Otteniamo il processore di warping configurato
         var warpProcessor = _alignmentService.GetWarpingProcessor(map, logStrategy);
 
-        // 4. Eseguiamo il batch
         return await _batchService.ProcessFilesAsync(files, "Aligned", warpProcessor, progress, token);
     }
 
@@ -156,9 +198,6 @@ public class AlignmentCoordinator : IAlignmentCoordinator
     {
         var header = file.ModifiedHeader ?? await _dataManager.GetHeaderOnlyAsync(file.FilePath);
         
-        // [SCIENTIFIC FIX] Calcolo del tempo per orbite precise
-        // Per oggetti veloci (Comete/NEO), la posizione deve essere riferita al
-        // PUNTO MEDIO dell'esposizione (DATE-OBS + EXPTIME/2), non all'inizio.
         var date = _metadataService.GetObservationMidPoint(header!) 
                    ?? _metadataService.GetObservationDate(header!);
                    
@@ -167,7 +206,6 @@ public class AlignmentCoordinator : IAlignmentCoordinator
 
         if (date == null || loc == null || !wcs.IsValid) return null;
 
-        // Interrogazione JPL Horizons con il tempo corretto
         var ephem = await _jplService.GetEphemerisAsync(targetName, date.Value, loc);
         if (!ephem.HasValue) return null;
 

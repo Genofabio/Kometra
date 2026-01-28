@@ -26,6 +26,11 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
     private readonly IFitsDataManager _dataManager;
     private readonly IFitsRendererFactory _rendererFactory;
 
+    // --- CACHE DATI JPL/WCS ---
+    // Memorizza i punti calcolati da JPL/WCS per evitare chiamate ripetute
+    // Viene resettata ogni volta che cambia la modalità o il target.
+    private List<Point2D?>? _cachedVerifiedPoints;
+
     public SequenceNavigator Navigator { get; } = new();
     public AlignmentImageViewport Viewport { get; } = new();
     public ObservableCollection<CoordinateEntry> CoordinateEntries { get; } = new();
@@ -106,7 +111,6 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
     {
         get
         {
-            // Per 1 solo file, Guided non ha senso matematico
             if (_files.Count <= 1) return new[] { AlignmentMode.Automatic, AlignmentMode.Manual };
 
             if (SelectedTarget == AlignmentTarget.Stars)
@@ -141,13 +145,11 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
     {
         get
         {
-            // Se siamo in modalità di navigazione libera (ResultsReady), mostriamo l'indice reale
             if (CurrentState == AlignmentState.ResultsReady)
             {
                 return $"{Navigator.DisplayIndex} / {Navigator.TotalCount}";
             }
 
-            // Calcolo dinamico degli indici visibili in base al filtro attivo
             int visibleCount = 0;
             int relativeIndex = 0;
 
@@ -163,9 +165,7 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
                 }
             }
 
-            // Fallback di sicurezza
             if (visibleCount == 0) return "0 / 0";
-
             return $"{relativeIndex} / {visibleCount}";
         }
     }
@@ -191,7 +191,6 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
     public bool IsApplyCancelButtonsVisible => CurrentState == AlignmentState.ResultsReady;
     public bool IsProcessingVisible => CurrentState == AlignmentState.Processing || CurrentState == AlignmentState.Calculating;
     
-    // Rimosso il vincolo _files.Count > 1 per permettere l'uso di JPL anche su scatto singolo
     public bool IsTargetNameInputVisible => SelectedTarget == AlignmentTarget.Comet;
     public bool IsVerifyButtonVisible => SelectedTarget == AlignmentTarget.Comet;
     
@@ -232,7 +231,7 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
     #endregion
 
     public AlignmentToolViewModel(
-        List<FitsFileReference> sourceFiles, // Cambiato da List<string>
+        List<FitsFileReference> sourceFiles, 
         IAlignmentCoordinator coordinator,
         IFitsDataManager dataManager,
         IFitsRendererFactory rendererFactory)
@@ -241,7 +240,6 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
         _dataManager = dataManager;
         _rendererFactory = rendererFactory;
         
-        // MODIFICA: Non creiamo più nuovi oggetti, usiamo quelli della sessione
         _files = sourceFiles; 
         
         Navigator.IndexFilter = IsIndexAccessible; 
@@ -267,8 +265,6 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
                 });
             }
 
-            // MODIFICA: GetFileMetadataAsync ora riceve il Reference completo.
-            // Il Coordinator userà il ModifiedHeader se presente (ottimizzazione già fatta).
             var metadata = await _coordinator.GetFileMetadataAsync(_files[0]);
             TargetName = metadata.ObjectName;
             
@@ -289,7 +285,7 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
     private void UpdateNavigationStatus()
     {
         Navigator.UpdateStatus(Navigator.CurrentIndex, _files.Count);
-        OnPropertyChanged(nameof(CurrentImageText)); // Aggiorna il testo 1/2
+        OnPropertyChanged(nameof(CurrentImageText)); 
     }
 
     #region Gestione Cambi Mode/Target
@@ -329,6 +325,12 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
         ClearUiCoordinates();
         StatusMessage = string.Empty;
         
+        // --- LOGICA DI RESET CACHE ---
+        // Se cambiamo modalità, i dati precedenti (es. Automatic) potrebbero non essere
+        // più rilevanti o potrebbero dover essere ricalcolati/verificati diversamente.
+        // Resettando a null, forziamo il ViewModel a ricalcolarli (o l'utente a riverificarli).
+        _cachedVerifiedPoints = null;
+        
         if (SelectedMode == AlignmentMode.Manual || !UseJplAstrometry)
         {
             AstrometryStatus = JplStatus.Idle;
@@ -352,23 +354,27 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
         IsVerifyingJpl = true;
         AstrometryStatus = JplStatus.Verifying;
         AstrometryStatusMessage = "Verifica integrità sequenza...";
+        
+        // Reset preventivo cache in fase di verifica manuale
+        _cachedVerifiedPoints = null;
 
         try
         {
-            // DiscoverStartingPointsAsync esegue il loop su TUTTI i file internamente
             var pointsResult = await _coordinator.DiscoverStartingPointsAsync(_files, SelectedTarget, TargetName);
             var points = pointsResult.ToList();
         
             int totalFiles = points.Count;
             int validFiles = points.Count(p => p.HasValue);
 
-            // CONTROLLO RIGIDO: Tutti i file devono essere validi
             if (validFiles == totalFiles)
             {
+                // SALVATAGGIO IN CACHE
+                _cachedVerifiedPoints = points;
+
                 if (SelectedMode == AlignmentMode.Guided) 
                     ApplyCoordinatesToUi(points);
                 else 
-                    ClearUiCoordinates(); 
+                    ClearUiCoordinates(); // Puliamo la UI (i dati sono in cache)
 
                 AstrometryStatusMessage = SelectedTarget == AlignmentTarget.Stars 
                     ? "WCS verificato su tutta la sequenza." 
@@ -377,12 +383,9 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
             }
             else
             {
-                // Segnaliamo l'errore specifico con il conteggio dei fallimenti
                 int failedCount = totalFiles - validFiles;
                 AstrometryStatusMessage = $"Dati mancanti in {failedCount} immagini su {totalFiles}. Risolvi (Plate Solve) prima di procedere.";
                 AstrometryStatus = JplStatus.Error;
-            
-                // Puliamo i risultati parziali per evitare stati incoerenti
                 ClearUiCoordinates();
             }
         }
@@ -404,6 +407,14 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
         else { AstrometryStatusMessage = ""; AstrometryStatus = JplStatus.Idle; }
         CalculateCentersCommand.NotifyCanExecuteChanged();
     }
+    
+    // Invalida la cache se cambia il nome del target
+    partial void OnTargetNameChanged(string value) 
+    { 
+        _cachedVerifiedPoints = null;
+        VerifyJplCommand.NotifyCanExecuteChanged(); 
+        CalculateCentersCommand.NotifyCanExecuteChanged(); 
+    }
 
     private bool CanVerifyJpl() => !IsVerifyingJpl && !string.IsNullOrWhiteSpace(TargetName) && SelectedMode != AlignmentMode.Manual;
 
@@ -420,20 +431,41 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
 
         try
         {
-            var uiGuesses = GetCoordinatesFromUi();
+            // 1. Recupera input manuali dalla UI
+            var inputGuesses = GetCoordinatesFromUi();
+            
+            // 2. MERGE CON CACHE (Se disponibile)
+            // Se abbiamo dati verificati in cache, li usiamo per riempire i buchi (null)
+            if (_cachedVerifiedPoints != null && _cachedVerifiedPoints.Count == inputGuesses.Count)
+            {
+                for (int i = 0; i < inputGuesses.Count; i++)
+                {
+                    // Priorità all'input manuale, fallback su cache
+                    if (inputGuesses[i] == null)
+                    {
+                        inputGuesses[i] = _cachedVerifiedPoints[i];
+                    }
+                }
+            }
+
             var progress = new Progress<AlignmentProgressReport>(p => {
                 StatusMessage = p.Message;
                 if (p.CurrentIndex > 0 && p.FoundCenter.HasValue)
                     UpdateSingleUiCoordinate(p.CurrentIndex - 1, p.FoundCenter.Value);
             });
 
-            // Calcolo coerente parametri per history
             int effectiveRadius = SearchRadius;
-            string? effectiveJplName = (UseJplAstrometry && SelectedMode != AlignmentMode.Manual) ? TargetName : null;
+            
+            // 3. DECISIONE FETCH DATI
+            // Se _cachedVerifiedPoints non è null, abbiamo già unito i dati sopra -> NON serve fetchare (null).
+            // Se _cachedVerifiedPoints è null ma l'utente vuole JPL -> passiamo TargetName -> il Coordinator fetcherà ora.
+            string? effectiveJplName = (UseJplAstrometry && SelectedMode != AlignmentMode.Manual && _cachedVerifiedPoints == null) 
+                                       ? TargetName 
+                                       : null;
 
             var resultMap = await _coordinator.AnalyzeSequenceAsync(
                 files: _files, 
-                guesses: uiGuesses, 
+                guesses: inputGuesses, 
                 target: SelectedTarget, 
                 mode: SelectedMode, 
                 method: CenteringMethod.LocalRegion, 
@@ -448,7 +480,7 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
             
             UpdateNavigationStatus(); 
             ApplyAlignmentCommand.NotifyCanExecuteChanged();
-            OnPropertyChanged(nameof(CurrentImageText)); // Aggiorna navigazione per mostrare totale reale
+            OnPropertyChanged(nameof(CurrentImageText)); 
         }
         catch (Exception ex) 
         { 
@@ -465,16 +497,16 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
         IsBusy = true;
         try
         {
-            // 1. PREPARAZIONE DATI
             var centers = GetCoordinatesFromUi();
 
-            // Parametri coerenti per history
             int effectiveRadius = SearchRadius; 
+            
+            // Anche qui, logica per history: se abbiamo la cache usiamo il nome, altrimenti passiamo null o nome
+            // (Qui serve solo per il LOG nell'header FITS, quindi passiamo il nome se la feature è attiva)
             string? effectiveJplName = (UseJplAstrometry && SelectedMode != AlignmentMode.Manual) 
                                        ? TargetName 
                                        : null;
 
-            // 2. ANALISI (Ricalcolo veloce della mappa finale)
             var map = await _coordinator.AnalyzeSequenceAsync(
                 files: _files, 
                 guesses: centers, 
@@ -485,7 +517,6 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
                 jplTargetName: effectiveJplName
             );
 
-            // 3. ESECUZIONE (Passiamo le variabili per il log nella History)
             FinalProcessedPaths = await _coordinator.ExecuteWarpingAsync(
                 files: _files, 
                 map: map, 
@@ -522,24 +553,18 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
 
     private bool CanCalculate()
     {
-        // 1. Se il sistema è occupato o sta ancora verificando JPL, non si può cliccare.
         if (IsBusy || IsVerifyingJpl) return false;
     
-        // 2. VINCOLO JPL/WCS:
-        // Se l'opzione JPL è attiva (e non siamo in manuale), il tasto è cliccabile 
-        // SOLO SE lo stato è "Success" (ovvero tutti i file hanno passato il controllo).
         if (UseJplAstrometry && SelectedMode != AlignmentMode.Manual)
         {
             if (AstrometryStatus != JplStatus.Success) return false;
         }
 
-        // 3. Logiche specifiche per le diverse modalità (già esistenti)
         if (SelectedMode == AlignmentMode.Manual) 
             return CoordinateEntries.All(e => e.Coordinate != null);
 
         if (SelectedTarget == AlignmentTarget.Comet)
         {
-            // Se usiamo JPL, il nome è obbligatorio (già coperto dal punto 2, ma per sicurezza...)
             if (UseJplAstrometry && string.IsNullOrWhiteSpace(TargetName)) return false;
         }
 
@@ -605,10 +630,6 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
         await LoadImageAsync(index);
     }
 
-    // =======================================================================
-    // Navigazione e Rendering (Versione Ottimizzata)
-    // =======================================================================
-
     private async Task LoadImageAsync(int index)
     {
         if (index < 0 || index >= _files.Count) return;
@@ -624,7 +645,6 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
             var data = await _dataManager.GetDataAsync(file.FilePath);
             token.ThrowIfCancellationRequested();
 
-            // [MODIFICA MEF] Accesso sicuro all'HDU immagine
             var imageHdu = data.FirstImageHdu ?? data.PrimaryHdu;
             if (imageHdu == null)
             {
@@ -632,8 +652,6 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
                 return;
             }
 
-            // 1. Creazione del nuovo renderer tramite Factory
-            // Usiamo i PixelData dell'HDU e diamo priorità all'header modificato in RAM
             var newRenderer = await _rendererFactory.CreateAsync(
                 imageHdu.PixelData, 
                 file.ModifiedHeader ?? imageHdu.Header
@@ -641,39 +659,28 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
             
             token.ThrowIfCancellationRequested();
 
-            // 2. LOGICA ADATTIVA SENZA MATRICI
             if (ActiveRenderer != null)
             {
-                // Catturiamo lo stile di visualizzazione (Black/White point in unità Sigma)
                 var currentStyle = ActiveRenderer.CaptureSigmaProfile();
-                
-                // Sincronizziamo la modalità (Linear, Log, etc.)
                 newRenderer.VisualizationMode = ActiveRenderer.VisualizationMode;
-                
-                // Applichiamo lo stile al nuovo
                 newRenderer.ApplyRelativeProfile(currentStyle);
-
-                // Smaltiamo immediatamente i 64-bit del vecchio renderer dalla RAM
                 ActiveRenderer.Dispose();
             }
 
-            // 3. Aggiornamento Stato UI
             ActiveRenderer = newRenderer;
             Viewport.ImageSize = ActiveRenderer.ImageSize;
             Viewport.SearchRadius = SearchRadius; 
 
-            // Inizializzazione metadati per le coordinate (se necessario)
             if (CoordinateEntries.Count > 0 && CoordinateEntries[0].ImageHeight == 0)
             {
                 foreach (var entry in CoordinateEntries) entry.ImageHeight = ActiveRenderer.ImageSize.Height;
             }
 
-            // Sincronizzazione mirino e notifiche binding
             Viewport.TargetCoordinate = CoordinateEntries[index].Coordinate;
             
             OnPropertyChanged(nameof(SafeImage));
             OnPropertyChanged(nameof(IsSearchBoxOverlayVisible));
-            OnPropertyChanged(nameof(BlackPoint)); // Notifica alla UI i nuovi valori ADU
+            OnPropertyChanged(nameof(BlackPoint));
             OnPropertyChanged(nameof(WhitePoint));
         }
         catch (OperationCanceledException) { }
@@ -715,8 +722,7 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
     [RelayCommand] private async Task ResetThresholds() { if (ActiveRenderer != null) { await ActiveRenderer.ResetThresholdsAsync(); OnPropertyChanged(nameof(BlackPoint)); OnPropertyChanged(nameof(WhitePoint)); } }
     
     partial void OnSearchRadiusChanged(int value) => Viewport.SearchRadius = value;
-    partial void OnTargetNameChanged(string value) { VerifyJplCommand.NotifyCanExecuteChanged(); CalculateCentersCommand.NotifyCanExecuteChanged(); }
-
+    
     #endregion
 
     public void ApplyPan(double dx, double dy) => Viewport.ApplyPan(dx, dy);
