@@ -116,10 +116,23 @@ public class GradientRadialEngine : IGradientRadialEngine
 
     public void ApplyInverseRho(Mat src, Mat dst, int subsampling = 5)
     {
-        // FIX: Dispatching dinamico su Float/Double
+        // Creiamo dst della stessa dimensione e tipo
         dst.Create(src.Size(), src.Type());
+
+        // 1. Esecuzione Core (Calcolo matematico)
         if (src.Depth() == MatType.CV_64F) InverseRhoCore<double>(src, dst, subsampling);
         else InverseRhoCore<float>(src, dst, subsampling);
+
+        // 2. CORREZIONE "EFFETTO TROPPO FORTE" (Gamma Compression)
+        // L'Inverse Rho espande la dinamica in modo lineare, che spesso appare "esagerata".
+        // Applicando una radice quadrata (Gamma ~2.2 inversa), riportiamo l'immagine a una
+        // percezione naturale simile all'occhio umano.
+    
+        // Ignoriamo i NaN durante la Pow (OpenCV gestisce i NaN nella Pow lasciandoli NaN o 0)
+        Cv2.Pow(dst, 0.5, dst); 
+    
+        // Opzionale: Normalizzazione finale per sicurezza (0.0 - 1.0)
+        Cv2.Normalize(dst, dst, 0, 1, NormTypes.MinMax);
     }
 
     public Mat ToPolar(Mat src, int nRad, int nTheta, int subsampling = 5)
@@ -188,47 +201,103 @@ public class GradientRadialEngine : IGradientRadialEngine
     // PRIVATE HELPERS (GENERIC)
     // =========================================================
 
-    private void InverseRhoCore<T>(Mat src, Mat dst, int subsampling) where T : struct
-    {
-        int rows = src.Rows; int cols = src.Cols;
-        double xnuc = cols / 2.0; double ynuc = rows / 2.0;
-        var srcIndexer = src.GetGenericIndexer<T>();
-        var dstIndexer = dst.GetGenericIndexer<T>();
+    private void InverseRhoCore<T>(Mat src, Mat dst, int subsampling) where T : struct, IComparable<T>
+{
+    int rows = src.Rows; int cols = src.Cols;
+    double xnuc = cols / 2.0; double ynuc = rows / 2.0;
+    
+    var srcIndexer = src.GetGenericIndexer<T>();
+    var dstIndexer = dst.GetGenericIndexer<T>();
 
-        Scalar meanScalar = Cv2.Mean(src);
-        double globalMean = meanScalar.Val0;
-        double renormFactor = (globalMean > 1e-9) ? (100.0 / globalMean) : 1.0;
+    // =========================================================
+    // FASE 1: CALCOLO STATISTICHE ROBUSTO (Ignora NaN)
+    // Non usiamo Cv2.MinMaxLoc perché fallisce se ci sono troppi NaN
+    // =========================================================
+    double minVal = double.MaxValue;
+    double sumVal = 0;
+    long validCount = 0;
 
-        double step = 1.0 / subsampling;
-        double offsetStart = -0.5 + (step / 2.0);
-        double[] localOffsets = new double[subsampling];
-        for (int i = 0; i < subsampling; i++) localOffsets[i] = offsetStart + (i * step);
-
-        Parallel.For(0, rows, y => {
-            double baseDy = ynuc - y;
-            for (int x = 0; x < cols; x++) {
-                double val = Convert.ToDouble(srcIndexer[y, x]);
-                // NaN check manuale per T generico
-                if (double.IsNaN(val)) { dstIndexer[y, x] = default; continue; }
-
-                double normalizedVal = val * renormFactor;
-                double sumRho = 0;
-                double baseDx = xnuc - x;
-                
-                for (int jj = 0; jj < subsampling; jj++) {
-                    double dy = baseDy - localOffsets[jj];
-                    double dy2 = dy * dy;
-                    for (int ii = 0; ii < subsampling; ii++) {
-                        double dx = baseDx - localOffsets[ii];
-                        sumRho += Math.Sqrt(dx * dx + dy2);
-                    }
-                }
-                double avgDist = sumRho / (subsampling * subsampling);
-                double result = normalizedVal * avgDist;
-                dstIndexer[y, x] = (T)Convert.ChangeType(result, typeof(T));
+    // Scansione seriale veloce per statistiche (O(N))
+    // Nota: Potrebbe essere parallelizzato, ma per statistiche semplici è rapido anche così
+    for (int y = 0; y < rows; y++) {
+        for (int x = 0; x < cols; x++) {
+            double val = Convert.ToDouble(srcIndexer[y, x]);
+            if (!double.IsNaN(val)) {
+                if (val < minVal) minVal = val;
+                sumVal += val;
+                validCount++;
             }
-        });
+        }
     }
+
+    // Se l'immagine è tutta NaN o vuota, usiamo default sicuri
+    if (validCount == 0) {
+        minVal = 0.0;
+        sumVal = 1.0; // evita div/0 dopo
+        validCount = 1;
+    }
+
+    double backgroundBias = minVal;
+    double globalMean = (sumVal / validCount) - backgroundBias;
+    // Fattore di rinormalizzazione (evita numeri giganti)
+    double renormFactor = (globalMean > 1e-9) ? (100.0 / globalMean) : 1.0;
+
+    // Pre-calcolo offset subsampling
+    double step = 1.0 / subsampling;
+    double offsetStart = -0.5 + (step / 2.0);
+    double[] localOffsets = new double[subsampling];
+    for (int i = 0; i < subsampling; i++) localOffsets[i] = offsetStart + (i * step);
+
+    // =========================================================
+    // FASE 2: APPLICAZIONE FILTRO
+    // =========================================================
+    Parallel.For(0, rows, y => {
+        double baseDy = ynuc - y;
+        for (int x = 0; x < cols; x++) {
+            double rawVal = Convert.ToDouble(srcIndexer[y, x]);
+
+            // Se è NaN, lo propaghiamo come NaN (o 0 se preferisci 'bucare' l'immagine)
+            if (double.IsNaN(rawVal)) {
+                // Impostiamo a NaN specificando il tipo corretto
+                if (typeof(T) == typeof(double)) dstIndexer[y, x] = (T)(object)double.NaN;
+                else dstIndexer[y, x] = (T)(object)float.NaN;
+                continue;
+            }
+
+            // 1. Sottrazione Fondo Cielo (Cruciale per i bordi)
+            // Usiamo Math.Max(0, ...) per evitare valori negativi che romperebbero la radice quadrata successiva
+            double val = Math.Max(0, rawVal - backgroundBias);
+            
+            // 2. Normalizzazione luminosità
+            double normalizedVal = val * renormFactor;
+
+            // 3. Calcolo Distanza media (Inverse Rho)
+            double sumRho = 0;
+            double baseDx = xnuc - x;
+            
+            // Ciclo ottimizzato (loop unrolling parziale non necessario col JIT moderno, ma teniamo pulito)
+            for (int jj = 0; jj < subsampling; jj++) {
+                double dy = baseDy - localOffsets[jj];
+                double dy2 = dy * dy;
+                for (int ii = 0; ii < subsampling; ii++) {
+                    double dx = baseDx - localOffsets[ii];
+                    sumRho += Math.Sqrt(dx * dx + dy2);
+                }
+            }
+            double avgDist = sumRho / (subsampling * subsampling);
+
+            // 4. Clamp Distanza (Salva il centro nero)
+            // Assumiamo che il raggio minimo utile sia ~20px per evitare moltiplicazioni quasi-zero
+            // Se avgDist < 10, lo blocchiamo a 10.
+            double multiplier = Math.Max(10.0, avgDist);
+
+            // Risultato Lineare
+            double result = normalizedVal * multiplier;
+            
+            dstIndexer[y, x] = (T)Convert.ChangeType(result, typeof(T));
+        }
+    });
+}
 
     private void AzimuthalAverageCore<T>(Mat polar, double rejSig) where T : struct
     {
