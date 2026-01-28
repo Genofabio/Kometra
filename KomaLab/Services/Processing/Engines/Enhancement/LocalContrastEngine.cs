@@ -41,40 +41,142 @@ public class LocalContrastEngine : ILocalContrastEngine
     }
 
     // =========================================================
-    // 2. ADAPTIVE LOCAL NORMALIZATION (LSN)
+    // 2. ADAPTIVE LOCAL NORMALIZATION (LSN) - NaN SAFE
     // =========================================================
     public async Task ApplyLocalNormalizationAsync(Mat src, Mat dst, int windowSize, double intensity, IProgress<double> progress = null)
+{
+    // Calcoliamo parametri kernel
+    int k = windowSize % 2 == 0 ? windowSize + 1 : windowSize;
+    Size kSize = new Size(k, k);
+    Point anchor = new Point(-1, -1);
+    BorderTypes border = BorderTypes.Replicate;
+
+    await Task.Run(() => {
+        // 1. SANITIZZAZIONE DEI DATI (Safe & Managed)
+        // Creiamo due matrici pulite:
+        // - srcClean: contiene i pixel originali, ma i NaN sono sostituiti da 0.0
+        // - weights: contiene 1.0 se il pixel è valido, 0.0 se era NaN
+        
+        using Mat srcClean = new Mat(src.Size(), src.Type());
+        using Mat weights = new Mat(src.Size(), src.Type());
+
+        // Usiamo un metodo helper con Generic Indexer (NO UNSAFE)
+        if (src.Depth() == MatType.CV_64F)
+            SanitizeMapSafe<double>(src, srcClean, weights);
+        else
+            SanitizeMapSafe<float>(src, srcClean, weights);
+
+        // DA QUI IN POI, OpenCV VEDE SOLO 0 e 1. I NaN SONO SPARITI.
+        
+        // 2. CALCOLO DEI PESI LOCALI (Count)
+        // Quanti pixel validi ci sono in ogni finestra k*k?
+        using Mat localWeight = new Mat();
+        Cv2.BoxFilter(weights, localWeight, src.Type(), kSize, anchor, true, border);
+        // Evitiamo divisione per zero (se una zona è tutta NaN, mettiamo un epsilon)
+        Cv2.Max(localWeight, Scalar.All(1e-9), localWeight);
+
+        // 3. CALCOLO MEDIA (Mean)
+        // BoxFilter(Clean) fa la somma (perché i NaN sono 0). 
+        // Dividendo per localWeight otteniamo la media reale dei soli pixel validi.
+        using Mat sumRaw = new Mat();
+        Cv2.BoxFilter(srcClean, sumRaw, src.Type(), kSize, anchor, true, border);
+        
+        using Mat mean = new Mat();
+        Cv2.Divide(sumRaw, localWeight, mean);
+
+        // 4. CALCOLO DEVIAZIONE STANDARD (StdDev)
+        // Calcoliamo i quadrati su srcClean (0^2 = 0)
+        using Mat srcSq = new Mat();
+        Cv2.Multiply(srcClean, srcClean, srcSq);
+        
+        using Mat sumSqRaw = new Mat();
+        Cv2.BoxFilter(srcSq, sumSqRaw, src.Type(), kSize, anchor, true, border);
+        
+        using Mat meanSq = new Mat();
+        Cv2.Divide(sumSqRaw, localWeight, meanSq);
+
+        // Varianza = MeanSq - Mean^2
+        using Mat stdDev = new Mat();
+        using Mat meanSqDiff = new Mat();
+        Cv2.Multiply(mean, mean, meanSqDiff);
+        Cv2.Subtract(meanSq, meanSqDiff, stdDev);
+
+        // Correzione errori numerici (variance non può essere negativa)
+        Cv2.Max(stdDev, Scalar.All(0), stdDev);
+        Cv2.Sqrt(stdDev, stdDev);
+        Cv2.Max(stdDev, Scalar.All(1e-9), stdDev); // Evita div/0
+
+        // 5. NORMALIZZAZIONE FINALE
+        // dst = (srcClean - mean) / stdDev
+        // NOTA FONDAMENTALE: Usiamo srcClean, non src!
+        // - Se il pixel era valido: (Valore - Media) / StdDev -> OK
+        // - Se il pixel era NaN (ora 0): (0 - Media) / StdDev -> Valore calcolato (Inpainting)
+        
+        using Mat diff = new Mat();
+        Cv2.Subtract(srcClean, mean, diff);
+        Cv2.Divide(diff, stdDev, dst);
+
+        // Applicazione intensità
+        if (Math.Abs(intensity - 1.0) > double.Epsilon) 
+            Cv2.Multiply(dst, Scalar.All(intensity), dst);
+        
+        // OPZIONALE: Ripristinare i NaN originali nell'output?
+        // Se vuoi che l'output abbia NaN dove l'input aveva NaN, scommenta queste righe:
+        /*
+        using Mat nanMask = new Mat();
+        Cv2.Compare(weights, Scalar.All(0), nanMask, CmpTypes.EQ);
+        dst.SetTo(Scalar.All(double.NaN), nanMask);
+        */
+
+        progress?.Report(100);
+    });
+}
+
+// Helper Safe che usa GetGenericIndexer invece dei puntatori unsafe
+private void SanitizeMapSafe<T>(Mat src, Mat clean, Mat weights) where T : struct, IEquatable<T>
+{
+    // Otteniamo gli indexer per accesso veloce (ma safe) ai pixel
+    var srcIdx = src.GetGenericIndexer<T>();
+    var cleanIdx = clean.GetGenericIndexer<T>();
+    var wIdx = weights.GetGenericIndexer<T>();
+
+    int rows = src.Rows;
+    int cols = src.Cols;
+
+    // Parallelizziamo il ciclo per mantenere le performance alte
+    Parallel.For(0, rows, y =>
     {
-        await Task.Run(() => {
-            dst.Create(src.Size(), src.Type());
-            int k = windowSize | 1;
+        for (int x = 0; x < cols; x++)
+        {
+            T val = srcIdx[y, x];
+            bool isNan;
 
-            using Mat mean = new Mat();
-            using Mat srcSq = new Mat();
-            using Mat meanSq = new Mat();
-            using Mat stdDev = new Mat();
+            // Controllo NaN specifico per tipo
+            if (typeof(T) == typeof(double))
+                isNan = double.IsNaN(Convert.ToDouble(val));
+            else
+                isNan = float.IsNaN(Convert.ToSingle(val));
 
-            // Calcolo media locale e stdDev locale senza mai uscire dai float/double
-            // OpenCV gestisce automaticamente il tipo di dato (32F o 64F) di 'src'
-            Cv2.BoxFilter(src, mean, src.Type(), new Size(k, k), new Point(-1, -1), true, BorderTypes.Replicate);
-            Cv2.Multiply(src, src, srcSq);
-            Cv2.BoxFilter(srcSq, meanSq, src.Type(), new Size(k, k), new Point(-1, -1), true, BorderTypes.Replicate);
-
-            using Mat meanSqDiff = new Mat();
-            Cv2.Multiply(mean, mean, meanSqDiff);
-            Cv2.Subtract(meanSq, meanSqDiff, stdDev);
-            Cv2.Max(stdDev, Scalar.All(1e-15), stdDev); // Evita divisione per zero
-            Cv2.Sqrt(stdDev, stdDev);
-
-            // dst = (src - mean) / (stdDev * intensity)
-            using Mat diff = new Mat();
-            Cv2.Subtract(src, mean, diff);
-            Cv2.Divide(diff, stdDev, dst);
-            if (intensity != 1.0) Cv2.Multiply(dst, Scalar.All(intensity), dst);
-            
-            progress?.Report(100);
-        });
-    }
+            if (isNan)
+            {
+                // Trovato NaN: pulisci (0) e peso nullo (0)
+                cleanIdx[y, x] = default(T); // 0
+                wIdx[y, x] = default(T);     // 0
+            }
+            else
+            {
+                // Valido: copia valore e peso unitario (1)
+                cleanIdx[y, x] = val;
+                
+                // Assegnazione 1.0 generica
+                if (typeof(T) == typeof(double))
+                    wIdx[y, x] = (T)(object)1.0;
+                else
+                    wIdx[y, x] = (T)(object)1.0f;
+            }
+        }
+    });
+}
 
     // =========================================================
     // 3. CLAHE
