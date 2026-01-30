@@ -82,6 +82,9 @@ public partial class ImageEnhancementToolViewModel : ObservableObject, IDisposab
     [NotifyPropertyChangedFor(nameof(IsRvsfMosaicVisible))]
     [NotifyPropertyChangedFor(nameof(IsRvsfSingleVisible))]
     [NotifyPropertyChangedFor(nameof(IsAzimuthalVisible))]
+    // [MODIFICA] Aggiunti trigger per la visibilità granulare
+    [NotifyPropertyChangedFor(nameof(IsAzimuthalRejectionVisible))]
+    [NotifyPropertyChangedFor(nameof(IsAzimuthalNormVisible))]
     [NotifyPropertyChangedFor(nameof(IsFrangiVisible))]
     [NotifyPropertyChangedFor(nameof(IsTensorVisible))]
     [NotifyPropertyChangedFor(nameof(IsTopHatVisible))]
@@ -129,7 +132,20 @@ public partial class ImageEnhancementToolViewModel : ObservableObject, IDisposab
     public bool IsLarsonSekaninaVisible => SelectedMode is ImageEnhancementMode.LarsonSekaninaStandard or ImageEnhancementMode.LarsonSekaninaSymmetric;
     public bool IsRvsfSingleVisible => SelectedMode == ImageEnhancementMode.AdaptiveLaplacianRVSF;
     public bool IsRvsfMosaicVisible => SelectedMode == ImageEnhancementMode.AdaptiveLaplacianMosaic;
-    public bool IsAzimuthalVisible => SelectedMode is ImageEnhancementMode.AzimuthalAverage or ImageEnhancementMode.AzimuthalRenormalization or ImageEnhancementMode.InverseRho or ImageEnhancementMode.AzimuthalMedian;
+    
+    // IsAzimuthalVisible controlla il blocco intero (incluso InverseRho che ha solo subsampling)
+    public bool IsAzimuthalVisible => SelectedMode is ImageEnhancementMode.AzimuthalAverage 
+                                                   or ImageEnhancementMode.AzimuthalRenormalization 
+                                                   or ImageEnhancementMode.InverseRho 
+                                                   or ImageEnhancementMode.AzimuthalMedian;
+
+    // [MODIFICA] Visibilità specifica per "Sigma Rejection" (Solo Average e Renorm)
+    public bool IsAzimuthalRejectionVisible => SelectedMode is ImageEnhancementMode.AzimuthalAverage 
+                                                            or ImageEnhancementMode.AzimuthalRenormalization;
+
+    // [MODIFICA] Visibilità specifica per "Norm Scale" (Solo Renorm)
+    public bool IsAzimuthalNormVisible => SelectedMode is ImageEnhancementMode.AzimuthalRenormalization;
+
     public bool IsFrangiVisible => SelectedMode == ImageEnhancementMode.FrangiVesselnessFilter;
     public bool IsTensorVisible => SelectedMode == ImageEnhancementMode.StructureTensorCoherence;
     public bool IsTopHatVisible => SelectedMode == ImageEnhancementMode.WhiteTopHatExtraction;
@@ -200,14 +216,11 @@ public partial class ImageEnhancementToolViewModel : ObservableObject, IDisposab
                 StatusText = "Elaborazione anteprima...";
                 var parameters = BuildParameters();
                 
-                // --- FIX 1: Passiamo il token al calcolo dell'anteprima ---
-                // Nota: CalculatePreviewDataAsync ora gestisce internamente il recupero dell'HDU corretto
                 Array processedPixels = await _coordinator.CalculatePreviewDataAsync(fileRef, SelectedMode, parameters, token);
                 token.ThrowIfCancellationRequested();
 
                 var originalData = await _dataManager.GetDataAsync(fileRef.FilePath);
                 
-                // [MODIFICA MEF] Accesso sicuro all'HDU immagine originale per header e dimensioni
                 var originalHdu = originalData.FirstImageHdu ?? originalData.PrimaryHdu;
                 if (originalHdu == null) throw new InvalidOperationException("File sorgente privo di immagini.");
 
@@ -216,7 +229,6 @@ public partial class ImageEnhancementToolViewModel : ObservableObject, IDisposab
                 if (SelectedMode == ImageEnhancementMode.AdaptiveLaplacianMosaic)
                 {
                     header = header.Clone();
-                    // Accesso alle dimensioni tramite originalHdu.PixelData
                     _metadataService.AddValue(header, "NAXIS1", originalHdu.PixelData.GetLength(1) * 4, "Mosaic Width");
                     _metadataService.AddValue(header, "NAXIS2", originalHdu.PixelData.GetLength(0) * 2, "Mosaic Height");
                 }
@@ -229,7 +241,6 @@ public partial class ImageEnhancementToolViewModel : ObservableObject, IDisposab
                 var data = await _dataManager.GetDataAsync(fileRef.FilePath);
                 token.ThrowIfCancellationRequested();
                 
-                // [MODIFICA MEF] Accesso sicuro all'HDU immagine
                 var imageHdu = data.FirstImageHdu ?? data.PrimaryHdu;
                 if (imageHdu == null) throw new InvalidOperationException("Nessuna immagine valida trovata.");
 
@@ -312,7 +323,6 @@ public partial class ImageEnhancementToolViewModel : ObservableObject, IDisposab
         CurrentState = EnhancementToolState.Processing;
         IsBusy = true;
 
-        // --- FIX 2: Creiamo un nuovo CTS per l'operazione Batch ---
         _loadingCts?.Cancel();
         _loadingCts = new CancellationTokenSource();
         var token = _loadingCts.Token;
@@ -322,7 +332,6 @@ public partial class ImageEnhancementToolViewModel : ObservableObject, IDisposab
             var progress = new Progress<BatchProgressReport>(p =>
                 StatusText = $"File {p.CurrentFileIndex} / {p.TotalFiles}...");
 
-            // --- FIX 3: Passiamo il token al Batch Service ---
             var results = await _coordinator.ExecuteBatchAsync(
                 _sourceFiles, 
                 SelectedMode, 
@@ -354,7 +363,6 @@ public partial class ImageEnhancementToolViewModel : ObservableObject, IDisposab
     [RelayCommand]
     private async Task Cancel()
     {
-        // --- FIX 4: Se stiamo processando o caricando, fermiamo tutto ---
         _loadingCts?.Cancel();
 
         if (CurrentState == EnhancementToolState.ResultsReady)
@@ -364,7 +372,6 @@ public partial class ImageEnhancementToolViewModel : ObservableObject, IDisposab
         }
         else if (CurrentState == EnhancementToolState.Processing)
         {
-            // Torniamo allo stato di visualizzazione risultati preparati
             CurrentState = EnhancementToolState.ResultsReady;
             StatusText = "Operazione interrotta";
         }
@@ -383,32 +390,22 @@ public partial class ImageEnhancementToolViewModel : ObservableObject, IDisposab
 
     public void Dispose()
     {
-        // 1. Gestione sicura del CancellationTokenSource
         if (_loadingCts != null)
         {
             try
             {
-                // Proviamo a cancellare solo se non è già stato disposto
-                // Nota: Non esiste una proprietà .IsDisposed pubblica, quindi il try-catch è necessario
                 _loadingCts.Cancel(); 
             }
-            catch (ObjectDisposedException)
-            {
-                // Se entriamo qui, il token era già disposto. 
-                // Non dobbiamo fare nulla, l'obiettivo (fermare tutto) è già raggiunto.
-            }
+            catch (ObjectDisposedException) { }
             finally
             {
-                // Assicuriamoci di disporlo e di settarlo a null per evitare chiamate future
                 _loadingCts.Dispose();
                 _loadingCts = null; 
             }
         }
 
-        // 2. Gestione sicura dell'Immagine (per evitare il crash grafico di cui parlavamo prima)
-        // Stacchiamo il binding PRIMA di distruggere la risorsa
         var rendererToDispose = ActiveRenderer;
-        ActiveRenderer = null; // Questo notifica la UI di rimuovere l'immagine
+        ActiveRenderer = null; 
     
         rendererToDispose?.Dispose();
     }

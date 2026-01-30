@@ -145,11 +145,14 @@ public class ImageEnhancementCoordinator : IImageEnhancementCoordinator
                 await Task.Run(() => _radialEngine.ApplyInverseRho(src, dst, p.RadialSubsampling), token); break;
 
             case ImageEnhancementMode.AzimuthalAverage:
-                await RunPolarFilterAsync(src, dst, polar => _radialEngine.ApplyAzimuthalAverage(polar, p.AzimuthalRejSigma), token); break;
+                // Passiamo p.RadialSubsampling al filtro polare
+                await RunPolarFilterAsync(src, dst, p.RadialSubsampling, polar => _radialEngine.ApplyAzimuthalAverage(polar, p.AzimuthalRejSigma), token); break;
             case ImageEnhancementMode.AzimuthalMedian:
-                await RunPolarFilterAsync(src, dst, polar => _radialEngine.ApplyAzimuthalMedian(polar), token); break;
+                // Passiamo p.RadialSubsampling al filtro polare
+                await RunPolarFilterAsync(src, dst, p.RadialSubsampling, polar => _radialEngine.ApplyAzimuthalMedian(polar), token); break;
             case ImageEnhancementMode.AzimuthalRenormalization:
-                await RunPolarFilterAsync(src, dst, polar => _radialEngine.ApplyAzimuthalRenormalization(polar, p.AzimuthalRejSigma, p.AzimuthalNormSigma), token); break;
+                // Passiamo p.RadialSubsampling al filtro polare
+                await RunPolarFilterAsync(src, dst, p.RadialSubsampling, polar => _radialEngine.ApplyAzimuthalRenormalization(polar, p.AzimuthalRejSigma, p.AzimuthalNormSigma), token); break;
 
             case ImageEnhancementMode.FrangiVesselnessFilter:
                 await _shapeEngine.ApplyFrangiVesselnessAsync(src, dst, p.FrangiSigma, p.FrangiBeta, p.FrangiC, progress); break;
@@ -170,7 +173,7 @@ public class ImageEnhancementCoordinator : IImageEnhancementCoordinator
         }
     }
 
-    private async Task RunPolarFilterAsync(Mat src, Mat dst, Action<Mat> polarFilterAction, CancellationToken token)
+    private async Task RunPolarFilterAsync(Mat src, Mat dst, int subsampling, Action<Mat> polarFilterAction, CancellationToken token)
     {
         // Check prima della trasformazione pesante
         token.ThrowIfCancellationRequested();
@@ -180,7 +183,8 @@ public class ImageEnhancementCoordinator : IImageEnhancementCoordinator
             int nRad = Math.Min(src.Cols, src.Rows) / 2;
             int nTheta = nRad * 3;
 
-            using Mat polar = _radialEngine.ToPolar(src, nRad, nTheta);
+            // Usa il parametro subsampling passato dalla UI
+            using Mat polar = _radialEngine.ToPolar(src, nRad, nTheta, subsampling);
             
             // Check intermedio prima di applicare il filtro
             if (token.IsCancellationRequested) return;
@@ -190,7 +194,8 @@ public class ImageEnhancementCoordinator : IImageEnhancementCoordinator
             // Check finale prima di tornare in cartesiano
             if (token.IsCancellationRequested) return;
 
-            _radialEngine.FromPolar(polar, dst, src.Cols, src.Rows);
+            // Usa il parametro subsampling anche per la trasformazione inversa
+            _radialEngine.FromPolar(polar, dst, src.Cols, src.Rows, subsampling);
         }, token);
     }
 
@@ -202,11 +207,36 @@ public class ImageEnhancementCoordinator : IImageEnhancementCoordinator
         {
             ImageEnhancementMode.LarsonSekaninaStandard or ImageEnhancementMode.LarsonSekaninaSymmetric => 
                 $"Angle={p.RotationAngle:F2}, Shift=({p.ShiftX:F1}, {p.ShiftY:F1})",
-            ImageEnhancementMode.AdaptiveLaplacianRVSF => $"RVSF A={p.ParamA_1}, B={p.ParamB_1}, N={p.ParamN_1}",
-            ImageEnhancementMode.AzimuthalAverage => $"RejSig={p.AzimuthalRejSigma}",
-            ImageEnhancementMode.FrangiVesselnessFilter => $"Sigma={p.FrangiSigma}, Beta={p.FrangiBeta}",
-            ImageEnhancementMode.UnsharpMaskingMedian => $"Kernel={p.KernelSize}",
-            ImageEnhancementMode.AdaptiveLocalNormalization => $"Win={p.LocalNormWindowSize}, Int={p.LocalNormIntensity}",
+
+            ImageEnhancementMode.AdaptiveLaplacianRVSF => 
+                $"RVSF A={p.ParamA_1}, B={p.ParamB_1}, N={p.ParamN_1}",
+
+            ImageEnhancementMode.AzimuthalAverage or ImageEnhancementMode.AzimuthalMedian or ImageEnhancementMode.AzimuthalRenormalization => 
+                $"Subsampling={p.RadialSubsampling}, RejSig={p.AzimuthalRejSigma}, NormSig={p.AzimuthalNormSigma}",
+
+            ImageEnhancementMode.InverseRho => 
+                $"Subsampling={p.RadialSubsampling}",
+
+            // --- LOG SPECIFICI PER STRUCTURE SHAPE ENGINE ---
+            ImageEnhancementMode.FrangiVesselnessFilter => 
+                $"Sigma={p.FrangiSigma:F2}, Beta={p.FrangiBeta:F2}, C={p.FrangiC:F4}",
+
+            ImageEnhancementMode.StructureTensorCoherence => 
+                $"Sigma={p.TensorSigma}, Rho={p.TensorRho}",
+
+            ImageEnhancementMode.WhiteTopHatExtraction => 
+                $"KernelSize={p.TopHatKernelSize}",
+            // ------------------------------------------------
+
+            ImageEnhancementMode.UnsharpMaskingMedian => 
+                $"Kernel={p.KernelSize}",
+
+            ImageEnhancementMode.ClaheLocalContrast => 
+                $"Clip={p.ClaheClipLimit:F1}, Tile={p.ClaheTileSize}",
+
+            ImageEnhancementMode.AdaptiveLocalNormalization => 
+                $"Win={p.LocalNormWindowSize}, Int={p.LocalNormIntensity:F1}",
+
             _ => ""
         };
 

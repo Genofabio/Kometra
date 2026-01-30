@@ -53,12 +53,12 @@ public partial class ImageEnhancementToolView : Window
         {
             _vm.PropertyChanged -= OnViewModelPropertyChanged;
         
-            // Aggiungi queste righe per pulizia extra
-            _vm.Dispose(); // Assicurati di chiamare il dispose se non lo fa il contenitore padre
+            // Disposizione manuale sicura
+            _vm.Dispose(); 
             _vm = null;
         }
     
-        // Stacca il DataContext per rompere tutti i binding residui immediatamente
+        // Stacca il DataContext
         this.DataContext = null;
     
         // Pulizia eventi controlli
@@ -88,16 +88,24 @@ public partial class ImageEnhancementToolView : Window
                 case nameof(ImageEnhancementToolViewModel.AzimuthalRejSigma): UpdateBox("AzimuthalRejBox", _vm.AzimuthalRejSigma.ToString("F1")); break;
                 case nameof(ImageEnhancementToolViewModel.AzimuthalNormSigma): UpdateBox("AzimuthalNormBox", _vm.AzimuthalNormSigma.ToString("F1")); break;
 
-                // RVSF
+                // RVSF (Single & Mosaic Min)
                 case nameof(ImageEnhancementToolViewModel.RvsfA_1): 
                     UpdateBox("RvsfA1Box", _vm.RvsfA_1.ToString("F2")); 
+                    UpdateBox("RvsfAMinBox", _vm.RvsfA_1.ToString("F2"));
                     break;
                 case nameof(ImageEnhancementToolViewModel.RvsfB_1): 
                     UpdateBox("RvsfB1Box", _vm.RvsfB_1.ToString("F2")); 
+                    UpdateBox("RvsfBMinBox", _vm.RvsfB_1.ToString("F2"));
                     break;
                 case nameof(ImageEnhancementToolViewModel.RvsfN_1): 
                     UpdateBox("RvsfN1Box", _vm.RvsfN_1.ToString("F2")); 
+                    UpdateBox("RvsfNMinBox", _vm.RvsfN_1.ToString("F2"));
                     break;
+
+                // RVSF (Mosaic Max)
+                case nameof(ImageEnhancementToolViewModel.RvsfA_2): UpdateBox("RvsfAMaxBox", _vm.RvsfA_2.ToString("F2")); break;
+                case nameof(ImageEnhancementToolViewModel.RvsfB_2): UpdateBox("RvsfBMaxBox", _vm.RvsfB_2.ToString("F2")); break;
+                case nameof(ImageEnhancementToolViewModel.RvsfN_2): UpdateBox("RvsfNMaxBox", _vm.RvsfN_2.ToString("F2")); break;
 
                 // Frangi
                 case nameof(ImageEnhancementToolViewModel.FrangiSigma): UpdateBox("FrangiSigmaBox", _vm.FrangiSigma.ToString("F2")); break;
@@ -135,7 +143,6 @@ public partial class ImageEnhancementToolView : Window
     {
         if (_vm == null) return;
         
-        // Forza l'aggiornamento di TUTTE le box visibili e non
         UpdateBox("RotationBox", _vm.RotationAngle.ToString("F1"));
         UpdateBox("ShiftXBox", _vm.ShiftX.ToString("F1"));
         UpdateBox("ShiftYBox", _vm.ShiftY.ToString("F1"));
@@ -144,9 +151,18 @@ public partial class ImageEnhancementToolView : Window
         UpdateBox("AzimuthalRejBox", _vm.AzimuthalRejSigma.ToString("F1"));
         UpdateBox("AzimuthalNormBox", _vm.AzimuthalNormSigma.ToString("F1"));
 
+        // RVSF Single
         UpdateBox("RvsfA1Box", _vm.RvsfA_1.ToString("F2"));
         UpdateBox("RvsfB1Box", _vm.RvsfB_1.ToString("F2"));
         UpdateBox("RvsfN1Box", _vm.RvsfN_1.ToString("F2"));
+
+        // RVSF Mosaic
+        UpdateBox("RvsfAMinBox", _vm.RvsfA_1.ToString("F2"));
+        UpdateBox("RvsfAMaxBox", _vm.RvsfA_2.ToString("F2"));
+        UpdateBox("RvsfBMinBox", _vm.RvsfB_1.ToString("F2"));
+        UpdateBox("RvsfBMaxBox", _vm.RvsfB_2.ToString("F2"));
+        UpdateBox("RvsfNMinBox", _vm.RvsfN_1.ToString("F2"));
+        UpdateBox("RvsfNMaxBox", _vm.RvsfN_2.ToString("F2"));
 
         UpdateBox("FrangiSigmaBox", _vm.FrangiSigma.ToString("F2"));
         UpdateBox("FrangiBetaBox", _vm.FrangiBeta.ToString("F2"));
@@ -193,6 +209,14 @@ public partial class ImageEnhancementToolView : Window
                 case "RvsfB1Box": _vm.RvsfB_1 = d; break;
                 case "RvsfN1Box": _vm.RvsfN_1 = d; break;
 
+                // Mosaico RVSF (Range)
+                case "RvsfAMinBox": _vm.RvsfA_1 = d; break;
+                case "RvsfAMaxBox": _vm.RvsfA_2 = d; break;
+                case "RvsfBMinBox": _vm.RvsfB_1 = d; break;
+                case "RvsfBMaxBox": _vm.RvsfB_2 = d; break;
+                case "RvsfNMinBox": _vm.RvsfN_1 = d; break;
+                case "RvsfNMaxBox": _vm.RvsfN_2 = d; break;
+
                 case "FrangiSigmaBox": _vm.FrangiSigma = d; break;
                 case "FrangiBetaBox": _vm.FrangiBeta = d; break;
                 case "FrangiCBox": _vm.FrangiC = d; break;
@@ -228,7 +252,7 @@ public partial class ImageEnhancementToolView : Window
     }
 
     // =======================================================================
-    // GESTIONE VIEWPORT E MOUSE (Identico alle altre finestre)
+    // GESTIONE VIEWPORT E MOUSE
     // =======================================================================
 
     private void OnPreviewSizeChanged(object? sender, SizeChangedEventArgs e)
@@ -249,7 +273,7 @@ public partial class ImageEnhancementToolView : Window
 
         var properties = e.GetCurrentPoint(border).Properties;
 
-        // FIX: Ora controlla SIA il tasto sinistro CHE il tasto centrale (rotella)
+        // Panning attivato con tasto centrale
         if (properties.IsMiddleButtonPressed) 
         { 
             _isPanning = true; 
@@ -298,17 +322,18 @@ public partial class ImageEnhancementToolView : Window
     }
 
     private void OnResetViewClicked(object? sender, RoutedEventArgs e) => CenterImage();
+    
     private void OnZoomInClicked(object? sender, RoutedEventArgs e) 
     {
         var b = this.FindControl<Border>("PreviewBorder");
         if (_vm != null && b != null) _vm.Viewport.ApplyZoomAtPoint(1.2, b.Bounds.Center);
     }
+    
     private void OnZoomOutClicked(object? sender, RoutedEventArgs e) 
     {
         var b = this.FindControl<Border>("PreviewBorder");
         if (_vm != null && b != null) _vm.Viewport.ApplyZoomAtPoint(1.0/1.2, b.Bounds.Center);
     }
+    
     private void OnControlsPointerPressed(object? sender, PointerPressedEventArgs e) => e.Handled = true;
-    
-    
 }

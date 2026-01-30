@@ -97,13 +97,17 @@
                                 <TextBox x:Name="SubsamplingBox" Text="{Binding RadialSubsampling, Mode=OneWay}"
                                          Grid.Row="0" Grid.Column="1" Classes="compact" LostFocus="OnManualInputCommit" KeyDown="OnInputKeyDown"/>
 
-                                <TextBlock Grid.Row="1" Text="Sigma Rej:" VerticalAlignment="Center" Opacity="0.8"/>
+                                <TextBlock Grid.Row="1" Text="Sigma Rej:" VerticalAlignment="Center" Opacity="0.8"
+                                           IsVisible="{Binding IsAzimuthalRejectionVisible}"/>
                                 <TextBox x:Name="AzimuthalRejBox" Text="{Binding AzimuthalRejSigma, Mode=OneWay, StringFormat={}{0:F1}}"
-                                         Grid.Row="1" Grid.Column="1" Classes="compact" LostFocus="OnManualInputCommit" KeyDown="OnInputKeyDown"/>
+                                         Grid.Row="1" Grid.Column="1" Classes="compact" LostFocus="OnManualInputCommit" KeyDown="OnInputKeyDown"
+                                         IsVisible="{Binding IsAzimuthalRejectionVisible}"/>
                                 
-                                <TextBlock Grid.Row="2" Text="Norm Scale:" VerticalAlignment="Center" Opacity="0.8"/>
+                                <TextBlock Grid.Row="2" Text="Norm Scale:" VerticalAlignment="Center" Opacity="0.8"
+                                           IsVisible="{Binding IsAzimuthalNormVisible}"/>
                                 <TextBox x:Name="AzimuthalNormBox" Text="{Binding AzimuthalNormSigma, Mode=OneWay, StringFormat={}{0:F1}}"
-                                         Grid.Row="2" Grid.Column="1" Classes="compact" LostFocus="OnManualInputCommit" KeyDown="OnInputKeyDown"/>
+                                         Grid.Row="2" Grid.Column="1" Classes="compact" LostFocus="OnManualInputCommit" KeyDown="OnInputKeyDown"
+                                         IsVisible="{Binding IsAzimuthalNormVisible}"/>
                             </Grid>
                         </StackPanel>
 

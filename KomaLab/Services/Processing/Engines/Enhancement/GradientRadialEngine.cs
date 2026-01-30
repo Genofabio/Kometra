@@ -20,14 +20,19 @@ public class GradientRadialEngine : IGradientRadialEngine
         await Task.Run(() =>
         {
             dst.Create(src.Size(), src.Type());
-            Point2f center = new Point2f(src.Cols / 2f, src.Rows / 2f);
+            // Il centro geometrico per la rotazione OpenCV 
+            // In un'immagine 801x801, 400.5 è l'intersezione esatta tra i pixel centrali.
+            Point2f center = new Point2f(src.Cols / 2.0f, src.Rows / 2.0f);
 
             Mat GetRotatedImage(Mat input, double deg, double sx, double sy)
             {
                 using Mat rotMat = Cv2.GetRotationMatrix2D(center, deg, 1.0);
                 var indexer = rotMat.GetGenericIndexer<double>();
-                indexer[0, 2] += sx; indexer[1, 2] += sy;
+                indexer[0, 2] += sx; 
+                indexer[1, 2] += sy;
+                
                 Mat res = new Mat();
+                // Interpolazione cubica per precisione sub-pixel nelle strutture fini
                 Cv2.WarpAffine(input, res, rotMat, input.Size(), InterpolationFlags.Cubic, BorderTypes.Constant, Scalar.All(0));
                 return res;
             }
@@ -72,6 +77,7 @@ public class GradientRadialEngine : IGradientRadialEngine
             await Task.Run(() => {
                 using Mat workImg = PrepareImageForRVSF(src, useLog);
                 dst.Create(src.Size(), workImg.Type());
+
                 if (workImg.Depth() == MatType.CV_64F) RunRVSFCore<double>(workImg, dst, paramA, paramB, paramN, progress);
                 else RunRVSFCore<float>(workImg, dst, paramA, paramB, paramN, progress);
             });
@@ -102,6 +108,7 @@ public class GradientRadialEngine : IGradientRadialEngine
                     var (a, b, n) = combinations[index];
                     int gridRow = index / 4; int gridCol = index % 4;
                     using Mat subDst = new Mat(dst, new Rect(gridCol * w, gridRow * h, w, h));
+                    
                     if (workImg.Depth() == MatType.CV_64F) RunRVSFCore<double>(workImg, subDst, a, b, n, null);
                     else RunRVSFCore<float>(workImg, subDst, a, b, n, null);
                 } finally { _memSemaphore.Release(); }
@@ -111,227 +118,233 @@ public class GradientRadialEngine : IGradientRadialEngine
     }
 
     // =========================================================
-    // PARTE 2: METODI DA RadialEnhancementEngine (Polar & InverseRho)
+    // PARTE 2: METODI RADIALI (POLARI)
     // =========================================================
 
-    public void ApplyInverseRho(Mat src, Mat dst, int subsampling = 5)
+    public void ApplyInverseRho(Mat src, Mat dst, int subsampling = 10)
     {
-        // Creiamo dst della stessa dimensione e tipo
         dst.Create(src.Size(), src.Type());
-
-        // 1. Esecuzione Core (Calcolo matematico)
         if (src.Depth() == MatType.CV_64F) InverseRhoCore<double>(src, dst, subsampling);
         else InverseRhoCore<float>(src, dst, subsampling);
-
-        // 2. CORREZIONE "EFFETTO TROPPO FORTE" (Gamma Compression)
-        // L'Inverse Rho espande la dinamica in modo lineare, che spesso appare "esagerata".
-        // Applicando una radice quadrata (Gamma ~2.2 inversa), riportiamo l'immagine a una
-        // percezione naturale simile all'occhio umano.
-    
-        // Ignoriamo i NaN durante la Pow (OpenCV gestisce i NaN nella Pow lasciandoli NaN o 0)
-        Cv2.Pow(dst, 0.5, dst); 
-    
-        // Opzionale: Normalizzazione finale per sicurezza (0.0 - 1.0)
-        Cv2.Normalize(dst, dst, 0, 1, NormTypes.MinMax);
     }
 
-    public Mat ToPolar(Mat src, int nRad, int nTheta, int subsampling = 5)
+    public Mat ToPolar(Mat src, int nRad, int nTheta, int subsampling = 10)
     {
-        Point2f center = new Point2f(src.Cols / 2f, src.Rows / 2f);
-        // WarpPolar supporta nativamente 32F e 64F
-        Mat polarOpenCv = new Mat();
-        Cv2.WarpPolar(src, polarOpenCv, new Size(nRad, nTheta), center, nRad, 
-                      InterpolationFlags.Cubic | InterpolationFlags.WarpFillOutliers, 
-                      WarpPolarMode.Linear);
-
-        Mat polarCorrected = new Mat();
-        Cv2.Rotate(polarOpenCv, polarCorrected, RotateFlags.Rotate90Clockwise);
-        return polarCorrected;
+        Mat dst = new Mat(new Size(nTheta, nRad), src.Type());
+        if (src.Depth() == MatType.CV_64F) ToPolarCore<double>(src, dst, nRad, nTheta, subsampling);
+        else ToPolarCore<float>(src, dst, nRad, nTheta, subsampling);
+        return dst;
     }
 
-    public void FromPolar(Mat polar, Mat dst, int width, int height, int subsampling = 5)
+    public void FromPolar(Mat polar, Mat dst, int width, int height, int subsampling = 10)
     {
         dst.Create(new Size(width, height), polar.Type());
-
-        using Mat polarForOpenCv = new Mat();
-        Cv2.Rotate(polar, polarForOpenCv, RotateFlags.Rotate90Counterclockwise);
-
-        Point2f center = new Point2f(width / 2f, height / 2f);
-        double maxRadius = polar.Rows; 
-
-        Cv2.WarpPolar(polarForOpenCv, dst, new Size(width, height), center, maxRadius,
-                      InterpolationFlags.Cubic | InterpolationFlags.WarpInverseMap, 
-                      WarpPolarMode.Linear);
-
-        // FIX: Accesso al pixel centrale safe per float e double
-        if (dst.Depth() == MatType.CV_64F)
-        {
-            var indexer = dst.GetGenericIndexer<double>();
-            indexer[height / 2, width / 2] = 0.0;
-        }
-        else
-        {
-            var indexer = dst.GetGenericIndexer<float>();
-            indexer[height / 2, width / 2] = 0f;
-        }
+        if (polar.Depth() == MatType.CV_64F) FromPolarCore<double>(polar, dst, width, height, subsampling);
+        else FromPolarCore<float>(polar, dst, width, height, subsampling);
     }
 
     public void ApplyAzimuthalAverage(Mat polar, double rejSig)
     {
-        // FIX: Dispatching dinamico
         if (polar.Depth() == MatType.CV_64F) AzimuthalAverageCore<double>(polar, rejSig);
         else AzimuthalAverageCore<float>(polar, rejSig);
     }
 
     public void ApplyAzimuthalMedian(Mat polar)
     {
-        // FIX: Dispatching dinamico
         if (polar.Depth() == MatType.CV_64F) AzimuthalMedianCore<double>(polar);
         else AzimuthalMedianCore<float>(polar);
     }
 
     public void ApplyAzimuthalRenormalization(Mat polar, double rejSig, double nSig)
     {
-        // FIX: Dispatching dinamico
         if (polar.Depth() == MatType.CV_64F) AzimuthalRenormCore<double>(polar, rejSig, nSig);
         else AzimuthalRenormCore<float>(polar, rejSig, nSig);
     }
 
     // =========================================================
-    // PRIVATE HELPERS (GENERIC)
+    // PRIVATE CORE IMPLEMENTATIONS
     // =========================================================
 
-    private void InverseRhoCore<T>(Mat src, Mat dst, int subsampling) where T : struct, IComparable<T>
-{
-    int rows = src.Rows; int cols = src.Cols;
-    double xnuc = cols / 2.0; double ynuc = rows / 2.0;
-    
-    var srcIndexer = src.GetGenericIndexer<T>();
-    var dstIndexer = dst.GetGenericIndexer<T>();
+    private void RunRVSFCore<T>(Mat src, Mat dst, double A, double B, double N, IProgress<double> progress) where T : struct
+    {
+        int rows = src.Rows; int cols = src.Cols;
+        double xNuc = cols / 2.0; 
+        double yNuc = rows / 2.0;
+        
+        var srcIdx = src.GetGenericIndexer<T>();
+        var dstIdx = dst.GetGenericIndexer<T>();
+        
+        int completed = 0;
+        double[] offsets = new double[10];
+        for (int k = 1; k <= 10; k++) offsets[k - 1] = -0.45 + (k - 1) * 0.1;
 
-    // =========================================================
-    // FASE 1: CALCOLO STATISTICHE ROBUSTO (Ignora NaN)
-    // Non usiamo Cv2.MinMaxLoc perché fallisce se ci sono troppi NaN
-    // =========================================================
-    double minVal = double.MaxValue;
-    double sumVal = 0;
-    long validCount = 0;
+        Parallel.For(0, rows, (int y) => {
+            for (int x = 0; x < cols; x++) {
+                double sumEdg = 0.0, sumCrn = 0.0;
+                for (int m = 0; m < 10; m++) {
+                    double subY = (y + 0.5 - yNuc) + offsets[m]; 
+                    for (int n = 0; n < 10; n++) {
+                        double subX = (x + 0.5 - xNuc) + offsets[n]; 
+                        double rho = Math.Sqrt(subX * subX + subY * subY);
+                        double radius = A + (B * Math.Pow(rho, N));
+                        int rInt = (int)Math.Round(radius); 
 
-    // Scansione seriale veloce per statistiche (O(N))
-    // Nota: Potrebbe essere parallelizzato, ma per statistiche semplici è rapido anche così
-    for (int y = 0; y < rows; y++) {
-        for (int x = 0; x < cols; x++) {
-            double val = Convert.ToDouble(srcIndexer[y, x]);
-            if (!double.IsNaN(val)) {
-                if (val < minVal) minVal = val;
-                sumVal += val;
-                validCount++;
-            }
-        }
-    }
-
-    // Se l'immagine è tutta NaN o vuota, usiamo default sicuri
-    if (validCount == 0) {
-        minVal = 0.0;
-        sumVal = 1.0; // evita div/0 dopo
-        validCount = 1;
-    }
-
-    double backgroundBias = minVal;
-    double globalMean = (sumVal / validCount) - backgroundBias;
-    // Fattore di rinormalizzazione (evita numeri giganti)
-    double renormFactor = (globalMean > 1e-9) ? (100.0 / globalMean) : 1.0;
-
-    // Pre-calcolo offset subsampling
-    double step = 1.0 / subsampling;
-    double offsetStart = -0.5 + (step / 2.0);
-    double[] localOffsets = new double[subsampling];
-    for (int i = 0; i < subsampling; i++) localOffsets[i] = offsetStart + (i * step);
-
-    // =========================================================
-    // FASE 2: APPLICAZIONE FILTRO
-    // =========================================================
-    Parallel.For(0, rows, y => {
-        double baseDy = ynuc - y;
-        for (int x = 0; x < cols; x++) {
-            double rawVal = Convert.ToDouble(srcIndexer[y, x]);
-
-            // Se è NaN, lo propaghiamo come NaN (o 0 se preferisci 'bucare' l'immagine)
-            if (double.IsNaN(rawVal)) {
-                // Impostiamo a NaN specificando il tipo corretto
-                if (typeof(T) == typeof(double)) dstIndexer[y, x] = (T)(object)double.NaN;
-                else dstIndexer[y, x] = (T)(object)float.NaN;
-                continue;
-            }
-
-            // 1. Sottrazione Fondo Cielo (Cruciale per i bordi)
-            // Usiamo Math.Max(0, ...) per evitare valori negativi che romperebbero la radice quadrata successiva
-            double val = Math.Max(0, rawVal - backgroundBias);
-            
-            // 2. Normalizzazione luminosità
-            double normalizedVal = val * renormFactor;
-
-            // 3. Calcolo Distanza media (Inverse Rho)
-            double sumRho = 0;
-            double baseDx = xnuc - x;
-            
-            // Ciclo ottimizzato (loop unrolling parziale non necessario col JIT moderno, ma teniamo pulito)
-            for (int jj = 0; jj < subsampling; jj++) {
-                double dy = baseDy - localOffsets[jj];
-                double dy2 = dy * dy;
-                for (int ii = 0; ii < subsampling; ii++) {
-                    double dx = baseDx - localOffsets[ii];
-                    sumRho += Math.Sqrt(dx * dx + dy2);
+                        int[] dy = { -rInt, rInt, 0, 0, -rInt, -rInt, rInt, rInt };
+                        int[] dx = { 0, 0, -rInt, rInt, -rInt, rInt, -rInt, rInt };
+                        
+                        for (int k = 0; k < 4; k++) { 
+                            int yi = y + dy[k], xi = x + dx[k];
+                            if (yi >= 0 && yi < rows && xi >= 0 && xi < cols) sumEdg += Convert.ToDouble(srcIdx[yi, xi]);
+                        }
+                        for (int k = 4; k < 8; k++) { 
+                            int yi = y + dy[k], xi = x + dx[k];
+                            if (yi >= 0 && yi < rows && xi >= 0 && xi < cols) sumCrn += Convert.ToDouble(srcIdx[yi, xi]);
+                        }
+                    }
                 }
+                double res = (1024.0 * Convert.ToDouble(srcIdx[y, x])) - (1.92 * sumEdg) - (0.64 * sumCrn);
+                dstIdx[y, x] = (T)Convert.ChangeType(res, typeof(T));
             }
-            double avgDist = sumRho / (subsampling * subsampling);
+            if (progress != null) {
+                var current = Interlocked.Increment(ref completed);
+                if (current % 100 == 0) progress.Report((double)current / rows * 100);
+            }
+        });
+    }
 
-            // 4. Clamp Distanza (Salva il centro nero)
-            // Assumiamo che il raggio minimo utile sia ~20px per evitare moltiplicazioni quasi-zero
-            // Se avgDist < 10, lo blocchiamo a 10.
-            double multiplier = Math.Max(10.0, avgDist);
+    private void InverseRhoCore<T>(Mat src, Mat dst, int subsampling) where T : struct
+    {
+        int rows = src.Rows; int cols = src.Cols;
+        double xNuc = cols / 2.0; double yNuc = rows / 2.0;
+        var srcIdx = src.GetGenericIndexer<T>();
+        var dstIdx = dst.GetGenericIndexer<T>();
 
-            // Risultato Lineare
-            double result = normalizedVal * multiplier;
-            
-            dstIndexer[y, x] = (T)Convert.ChangeType(result, typeof(T));
-        }
-    });
-}
+        Scalar mean = Cv2.Mean(src);
+        double renorm = 100.0 / (Math.Abs(mean.Val0) > 1e-9 ? mean.Val0 : 1.0);
+        
+        Parallel.For(0, rows, (int y) => {
+            for (int x = 0; x < cols; x++) {
+                double rhoSum = 0;
+                for (int m = 0; m < 10; m++) {
+                    double dy = (y + 0.5 - yNuc) - 0.45 + (m * 0.1);
+                    for (int n = 0; n < 10; n++) {
+                        double dx = (x + 0.5 - xNuc) - 0.45 + (n * 0.1);
+                        rhoSum += Math.Sqrt(dx * dx + dy * dy);
+                    }
+                }
+                double val = Convert.ToDouble(srcIdx[y, x]) * renorm;
+                dstIdx[y, x] = (T)Convert.ChangeType(val * (rhoSum * 0.01), typeof(T));
+            }
+        });
+    }
+
+    private void ToPolarCore<T>(Mat src, Mat dst, int nRad, int nTheta, int subsampling) where T : struct
+    {
+        int sw = src.Cols; int sh = src.Rows;
+        double xNuc = sw / 2.0; double yNuc = sh / 2.0;
+        double twoPi = 2.0 * Math.PI;
+        var srcIdx = src.GetGenericIndexer<T>();
+        var dstIdx = dst.GetGenericIndexer<T>();
+
+        Parallel.For(0, nRad, (int r) => {
+            double radiusBase = r + 1.0; 
+            for (int t = 0; t < nTheta; t++) {
+                double avect_t = 0;
+                for (int ii = 0; ii < 10; ii++) {
+                    double ai = radiusBase - 0.45 + (ii * 0.1);
+                    for (int jj = 0; jj < 10; jj++) {
+                        double angle = ((t * 10.0 + jj) + 0.5) * twoPi / (nTheta * 10.0);
+                        // Calcolo coordinate sub-pixel (0.5 è il centro del pixel indice 0)
+                        double xPos = xNuc + (ai * -Math.Sin(angle));
+                        double yPos = yNuc + (ai * Math.Cos(angle));
+                        
+                        // Passaggio all'interpolatore bilineare (convertiamo in 0-based puro sottraendo 0.5)
+                        avect_t += GetBilinearSample(srcIdx, xPos - 0.5, yPos - 0.5, sw, sh);
+                    }
+                }
+                dstIdx[r, t] = (T)Convert.ChangeType(avect_t * 0.01, typeof(T));
+            }
+        });
+    }
+
+    private void FromPolarCore<T>(Mat polar, Mat cartes, int w, int h, int subsampling) where T : struct
+    {
+        int nRad = polar.Rows; int nTheta = polar.Cols;
+        double xNuc = w / 2.0; double yNuc = h / 2.0;
+        double twoPi = 2.0 * Math.PI;
+        var polIdx = polar.GetGenericIndexer<T>();
+        var carIdx = cartes.GetGenericIndexer<T>();
+
+        Parallel.For(0, h, (int i) => {
+            for (int j = 0; j < w; j++) {
+                double cvect_j = 0;
+                for (int ii = 0; ii < 10; ii++) {
+                    double dy = (i + 0.5 - yNuc) - 0.45 + (ii * 0.1);
+                    for (int jj = 0; jj < 10; jj++) {
+                        double dx = (j + 0.5 - xNuc) - 0.45 + (jj * 0.1);
+                        double rho = Math.Sqrt(dx * dx + dy * dy);
+                        
+                        if (rho >= 0.5 && rho <= nRad + 0.5) {
+                            double ang = Math.Atan2(-dx, dy);
+                            if (ang < 0) ang += twoPi;
+                            
+                            double rCoord = rho - 1.0;
+                            double tCoord = ang * nTheta / twoPi;
+                            
+                            cvect_j += GetBilinearSample(polIdx, tCoord, rCoord, nTheta, nRad);
+                        }
+                    }
+                }
+                carIdx[i, j] = (T)Convert.ChangeType(cvect_j * 0.01, typeof(T));
+            }
+        });
+    }
+
+    private double GetBilinearSample<T>(MatIndexer<T> indexer, double x, double y, int w, int h) where T : struct
+    {
+        // Out of bounds check
+        if (x < 0 || x > w - 1 || y < 0 || y > h - 1) return 0.0;
+
+        int x1 = (int)Math.Floor(x);
+        int y1 = (int)Math.Floor(y);
+        int x2 = Math.Min(x1 + 1, w - 1);
+        int y2 = Math.Min(y1 + 1, h - 1);
+
+        double dx = x - x1;
+        double dy = y - y1;
+
+        double v1 = Convert.ToDouble(indexer[y1, x1]);
+        double v2 = Convert.ToDouble(indexer[y1, x2]);
+        double v3 = Convert.ToDouble(indexer[y2, x1]);
+        double v4 = Convert.ToDouble(indexer[y2, x2]);
+
+        return v1 * (1 - dx) * (1 - dy) + v2 * dx * (1 - dy) + 
+               v3 * (1 - dx) * dy + v4 * dx * dy;
+    }
 
     private void AzimuthalAverageCore<T>(Mat polar, double rejSig) where T : struct
     {
         int nRad = polar.Rows; int nTheta = polar.Cols;
         var indexer = polar.GetGenericIndexer<T>();
-
-        Parallel.For(0, nRad, i => {
-            int count = 0; double sum = 0, sumSq = 0;
+        Parallel.For(0, nRad, (int i) => {
+            double sum = 0, sumSq = 0; int count = 0;
             for (int j = 0; j < nTheta; j++) {
-                double val = Convert.ToDouble(indexer[i, j]);
-                if (!double.IsNaN(val) && val >= 0) { sum += val; sumSq += val * val; count++; }
+                double v = Convert.ToDouble(indexer[i, j]);
+                if (!double.IsNaN(v) && v >= 0) { sum += v; sumSq += v * v; count++; }
             }
             if (count < 2) return;
-
-            double mean1 = sum / count;
-            double variance = (sumSq / count) - (mean1 * mean1);
-            double sigma1 = variance > 0 ? Math.Sqrt(variance) : 0;
-            double rejVal = rejSig * sigma1;
-            double rejMin = Math.Max(1.0e-5, mean1 - rejVal);
-            double rejMax = mean1 + rejVal;
-
-            double cleanSum = 0; int cleanCount = 0;
+            double m1 = sum / count;
+            double s1 = Math.Sqrt(Math.Max(0, (sumSq / count) - (m1 * m1)));
+            double rMin = Math.Max(0, m1 - rejSig * s1), rMax = m1 + rejSig * s1;
+            
+            double cSum = 0; int cCount = 0;
             for (int j = 0; j < nTheta; j++) {
-                double val = Convert.ToDouble(indexer[i, j]);
-                if (!double.IsNaN(val) && val >= rejMin && val <= rejMax) { cleanSum += val; cleanCount++; }
+                double v = Convert.ToDouble(indexer[i, j]);
+                if (v >= rMin && v <= rMax) { cSum += v; cCount++; }
             }
-            double finalMean = cleanCount > 0 ? cleanSum / cleanCount : mean1;
-            double divisor = finalMean + 1.0e-6;
-
-            for (int j = 0; j < nTheta; j++) {
-                double val = Convert.ToDouble(indexer[i, j]);
-                if (!double.IsNaN(val)) 
-                    indexer[i, j] = (T)Convert.ChangeType(val / divisor, typeof(T));
-            }
+            double finalMean = cCount > 0 ? cSum / cCount : m1;
+            for (int j = 0; j < nTheta; j++) 
+                indexer[i, j] = (T)Convert.ChangeType(Convert.ToDouble(indexer[i, j]) / (finalMean + 1e-9), typeof(T));
         });
     }
 
@@ -339,28 +352,21 @@ public class GradientRadialEngine : IGradientRadialEngine
     {
         int nRad = polar.Rows; int nTheta = polar.Cols;
         var indexer = polar.GetGenericIndexer<T>();
-
-        Parallel.For(0, nRad, i => {
-            // Buffer locale: usiamo double per il calcolo della mediana per semplicità
+        Parallel.For(0, nRad, (int i) => {
             double[] buffer = ArrayPool<double>.Shared.Rent(nTheta);
-            int validCount = 0;
+            int vc = 0;
             try {
                 for (int j = 0; j < nTheta; j++) {
-                    double val = Convert.ToDouble(indexer[i, j]);
-                    if (!double.IsNaN(val) && val >= 0) buffer[validCount++] = val;
+                    double v = Convert.ToDouble(indexer[i, j]);
+                    if (!double.IsNaN(v)) buffer[vc++] = v;
                 }
-                if (validCount > 0) {
-                    Array.Sort(buffer, 0, validCount);
-                    double median = buffer[validCount / 2];
-                    double divisor = median + 1e-6;
-                    for (int j = 0; j < nTheta; j++) {
-                        double val = Convert.ToDouble(indexer[i, j]);
-                        if (!double.IsNaN(val))
-                            indexer[i, j] = (T)Convert.ChangeType(val / divisor, typeof(T));
-                    }
+                if (vc > 0) {
+                    Array.Sort(buffer, 0, vc);
+                    double median = buffer[vc / 2];
+                    for (int j = 0; j < nTheta; j++) 
+                        indexer[i, j] = (T)Convert.ChangeType(Convert.ToDouble(indexer[i, j]) / (median + 1e-9), typeof(T));
                 }
-            }
-            finally { ArrayPool<double>.Shared.Return(buffer); }
+            } finally { ArrayPool<double>.Shared.Return(buffer); }
         });
     }
 
@@ -368,75 +374,45 @@ public class GradientRadialEngine : IGradientRadialEngine
     {
         int nRad = polar.Rows; int nTheta = polar.Cols;
         var indexer = polar.GetGenericIndexer<T>();
-
-        Parallel.For(0, nRad, i => {
-            int count = 0; double sum = 0, sumSq = 0;
+        Parallel.For(0, nRad, (int i) => {
+            double sum = 0, sumSq = 0; int count = 0;
             for (int j = 0; j < nTheta; j++) {
-                double val = Convert.ToDouble(indexer[i, j]);
-                if (!double.IsNaN(val) && val >= 0) { sum += val; sumSq += val * val; count++; }
+                double v = Convert.ToDouble(indexer[i, j]);
+                if (v >= 0) { sum += v; sumSq += v * v; count++; }
             }
             if (count < 3) return;
-
-            double mean1 = sum / count;
-            double variance = (sumSq / count) - (mean1 * mean1);
-            double sigma1 = variance > 0 ? Math.Sqrt(variance) : 0;
-            double rejVal = rejSig * sigma1;
-            double rejMin = Math.Max(1.0e-5, mean1 - rejVal);
-            double rejMax = mean1 + rejVal;
+            double m1 = sum / count;
+            double s1 = Math.Sqrt(Math.Max(0, (sumSq / count) - (m1 * m1)));
+            double rMin = m1 - rejSig * s1, rMax = m1 + rejSig * s1;
             
-            double cleanSum = 0, cleanSumSq = 0; int cleanCount = 0;
+            double cSum = 0, cSumSq = 0; int cc = 0;
             for (int j = 0; j < nTheta; j++) {
-                double val = Convert.ToDouble(indexer[i, j]);
-                if (!double.IsNaN(val) && val >= rejMin && val <= rejMax) { cleanSum += val; cleanSumSq += val*val; cleanCount++; }
+                double v = Convert.ToDouble(indexer[i, j]);
+                if (v >= rMin && v <= rMax) { cSum += v; cSumSq += v * v; cc++; }
             }
-            if (cleanCount < 2) return;
-
-            double finalMean = cleanSum / cleanCount;
-            double finalVar = (cleanSumSq / cleanCount) - (finalMean * finalMean);
-            double finalStd = finalVar > 0 ? Math.Sqrt(finalVar) : 0;
-            double divisor = finalStd * nSig;
-            if (divisor < 1e-9) divisor = 1.0;
-
-            for (int j = 0; j < nTheta; j++) {
-                double val = Convert.ToDouble(indexer[i, j]);
-                if (!double.IsNaN(val))
-                    indexer[i, j] = (T)Convert.ChangeType((val - finalMean) / divisor, typeof(T));
-            }
-        });
-    }
-
-    private void RunRVSFCore<T>(Mat src, Mat dst, double A, double B, double N, IProgress<double> progress) where T : struct
-    {
-        int rows = src.Rows; int cols = src.Cols;
-        double xNuc = cols / 2.0; double yNuc = rows / 2.0;
-        var srcIdx = src.GetGenericIndexer<T>(); var dstIdx = dst.GetGenericIndexer<T>();
-        int completed = 0;
-        Parallel.For(0, rows, y => {
-            double dySq = Math.Pow(y - yNuc, 2);
-            for (int x = 0; x < cols; x++) {
-                double rho = Math.Sqrt(Math.Pow(x - xNuc, 2) + dySq);
-                int r = Math.Max(1, (int)Math.Round(A + (B * Math.Pow(rho, N))));
-                int yMin = Math.Clamp(y - r, 0, rows - 1); int yMax = Math.Clamp(y + r, 0, rows - 1);
-                int xMin = Math.Clamp(x - r, 0, cols - 1); int xMax = Math.Clamp(x + r, 0, cols - 1);
-                double cur = Convert.ToDouble(srcIdx[y, x]);
-                double sE = Convert.ToDouble(srcIdx[yMin, x]) + Convert.ToDouble(srcIdx[yMax, x]) + Convert.ToDouble(srcIdx[y, xMin]) + Convert.ToDouble(srcIdx[y, xMax]);
-                double sC = Convert.ToDouble(srcIdx[yMin, xMin]) + Convert.ToDouble(srcIdx[yMin, xMax]) + Convert.ToDouble(srcIdx[yMax, xMin]) + Convert.ToDouble(srcIdx[yMax, xMax]);
-                double res = (1024.0 * cur) - (192.0 * sE) - (64.0 * sC);
-                dstIdx[y, x] = (T)Convert.ChangeType(res, typeof(T));
-            }
-            var current = Interlocked.Increment(ref completed);
-            if (progress != null && current % 100 == 0) progress.Report((double)current / rows * 100);
+            if (cc < 2) return;
+            double fm = cSum / cc;
+            double fs = Math.Sqrt(Math.Max(0, (cSumSq / cc) - (fm * fm)));
+            double rowMin = fm - nSig * fs, rowMax = fm + nSig * fs;
+            double diff = Math.Max(1e-9, rowMax - rowMin);
+            
+            for (int j = 0; j < nTheta; j++) 
+                indexer[i, j] = (T)Convert.ChangeType((Convert.ToDouble(indexer[i, j]) - rowMin) / diff, typeof(T));
         });
     }
 
     private Mat PrepareImageForRVSF(Mat src, bool useLog)
     {
-        if (!useLog) return src.Clone();
         Mat work = new Mat();
-        src.ConvertTo(work, src.Type());
-        Cv2.Add(work, Scalar.All(1.0), work);
-        Cv2.Log(work, work);
-        work.ConvertTo(work, -1, 1.0 / Math.Log(10));
+        Scalar mean = Cv2.Mean(src);
+        double renorm = (Math.Abs(mean.Val0) > 1e-9) ? 100.0 / mean.Val0 : 1.0;
+        src.ConvertTo(work, MatType.CV_64F, renorm);
+        
+        if (useLog) { 
+            Cv2.Max(work, 1e-12, work); 
+            Cv2.Log(work, work); 
+            work.ConvertTo(work, -1, 1.0 / Math.Log(10)); 
+        }
         return work;
     }
 }
