@@ -66,13 +66,14 @@ public class GradientRadialEngine : IGradientRadialEngine
         });
     }
 
-    public async Task ApplyAdaptiveRVSFAsync(Mat src, Mat dst, double paramA, double paramB, double paramN, bool useLog, IProgress<double> progress = null)
+public async Task ApplyAdaptiveRVSFAsync(Mat src, Mat dst, double paramA, double paramB, double paramN, bool useLog, IProgress<double> progress = null)
     {
         await _memSemaphore.WaitAsync();
         try
         {
             await Task.Run(() =>
             {
+                // FIX: Usa la logica originale (senza rinormalizzazione)
                 using Mat workImg = PrepareImageForRVSF(src, useLog);
                 dst.Create(src.Size(), workImg.Type());
 
@@ -87,6 +88,7 @@ public class GradientRadialEngine : IGradientRadialEngine
 
     public async Task ApplyRVSFMosaicAsync(Mat src, Mat dst, (double v1, double v2) paramA, (double v1, double v2) paramB, (double v1, double v2) paramN, bool useLog)
     {
+        // FIX: Usa la logica originale (senza rinormalizzazione)
         using Mat workImg = PrepareImageForRVSF(src, useLog);
         int w = src.Cols; int h = src.Rows;
         dst.Create(new Size(w * 4, h * 2), workImg.Type());
@@ -257,42 +259,42 @@ public class GradientRadialEngine : IGradientRadialEngine
         double[] dArr = new double[sArr.Length];
 
         int completed = 0;
-        double[] offsets = new double[10];
-        for (int k = 1; k <= 10; k++) offsets[k - 1] = -0.45 + (k - 1) * 0.1;
 
         Parallel.For(0, rows, (int y) => {
             int rowOffset = y * cols;
+            double dy = y - yNuc;
+            double dySq = dy * dy;
+
             for (int x = 0; x < cols; x++)
             {
-                double sumEdg = 0.0, sumCrn = 0.0;
-                for (int m = 0; m < 10; m++)
-                {
-                    double subY = (y + 0.5 - yNuc) + offsets[m];
-                    for (int n = 0; n < 10; n++)
-                    {
-                        double subX = (x + 0.5 - xNuc) + offsets[n];
-                        double rho = Math.Sqrt(subX * subX + subY * subY);
-                        double radius = A + (B * Math.Pow(rho, N));
-                        int rInt = (int)Math.Round(radius);
+                // 1. Calcolo del raggio UNICO per pixel (Logica originale)
+                double dx = x - xNuc;
+                double rho = Math.Sqrt(dx * dx + dySq);
+                
+                int r = (int)Math.Round(A + (B * Math.Pow(rho, N)));
+                if (r < 1) r = 1;
 
-                        int[] dy = { -rInt, rInt, 0, 0, -rInt, -rInt, rInt, rInt };
-                        int[] dx = { 0, 0, -rInt, rInt, -rInt, rInt, -rInt, rInt };
+                // 2. Clamping degli indici (Border Replicate) - Essenziale per i bordi
+                int yMin = (y - r < 0) ? 0 : (y - r >= rows ? rows - 1 : y - r);
+                int yMax = (y + r < 0) ? 0 : (y + r >= rows ? rows - 1 : y + r);
+                int xMin = (x - r < 0) ? 0 : (x - r >= cols ? cols - 1 : x - r);
+                int xMax = (x + r < 0) ? 0 : (x + r >= cols ? cols - 1 : x + r);
 
-                        for (int k = 0; k < 4; k++)
-                        {
-                            int yi = y + dy[k], xi = x + dx[k];
-                            if (yi >= 0 && yi < rows && xi >= 0 && xi < cols)
-                                sumEdg += sArr[yi * cols + xi];
-                        }
-                        for (int k = 4; k < 8; k++)
-                        {
-                            int yi = y + dy[k], xi = x + dx[k];
-                            if (yi >= 0 && yi < rows && xi >= 0 && xi < cols)
-                                sumCrn += sArr[yi * cols + xi];
-                        }
-                    }
-                }
-                double res = (1024.0 * sArr[rowOffset + x]) - (1.92 * sumEdg) - (0.64 * sumCrn);
+                // 3. Somme pesate usando gli indici clampati
+                double valC = sArr[rowOffset + x];
+
+                double sE = sArr[yMin * cols + x] + 
+                            sArr[yMax * cols + x] + 
+                            sArr[y * cols + xMin] + 
+                            sArr[y * cols + xMax];
+
+                double sC = sArr[yMin * cols + xMin] + 
+                            sArr[yMin * cols + xMax] + 
+                            sArr[yMax * cols + xMin] + 
+                            sArr[yMax * cols + xMax];
+
+                // 4. Formula RVSF Originale
+                double res = (1024.0 * valC) - (192.0 * sE) - (64.0 * sC);
                 dArr[rowOffset + x] = res;
             }
             if (progress != null)
@@ -304,7 +306,7 @@ public class GradientRadialEngine : IGradientRadialEngine
         dst.SetArray(dArr);
     }
 
-    // --- RVSF CORE FLOAT ---
+    // --- RVSF CORE FLOAT (FIXED) ---
     private void RunRVSFCoreFloat(Mat src, Mat dst, double A, double B, double N, IProgress<double> progress)
     {
         int rows = src.Rows; int cols = src.Cols;
@@ -315,42 +317,38 @@ public class GradientRadialEngine : IGradientRadialEngine
         float[] dArr = new float[sArr.Length];
 
         int completed = 0;
-        double[] offsets = new double[10];
-        for (int k = 1; k <= 10; k++) offsets[k - 1] = -0.45 + (k - 1) * 0.1;
 
         Parallel.For(0, rows, (int y) => {
             int rowOffset = y * cols;
+            double dy = y - yNuc;
+            double dySq = dy * dy;
+
             for (int x = 0; x < cols; x++)
             {
-                double sumEdg = 0.0, sumCrn = 0.0;
-                for (int m = 0; m < 10; m++)
-                {
-                    double subY = (y + 0.5 - yNuc) + offsets[m];
-                    for (int n = 0; n < 10; n++)
-                    {
-                        double subX = (x + 0.5 - xNuc) + offsets[n];
-                        double rho = Math.Sqrt(subX * subX + subY * subY);
-                        double radius = A + (B * Math.Pow(rho, N));
-                        int rInt = (int)Math.Round(radius);
+                double dx = x - xNuc;
+                double rho = Math.Sqrt(dx * dx + dySq);
+                
+                int r = (int)Math.Round(A + (B * Math.Pow(rho, N)));
+                if (r < 1) r = 1;
 
-                        int[] dy = { -rInt, rInt, 0, 0, -rInt, -rInt, rInt, rInt };
-                        int[] dx = { 0, 0, -rInt, rInt, -rInt, rInt, -rInt, rInt };
+                int yMin = (y - r < 0) ? 0 : (y - r >= rows ? rows - 1 : y - r);
+                int yMax = (y + r < 0) ? 0 : (y + r >= rows ? rows - 1 : y + r);
+                int xMin = (x - r < 0) ? 0 : (x - r >= cols ? cols - 1 : x - r);
+                int xMax = (x + r < 0) ? 0 : (x + r >= cols ? cols - 1 : x + r);
 
-                        for (int k = 0; k < 4; k++)
-                        {
-                            int yi = y + dy[k], xi = x + dx[k];
-                            if (yi >= 0 && yi < rows && xi >= 0 && xi < cols)
-                                sumEdg += sArr[yi * cols + xi]; 
-                        }
-                        for (int k = 4; k < 8; k++)
-                        {
-                            int yi = y + dy[k], xi = x + dx[k];
-                            if (yi >= 0 && yi < rows && xi >= 0 && xi < cols)
-                                sumCrn += sArr[yi * cols + xi];
-                        }
-                    }
-                }
-                double res = (1024.0 * sArr[rowOffset + x]) - (1.92 * sumEdg) - (0.64 * sumCrn);
+                float valC = sArr[rowOffset + x];
+
+                float sE = sArr[yMin * cols + x] + 
+                           sArr[yMax * cols + x] + 
+                           sArr[y * cols + xMin] + 
+                           sArr[y * cols + xMax];
+
+                float sC = sArr[yMin * cols + xMin] + 
+                           sArr[yMin * cols + xMax] + 
+                           sArr[yMax * cols + xMin] + 
+                           sArr[yMax * cols + xMax];
+
+                double res = (1024.0 * valC) - (192.0 * sE) - (64.0 * sC);
                 dArr[rowOffset + x] = (float)res;
             }
             if (progress != null)
@@ -361,6 +359,7 @@ public class GradientRadialEngine : IGradientRadialEngine
         });
         dst.SetArray(dArr);
     }
+    
 
     // --- INVERSE RHO DOUBLE ---
     private void InverseRhoCoreDouble(Mat src, Mat dst, int subsampling)
@@ -628,15 +627,21 @@ public class GradientRadialEngine : IGradientRadialEngine
 
     private Mat PrepareImageForRVSF(Mat src, bool useLog)
     {
+        // FIX: Rimosso calcolo della media e rinormalizzazione (100.0/mean).
+        // RVSF lavora sui valori locali, normalizzare globalmente altera l'output.
+        
         Mat work = new Mat();
-        Scalar mean = Cv2.Mean(src);
-        double renorm = (Math.Abs(mean.Val0) > 1e-9) ? 100.0 / mean.Val0 : 1.0;
-        src.ConvertTo(work, MatType.CV_64F, renorm);
-
-        if (useLog)
+        if (!useLog)
         {
-            Cv2.Max(work, 1e-12, work);
+            src.ConvertTo(work, MatType.CV_64F);
+        }
+        else
+        {
+            src.ConvertTo(work, MatType.CV_64F);
+            // Logica Logaritmica Originale: Log(val + 1)
+            Cv2.Add(work, Scalar.All(1.0), work);
             Cv2.Log(work, work);
+            // Conversione base 10
             work.ConvertTo(work, -1, 1.0 / Math.Log(10));
         }
         return work;

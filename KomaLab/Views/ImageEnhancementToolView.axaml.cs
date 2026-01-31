@@ -30,8 +30,11 @@ public partial class ImageEnhancementToolView : Window
         if (DataContext is ImageEnhancementToolViewModel vm)
         {
             _vm = vm;
-            // Sottoscriviamo per ricevere aggiornamenti dal VM (es. reset valori o calcoli auto)
+            // Sottoscriviamo per ricevere aggiornamenti dal VM
             _vm.PropertyChanged += OnViewModelPropertyChanged;
+            
+            // [AGGIUNTO] Sottoscrizione all'evento per il fit automatico
+            _vm.RequestFitToScreen += OnRequestFitToScreen;
             
             // Inizializza i valori nelle TextBox all'avvio
             UpdateUiValues();
@@ -39,8 +42,9 @@ public partial class ImageEnhancementToolView : Window
             try 
             {
                 await vm.ImageLoadedTcs.Task;
-                // Riesegue update dopo caricamento immagine (potrebbe aver ricalcolato default)
                 UpdateUiValues(); 
+                
+                // Fit iniziale all'apertura
                 CenterImage();
             }
             catch { }
@@ -52,6 +56,9 @@ public partial class ImageEnhancementToolView : Window
         if (_vm != null)
         {
             _vm.PropertyChanged -= OnViewModelPropertyChanged;
+            
+            // [AGGIUNTO] Rimozione sottoscrizione
+            _vm.RequestFitToScreen -= OnRequestFitToScreen;
         
             // Disposizione manuale sicura
             _vm.Dispose(); 
@@ -64,6 +71,13 @@ public partial class ImageEnhancementToolView : Window
         // Pulizia eventi controlli
         var previewBorder = this.FindControl<Border>("PreviewBorder");
         if (previewBorder != null) previewBorder.SizeChanged -= OnPreviewSizeChanged;
+    }
+
+    // [AGGIUNTO] Handler dell'evento scatenato dal ViewModel
+    private void OnRequestFitToScreen()
+    {
+        // Eseguiamo sul thread UI per sicurezza
+        Dispatcher.UIThread.InvokeAsync(CenterImage);
     }
 
     // =======================================================================
@@ -263,7 +277,11 @@ public partial class ImageEnhancementToolView : Window
     private void CenterImage()
     {
         var b = this.FindControl<Border>("PreviewBorder");
-        if (_vm != null && b != null) { _vm.Viewport.ViewportSize = b.Bounds.Size; _vm.Viewport.ResetView(); }
+        if (_vm != null && b != null) 
+        { 
+            _vm.Viewport.ViewportSize = b.Bounds.Size; 
+            _vm.Viewport.ResetView(); 
+        }
     }
     
     private void OnPreviewPointerPressed(object? sender, PointerPressedEventArgs e)

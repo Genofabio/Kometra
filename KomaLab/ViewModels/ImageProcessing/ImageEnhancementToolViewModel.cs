@@ -38,13 +38,17 @@ public partial class ImageEnhancementToolViewModel : ObservableObject, IDisposab
     private readonly EnhancementCategory _category;
     private CancellationTokenSource? _loadingCts;
 
+    // --- EVENTI PER LA VIEW ---
+    // [MODIFICA 1] Evento per richiedere l'adattamento dell'immagine alla finestra
+    public event Action? RequestFitToScreen; 
+    public event Action? RequestClose;
+
     // --- PROPRIETÀ PUBBLICHE ---
     public EnhancementCategory CurrentCategory => _category;
     public TaskCompletionSource<bool> ImageLoadedTcs { get; } = new();
     public SequenceNavigator Navigator { get; } = new();
     public EnhancementImageViewport Viewport { get; } = new();
 
-    public event Action? RequestClose;
     public bool DialogResult { get; private set; }
     public List<string> ResultPaths { get; private set; } = new();
 
@@ -82,7 +86,6 @@ public partial class ImageEnhancementToolViewModel : ObservableObject, IDisposab
     [NotifyPropertyChangedFor(nameof(IsRvsfMosaicVisible))]
     [NotifyPropertyChangedFor(nameof(IsRvsfSingleVisible))]
     [NotifyPropertyChangedFor(nameof(IsAzimuthalVisible))]
-    // [MODIFICA] Aggiunti trigger per la visibilità granulare
     [NotifyPropertyChangedFor(nameof(IsAzimuthalRejectionVisible))]
     [NotifyPropertyChangedFor(nameof(IsAzimuthalNormVisible))]
     [NotifyPropertyChangedFor(nameof(IsFrangiVisible))]
@@ -133,17 +136,14 @@ public partial class ImageEnhancementToolViewModel : ObservableObject, IDisposab
     public bool IsRvsfSingleVisible => SelectedMode == ImageEnhancementMode.AdaptiveLaplacianRVSF;
     public bool IsRvsfMosaicVisible => SelectedMode == ImageEnhancementMode.AdaptiveLaplacianMosaic;
     
-    // IsAzimuthalVisible controlla il blocco intero (incluso InverseRho che ha solo subsampling)
     public bool IsAzimuthalVisible => SelectedMode is ImageEnhancementMode.AzimuthalAverage 
                                                    or ImageEnhancementMode.AzimuthalRenormalization 
                                                    or ImageEnhancementMode.InverseRho 
                                                    or ImageEnhancementMode.AzimuthalMedian;
 
-    // [MODIFICA] Visibilità specifica per "Sigma Rejection" (Solo Average e Renorm)
     public bool IsAzimuthalRejectionVisible => SelectedMode is ImageEnhancementMode.AzimuthalAverage 
                                                             or ImageEnhancementMode.AzimuthalRenormalization;
 
-    // [MODIFICA] Visibilità specifica per "Norm Scale" (Solo Renorm)
     public bool IsAzimuthalNormVisible => SelectedMode is ImageEnhancementMode.AzimuthalRenormalization;
 
     public bool IsFrangiVisible => SelectedMode == ImageEnhancementMode.FrangiVesselnessFilter;
@@ -176,7 +176,9 @@ public partial class ImageEnhancementToolViewModel : ObservableObject, IDisposab
         if (AvailableModes.Any()) SelectedMode = AvailableModes.First();
 
         Navigator.UpdateStatus(0, _sourceFiles.Count);
-        Navigator.IndexChanged += async (_, idx) => await LoadImageAtIndexAsync(idx, resetVisuals: false);
+        
+        // [NOTA] Qui autoFit è false per default (quando navighi)
+        Navigator.IndexChanged += async (_, idx) => await LoadImageAtIndexAsync(idx, resetVisuals: false, autoFit: false);
 
         _ = InitializeAsync();
     }
@@ -185,7 +187,7 @@ public partial class ImageEnhancementToolViewModel : ObservableObject, IDisposab
     {
         try
         {
-            if (_sourceFiles.Count > 0) await LoadImageAtIndexAsync(0, resetVisuals: true);
+            if (_sourceFiles.Count > 0) await LoadImageAtIndexAsync(0, resetVisuals: true, autoFit: true); // Opzionale: Fit all'avvio
             ImageLoadedTcs.TrySetResult(true);
         }
         catch (Exception ex)
@@ -195,12 +197,12 @@ public partial class ImageEnhancementToolViewModel : ObservableObject, IDisposab
         }
     }
 
-    private async Task LoadImageAtIndexAsync(int index, bool resetVisuals)
+    // [MODIFICA 2] Aggiunto parametro opzionale 'autoFit'
+    private async Task LoadImageAtIndexAsync(int index, bool resetVisuals, bool autoFit = false)
     {
         IsBusy = true;
         ProgressValue = 0;
         
-        // --- GESTIONE TOKEN CARICAMENTO ---
         _loadingCts?.Cancel();
         _loadingCts = new CancellationTokenSource();
         var token = _loadingCts.Token;
@@ -253,19 +255,32 @@ public partial class ImageEnhancementToolViewModel : ObservableObject, IDisposab
             if (resetVisuals) await newRenderer.ResetThresholdsAsync();
             else if (ActiveRenderer != null)
             {
+                // Se la dimensione non è cambiata, mantieni lo zoom/pan e i livelli
                 if (ActiveRenderer.ImageSize == newRenderer.ImageSize)
                 {
                     var profile = ActiveRenderer.CaptureSigmaProfile();
                     newRenderer.VisualizationMode = ActiveRenderer.VisualizationMode;
                     newRenderer.ApplyRelativeProfile(profile);
+                    // IMPORTANTE: Qui non tocchiamo il Viewport per mantenere la posizione
                 }
-                else await newRenderer.ResetThresholdsAsync();
+                else 
+                {
+                    await newRenderer.ResetThresholdsAsync();
+                    // Se la dimensione è cambiata drasticamente, potrebbe aver senso un fit, 
+                    // ma rispettiamo il parametro autoFit.
+                }
             }
 
             ActiveRenderer?.Dispose();
             ActiveRenderer = newRenderer;
             Viewport.ImageSize = ActiveRenderer.ImageSize;
             OnPropertyChanged(nameof(CurrentImageText));
+
+            // [MODIFICA 3] Scatena l'evento solo se richiesto esplicitamente
+            if (autoFit)
+            {
+                RequestFitToScreen?.Invoke();
+            }
         }
         catch (OperationCanceledException) 
         { 
@@ -306,7 +321,9 @@ public partial class ImageEnhancementToolViewModel : ObservableObject, IDisposab
         try
         {
             CurrentState = EnhancementToolState.ResultsReady;
-            await LoadImageAtIndexAsync(Navigator.CurrentIndex, resetVisuals: true);
+            // [MODIFICA 4] Qui passiamo 'autoFit: true'
+            // È l'unico punto in cui chiediamo esplicitamente di adattare l'immagine
+            await LoadImageAtIndexAsync(Navigator.CurrentIndex, resetVisuals: true, autoFit: true);
         }
         catch (Exception ex)
         {
@@ -368,7 +385,9 @@ public partial class ImageEnhancementToolViewModel : ObservableObject, IDisposab
         if (CurrentState == EnhancementToolState.ResultsReady)
         {
             CurrentState = EnhancementToolState.Initial;
-            await LoadImageAtIndexAsync(Navigator.CurrentIndex, resetVisuals: true);
+            // Quando si annulla, resettiamo l'immagine originale
+            // autoFit: false (default), così se l'utente aveva zoomato, resta zoomato
+            await LoadImageAtIndexAsync(Navigator.CurrentIndex, resetVisuals: true, autoFit: false);
         }
         else if (CurrentState == EnhancementToolState.Processing)
         {
