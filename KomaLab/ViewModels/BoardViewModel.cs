@@ -61,6 +61,9 @@ public partial class BoardViewModel : ObservableObject
         ShowRadialEnhancementWindowCommand.NotifyCanExecuteChanged();
         ShowStructureExtractionWindowCommand.NotifyCanExecuteChanged();
         ShowLocalContrastWindowCommand.NotifyCanExecuteChanged();
+        
+        // [AGGIUNTO] Notifica per il nuovo comando
+        ShowStarMaskingWindowCommand.NotifyCanExecuteChanged();
     }
     
     public bool IsGlobalAnimationRunning => 
@@ -163,9 +166,8 @@ public partial class BoardViewModel : ObservableObject
         await RunGenericProcessing(async (files, mode) => 
         {
             var result = await _windowService.ShowRadialEnhancementWindowAsync(files, mode);
-            if (result == null) return null; // Annullato dall'utente
+            if (result == null) return null;
             
-            // Estraiamo il path e calcoliamo il suffisso dal Mode
             string suffix = GetEnhancementSuffix(result.Value.Mode);
             return (result.Value.Paths, suffix);
         }, "Miglioramento Radiale");
@@ -219,6 +221,23 @@ public partial class BoardViewModel : ObservableObject
             var paths = await _windowService.ShowAlignmentWindowAsync(files, mode);
             return paths != null ? (paths, "(Allineata)") : null;
         }, "Allineamento");
+    }
+    
+    // 6. MASCHERAMENTO STELLE [NUOVO]
+    [RelayCommand(CanExecute = nameof(CanExecuteOnImageNode))]
+    private async Task ShowStarMaskingWindow()
+    {
+        await RunGenericProcessing(async (files, mode) => 
+        {
+            // Nota: Ignoriamo 'mode' (visualizzazione) perché non influisce sulla logica della maschera,
+            // ma l'helper RunGenericProcessing ce lo passa comunque.
+            
+            // Assumo che IWindowService sia stato aggiornato con questo metodo
+            var paths = await _windowService.ShowStarMaskingWindowAsync(files);
+            
+            // Ritorniamo i percorsi e il suffisso per il nuovo nodo
+            return paths != null ? (paths, "(StarMask)") : null;
+        }, "Generazione Maschera Stelle");
     }
     
     // --- HELPER GENERICO (DRY) ---
@@ -303,12 +322,8 @@ public partial class BoardViewModel : ObservableObject
         Point pos = Viewport.ToWorldCoordinates(centerScreen);
 
         // LOGICA DI CREAZIONE
-        // Se l'utente vuole nodi separati, creiamo N nodi Singoli.
-        // Altrimenti, usiamo la logica standard (1 file -> Singolo, >1 file -> Multiplo).
-        
         if (separateNodes)
         {
-            // Creiamo un nodo per ogni file
             double offsetX = 0;
             double offsetY = 0;
             
@@ -320,14 +335,12 @@ public partial class BoardViewModel : ObservableObject
                 
                 AddNodeToGraph(newNode, "Importa Immagine Singola");
                 
-                // Spostiamo leggermente il prossimo nodo a cascata
                 offsetX += 30;
                 offsetY += 30;
             }
         }
         else
         {
-            // Logica Standard (Raggruppa se possibile)
             BaseNodeViewModel newNode;
             
             if (sortedPaths.Count == 1)
@@ -365,9 +378,8 @@ public partial class BoardViewModel : ObservableObject
             
             // [MODIFICA MEF] Accesso sicuro all'immagine da salvare
             var imageHdu = data.FirstImageHdu ?? data.PrimaryHdu;
-            if (imageHdu == null) return; // Niente da salvare
+            if (imageHdu == null) return; 
             
-            // Salviamo i pixel dell'HDU e l'header (con priorità alla RAM)
             await _dataManager.SaveDataAsync(p, imageHdu.PixelData, fr.ModifiedHeader ?? imageHdu.Header); 
         } 
         catch(Exception ex) 

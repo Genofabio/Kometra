@@ -19,6 +19,9 @@ public interface IRadiometryEngine
     /// </summary>
     (double Mean, double StdDev) ComputeStatistics(Mat image);
 
+    public (double Mean, double StdDev, double MedianApprox) ComputeRobustStatistics(Mat image, double sigma = 3.0,
+        int maxIterations = 5);
+
     /// <summary>
     /// Estrae un array di campioni pixel ignorando i NaN per analisi statistiche veloci.
     /// </summary>

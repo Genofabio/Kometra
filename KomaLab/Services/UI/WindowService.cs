@@ -204,6 +204,26 @@ public class WindowService : IWindowService
         // Se l'utente preme "Esporta", il VM gestirà: 1. Selezione Path, 2. Export con Progress, 3. Chiusura.
         return await ShowDialogAndGetResultAsync(view, viewModel, vm => vm.GetSettings(vm.OutputPath));
     }
+    
+    // =======================================================================
+    // 10. MASCHERAMENTO STELLE [NUOVO]
+    // =======================================================================
+    public async Task<List<string>?> ShowStarMaskingWindowAsync(List<FitsFileReference> sourceFiles)
+    {
+        if (_mainWindow == null) throw new InvalidOperationException("Finestra principale non registrata.");
+
+        // Recupero servizi dal container DI
+        var coordinator = _serviceProvider.GetRequiredService<IMaskingCoordinator>();
+        var dataManager = _serviceProvider.GetRequiredService<IFitsDataManager>();
+        var rendererFactory = _serviceProvider.GetRequiredService<IFitsRendererFactory>();
+
+        // Creazione ViewModel e View
+        using var viewModel = new StarMaskingViewModel(sourceFiles, coordinator, dataManager, rendererFactory);
+        var view = new StarMaskingView { DataContext = viewModel };
+
+        // Apertura dialogo e recupero risultato
+        return await ShowDialogAndGetResultAsync(view, viewModel, vm => vm.ResultPaths);
+    }
 
     // =======================================================================
     // HELPERS PER APERTURA DIALOGHI

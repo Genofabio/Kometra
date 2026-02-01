@@ -94,6 +94,7 @@ public class App : Application
         services.AddSingleton<IGradientRadialEngine, GradientRadialEngine>();
         services.AddSingleton<ILocalContrastEngine, LocalContrastEngine>();
         services.AddSingleton<IStructureShapeEngine, StructureShapeEngine>();
+        services.AddSingleton<ISegmentationEngine, SegmentationEngine>();
 
         // --- 4. Servizi di Dominio & Multimedia ---
         services.AddSingleton<IPlateSolvingService, PlateSolvingService>();
@@ -114,6 +115,7 @@ public class App : Application
         services.AddSingleton<IStackingCoordinator, StackingCoordinator>();
         services.AddSingleton<ICalibrationCoordinator, CalibrationCoordinator>();
         services.AddSingleton<IImageEnhancementCoordinator, ImageEnhancementCoordinator>();
+        services.AddSingleton<IMaskingCoordinator, MaskingCoordinator>();
         
         // Registrazione del Coordinatore Video (Singleton perché non ha stato interno)
         services.AddSingleton<IVideoExportCoordinator, VideoExportCoordinator>();
@@ -134,6 +136,7 @@ public class App : Application
         services.AddTransient<AlignmentToolViewModel>();
         services.AddTransient<ImportViewModel>();
         services.AddTransient<ImageEnhancementToolViewModel>();
+        services.AddTransient<StarMaskingViewModel>();
 
         return services.BuildServiceProvider();
     }

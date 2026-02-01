@@ -30,6 +30,59 @@ public class RadiometryEngine : IRadiometryEngine
         
         return (mean.Val0, stdDev.Val0);
     }
+    
+    /// <summary>
+    /// Calcola statistiche robuste iterando il Sigma Clipping per escludere outlier (stelle, hot pixel).
+    /// Supporta CV_32F e CV_64F. I NaN vengono ignorati.
+    /// </summary>
+    /// <returns>
+    /// Mean: La media dei pixel "buoni".
+    /// StdDev: La deviazione standard del "rumore di fondo".
+    /// MedianApprox: Stima del background (coincide con la Mean clippata).
+    /// </returns>
+    public (double Mean, double StdDev, double MedianApprox) ComputeRobustStatistics(Mat image, double sigma = 3.0, int maxIterations = 5)
+    {
+        if (image == null || image.Empty()) return (0, 1, 0);
+
+        // 1. Maschera iniziale: Esclude NaN e Inf
+        // Usiamo InRange con limiti molto alti ma finiti. NaN fallisce il test ed è escluso.
+        using Mat currentMask = new Mat();
+        Cv2.InRange(image, new Scalar(-1e30), new Scalar(1e30), currentMask);
+
+        double mean = 0, stdDev = 1;
+        double prevMean = double.MaxValue;
+
+        // 2. Ciclo Iterativo
+        for (int i = 0; i < maxIterations; i++)
+        {
+            if (Cv2.CountNonZero(currentMask) == 0) return (0, 1, 0);
+
+            // Calcola su pixel validi
+            Cv2.MeanStdDev(image, out Scalar mu, out Scalar sigmaVal, currentMask);
+            mean = mu.Val0;
+            stdDev = sigmaVal.Val0;
+
+            // Se l'immagine è piatta o siamo in convergenza (la media cambia pochissimo), usciamo
+            if (stdDev < 1e-9 || Math.Abs(mean - prevMean) < 1e-5 * Math.Abs(prevMean)) 
+                break;
+
+            prevMean = mean;
+
+            // 3. Calcolo limiti per il prossimo giro
+            double lower = mean - (sigma * stdDev);
+            double upper = mean + (sigma * stdDev);
+
+            // 4. Aggiorna Maschera: mantieni solo i pixel nel range [lower, upper]
+            using Mat rangeMask = new Mat();
+            Cv2.InRange(image, new Scalar(lower), new Scalar(upper), rangeMask);
+            
+            // Intersezione: Mantieni valide solo le celle che ERANO valide E sono nel range
+            Cv2.BitwiseAnd(currentMask, rangeMask, currentMask);
+        }
+
+        // La Mean finale (clippata) è la nostra migliore stima del Background/Mediana
+        return (mean, stdDev, mean);
+    }
 
     // =======================================================================
     // 2. LOGICA AUTOSTRETCH (Ottimizzata)
@@ -161,9 +214,8 @@ public class RadiometryEngine : IRadiometryEngine
     private Mat CreateValidMask(Mat image)
     {
         Mat mask = new Mat();
-        // Controllo robusto: esclude NaN e Infiniti per entrambi i tipi (32/64 bit)
-        // Usiamo un range leggermente inferiore ai limiti float per sicurezza
-        Cv2.InRange(image, new Scalar(-1e37), new Scalar(1e37), mask);
+        Cv2.Compare(image, image, mask, CmpType.EQ);
+    
         return mask;
     }
 }
