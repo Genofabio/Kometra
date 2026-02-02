@@ -95,6 +95,9 @@ public class App : Application
         services.AddSingleton<ILocalContrastEngine, LocalContrastEngine>();
         services.AddSingleton<IStructureShapeEngine, StructureShapeEngine>();
         services.AddSingleton<ISegmentationEngine, SegmentationEngine>();
+        
+        // [NUOVO] Registrazione Engine Inpainting (Richiesto dal MaskingCoordinator)
+        services.AddSingleton<IInpaintingEngine, InpaintingEngine>();
 
         // --- 4. Servizi di Dominio & Multimedia ---
         services.AddSingleton<IPlateSolvingService, PlateSolvingService>();
@@ -102,8 +105,7 @@ public class App : Application
         services.AddSingleton<IBatchProcessingService, BatchProcessingService>(); 
         services.AddSingleton<IJplHorizonsService, JplHorizonsService>();
         
-        // Infrastruttura Video (L'implementazione OpenCV per l'esportazione)
-        // Registrato come Transient perché il VideoWriter è stateful
+        // Infrastruttura Video
         services.AddSingleton<IVideoFormatProvider, VideoFormatProvider>();
         services.AddTransient<IVideoEncoder, OpenCvVideoEncoder>();
 
@@ -117,7 +119,6 @@ public class App : Application
         services.AddSingleton<IImageEnhancementCoordinator, ImageEnhancementCoordinator>();
         services.AddSingleton<IMaskingCoordinator, MaskingCoordinator>();
         
-        // Registrazione del Coordinatore Video (Singleton perché non ha stato interno)
         services.AddSingleton<IVideoExportCoordinator, VideoExportCoordinator>();
 
         // --- 6. Factories ---

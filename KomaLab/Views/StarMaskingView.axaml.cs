@@ -20,11 +20,13 @@ public partial class StarMaskingView : Window
     {
         InitializeComponent();
 
+        // Cattura click globale per togliere focus dalle TextBox (commit valori)
         this.AddHandler(PointerPressedEvent, OnWindowPointerPressed_Global, RoutingStrategies.Tunnel, handledEventsToo: true);
 
         this.Loaded += OnWindowLoaded;
         this.Unloaded += OnWindowUnloaded;
         
+        // Collega i pulsanti di zoom manuali (definiti nello XAML tramite Name)
         var zoomInBtn = this.FindControl<Button>("ZoomInButton");
         var zoomOutBtn = this.FindControl<Button>("ZoomOutButton");
         if (zoomInBtn != null) zoomInBtn.Click += OnZoomInClicked;
@@ -38,14 +40,15 @@ public partial class StarMaskingView : Window
         if (DataContext is StarMaskingViewModel vm)
         {
             _vm = vm;
-            _vm.PropertyChanged += OnViewModelPropertyChanged;
             
-            // [AGGIUNTO] Sottoscrizione all'evento
+            // Sottoscrizione eventi ViewModel
+            _vm.PropertyChanged += OnViewModelPropertyChanged;
             _vm.RequestFitToScreen += OnRequestFitToScreen;
             
+            // Inizializza valori UI (TextBox) dai dati attuali
             UpdateUiValues();
             
-            // Proviamo a centrare subito se i dati sono già pronti
+            // Tenta il centraggio iniziale
             CenterImage();
         }
     }
@@ -55,23 +58,19 @@ public partial class StarMaskingView : Window
         if (_vm != null)
         {
             _vm.PropertyChanged -= OnViewModelPropertyChanged;
-            
-            // [AGGIUNTO] Rimozione sottoscrizione
             _vm.RequestFitToScreen -= OnRequestFitToScreen;
-            
             _vm = null;
         }
     }
 
-    // [AGGIUNTO] Handler evento ViewModel
+    // Risponde alla richiesta del ViewModel di centrare la vista (es. nuova immagine caricata)
     private void OnRequestFitToScreen()
     {
-        // Eseguiamo in background per assicurarci che il layout sia aggiornato
         Dispatcher.UIThread.InvokeAsync(CenterImage, DispatcherPriority.Background);
     }
 
     // =======================================================================
-    // GESTIONE INPUT TESTUALE & SINCRONIZZAZIONE
+    // SINCRONIZZAZIONE DATI (ViewModel -> UI)
     // =======================================================================
 
     private void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
@@ -101,10 +100,13 @@ public partial class StarMaskingView : Window
         if (_vm == null) return;
         UpdateBox("CometThresholdBox", _vm.CometThreshold.ToString("N1"));
         UpdateBox("CometDilationBox", _vm.CometDilation.ToString());
-        
         UpdateBox("StarThresholdBox", _vm.StarThreshold.ToString("N1"));
         UpdateBox("StarDilationBox", _vm.StarDilation.ToString());
     }
+
+    // =======================================================================
+    // GESTIONE INPUT MANUALE (UI -> ViewModel)
+    // =======================================================================
 
     private void OnManualInputCommit(object? sender, RoutedEventArgs e)
     {
@@ -126,7 +128,7 @@ public partial class StarMaskingView : Window
         }
         else
         {
-            UpdateUiValues();
+            UpdateUiValues(); // Revert se input non valido
         }
     }
 
@@ -134,7 +136,7 @@ public partial class StarMaskingView : Window
     {
         if (e.Key == Key.Enter)
         {
-            this.Focus(); 
+            this.Focus(); // Toglie il focus per forzare il LostFocus/Commit
             e.Handled = true;
         }
     }
@@ -145,12 +147,7 @@ public partial class StarMaskingView : Window
 
     private void OnPreviewSizeChanged(object? sender, SizeChangedEventArgs e)
     {
-        // Aggiorniamo la dimensione del viewport nel VM quando la finestra cambia
-        if (_vm != null) 
-        {
-             _vm.Viewport.ViewportSize = e.NewSize;
-             // Non facciamo reset automatico qui per non disturbare l'utente che ridimensiona
-        }
+        if (_vm != null) _vm.Viewport.ViewportSize = e.NewSize;
     }
 
     private void CenterImage()
@@ -158,14 +155,8 @@ public partial class StarMaskingView : Window
         var previewBorder = this.FindControl<Border>("PreviewBorder");
         if (_vm != null && previewBorder != null && previewBorder.Bounds.Width > 0)
         {
-            // Aggiorniamo la dimensione del contenitore
             _vm.Viewport.ViewportSize = previewBorder.Bounds.Size;
-            
-            // Se l'immagine è caricata (dimensione > 0), resettiamo la vista
-            if (_vm.Viewport.ImageSize.Width > 0)
-            {
-                _vm.Viewport.ResetView();
-            }
+            if (_vm.Viewport.ImageSize.Width > 0) _vm.Viewport.ResetView();
         }
     }
 
@@ -216,6 +207,7 @@ public partial class StarMaskingView : Window
         var previewBorder = this.FindControl<Border>("PreviewBorder");
         if (DataContext is not StarMaskingViewModel vm || previewBorder == null || vm.ActiveRenderer == null) return;
         
+        // CTRL + Wheel = Zoom
         if (e.KeyModifiers.HasFlag(KeyModifiers.Control))
         {
             var mousePos = e.GetPosition(previewBorder);
@@ -225,12 +217,14 @@ public partial class StarMaskingView : Window
             return;
         }
 
+        // Wheel = Stretch (Livelli)
         double currentRange = Math.Abs(vm.ActiveRenderer.WhitePoint - vm.ActiveRenderer.BlackPoint);
         double step = Math.Max(0.0001, (currentRange > 0.00001) ? currentRange * 0.05 : 1.0);
         if (e.Delta.Y < 0) step = -step;
 
         if (e.KeyModifiers.HasFlag(KeyModifiers.Shift))
         {
+            // Shift = Black Point
             double newBlack = vm.ActiveRenderer.BlackPoint + step;
             if (step > 0)
             {
@@ -241,6 +235,7 @@ public partial class StarMaskingView : Window
         }
         else
         {
+            // Normal = White Point
             double newWhite = vm.ActiveRenderer.WhitePoint + step;
             if (step < 0)
             {

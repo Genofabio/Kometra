@@ -23,6 +23,7 @@ public class MaskingCoordinator : IMaskingCoordinator
     private readonly IFitsMetadataService _metadataService;
     private readonly IRadiometryEngine _radiometryEngine;
     private readonly ISegmentationEngine _segmentationEngine;
+    private readonly IInpaintingEngine _inpaintingEngine;
 
     public MaskingCoordinator(
         IBatchProcessingService batchService,
@@ -30,7 +31,8 @@ public class MaskingCoordinator : IMaskingCoordinator
         IFitsOpenCvConverter converter,
         IFitsMetadataService metadataService,
         IRadiometryEngine radiometryEngine,
-        ISegmentationEngine segmentationEngine)
+        ISegmentationEngine segmentationEngine,
+        IInpaintingEngine inpaintingEngine)
     {
         _batchService = batchService ?? throw new ArgumentNullException(nameof(batchService));
         _dataManager = dataManager ?? throw new ArgumentNullException(nameof(dataManager));
@@ -38,9 +40,14 @@ public class MaskingCoordinator : IMaskingCoordinator
         _metadataService = metadataService ?? throw new ArgumentNullException(nameof(metadataService));
         _radiometryEngine = radiometryEngine ?? throw new ArgumentNullException(nameof(radiometryEngine));
         _segmentationEngine = segmentationEngine ?? throw new ArgumentNullException(nameof(segmentationEngine));
+        _inpaintingEngine = inpaintingEngine ?? throw new ArgumentNullException(nameof(inpaintingEngine));
     }
 
-    public async Task<(Array StarMaskPixels, Array CometMaskPixels)> CalculatePreviewAsync(
+    /// <summary>
+    /// Calcola l'anteprima della rimozione stelle per una singola immagine.
+    /// Restituisce i pixel dell'immagine processata (Starless).
+    /// </summary>
+    public async Task<Array> ProcessPreviewAsync(
         FitsFileReference sourceFile, 
         MaskingParameters p, 
         CancellationToken token = default)
@@ -49,7 +56,6 @@ public class MaskingCoordinator : IMaskingCoordinator
         var imageHdu = data.FirstImageHdu ?? data.PrimaryHdu;
         if (imageHdu == null) throw new InvalidOperationException("Nessuna immagine valida per l'anteprima.");
 
-        // [MODIFICA] targetDepth: null 
         // Lasciamo che il converter decida il formato ottimale (32F o 64F) in base all'input.
         using Mat src = _converter.RawToMat(imageHdu.PixelData, 1.0, 0.0, null);
         
@@ -57,22 +63,28 @@ public class MaskingCoordinator : IMaskingCoordinator
         {
             token.ThrowIfCancellationRequested();
 
-            // 1. Statistiche (Funziona su 32F e 64F)
+            // 1. Statistiche (Background & Noise)
             var stats = _radiometryEngine.ComputeRobustStatistics(src, sigma: 3.0, maxIterations: 5);
             token.ThrowIfCancellationRequested();
 
-            // 2. Calcola Maschere (Funziona su 32F e 64F)
+            // 2. Calcola Maschera Cometa (per proteggerla)
             using Mat cometMask = _segmentationEngine.ComputeCometMask(src, stats.MedianApprox, stats.StdDev, p);
             token.ThrowIfCancellationRequested();
 
+            // 3. Calcola Maschera Stelle (escludendo la cometa)
             using Mat starMask = _segmentationEngine.ComputeStarMask(src, cometMask, stats.MedianApprox, stats.StdDev, p);
             token.ThrowIfCancellationRequested();
 
-            // 3. Output per UI
-            return (
-                _converter.MatToRaw(starMask, FitsBitDepth.UInt8),
-                _converter.MatToRaw(cometMask, FitsBitDepth.UInt8)
-            );
+            // 4. Esegui Inpainting (Rimozione Stelle)
+            // InpaintStars restituisce una NUOVA matrice clonata/modificata
+            using Mat starlessImage = _inpaintingEngine.InpaintStars(src, starMask);
+            token.ThrowIfCancellationRequested();
+
+            // 5. Converti il risultato in Array per il renderer
+            // Manteniamo la profondità di bit originale (Float o Double)
+            var depth = src.Type() == MatType.CV_32FC1 ? FitsBitDepth.Float : FitsBitDepth.Double;
+            return _converter.MatToRaw(starlessImage, depth);
+
         }, token);
     }
 
@@ -82,14 +94,11 @@ public class MaskingCoordinator : IMaskingCoordinator
         IProgress<BatchProgressReport>? progress = null,
         CancellationToken token = default)
     {
-        Func<Mat, Mat, FitsHeader, int, Task> maskingOp = async (src, dst, header, index) =>
+        // Operazione definita per ogni file nel batch
+        Func<Mat, Mat, FitsHeader, int, Task> removalOp = async (src, dst, header, index) =>
         {
             await Task.Run(() =>
             {
-                // [MODIFICA] Nessuna conversione forzata.
-                // 'src' arriva dal BatchService che usa lo stesso Converter, 
-                // quindi è già Float o Double a seconda del dato raw.
-                
                 // 1. Statistiche
                 var stats = _radiometryEngine.ComputeRobustStatistics(src, sigma: 3.0, maxIterations: 5);
 
@@ -97,30 +106,50 @@ public class MaskingCoordinator : IMaskingCoordinator
                 using Mat cometMask = _segmentationEngine.ComputeCometMask(src, stats.MedianApprox, stats.StdDev, p);
                 using Mat starMask = _segmentationEngine.ComputeStarMask(src, cometMask, stats.MedianApprox, stats.StdDev, p);
 
-                // 3. Scaling Output
-                // Se salviamo su 16-bit, scaliamo 255 -> 65535.
-                double scaleFactor = 1.0;
-                if (dst.Depth() == MatType.CV_16U || dst.Depth() == MatType.CV_16S)
-                {
-                    scaleFactor = 65535.0 / 255.0;
-                }
-                else if (dst.Depth() == MatType.CV_32F || dst.Depth() == MatType.CV_64F)
-                {
-                    scaleFactor = 1.0 / 255.0; 
-                }
+                // 3. Inpainting (Rimozione Stelle)
+                using Mat starlessResult = _inpaintingEngine.InpaintStars(src, starMask);
 
-                starMask.ConvertTo(dst, dst.Type(), alpha: scaleFactor);
+                // 4. Copia il risultato nel buffer di destinazione (dst)
+                // BatchProcessingService si occuperà di salvare 'dst' su disco.
+                starlessResult.CopyTo(dst);
 
-                // 4. Metadata
-                _metadataService.AddValue(header, "HISTORY", "$KomaLab - Star Masked. Params: Sigma={p.StarThresholdSigma}, Dilation={p.StarDilation}");
+                // 5. Aggiornamento Header
+                _metadataService.AddValue(header, "HISTORY", "KomaLab: Stars Removed");
+                _metadataService.AddValue(header, "HISTORY", $"Params: Threshold={p.StarThresholdSigma}, Dilation={p.StarDilation}");
             }, token);
         };
 
         return await _batchService.ProcessFilesAsync(
             sourceFiles,
-            "StarMask",
-            maskingOp,
+            "Starless", // Suffisso per i file salvati
+            removalOp,
             progress,
             token);
+    }
+    
+    public async Task<(Array StarMask, Array CometMask)> CalculateMasksPreviewAsync(
+        FitsFileReference sourceFile, 
+        MaskingParameters p, 
+        CancellationToken token = default)
+    {
+        var data = await _dataManager.GetDataAsync(sourceFile.FilePath);
+        var imageHdu = data.FirstImageHdu ?? data.PrimaryHdu;
+        if (imageHdu == null) return (new byte[0,0], new byte[0,0]);
+
+        using Mat src = _converter.RawToMat(imageHdu.PixelData, 1.0, 0.0, null);
+        
+        return await Task.Run(() =>
+        {
+            var stats = _radiometryEngine.ComputeRobustStatistics(src, 3.0, 5);
+            
+            using Mat cometMask = _segmentationEngine.ComputeCometMask(src, stats.MedianApprox, stats.StdDev, p);
+            using Mat starMask = _segmentationEngine.ComputeStarMask(src, cometMask, stats.MedianApprox, stats.StdDev, p);
+
+            // Ritorna le maschere raw (byte) per la UI
+            return (
+                _converter.MatToRaw(starMask, FitsBitDepth.UInt8),
+                _converter.MatToRaw(cometMask, FitsBitDepth.UInt8)
+            );
+        }, token);
     }
 }
