@@ -2,10 +2,11 @@
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
+using System.Runtime.InteropServices; // Necessario per Marshal.Copy
+using System.Threading;
 using System.Threading.Tasks;
 using OpenCvSharp;
 using KomaLab.Models.Fits;
-using KomaLab.Models.Fits.Structure;
 using KomaLab.Services.Fits.Conversion; 
 
 namespace KomaLab.Services.Processing.Engines;
@@ -15,7 +16,7 @@ public class InpaintingEngine : IInpaintingEngine
     private readonly IFitsOpenCvConverter _converter;
 
     // Configurazione
-    private const int HaloDilationSize = 4; // Raggio di dilatazione della maschera (definisce l'area Safe)
+    private const int HaloDilationSize = 4;
     private const int InitialWindow = 15;
     private const int MaxWindow = 151;
     private const int StepWindow = 15;
@@ -28,88 +29,101 @@ public class InpaintingEngine : IInpaintingEngine
 
     public Mat InpaintStars(Mat image, Mat starMask)
     {
-        // ---------------------------------------------------------
+        // Assicuriamoci che l'immagine sia continua in memoria per usare Marshal.Copy
+        // Se è una ROI (Region of Interest), Clone() la rende continua.
+        if (!image.IsContinuous()) image = image.Clone();
+
         // 1. PREPARAZIONE MASCHERE (OpenCV)
-        // ---------------------------------------------------------
-        
-        // A. Maschera NaN
         using Mat nanMask = new Mat();
         Cv2.Compare(image, image, nanMask, CmpType.NE); 
 
-        // B. Maschera Fill (Stelle + NaN)
         using Mat fillMask = new Mat();
         if (starMask.Type() != MatType.CV_8UC1) starMask.ConvertTo(fillMask, MatType.CV_8UC1);
         else starMask.CopyTo(fillMask);
         Cv2.BitwiseOr(fillMask, nanMask, fillMask);
 
-        // C. Maschera Safe (Dove leggere)
-        // Usiamo la dilatazione per escludere geometricamente gli aloni.
-        // Non avremo bisogno di controllare la distanza pixel per pixel nel loop.
         using Mat safeMask = new Mat();
         using Mat dilatedStars = new Mat();
         using Mat kernel = Cv2.GetStructuringElement(MorphShapes.Ellipse, 
             new Size(2 * HaloDilationSize + 1, 2 * HaloDilationSize + 1));
         
-        // Dilatazione: Espande la zona "cattiva" (Stelle + Aloni)
         Cv2.Dilate(fillMask, dilatedStars, kernel);
-        
-        // Uniamo Aloni e NaN nella lista "cattivi"
         Cv2.BitwiseOr(dilatedStars, nanMask, safeMask); 
+        Cv2.BitwiseNot(safeMask, safeMask); // 255 = Safe, 0 = Bad
+
+        // 2. CONVERSIONE FLAT (1D Arrays) - Safe & Veloce con Marshal.Copy
+        int w = image.Cols;
+        int h = image.Rows;
+        int totalPixels = w * h;
+
+        // Copia Maschere (Byte)
+        byte[] fillFlat = new byte[totalPixels];
+        Marshal.Copy(fillMask.Data, fillFlat, 0, totalPixels);
+
+        byte[] safeFlat = new byte[totalPixels];
+        Marshal.Copy(safeMask.Data, safeFlat, 0, totalPixels);
+
+        // 3. ELABORAZIONE
+        // Usiamo Marshal.Copy per copiare IntPtr -> Array Managed
+        // E poi Array Managed -> IntPtr. Non serve 'unsafe'.
         
-        // Invertiamo: 255 = Safe (Cielo Vero e Pulito), 0 = Bad (Stella, Alone o NaN)
-        Cv2.BitwiseNot(safeMask, safeMask); 
-
-        // ---------------------------------------------------------
-        // 2. TRASFERIMENTO DATI IN RAM
-        // ---------------------------------------------------------
-        byte[,] fillGrid = (byte[,])_converter.MatToRaw(fillMask, FitsBitDepth.UInt8);
-        byte[,] safeGrid = (byte[,])_converter.MatToRaw(safeMask, FitsBitDepth.UInt8);
-
         if (image.Type() == MatType.CV_32FC1)
         {
-            float[,] imgGrid = (float[,])_converter.MatToRaw(image, FitsBitDepth.Float);
-            ProcessGridFloat(imgGrid, fillGrid, safeGrid);
-            return _converter.RawToMat(imgGrid, 1.0, 0.0, FitsBitDepth.Float);
+            float[] imgFlat = new float[totalPixels];
+            Marshal.Copy(image.Data, imgFlat, 0, totalPixels); // Leggi
+            
+            ProcessGridFloat(imgFlat, fillFlat, safeFlat, w, h);
+            
+            // Scrivi risultato su una NUOVA matrice per evitare di modificare l'originale se è condivisa
+            Mat result = new Mat(h, w, MatType.CV_32FC1);
+            Marshal.Copy(imgFlat, 0, result.Data, totalPixels); // Scrivi
+            return result;
         }
         else if (image.Type() == MatType.CV_64FC1)
         {
-            double[,] imgGrid = (double[,])_converter.MatToRaw(image, FitsBitDepth.Double);
-            ProcessGridDouble(imgGrid, fillGrid, safeGrid);
-            return _converter.RawToMat(imgGrid, 1.0, 0.0, FitsBitDepth.Double);
+            double[] imgFlat = new double[totalPixels];
+            Marshal.Copy(image.Data, imgFlat, 0, totalPixels); // Leggi
+            
+            ProcessGridDouble(imgFlat, fillFlat, safeFlat, w, h);
+            
+            Mat result = new Mat(h, w, MatType.CV_64FC1);
+            Marshal.Copy(imgFlat, 0, result.Data, totalPixels); // Scrivi
+            return result;
         }
         else
         {
-            throw new NotSupportedException("Serve Float o Double.");
+            throw new NotSupportedException("Formato immagine non supportato (serve Float o Double).");
         }
     }
 
     // -------------------------------------------------------------------------------
-    // IMPLEMENTAZIONE FLOAT (Welford / Zero Alloc / Solo SafeMask check)
+    // IMPLEMENTAZIONE FLOAT (Array 1D)
     // -------------------------------------------------------------------------------
-    private void ProcessGridFloat(float[,] img, byte[,] fill, byte[,] safe)
+    private void ProcessGridFloat(float[] img, byte[] fill, byte[] safe, int w, int h)
     {
-        int h = img.GetLength(0);
-        int w = img.GetLength(1);
-
-        var pixelsToFill = new List<Point>(w * h / 20);
-        for (int y = 0; y < h; y++)
-            for (int x = 0; x < w; x++)
-                if (fill[y, x] > 0) pixelsToFill.Add(new Point(x, y));
+        // Lista indici 1D
+        var pixelsToFill = new List<int>(img.Length / 20);
+        for (int i = 0; i < fill.Length; i++)
+        {
+            if (fill[i] > 0) pixelsToFill.Add(i);
+        }
 
         int iteration = 0;
         int windowSize = InitialWindow;
 
         while (pixelsToFill.Count > 0 && iteration < MaxIter && windowSize <= MaxWindow)
         {
-            var nextIterPixels = new ConcurrentBag<Point>();
+            int[] nextPixelsBuffer = new int[pixelsToFill.Count];
+            int nextCount = 0;
+
             int rad = windowSize / 2;
             const int TargetSamples = 15;
             const int MaxProbes = 60;
 
-            Parallel.ForEach(pixelsToFill, pt =>
+            Parallel.ForEach(pixelsToFill, idx =>
             {
-                int px = pt.X;
-                int py = pt.Y;
+                int py = idx / w;
+                int px = idx % w;
 
                 int count = 0;
                 double mean = 0.0;
@@ -126,19 +140,16 @@ public class InpaintingEngine : IInpaintingEngine
 
                 for (int k = 0; k < MaxProbes && count < TargetSamples; k++)
                 {
-                    // RNG Veloce
                     seed ^= seed << 13; seed ^= seed >> 17; seed ^= seed << 5;
                     int ry = yMin + (int)(seed % (uint)heightRange);
                     seed ^= seed << 13; seed ^= seed >> 17; seed ^= seed << 5;
                     int rx = xMin + (int)(seed % (uint)widthRange);
 
-                    // RIMOSSO: if (Math.Abs(...) <= Halo) -> Non serve più!
-                    // La maschera 'safe' è già dilatata. 
-                    // Se safe[ry, rx] è 255, siamo matematicamente sicuri di essere fuori dall'alone.
+                    int neighborIdx = ry * w + rx;
 
-                    if (safe[ry, rx] == 255)
+                    if (safe[neighborIdx] == 255)
                     {
-                        float val = img[ry, rx];
+                        float val = img[neighborIdx];
                         if (!float.IsNaN(val))
                         {
                             count++;
@@ -156,59 +167,56 @@ public class InpaintingEngine : IInpaintingEngine
                     double stdDev = Math.Sqrt(variance);
                     float noise = GenerateGaussianNoiseFloat((float)mean, (float)stdDev, ref seed);
 
-                    // Protezione finale
                     if (float.IsNaN(noise) || float.IsInfinity(noise)) noise = 0.0f;
                     if (noise < 0) noise = 0.0f;
 
-                    img[py, px] = noise;
+                    img[idx] = noise;
                 }
                 else
                 {
-                    nextIterPixels.Add(pt);
+                    int storeIdx = Interlocked.Increment(ref nextCount) - 1;
+                    nextPixelsBuffer[storeIdx] = idx;
                 }
             });
 
-            var remainingSet = new HashSet<Point>(nextIterPixels);
-            foreach (var pt in pixelsToFill)
-            {
-                if (!remainingSet.Contains(pt)) fill[pt.Y, pt.X] = 0;
-            }
-            pixelsToFill = nextIterPixels.ToList();
-            
+            var nextIterList = new List<int>(nextCount);
+            for(int k=0; k<nextCount; k++) nextIterList.Add(nextPixelsBuffer[k]);
+            pixelsToFill = nextIterList;
+
             if (pixelsToFill.Count > 0) windowSize = Math.Min(windowSize + StepWindow, MaxWindow);
             iteration++;
         }
 
-        foreach(var pt in pixelsToFill) img[pt.Y, pt.X] = 0.0f;
+        foreach(var idx in pixelsToFill) img[idx] = 0.0f;
     }
 
     // -------------------------------------------------------------------------------
-    // IMPLEMENTAZIONE DOUBLE
+    // IMPLEMENTAZIONE DOUBLE (Array 1D)
     // -------------------------------------------------------------------------------
-    private void ProcessGridDouble(double[,] img, byte[,] fill, byte[,] safe)
+    private void ProcessGridDouble(double[] img, byte[] fill, byte[] safe, int w, int h)
     {
-        int h = img.GetLength(0);
-        int w = img.GetLength(1);
-
-        var pixelsToFill = new List<Point>(w * h / 20);
-        for (int y = 0; y < h; y++)
-            for (int x = 0; x < w; x++)
-                if (fill[y, x] > 0) pixelsToFill.Add(new Point(x, y));
+        var pixelsToFill = new List<int>(img.Length / 20);
+        for (int i = 0; i < fill.Length; i++)
+        {
+            if (fill[i] > 0) pixelsToFill.Add(i);
+        }
 
         int iteration = 0;
         int windowSize = InitialWindow;
 
         while (pixelsToFill.Count > 0 && iteration < MaxIter && windowSize <= MaxWindow)
         {
-            var nextIterPixels = new ConcurrentBag<Point>();
+            int[] nextPixelsBuffer = new int[pixelsToFill.Count];
+            int nextCount = 0;
+
             int rad = windowSize / 2;
             const int TargetSamples = 15;
             const int MaxProbes = 60;
 
-            Parallel.ForEach(pixelsToFill, pt =>
+            Parallel.ForEach(pixelsToFill, idx =>
             {
-                int px = pt.X;
-                int py = pt.Y;
+                int py = idx / w;
+                int px = idx % w;
 
                 int count = 0;
                 double mean = 0.0;
@@ -230,10 +238,11 @@ public class InpaintingEngine : IInpaintingEngine
                     seed ^= seed << 13; seed ^= seed >> 17; seed ^= seed << 5;
                     int rx = xMin + (int)(seed % (uint)widthRange);
 
-                    // Controllo solo sulla maschera dilatata
-                    if (safe[ry, rx] == 255)
+                    int neighborIdx = ry * w + rx;
+
+                    if (safe[neighborIdx] == 255)
                     {
-                        double val = img[ry, rx];
+                        double val = img[neighborIdx];
                         if (!double.IsNaN(val))
                         {
                             count++;
@@ -254,34 +263,33 @@ public class InpaintingEngine : IInpaintingEngine
                     if (double.IsNaN(noise) || double.IsInfinity(noise)) noise = 0.0;
                     if (noise < 0) noise = 0.0;
 
-                    img[py, px] = noise;
+                    img[idx] = noise;
                 }
                 else
                 {
-                    nextIterPixels.Add(pt);
+                    int storeIdx = Interlocked.Increment(ref nextCount) - 1;
+                    nextPixelsBuffer[storeIdx] = idx;
                 }
             });
 
-            var remainingSet = new HashSet<Point>(nextIterPixels);
-            foreach (var pt in pixelsToFill)
-            {
-                if (!remainingSet.Contains(pt)) fill[pt.Y, pt.X] = 0;
-            }
-            pixelsToFill = nextIterPixels.ToList();
-            
+            var nextIterList = new List<int>(nextCount);
+            for(int k=0; k<nextCount; k++) nextIterList.Add(nextPixelsBuffer[k]);
+            pixelsToFill = nextIterList;
+
             if (pixelsToFill.Count > 0) windowSize = Math.Min(windowSize + StepWindow, MaxWindow);
             iteration++;
         }
 
-        foreach(var pt in pixelsToFill) img[pt.Y, pt.X] = 0.0;
+        foreach(var idx in pixelsToFill) img[idx] = 0.0;
     }
+
+    // --- RNG VELOCE (Zero Lock) ---
 
     private float GenerateGaussianNoiseFloat(float mean, float stdDev, ref uint seed)
     {
         double u1 = NextDouble(ref seed);
         double u2 = NextDouble(ref seed);
         if (u1 < 1e-9) u1 = 1e-9;
-        
         double randStdNormal = Math.Sqrt(-2.0 * Math.Log(u1)) * Math.Sin(2.0 * Math.PI * u2);
         return mean + stdDev * (float)randStdNormal;
     }
@@ -291,7 +299,6 @@ public class InpaintingEngine : IInpaintingEngine
         double u1 = NextDouble(ref seed);
         double u2 = NextDouble(ref seed);
         if (u1 < 1e-9) u1 = 1e-9;
-        
         double randStdNormal = Math.Sqrt(-2.0 * Math.Log(u1)) * Math.Sin(2.0 * Math.PI * u2);
         return mean + stdDev * randStdNormal;
     }

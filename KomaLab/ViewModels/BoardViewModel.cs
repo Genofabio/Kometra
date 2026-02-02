@@ -61,8 +61,6 @@ public partial class BoardViewModel : ObservableObject
         ShowRadialEnhancementWindowCommand.NotifyCanExecuteChanged();
         ShowStructureExtractionWindowCommand.NotifyCanExecuteChanged();
         ShowLocalContrastWindowCommand.NotifyCanExecuteChanged();
-        
-        // [AGGIUNTO] Notifica per il nuovo comando
         ShowStarMaskingWindowCommand.NotifyCanExecuteChanged();
     }
     
@@ -223,21 +221,23 @@ public partial class BoardViewModel : ObservableObject
         }, "Allineamento");
     }
     
-    // 6. MASCHERAMENTO STELLE [NUOVO]
+    // 6. MASCHERAMENTO STELLE [FIXATO]
     [RelayCommand(CanExecute = nameof(CanExecuteOnImageNode))]
     private async Task ShowStarMaskingWindow()
     {
+        // NOTA: Usiamo RunGenericProcessing per gestire la creazione nodo e l'undo
+        // in modo coerente e sicuro (gestione eccezioni inclusa)
         await RunGenericProcessing(async (files, mode) => 
         {
-            // Nota: Ignoriamo 'mode' (visualizzazione) perché non influisce sulla logica della maschera,
-            // ma l'helper RunGenericProcessing ce lo passa comunque.
-            
-            // Assumo che IWindowService sia stato aggiornato con questo metodo
+            // Apri la finestra di dialogo
             var paths = await _windowService.ShowStarMaskingWindowAsync(files);
             
-            // Ritorniamo i percorsi e il suffisso per il nuovo nodo
-            return paths != null ? (paths, "(StarMask)") : null;
-        }, "Generazione Maschera Stelle");
+            // Se l'utente ha annullato o ci sono stati errori, ritorna null
+            if (paths == null || paths.Count == 0) return null;
+
+            // Ritorna i path e il suffisso per il titolo
+            return (paths, "(Starless)");
+        }, "Rimozione Stelle");
     }
     
     // --- HELPER GENERICO (DRY) ---
@@ -250,25 +250,37 @@ public partial class BoardViewModel : ObservableObject
         var inputFiles = imgNode.CurrentFiles.ToList();
         if (!inputFiles.Any()) return;
     
-        var result = await windowAction(inputFiles, imgNode.VisualizationMode);
-        
-        if (result == null) return;
-        if (result.Value.Paths == null || !result.Value.Paths.Any()) return;
+        try 
+        {
+            var result = await windowAction(inputFiles, imgNode.VisualizationMode);
+            
+            if (result == null) return;
+            if (result.Value.Paths == null || !result.Value.Paths.Any()) return;
 
-        var (resultPaths, titleSuffix) = result.Value;
+            var (resultPaths, titleSuffix) = result.Value;
 
-        double centerX = imgNode.X + (1.5 * imgNode.EstimatedTotalSize.Width);
-        double centerY = imgNode.Y + (imgNode.EstimatedTotalSize.Height / 2.0);
+            double centerX = imgNode.X + (1.5 * imgNode.EstimatedTotalSize.Width);
+            double centerY = imgNode.Y + (imgNode.EstimatedTotalSize.Height / 2.0);
 
-        BaseNodeViewModel newNode = resultPaths.Count == 1
-            ? await _nodeFactory.CreateSingleImageNodeAsync(resultPaths[0], centerX + 400, centerY)
-            : await _nodeFactory.CreateMultipleImagesNodeAsync(resultPaths, centerX + 400, centerY);
+            // [SICUREZZA MEMORIA] Forziamo una pulizia prima di caricare il risultato nel nuovo nodo
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
 
-        newNode.Title = $"{imgNode.Title} {titleSuffix}";
-        
-        if (newNode is ImageNodeViewModel resNode) resNode.VisualizationMode = imgNode.VisualizationMode;
-        
-        RegisterProcessingResult(newNode, imgNode, resultPaths[0], undoLabel);
+            BaseNodeViewModel newNode = resultPaths.Count == 1
+                ? await _nodeFactory.CreateSingleImageNodeAsync(resultPaths[0], centerX + 400, centerY)
+                : await _nodeFactory.CreateMultipleImagesNodeAsync(resultPaths, centerX + 400, centerY);
+
+            newNode.Title = $"{imgNode.Title} {titleSuffix}";
+            
+            if (newNode is ImageNodeViewModel resNode) resNode.VisualizationMode = imgNode.VisualizationMode;
+            
+            RegisterProcessingResult(newNode, imgNode, resultPaths[0], undoLabel);
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"Errore creazione nodo risultato: {ex.Message}");
+            // Qui potresti mostrare un messaggio d'errore all'utente se hai un DialogService per messaggi
+        }
     }
 
     // --- HELPER NOMI FILTRI ---
@@ -294,19 +306,15 @@ public partial class BoardViewModel : ObservableObject
         };
     }
 
-    // [ALTRI COMANDI]
+    // [ALTRI COMANDI ESISTENTI...]
     [RelayCommand]
     private async Task AddNodeAsync()
     {
-        // 1. Apriamo la finestra e riceviamo (Paths, SeparateNodes)
         var result = await _windowService.ShowImportWindowAsync();
-        
-        if (result == null || result.Value.Paths == null || !result.Value.Paths.Any()) 
-            return;
+        if (result == null || result.Value.Paths == null || !result.Value.Paths.Any()) return;
 
         var (paths, separateNodes) = result.Value;
 
-        // Pre-caricamento date per ordinamento (opzionale ma utile)
         var tasks = paths.Select(async path => 
         { 
             var header = await _dataManager.GetHeaderOnlyAsync(path); 
@@ -317,11 +325,9 @@ public partial class BoardViewModel : ObservableObject
         var results = await Task.WhenAll(tasks);
         var sortedPaths = results.OrderBy(x => x.Date).Select(x => x.Path).ToList();
 
-        // Calcolo posizione centrale
         Point centerScreen = new Point(Viewport.ViewportSize.Width / 2.0, Viewport.ViewportSize.Height / 2.0);
         Point pos = Viewport.ToWorldCoordinates(centerScreen);
 
-        // LOGICA DI CREAZIONE
         if (separateNodes)
         {
             double offsetX = 0;
@@ -342,15 +348,8 @@ public partial class BoardViewModel : ObservableObject
         else
         {
             BaseNodeViewModel newNode;
-            
-            if (sortedPaths.Count == 1)
-            {
-                newNode = await _nodeFactory.CreateSingleImageNodeAsync(sortedPaths[0], pos.X, pos.Y);
-            }
-            else
-            {
-                newNode = await _nodeFactory.CreateMultipleImagesNodeAsync(sortedPaths, pos.X, pos.Y);
-            }
+            if (sortedPaths.Count == 1) newNode = await _nodeFactory.CreateSingleImageNodeAsync(sortedPaths[0], pos.X, pos.Y);
+            else newNode = await _nodeFactory.CreateMultipleImagesNodeAsync(sortedPaths, pos.X, pos.Y);
 
             bool isCalibrated = sortedPaths.Any(p => p.Contains("Calibrated", StringComparison.OrdinalIgnoreCase));
             if (isCalibrated) newNode.Title += " (Calibrata)";
@@ -367,25 +366,15 @@ public partial class BoardViewModel : ObservableObject
     private async Task SaveSelectedNode() 
     { 
         if(SelectedNode is not ImageNodeViewModel n || n.ActiveFile == null) return; 
-        
         var p = await _dialogService.ShowSaveFitsFileDialogAsync(n.ActiveFile.FileName); 
         if(string.IsNullOrWhiteSpace(p)) return; 
-        
-        try 
-        { 
+        try { 
             var fr = n.ActiveFile;
             var data = await _dataManager.GetDataAsync(fr.FilePath);
-            
-            // [MODIFICA MEF] Accesso sicuro all'immagine da salvare
             var imageHdu = data.FirstImageHdu ?? data.PrimaryHdu;
             if (imageHdu == null) return; 
-            
             await _dataManager.SaveDataAsync(p, imageHdu.PixelData, fr.ModifiedHeader ?? imageHdu.Header); 
-        } 
-        catch(Exception ex) 
-        { 
-            Debug.WriteLine($"Save failed: {ex.Message}"); 
-        } 
+        } catch(Exception ex) { Debug.WriteLine($"Save failed: {ex.Message}"); } 
     }
     
     [RelayCommand(CanExecute = nameof(CanSaveVideo))]
@@ -393,23 +382,10 @@ public partial class BoardViewModel : ObservableObject
     {
         var node = SelectedImageNode;
         if (node?.ActiveRenderer == null) return;
-
         var settings = await _windowService.ShowVideoExportDialogAsync(node, node.VisualizationMode);
         if (settings == null) return;
-
-        try 
-        {
-            await _videoCoordinator.ExportVideoAsync(
-                node.CurrentFiles, 
-                settings, 
-                settings.InitialProfile);
-            
-            System.Diagnostics.Debug.WriteLine("Esportazione completata con successo.");
-        }
-        catch (Exception ex)
-        {
-            System.Diagnostics.Debug.WriteLine($"Export fallito: {ex.Message}");
-        }
+        try { await _videoCoordinator.ExportVideoAsync(node.CurrentFiles, settings, settings.InitialProfile); }
+        catch (Exception ex) { Debug.WriteLine($"Export fallito: {ex.Message}"); }
     }
     
     [RelayCommand(CanExecute = nameof(CanExecuteOnImageNode))] private async Task ShowPlateSolvingWindow() { if(SelectedNode is ImageNodeViewModel n) await _windowService.ShowPlateSolvingWindowAsync(n); }

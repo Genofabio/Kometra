@@ -58,18 +58,16 @@ public class MaskingCoordinator : IMaskingCoordinator
         {
             token.ThrowIfCancellationRequested();
 
+            // 1. Statistiche (Restituisce tupla: Mean, StdDev, MedianApprox)
             var stats = _radiometryEngine.ComputeRobustStatistics(src, sigma: 3.0, maxIterations: 5);
             token.ThrowIfCancellationRequested();
 
-            using Mat cometMask = _segmentationEngine.ComputeCometMask(src, stats.MedianApprox, stats.StdDev, p);
+            // 2. Calcolo Maschere & Inpainting (Incapsulato per gestione memoria)
+            using Mat starlessImage = GenerateStarlessImage(src, stats, p);
+
             token.ThrowIfCancellationRequested();
 
-            using Mat starMask = _segmentationEngine.ComputeStarMask(src, cometMask, stats.MedianApprox, stats.StdDev, p);
-            token.ThrowIfCancellationRequested();
-
-            using Mat starlessImage = _inpaintingEngine.InpaintStars(src, starMask);
-            token.ThrowIfCancellationRequested();
-
+            // 3. Conversione Finale
             var depth = src.Type() == MatType.CV_32FC1 ? FitsBitDepth.Float : FitsBitDepth.Double;
             return _converter.MatToRaw(starlessImage, depth);
 
@@ -88,15 +86,14 @@ public class MaskingCoordinator : IMaskingCoordinator
             {
                 var stats = _radiometryEngine.ComputeRobustStatistics(src, sigma: 3.0, maxIterations: 5);
 
-                using Mat cometMask = _segmentationEngine.ComputeCometMask(src, stats.MedianApprox, stats.StdDev, p);
-                using Mat starMask = _segmentationEngine.ComputeStarMask(src, cometMask, stats.MedianApprox, stats.StdDev, p);
+                // Generazione immagine senza stelle
+                using Mat starlessResult = GenerateStarlessImage(src, stats, p);
 
-                using Mat starlessResult = _inpaintingEngine.InpaintStars(src, starMask);
-
+                // Copia nel buffer di destinazione
                 starlessResult.CopyTo(dst);
 
+                // Aggiornamento Header
                 _metadataService.AddValue(header, "HISTORY", "KomaLab: Stars Removed");
-                // [AGGIORNAMENTO] Aggiunto il log del MinDiam per tracciabilità
                 _metadataService.AddValue(header, "HISTORY", $"Params: Thr={p.StarThresholdSigma}, Dil={p.StarDilation}, MinDiam={p.MinStarDiameter}");
             }, token);
         };
@@ -124,6 +121,7 @@ public class MaskingCoordinator : IMaskingCoordinator
         {
             var stats = _radiometryEngine.ComputeRobustStatistics(src, 3.0, 5);
             
+            // Qui usiamo stats.MedianApprox e stats.StdDev direttamente
             using Mat cometMask = _segmentationEngine.ComputeCometMask(src, stats.MedianApprox, stats.StdDev, p);
             using Mat starMask = _segmentationEngine.ComputeStarMask(src, cometMask, stats.MedianApprox, stats.StdDev, p);
 
@@ -132,5 +130,22 @@ public class MaskingCoordinator : IMaskingCoordinator
                 _converter.MatToRaw(cometMask, FitsBitDepth.UInt8)
             );
         }, token);
+    }
+
+    // --- HELPER PER GESTIONE SCOPE MEMORIA ---
+    
+    // [FIX] La firma ora accetta esattamente la tupla restituita da IRadiometryEngine
+    private Mat GenerateStarlessImage(
+        Mat src, 
+        (double Mean, double StdDev, double MedianApprox) stats, 
+        MaskingParameters p)
+    {
+        // Usiamo i campi della tupla (MedianApprox, StdDev)
+        using Mat cometMask = _segmentationEngine.ComputeCometMask(src, stats.MedianApprox, stats.StdDev, p);
+        using Mat starMask = _segmentationEngine.ComputeStarMask(src, cometMask, stats.MedianApprox, stats.StdDev, p);
+        
+        // InpaintStars usa le maschere per generare il risultato.
+        // Alla fine di questo blocco, le maschere vengono distrutte liberando memoria.
+        return _inpaintingEngine.InpaintStars(src, starMask);
     }
 }
