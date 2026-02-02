@@ -10,7 +10,7 @@ public class SegmentationEngine : ISegmentationEngine
 {
     public Mat ComputeCometMask(Mat image, double backgroundLevel, double noiseStdDev, MaskingParameters p)
     {
-        // --- LOGICA COMETA (Invariata - serve per trovare il centro) ---
+        // --- LOGICA COMETA (Invariata) ---
         int h = image.Rows;
         int w = image.Cols;
         int cx = w / 2;
@@ -82,28 +82,43 @@ public class SegmentationEngine : ISegmentationEngine
 
     public Mat ComputeStarMask(Mat image, Mat cometMask, double backgroundLevel, double noiseStdDev, MaskingParameters p)
     {
-        // 1. Sottrazione Background
+        // 1. SOTTRAZIONE BACKGROUND & MASKING
         using Mat subImage = new Mat();
         Cv2.Subtract(image, new Scalar(backgroundLevel), subImage);
         
-        // Escludi la cometa
+        // Rimuoviamo la cometa PRIMA di calcolare qualsiasi cosa
         subImage.SetTo(new Scalar(0), cometMask);
 
-        // 2. Threshold Deterministico
+        // 2. THRESHOLD (Binarizzazione)
         double thresholdVal = p.StarThresholdSigma * Math.Max(noiseStdDev, 1e-6);
         
         using Mat binary = new Mat();
         Cv2.Threshold(subImage, binary, thresholdVal, 255, ThresholdTypes.Binary);
         
-        // Output diretto (NO Componenti Connesse, NO Area filter)
         Mat starMask = new Mat();
         binary.ConvertTo(starMask, MatType.CV_8UC1);
 
-        // 3. Dilatazione Finale
+        // 3. PULIZIA RUMORE DINAMICA (Morphological Opening)
+        // Usiamo il parametro dell'utente per definire la dimensione minima.
+        // Assicuriamo che il kernel sia dispari (1, 3, 5, 7...) per avere un centro.
+        // Se MinStarDiameter non esiste ancora in 'p', aggiungilo alla classe MaskingParameters!
+        int kernelSize = Math.Max(1, p.MinStarDiameter); 
+        if (kernelSize % 2 == 0) kernelSize++; 
+
+        // Applichiamo il filtro solo se il diametro richiesto è > 1 pixel.
+        // Questo passaggio elimina rumore e hot pixel PRIMA che vengano dilatati.
+        if (kernelSize > 1)
+        {
+            using var cleanKernel = Cv2.GetStructuringElement(MorphShapes.Ellipse, new Size(kernelSize, kernelSize));
+            Cv2.MorphologyEx(starMask, starMask, MorphTypes.Open, cleanKernel);
+        }
+
+        // 4. DILATAZIONE UTENTE (Espansione)
+        // Espandiamo le stelle sopravvissute per coprire gli aloni (glow).
         if (p.StarDilation > 0)
         {
-            using var kernel = Cv2.GetStructuringElement(MorphShapes.Ellipse, new Size(3, 3));
-            Cv2.Dilate(starMask, starMask, kernel, iterations: p.StarDilation);
+            using var expandKernel = Cv2.GetStructuringElement(MorphShapes.Ellipse, new Size(3, 3));
+            Cv2.Dilate(starMask, starMask, expandKernel, iterations: p.StarDilation);
         }
 
         return starMask;

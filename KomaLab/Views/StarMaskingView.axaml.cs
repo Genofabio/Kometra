@@ -44,6 +44,7 @@ public partial class StarMaskingView : Window
             // Sottoscrizione eventi ViewModel
             _vm.PropertyChanged += OnViewModelPropertyChanged;
             _vm.RequestFitToScreen += OnRequestFitToScreen;
+            _vm.RequestClose += Close; // Gestisce la chiusura richiesta dal ViewModel
             
             // Inizializza valori UI (TextBox) dai dati attuali
             UpdateUiValues();
@@ -59,6 +60,8 @@ public partial class StarMaskingView : Window
         {
             _vm.PropertyChanged -= OnViewModelPropertyChanged;
             _vm.RequestFitToScreen -= OnRequestFitToScreen;
+            _vm.RequestClose -= Close;
+            _vm.Dispose(); // Importante per fermare i calcoli in corso
             _vm = null;
         }
     }
@@ -85,6 +88,9 @@ public partial class StarMaskingView : Window
                 
                 case nameof(StarMaskingViewModel.StarThreshold): UpdateBox("StarThresholdBox", _vm.StarThreshold.ToString("N1")); break;
                 case nameof(StarMaskingViewModel.StarDilation): UpdateBox("StarDilationBox", _vm.StarDilation.ToString()); break;
+                
+                // [AGGIUNTO] Aggiornamento Diametro Minimo
+                case nameof(StarMaskingViewModel.MinStarDiameter): UpdateBox("MinStarDiameterBox", _vm.MinStarDiameter.ToString()); break;
             }
         });
     }
@@ -102,6 +108,9 @@ public partial class StarMaskingView : Window
         UpdateBox("CometDilationBox", _vm.CometDilation.ToString());
         UpdateBox("StarThresholdBox", _vm.StarThreshold.ToString("N1"));
         UpdateBox("StarDilationBox", _vm.StarDilation.ToString());
+        
+        // [AGGIUNTO] Inizializzazione Diametro Minimo
+        UpdateBox("MinStarDiameterBox", _vm.MinStarDiameter.ToString());
     }
 
     // =======================================================================
@@ -124,6 +133,9 @@ public partial class StarMaskingView : Window
                 
                 case "StarThresholdBox": _vm.StarThreshold = d; break;
                 case "StarDilationBox": _vm.StarDilation = i; break;
+
+                // [AGGIUNTO] Commit Diametro Minimo
+                case "MinStarDiameterBox": _vm.MinStarDiameter = i; break;
             }
         }
         else

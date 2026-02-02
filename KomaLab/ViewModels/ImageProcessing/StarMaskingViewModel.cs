@@ -44,6 +44,7 @@ public partial class StarMaskingViewModel : ObservableObject, IDisposable
     private CancellationTokenSource? _maskPreviewCts; // Per calcolo rapido maschere overlay
 
     public event Action? RequestFitToScreen;
+    public event Action? RequestClose;
 
     public SequenceNavigator Navigator { get; } = new();
     public AlignmentImageViewport Viewport { get; } = new();
@@ -66,13 +67,14 @@ public partial class StarMaskingViewModel : ObservableObject, IDisposable
     [ObservableProperty] private Bitmap? _starMaskOverlay;
     [ObservableProperty] private Bitmap? _cometMaskOverlay;
     
-    // [FIX] Aggiunte le proprietà mancanti per le CheckBox
+    // Checkbox UI: Mostra/Nascondi maschere
     [ObservableProperty] private bool _showStarMask = true;
     [ObservableProperty] private bool _showCometMask = true;
     
     // --- Parametri con Trigger ---
-    // Quando cambiano, se siamo in Setup, ricalcoliamo solo le maschere (veloce)
+    // Quando cambiano, se siamo in Setup, ricalcoliamo solo le maschere (veloce) e non tutta l'immagine
     
+    // COMETA
     public double CometThreshold
     {
         get => _params.CometThresholdSigma;
@@ -83,6 +85,8 @@ public partial class StarMaskingViewModel : ObservableObject, IDisposable
         get => _params.CometDilation;
         set { if (SetProperty(_params.CometDilation, value, _params, (u, n) => u.CometDilation = n)) TriggerMaskPreview(); }
     }
+
+    // STELLE
     public double StarThreshold
     {
         get => _params.StarThresholdSigma;
@@ -94,7 +98,14 @@ public partial class StarMaskingViewModel : ObservableObject, IDisposable
         set { if (SetProperty(_params.StarDilation, value, _params, (u, n) => u.StarDilation = n)) TriggerMaskPreview(); }
     }
 
-    // --- Radiometria ---
+    // [IMPORTANTE] Aggiunto il parametro MinStarDiameter
+    public int MinStarDiameter
+    {
+        get => _params.MinStarDiameter;
+        set { if (SetProperty(_params.MinStarDiameter, value, _params, (u, n) => u.MinStarDiameter = n)) TriggerMaskPreview(); }
+    }
+
+    // --- Radiometria (Stretch Visivo) ---
     public double BlackPoint
     {
         get => ActiveRenderer?.BlackPoint ?? 0;
@@ -106,7 +117,7 @@ public partial class StarMaskingViewModel : ObservableObject, IDisposable
         set { if (ActiveRenderer != null) { ActiveRenderer.WhitePoint = value; OnPropertyChanged(); } }
     }
 
-    // --- Visibilità ---
+    // --- Stati di Visibilità ---
     public bool IsInteractionEnabled => !IsBusy;
     public bool IsSetupVisible => CurrentState == StarRemovalState.Setup;
     public bool IsResultActionsVisible => CurrentState == StarRemovalState.ResultsReady;
@@ -116,7 +127,6 @@ public partial class StarMaskingViewModel : ObservableObject, IDisposable
 
     public List<string>? ResultPaths { get; private set; }
     public bool DialogResult { get; private set; }
-    public event Action? RequestClose;
 
     #endregion
 
@@ -134,6 +144,7 @@ public partial class StarMaskingViewModel : ObservableObject, IDisposable
         Navigator.UpdateStatus(0, _files.Count);
         Navigator.IndexChanged += async (s, i) => await LoadImageAsync(i, autoFit: false);
 
+        // Caricamento iniziale con Fit to Screen
         _ = LoadImageAsync(0, autoFit: true);
     }
 
@@ -151,8 +162,8 @@ public partial class StarMaskingViewModel : ObservableObject, IDisposable
 
             if (CurrentState == StarRemovalState.ResultsReady)
             {
-                // --- FASE RISULTATO ---
-                // Calcoliamo l'immagine finale (Starless)
+                // --- FASE RISULTATO (ANTEPRIMA STARLESS) ---
+                // Qui non mostriamo overlay, ma il risultato dell'inpainting
                 StarMaskOverlay = null;
                 CometMaskOverlay = null;
 
@@ -160,6 +171,7 @@ public partial class StarMaskingViewModel : ObservableObject, IDisposable
                 
                 var starlessPixels = await _coordinator.ProcessPreviewAsync(file, _params, token);
                 
+                // Recuperiamo l'header originale per mantenere i metadati WCS
                 var originalData = await _dataManager.GetDataAsync(file.FilePath);
                 var originalHeader = (originalData.FirstImageHdu ?? originalData.PrimaryHdu)?.Header;
 
@@ -168,7 +180,7 @@ public partial class StarMaskingViewModel : ObservableObject, IDisposable
             }
             else
             {
-                // --- FASE SETUP ---
+                // --- FASE SETUP (IMMAGINE + MASCHERE) ---
                 StatusMessage = "Caricamento...";
                 var data = await _dataManager.GetDataAsync(file.FilePath);
                 var hdu = data.FirstImageHdu ?? data.PrimaryHdu;
@@ -176,7 +188,7 @@ public partial class StarMaskingViewModel : ObservableObject, IDisposable
 
                 await UpdateRendererAsync(hdu.PixelData, hdu.Header, autoFit);
                 
-                // Lancia il calcolo maschere
+                // Lancia il calcolo asincrono delle maschere colorate
                 TriggerMaskPreview();
                 StatusMessage = "Pronto.";
             }
@@ -185,13 +197,14 @@ public partial class StarMaskingViewModel : ObservableObject, IDisposable
         catch (Exception ex)
         {
             StatusMessage = $"Errore: {ex.Message}";
+            // Se c'è un errore grave nel calcolo, torniamo al setup
             if (CurrentState == StarRemovalState.ResultsReady) CurrentState = StarRemovalState.Setup;
         }
     }
 
     /// <summary>
     /// Calcola SOLO le maschere (Bitmaps) da sovrapporre all'immagine originale.
-    /// Usato solo in fase di Setup.
+    /// Usato solo in fase di Setup per dare feedback rapido all'utente.
     /// </summary>
     private async void TriggerMaskPreview()
     {
@@ -203,17 +216,21 @@ public partial class StarMaskingViewModel : ObservableObject, IDisposable
 
         try
         {
+            // Debounce: aspetta 150ms per evitare calcoli inutili se l'utente sposta velocemente lo slider
             await Task.Delay(150, token);
 
             var currentFile = _files[Navigator.CurrentIndex];
             
+            // Chiede al coordinator solo le maschere raw (byte[,])
             var (rawStar, rawComet) = await _coordinator.CalculateMasksPreviewAsync(currentFile, _params, token);
 
             if (token.IsCancellationRequested) return;
 
-            var starColor = Color.Parse("#567FFF"); // Blu
-            var cometColor = Color.Parse("#FFEA7B"); // Oro
+            // Colori Overlay: Blu per le stelle, Oro per la cometa
+            var starColor = Color.Parse("#567FFF"); 
+            var cometColor = Color.Parse("#FFEA7B");
 
+            // Conversione rapida (Parallelizzata) in Bitmap Avalonia
             var starBmp = RawMaskToOverlayBitmapSafe(rawStar, starColor, 0.5);
             var cometBmp = RawMaskToOverlayBitmapSafe(rawComet, cometColor, 0.5);
 
@@ -233,6 +250,7 @@ public partial class StarMaskingViewModel : ObservableObject, IDisposable
 
         if (ActiveRenderer != null)
         {
+            // Mantiene lo stretch (Black/White point) corrente quando cambi immagine
             var style = ActiveRenderer.CaptureSigmaProfile();
             newRenderer.ApplyRelativeProfile(style);
             ActiveRenderer.Dispose();
@@ -241,6 +259,7 @@ public partial class StarMaskingViewModel : ObservableObject, IDisposable
         ActiveRenderer = newRenderer;
         Viewport.ImageSize = ActiveRenderer.ImageSize;
         
+        // Notifica la UI
         OnPropertyChanged(nameof(ActiveRenderer));
         OnPropertyChanged(nameof(BlackPoint));
         OnPropertyChanged(nameof(WhitePoint));
@@ -254,15 +273,18 @@ public partial class StarMaskingViewModel : ObservableObject, IDisposable
     {
         if (IsBusy) return;
         
+        // Passaggio di stato: Setup -> Calculating -> ResultsReady
         CurrentState = StarRemovalState.Calculating;
         CurrentState = StarRemovalState.ResultsReady; 
         
+        // Ricarica l'immagine (che ora attiverà il ramo "ProcessPreviewAsync" in LoadImageAsync)
         await LoadImageAsync(Navigator.CurrentIndex, autoFit: false);
     }
 
     [RelayCommand]
     private async Task Cancel()
     {
+        // Annulla e torna al setup
         CurrentState = StarRemovalState.Setup;
         await LoadImageAsync(Navigator.CurrentIndex, autoFit: false);
     }
@@ -281,6 +303,7 @@ public partial class StarMaskingViewModel : ObservableObject, IDisposable
             var progress = new Progress<BatchProgressReport>(p => 
                 StatusMessage = $"Elaborazione: {p.CurrentFileIndex}/{p.TotalFiles} ({p.Percentage:F0}%)");
 
+            // Esegue l'inpainting su tutti i file
             ResultPaths = await _coordinator.ExecuteBatchAsync(_files, _params, progress, _cts.Token);
             
             DialogResult = true;
@@ -289,10 +312,11 @@ public partial class StarMaskingViewModel : ObservableObject, IDisposable
         catch (Exception ex)
         {
             StatusMessage = $"Errore Elaborazione: {ex.Message}";
-            CurrentState = StarRemovalState.ResultsReady;
+            CurrentState = StarRemovalState.ResultsReady; // Torna indietro in caso di errore
         }
     }
 
+    // Crea una Bitmap trasparente con i pixel colorati dove la maschera > 0
     private Bitmap? RawMaskToOverlayBitmapSafe(Array rawData, Color overlayColor, double opacity)
     {
         if (rawData is not byte[,] bytes) return null;
@@ -307,6 +331,7 @@ public partial class StarMaskingViewModel : ObservableObject, IDisposable
         byte g = overlayColor.G;
         byte b = overlayColor.B;
         
+        // Pre-calcolo del pixel colorato (ARGB)
         int colorPixel = (a << 24) | (r << 16) | (g << 8) | b;
         int transparentPixel = 0;
 
@@ -315,6 +340,7 @@ public partial class StarMaskingViewModel : ObservableObject, IDisposable
             IntPtr backBuffer = frameBuffer.Address;
             int rowBytes = frameBuffer.RowBytes;
 
+            // Parallelizza la scrittura per prestazioni massime su immagini grandi
             Parallel.For(0, height, y =>
             {
                 int[] rowBuffer = ArrayPool<int>.Shared.Rent(width);
