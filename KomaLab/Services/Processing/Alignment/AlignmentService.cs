@@ -1,6 +1,5 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using KomaLab.Models.Fits;
@@ -42,7 +41,7 @@ public class AlignmentService : IAlignmentService
     }
 
     // =======================================================================
-    // 1. CALCOLO CENTROIDI (Delegazione alle Strategie)
+    // 1. CALCOLO CENTROIDI
     // =======================================================================
 
     public async Task<IEnumerable<Point2D?>> CalculateCentersAsync(
@@ -66,22 +65,42 @@ public class AlignmentService : IAlignmentService
     public async Task<AlignmentMap> GenerateMapAsync(
         List<FitsFileReference> files, 
         List<Point2D?> centers, 
-        AlignmentTarget target)
+        AlignmentTarget target,
+        bool cropToCommonArea)
     {
         Size2D targetSize;
         Point2D globalShift = new Point2D(0, 0);
 
-        if (target == AlignmentTarget.Stars)
+        // ---------------------------------------------------------
+        // LOGICA DI RIDIMENSIONAMENTO CANVAS
+        // ---------------------------------------------------------
+        if (cropToCommonArea)
         {
-            // Allineamento Stellare: il canvas deve contenere l'unione di tutti i campi
-            var result = await CalculateUnionGeometryAsync(files, centers);
+            // [MODALITÀ CROP]
+            // Forza il canvas finale ad avere le STESSE DIMENSIONI del file originale (Input).
+            // Questo vale sia per Stelle che per Comete.
+            // - Stelle: L'immagine è centrata sulla media degli spostamenti.
+            // - Comete: L'immagine è centrata sul nucleo della cometa.
+            var result = await CalculateFixedCropAsync(files, centers);
             targetSize = result.Size;
             globalShift = result.Shift;
         }
         else
         {
-            // Allineamento Cometario: il target è centrato in un canvas ottimizzato
-            targetSize = await CalculatePerfectCanvasSizeAsync(files, centers);
+            // [MODALITÀ FULL/UNION]
+            // Il canvas si allarga per contenere tutti i dati, creando bordi neri se necessario.
+            if (target == AlignmentTarget.Stars)
+            {
+                var result = await CalculateUnionGeometryAsync(files, centers);
+                targetSize = result.Size;
+                globalShift = result.Shift;
+            }
+            else
+            {
+                // Per le comete, "Perfect Canvas" crea un'area abbastanza grande da non tagliare nulla.
+                targetSize = await CalculatePerfectCanvasSizeAsync(files, centers);
+                // globalShift resta 0,0 perché per le comete usiamo il centro del canvas come destinazione
+            }
         }
 
         return new AlignmentMap
@@ -94,7 +113,7 @@ public class AlignmentService : IAlignmentService
     }
 
     // =======================================================================
-    // 3. PROCESSORE DI WARPING (Iniezione nel Batch Service)
+    // 3. PROCESSORE DI WARPING
     // =======================================================================
 
     public Action<Mat, Mat, FitsHeader, int> GetWarpingProcessor(
@@ -116,9 +135,15 @@ public class AlignmentService : IAlignmentService
             }
 
             Point2D sourcePoint = centers[index]!.Value;
+            
+            // DECISIONE DEL PUNTO DI DESTINAZIONE
+            // - Stelle: Usano globalShift (che è calcolato per centrare la media del campo sul centro immagine).
+            // - Comete: Usano canvasCenter (mettono il nucleo esattamente al centro geometrico dell'immagine).
             Point2D destinationPoint = isStarAlignment ? globalShift : canvasCenter;
 
             // 1. Warping
+            // Nota: WarpTranslation gestisce il ritaglio. Se l'immagine traslata esce da targetSize,
+            // i pixel vengono persi (crop). Se non copre tutto, restano neri.
             using var warped = _geometricEngine.WarpTranslation(src, sourcePoint, destinationPoint, targetSize);
             warped.CopyTo(dst);
 
@@ -142,9 +167,71 @@ public class AlignmentService : IAlignmentService
     }
 
     // =======================================================================
-    // 4. HELPERS GEOMETRICI (Analisi Metadati e Pixel)
+    // 4. HELPERS GEOMETRICI
     // =======================================================================
 
+    /// <summary>
+    /// Restituisce un rettangolo di dimensioni identiche al primo file di input.
+    /// Calcola anche lo shift necessario per centrare la "media" dell'allineamento.
+    /// </summary>
+    private async Task<(Size2D Size, Point2D Shift)> CalculateFixedCropAsync(
+        List<FitsFileReference> files, List<Point2D?> centers)
+    {
+        double uMinX = 0, uMaxX = 0, uMinY = 0, uMaxY = 0;
+        bool initialized = false;
+
+        // 1. Calcoliamo l'estensione virtuale totale (solo per trovare il centro geometrico)
+        for (int i = 0; i < files.Count; i++)
+        {
+            if (i >= centers.Count || centers[i] == null) continue;
+
+            var dims = await GetImageDimensionsAsync(files[i]);
+            var c = centers[i]!.Value;
+
+            double relL = -c.X;
+            double relT = -c.Y;
+            double relR = dims.W - c.X;
+            double relB = dims.H - c.Y;
+
+            if (!initialized) 
+            {
+                uMinX = relL; uMaxX = relR; 
+                uMinY = relT; uMaxY = relB;
+                initialized = true;
+            } 
+            else 
+            {
+                uMinX = Math.Min(uMinX, relL); uMaxX = Math.Max(uMaxX, relR);
+                uMinY = Math.Min(uMinY, relT); uMaxY = Math.Max(uMaxY, relB);
+            }
+        }
+
+        // Fallback di sicurezza
+        if (!initialized) return (new Size2D(100, 100), new Point2D(0, 0));
+
+        // 2. Recuperiamo le dimensioni ORIGINALI dal primo file.
+        //    Questa è la dimensione che l'utente vuole in output.
+        var originalDims = await GetImageDimensionsAsync(files[0]);
+
+        // 3. Calcoliamo il centro geometrico dell'intera sequenza (il punto medio del drift)
+        double unionCenterX = (uMinX + uMaxX) / 2.0;
+        double unionCenterY = (uMinY + uMaxY) / 2.0;
+
+        // 4. Calcoliamo lo Shift.
+        //    Vogliamo che il punto "UnionCenter" finisca al centro della nostra nuova immagine (W/2, H/2).
+        //    Shift = Destinazione - Sorgente = (OriginalW/2) - UnionCenter
+        double shiftX = (originalDims.W / 2.0) - unionCenterX;
+        double shiftY = (originalDims.H / 2.0) - unionCenterY;
+
+        return (
+            new Size2D(originalDims.W, originalDims.H), 
+            new Point2D(shiftX, shiftY)
+        );
+    }
+
+    /// <summary>
+    /// Calcola l'unione totale (canvas espanso).
+    /// </summary>
     private async Task<(Size2D Size, Point2D Shift)> CalculateUnionGeometryAsync(
         List<FitsFileReference> files, List<Point2D?> centers)
     {
@@ -155,17 +242,13 @@ public class AlignmentService : IAlignmentService
         {
             if (i >= centers.Count || centers[i] == null) continue;
             
-            var header = files[i].ModifiedHeader ?? await _dataManager.GetHeaderOnlyAsync(files[i].FilePath);
-            if (header == null) continue;
-
-            double w = _metadataService.GetIntValue(header, "NAXIS1");
-            double h = _metadataService.GetIntValue(header, "NAXIS2");
+            var dims = await GetImageDimensionsAsync(files[i]);
             var c = centers[i]!.Value;
 
             double relL = -c.X;
             double relT = -c.Y;
-            double relR = w - c.X;
-            double relB = h - c.Y;
+            double relR = dims.W - c.X;
+            double relB = dims.H - c.Y;
 
             if (!initialized) {
                 minX = relL; maxX = relR; minY = relT; maxY = relB;
@@ -206,21 +289,14 @@ public class AlignmentService : IAlignmentService
                 {
                     var fileRef = files[index];
                     var data = await _dataManager.GetDataAsync(fileRef.FilePath);
-                    
-                    // [MODIFICA MEF] Accesso sicuro all'HDU immagine (gestisce multi-estensione)
                     var imageHdu = data.FirstImageHdu ?? data.PrimaryHdu;
-                    
                     if (imageHdu == null) return (0.0, 0.0);
 
-                    // Preferenza all'header modificato in RAM, altrimenti quello dell'HDU
                     var header = fileRef.ModifiedHeader ?? imageHdu.Header;
-                    
                     double bScale = _metadataService.GetDoubleValue(header, "BSCALE", 1.0);
                     double bZero = _metadataService.GetDoubleValue(header, "BZERO", 0.0);
 
-                    // Usiamo i PixelData dell'HDU immagine
                     using Mat mat = _converter.RawToMat(imageHdu.PixelData, bScale, bZero, FitsBitDepth.Float);
-                    
                     Rect2D validBox = _analysis.FindValidDataBox(mat);
                     if (validBox.Width > 0)
                     {
@@ -241,19 +317,21 @@ public class AlignmentService : IAlignmentService
             maxRadiusY = Math.Max(maxRadiusY, r.Ry);
         }
 
-        // Safety margin di 4 pixel per gestire arrotondamenti sub-pixel senza clipping
         int safetyMargin = 4; 
-        var finalSize = new Size2D(
+        return new Size2D(
             (int)Math.Ceiling(maxRadiusX * 2) + safetyMargin, 
             (int)Math.Ceiling(maxRadiusY * 2) + safetyMargin
         );
-
-        return finalSize;
     }
 
-    // =======================================================================
-    // FACTORY DELLE STRATEGIE
-    // =======================================================================
+    private async Task<(double W, double H)> GetImageDimensionsAsync(FitsFileReference file)
+    {
+         var header = file.ModifiedHeader ?? await _dataManager.GetHeaderOnlyAsync(file.FilePath);
+         if (header == null) return (0,0);
+         double w = _metadataService.GetIntValue(header, "NAXIS1");
+         double h = _metadataService.GetIntValue(header, "NAXIS2");
+         return (w, h);
+    }
 
     private IAlignmentStrategy CreateStrategy(AlignmentTarget target, AlignmentMode mode, CenteringMethod method)
     {

@@ -100,6 +100,9 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
     [ObservableProperty] private string _astrometryStatusMessage = string.Empty;
     
     [ObservableProperty] private JplStatus _astrometryStatus = JplStatus.Idle;
+    
+    [ObservableProperty]
+    private bool _cropToCommonArea = true;
 
     // --- REGOLE DI BUSINESS ---
     public int MinSearchRadius => 0;
@@ -489,7 +492,7 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
         }
         finally { IsBusy = false; }
     }
-
+    
     [RelayCommand(CanExecute = nameof(CanApply))]
     private async Task ApplyAlignment()
     {
@@ -507,6 +510,8 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
                                        ? TargetName 
                                        : null;
 
+            // Nota: Questo calcola la mappa preliminare. La geometria finale (Crop vs Union) 
+            // verrà ricalcolata e applicata dentro ExecuteWarpingAsync usando il parametro cropToCommonArea.
             var map = await _coordinator.AnalyzeSequenceAsync(
                 files: _files, 
                 guesses: centers, 
@@ -517,12 +522,14 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
                 jplTargetName: effectiveJplName
             );
 
+            // MODIFICA QUI: Passiamo il valore della CheckBox
             FinalProcessedPaths = await _coordinator.ExecuteWarpingAsync(
                 files: _files, 
                 map: map, 
                 mode: SelectedMode,      
                 searchRadius: effectiveRadius,  
-                jplName: effectiveJplName       
+                jplName: effectiveJplName,
+                cropToCommonArea: CropToCommonArea // <--- NUOVO PARAMETRO
             );
 
             DialogResult = true;

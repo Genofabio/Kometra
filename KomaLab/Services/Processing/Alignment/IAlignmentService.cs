@@ -28,10 +28,15 @@ public interface IAlignmentService
     /// <summary>
     /// Fase Geometrica: Calcola le dimensioni del canvas finale e gli offset di correzione.
     /// </summary>
+    /// <param name="cropToCommonArea">
+    /// Se true, calcola un ritaglio centrato sull'area comune a tutte le immagini (niente bordi neri),
+    /// mantenendo il centro geometrico e l'aspect ratio dell'unione originale.
+    /// </param>
     Task<AlignmentMap> GenerateMapAsync(
         List<FitsFileReference> files, 
         List<Point2D?> centers, 
-        AlignmentTarget target);
+        AlignmentTarget target,
+        bool cropToCommonArea); // <--- AGGIUNTO QUI
     
     /// <summary>
     /// Restituisce la funzione di processing pronta per essere eseguita dal BatchService.

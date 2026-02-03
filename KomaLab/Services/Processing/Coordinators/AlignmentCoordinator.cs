@@ -3,7 +3,6 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
-using KomaLab.Models.Astrometry;
 using KomaLab.Models.Fits;
 using KomaLab.Models.Primitives;
 using KomaLab.Models.Processing;
@@ -12,7 +11,6 @@ using KomaLab.Services.Fits;
 using KomaLab.Services.Fits.Metadata;
 using KomaLab.Services.Processing.Alignment;
 using KomaLab.Services.Processing.Batch;
-using OpenCvSharp;
 
 namespace KomaLab.Services.Processing.Coordinators;
 
@@ -57,7 +55,6 @@ public class AlignmentCoordinator : IAlignmentCoordinator
         );
     }
 
-    // --- FIX: Introduzione SemaphoreSlim per evitare ban API e conflitti I/O ---
     public async Task<List<Point2D?>> DiscoverStartingPointsAsync(
         IEnumerable<FitsFileReference> files,
         AlignmentTarget target,
@@ -68,22 +65,18 @@ public class AlignmentCoordinator : IAlignmentCoordinator
         if (target == AlignmentTarget.Comet && string.IsNullOrEmpty(targetName))
             return Enumerable.Repeat<Point2D?>(null, fileList.Count).ToList();
 
-        // Limitiamo a 4 richieste simultanee verso JPL/Disco per stabilità
+        // Limitiamo a 2 richieste simultanee verso JPL/Disco per stabilità
         using var semaphore = new SemaphoreSlim(2);
 
         var tasks = fileList.Select(async file =>
         {
-            // Per le stelle ritorniamo null qui (gestito dopo) per non bloccare il semaforo inutilmente
             if (target == AlignmentTarget.Stars) return (Point2D?)null;
 
-            // Blocchiamo l'esecuzione finché non c'è uno slot libero (max 4)
             await semaphore.WaitAsync();
             try
             {
                 if (target == AlignmentTarget.Comet)
                 {
-                    // Aggiungiamo un try-catch interno per evitare che un singolo errore
-                    // faccia fallire l'intero batch (ritornando null invece di crashare)
                     try 
                     {
                         return await FetchJplPointAsync(file, targetName!);
@@ -101,16 +94,13 @@ public class AlignmentCoordinator : IAlignmentCoordinator
             }
         }).ToList();
 
-        // Gestione Stelle (rimasta invariata, ma usa lo stesso pattern di lista)
         if (target == AlignmentTarget.Stars)
         {
             var firstFile = fileList[0];
             var refHeader = firstFile.ModifiedHeader ?? await _dataManager.GetHeaderOnlyAsync(firstFile.FilePath);
             var refWcs = _metadataService.ExtractWcs(refHeader!);
             
-            // Qui possiamo parallelizzare anche il calcolo WCS stellare
-            // Usiamo lo stesso semaforo per sicurezza I/O disco
-            using var starSemaphore = new SemaphoreSlim(8); // Più alto perché è calcolo locale (CPU/Disk)
+            using var starSemaphore = new SemaphoreSlim(8); 
 
             var starTasks = fileList.Select(async f => 
             {
@@ -143,7 +133,7 @@ public class AlignmentCoordinator : IAlignmentCoordinator
         var fileList = files.ToList();
         var guessList = guesses.ToList();
 
-        // Logica di riempimento intelligente
+        // 1. Discovery automatica se mancano dati manuali
         if (guessList.Any(g => g == null) && !string.IsNullOrEmpty(jplTargetName))
         {
             var discoveredPoints = await DiscoverStartingPointsAsync(fileList, target, jplTargetName);
@@ -157,10 +147,19 @@ public class AlignmentCoordinator : IAlignmentCoordinator
             }
         }
 
+        // 2. Calcolo Scientifico dei Centri
         var centers = await _alignmentService.CalculateCentersAsync(
             target, mode, method, fileList, guessList, searchRadius, progress, token);
 
-        return await _alignmentService.GenerateMapAsync(fileList, centers.ToList(), target);
+        // 3. Generazione Mappa di Analisi
+        // NOTA: Passiamo cropToCommonArea: false perché in fase di analisi (preview) 
+        // vogliamo solitamente vedere tutto il contesto o non ci importa del crop finale.
+        // Il crop vero e proprio viene deciso in ExecuteWarpingAsync.
+        return await _alignmentService.GenerateMapAsync(
+            fileList, 
+            centers.ToList(), 
+            target, 
+            cropToCommonArea: false); 
     }
 
     public async Task<List<string>> ExecuteWarpingAsync(
@@ -169,13 +168,26 @@ public class AlignmentCoordinator : IAlignmentCoordinator
         AlignmentMode mode,
         int searchRadius,
         string? jplName, 
+        bool cropToCommonArea, // <--- PARAMETRO NUOVO
         IProgress<BatchProgressReport>? progress = null,
         CancellationToken token = default)
     {
         if (map == null || !map.IsValid) throw new InvalidOperationException("Mappa non valida.");
 
+        var fileList = files.ToList();
+
+        // 1. RIGENERAZIONE MAPPA GEOMETRICA
+        // La mappa in ingresso contiene i centri corretti, ma potrebbe avere una geometria "Union" di default.
+        // Qui forziamo il ricalcolo della geometria (Size2D e Shift) in base alla scelta dell'utente (checkbox).
+        var finalMap = await _alignmentService.GenerateMapAsync(
+            fileList, 
+            map.Centers.ToList(), 
+            map.Target, 
+            cropToCommonArea); // Usa la scelta UI
+
+        // 2. Preparazione Logging
         string refInfo = "WCS";
-        if (map.Target == AlignmentTarget.Comet)
+        if (finalMap.Target == AlignmentTarget.Comet)
         {
             refInfo = !string.IsNullOrEmpty(jplName) ? $"JPL ({jplName})" : "Manual";
         }
@@ -183,13 +195,14 @@ public class AlignmentCoordinator : IAlignmentCoordinator
         Func<double, double, string> logStrategy = (dx, dy) => 
         {
             return FormattableString.Invariant(
-                $"KomaLab Align: Mode={mode}, Rad={searchRadius}, Ref={refInfo}, dX={dx:F2}, dY={dy:F2}"
+                $"KomaLab Align: Mode={mode}, Rad={searchRadius}, Ref={refInfo}, dX={dx:F2}, dY={dy:F2}, Cropped={cropToCommonArea}"
             );
         };
 
-        var warpProcessor = _alignmentService.GetWarpingProcessor(map, logStrategy);
+        // 3. Ottenimento Processore e Esecuzione Batch
+        var warpProcessor = _alignmentService.GetWarpingProcessor(finalMap, logStrategy);
 
-        return await _batchService.ProcessFilesAsync(files, "Aligned", warpProcessor, progress, token);
+        return await _batchService.ProcessFilesAsync(fileList, "Aligned", warpProcessor, progress, token);
     }
 
     #region Helpers Astrometrici Privati

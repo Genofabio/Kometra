@@ -189,7 +189,24 @@
                 </ScrollViewer>
                 
                 <StackPanel Grid.Row="2" Spacing="10" Margin="0,15,0,0">
+                    
+                    <Separator Margin="0,0,0,5" IsVisible="{Binding IsResultsListVisible}"/>
+
+                    <StackPanel Spacing="6" 
+                                IsEnabled="{Binding IsInteractionEnabled}"
+                                IsVisible="{Binding IsResultsListVisible}">
+                        <TextBlock Text="Opzioni di Salvataggio" FontSize="14" FontWeight="Bold"/>
+                        <CheckBox IsChecked="{Binding CropToCommonArea}" 
+                                  Margin="0,0,0,5"
+                                  Content="Ritaglia all'area comune">
+                            <ToolTip.Tip>
+                                <TextBlock Text="Se attivo, ritaglia l'immagine finale sull'area comune a tutti i frame, eliminando i bordi neri, ma mantenendo il centro e le proporzioni."/>
+                            </ToolTip.Tip>
+                        </CheckBox>
+                    </StackPanel>
+
                     <Separator Margin="0,0,0,10"/>
+
                     <Button Content="{Binding CalculateButtonText}" Command="{Binding CalculateCentersCommand}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" IsVisible="{Binding IsCalculateButtonVisible}" Classes="calculate"/> 
                     
                     <Grid ColumnDefinitions="*, *" ColumnSpacing="10" IsVisible="{Binding IsApplyCancelButtonsVisible}">
