@@ -18,7 +18,13 @@ public class ImageEnhancementModeConverter : IValueConverter
                 ImageEnhancementMode.LarsonSekaninaSymmetric => "Larson-Sekanina (Simmetrico)",
                 ImageEnhancementMode.AdaptiveLaplacianRVSF => "RVSF Adattivo (Singolo)",
                 ImageEnhancementMode.AdaptiveLaplacianMosaic => "RVSF Adattivo (Mosaico)",
+                
+                // --- Geometric Models (Filtri Fisici) ---
                 ImageEnhancementMode.InverseRho => "Correzione Fisica (1/Rho)",
+                ImageEnhancementMode.RadialWeightedModel => "Radial Weighted Model (R.W.M.)", // AGGIUNTO
+                ImageEnhancementMode.MedianComaModel => "Median Coma Model (M.C.M.)",         // AGGIUNTO
+
+                // --- Azimuthal ---
                 ImageEnhancementMode.AzimuthalAverage => "Media Azimutale",
                 ImageEnhancementMode.AzimuthalMedian => "Mediana Azimutale",
                 ImageEnhancementMode.AzimuthalRenormalization => "Rinormalizzazione Azimutale",

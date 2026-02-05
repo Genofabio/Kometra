@@ -84,9 +84,9 @@ public partial class ImageEnhancementToolViewModel : ObservableObject, IDisposab
     [NotifyPropertyChangedFor(nameof(IsLarsonSekaninaVisible))]
     [NotifyPropertyChangedFor(nameof(IsRvsfMosaicVisible))]
     [NotifyPropertyChangedFor(nameof(IsRvsfSingleVisible))]
-    [NotifyPropertyChangedFor(nameof(IsAzimuthalContainerVisible))] // Nuovo nome del pannello
-    [NotifyPropertyChangedFor(nameof(IsAngularQualityVisible))]    // Nuovo controllo specifico
-    [NotifyPropertyChangedFor(nameof(IsMaskRadiusVisible))]        // Nuovo controllo specifico
+    [NotifyPropertyChangedFor(nameof(IsAzimuthalContainerVisible))] 
+    [NotifyPropertyChangedFor(nameof(IsAngularQualityVisible))]    
+    [NotifyPropertyChangedFor(nameof(IsMaskRadiusVisible))]        
     [NotifyPropertyChangedFor(nameof(IsRadialWeightedModelVisible))]
     [NotifyPropertyChangedFor(nameof(IsAzimuthalRejectionVisible))]
     [NotifyPropertyChangedFor(nameof(IsAzimuthalNormVisible))]
@@ -99,7 +99,7 @@ public partial class ImageEnhancementToolViewModel : ObservableObject, IDisposab
     private ImageEnhancementMode _selectedMode;
 
     // --- PARAMETRI SCIENTIFICI ---
-    [ObservableProperty] private double _rotationAngle = 3.0;
+    [ObservableProperty] private double _rotationAngle = 5.0;
     [ObservableProperty] private double _shiftX = 0.0;
     [ObservableProperty] private double _shiftY = 0.0;
     [ObservableProperty] private bool _useLogScale = true;
@@ -111,13 +111,8 @@ public partial class ImageEnhancementToolViewModel : ObservableObject, IDisposab
     [ObservableProperty] private double _rvsfN_1 = 1.0;
     [ObservableProperty] private double _rvsfN_2 = 0.5;
     
-    // Subsampling ora è solo per MCM (Angular Quality)
     [ObservableProperty] private int _radialSubsampling = 5;
-    
-    // Raggio in Double per precisione sub-pixel
-    [ObservableProperty] private double _radialMaxRadius = 0.0;
-    
-    // RIMOSSO: _backgroundValue (ora automatico)
+    [ObservableProperty] private double _radialMaxRadius = 100.0;
     
     [ObservableProperty] private double _azimuthalRejSigma = 3.0;
     [ObservableProperty] private double _azimuthalNormSigma = 20.0;
@@ -149,22 +144,20 @@ public partial class ImageEnhancementToolViewModel : ObservableObject, IDisposab
     public bool IsRvsfSingleVisible => SelectedMode == ImageEnhancementMode.AdaptiveLaplacianRVSF;
     public bool IsRvsfMosaicVisible => SelectedMode == ImageEnhancementMode.AdaptiveLaplacianMosaic;
     
-    // Pannello "Geometria Polare" visibile per tutto ciò che è radiale/polare
+    // FIX: Rimosso InverseRho e AzimuthalMedian (che non hanno parametri)
+    // Così il contenitore (e il titolo) spariscono quando non ci sono controlli.
     public bool IsAzimuthalContainerVisible => SelectedMode is ImageEnhancementMode.AzimuthalAverage 
                                                    or ImageEnhancementMode.AzimuthalRenormalization 
-                                                   or ImageEnhancementMode.InverseRho 
-                                                   or ImageEnhancementMode.AzimuthalMedian
+                                                   // or ImageEnhancementMode.InverseRho  <-- RIMOSSO
+                                                   // or ImageEnhancementMode.AzimuthalMedian <-- RIMOSSO
                                                    or ImageEnhancementMode.MedianComaModel
                                                    or ImageEnhancementMode.RadialWeightedModel;
 
-    // NUOVO: Visibile SOLO per Median Coma Model (l'unico che usa subsampling come Angular Quality)
     public bool IsAngularQualityVisible => SelectedMode == ImageEnhancementMode.MedianComaModel;
 
-    // NUOVO: Visibile per MCM e RWM (Entrambi usano il raggio per la maschera)
     public bool IsMaskRadiusVisible => SelectedMode == ImageEnhancementMode.MedianComaModel 
                                     || SelectedMode == ImageEnhancementMode.RadialWeightedModel;
 
-    // Il pannello specifico RWM è ora vuoto (Background Auto), quindi false
     public bool IsRadialWeightedModelVisible => false; 
 
     public bool IsAzimuthalRejectionVisible => SelectedMode is ImageEnhancementMode.AzimuthalAverage 
@@ -321,13 +314,8 @@ public partial class ImageEnhancementToolViewModel : ObservableObject, IDisposab
             ParamA_1 = RvsfA_1, ParamA_2 = RvsfA_2,
             ParamB_1 = RvsfB_1, ParamB_2 = RvsfB_2,
             ParamN_1 = RvsfN_1, ParamN_2 = RvsfN_2,
-            
-            // Subsampling serve solo per MCM (Angular Quality)
             RadialSubsampling = RadialSubsampling,
-            
-            // Raggio Double per MCM e RWM
             RadialMaxRadius = RadialMaxRadius,
-            
             AzimuthalRejSigma = AzimuthalRejSigma, AzimuthalNormSigma = AzimuthalNormSigma,
             FrangiSigma = FrangiSigma, FrangiBeta = FrangiBeta, FrangiC = FrangiC,
             TensorSigma = TensorSigma, TensorRho = TensorRho, TopHatKernelSize = TopHatKernelSize,

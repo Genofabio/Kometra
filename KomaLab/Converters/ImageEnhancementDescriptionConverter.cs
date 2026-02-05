@@ -13,52 +13,60 @@ public class ImageEnhancementDescriptionConverter : IValueConverter
         {
             return mode switch
             {
-                // --- Radial & Rotational ---
+                // --- Radial & Rotational (Gradienti) ---
                 ImageEnhancementMode.LarsonSekaninaStandard => 
-                    "Metodo standard (Sottrattivo: $I - Rot$). Ruota l'immagine di un piccolo angolo e la sottrae dall'originale. Ideale per evidenziare la morfologia a 'girandola' dei getti.",
+                    "Metodo sottrattivo classico. Ruota l'immagine di un piccolo angolo e la sottrae dall'originale. Ideale per evidenziare bordi netti e strutture a spirale (girandola) nei getti della chioma.",
                 
                 ImageEnhancementMode.LarsonSekaninaSymmetric => 
-                    "Metodo simmetrico ($2I - Rot(+) - Rot(-)$). Riduce gli artefatti lineari tipici del metodo standard e aumenta il contrasto delle strutture.",
+                    "Evoluzione del metodo standard che somma una rotazione positiva e una negativa. Riduce drasticamente gli artefatti scuri ('buchi') tipici del metodo standard, preservando meglio il contrasto naturale.",
 
                 ImageEnhancementMode.AdaptiveLaplacianRVSF => 
-                    "Radial Variable Slope Filter. Filtro radiale adattivo ($R = A + B \\cdot \\rho^N$) ottimizzato per esaltare strutture che si espandono radialmente.",
+                    "Filtro a pendenza variabile (Radial Variable Slope). Modifica l'intensità del filtraggio in base alla distanza dal nucleo. Ottimizzato per seguire il naturale decadimento della luminosità della cometa.",
 
                 ImageEnhancementMode.AdaptiveLaplacianMosaic => 
-                    "Genera un mosaico (4x2) applicando l'RVSF con 8 combinazioni di parametri diverse per trovare quella ottimale.",
+                    "Genera un mosaico 4x2 applicando l'RVSF con diverse combinazioni di parametri simultaneamente. Utile per confrontare rapidamente diverse intensità di filtro e trovare quella ottimale.",
 
+                // --- Polar & Digital Models (Geometria) ---
                 ImageEnhancementMode.InverseRho => 
-                    "Compensa il calo di luce ($1/\\rho$). Appiattisce il gradiente centrale svelando getti esterni. Ideale per lo studio delle polveri.",
+                    "Filtro geometrico puro. Compensa la naturale caduta di luce (1/raggio) tipica delle comete. Appiattisce il forte bagliore centrale permettendo di vedere i dettagli deboli della polvere esterna.",
 
+                ImageEnhancementMode.RadialWeightedModel =>
+                    "Modello Radiale Pesato (R.W.M.). Sottrae il fondo cielo e moltiplica ogni pixel per la sua distanza dal centro. Simile all'Inverse Rho ma spesso offre un contrasto migliore nelle zone periferiche.",
+
+                ImageEnhancementMode.MedianComaModel =>
+                    "Modello della Chioma Mediana (M.C.M.). Costruisce un modello sintetico della cometa analizzando la mediana degli anelli concentrici e lo sottrae. È il metodo più robusto per isolare getti e shell senza creare artefatti geometrici.",
+
+                // --- Azimuthal Filters (Polari) ---
                 ImageEnhancementMode.AzimuthalAverage => 
-                    "Divide ogni pixel per la media del suo anello (escludendo outlier). Rimuove il gradiente naturale esaltando le variazioni strutturali.",
+                    "Calcola la luminosità media di ogni anello concentrico e divide l'immagine per questo modello. Rimuove la simmetria radiale perfetta, lasciando visibili solo le asimmetrie (getti, code).",
 
                 ImageEnhancementMode.AzimuthalMedian => 
-                    "Divide ogni pixel per la mediana del suo anello. Molto robusto contro i campi stellari densi.",
+                    "Simile alla media azimutale, ma utilizza la mediana. È molto più efficace nel gestire campi stellari densi, impedendo alle stelle di influenzare il calcolo del modello di fondo.",
 
                 ImageEnhancementMode.AzimuthalRenormalization => 
-                    "Normalizza il contrasto locale anello per anello (Mclaughlin/Z-Score). Efficace per recuperare dettagli debolissimi.",
+                    "Normalizza il contrasto locale anello per anello. Invece di mostrare la luminosità assoluta, mostra quanto un dettaglio è 'anomalo' rispetto ai suoi vicini sullo stesso raggio. Estremamente potente per dettagli elusivi.",
 
-                // --- Feature Extraction ---
+                // --- Feature Extraction (Morfologia) ---
                 ImageEnhancementMode.FrangiVesselnessFilter =>
-                    "Analisi Hessiana multiscala. Identifica strutture filamentose (vasi/getti) basandosi sulla curvatura locale, sopprimendo le stelle.",
+                    "Analisi basata sulla curvatura (Hessiana). Progettato per identificare strutture tubolari o filamentose. Eccellente per isolare getti sottili e code ioniche ignorando le stelle puntiformi.",
 
                 ImageEnhancementMode.StructureTensorCoherence =>
-                    "Calcola l'anisotropia locale (Tensore) per isolare flussi direzionali e getti lineari, attenuando il rumore puntiforme.",
+                    "Analizza la coerenza del flusso locale. Evidenzia le regioni dove la texture segue una direzione precisa (come flussi di gas e code), sopprimendo il rumore di fondo caotico.",
 
                 ImageEnhancementMode.WhiteTopHatExtraction =>
-                    "Operazione morfologica ($I - Apertura$). Estrae dettagli luminosi più piccoli del kernel ignorando il bagliore di fondo.",
+                    "Filtro morfologico che estrae dettagli luminosi più piccoli della dimensione del kernel specificato, rimuovendo completamente il gradiente di fondo a bassa frequenza.",
 
                 // --- Local Contrast ---
                 ImageEnhancementMode.UnsharpMaskingMedian => 
-                    "Sottrae un background sfocato (mediana). Metodo veloce per isolare strutture ad alta frequenza.",
+                    "Tecnica di maschera di contrasto che utilizza una mediana per sfocare il fondo. Sottrae le basse frequenze per aumentare drasticamente la nitidezza dei bordi e delle strutture fini.",
 
                 ImageEnhancementMode.ClaheLocalContrast =>
-                    "Equalizzazione istogramma adattiva (16-bit). Massimizza il contrasto locale dinamico in zone HDR.",
+                    "Equalizzazione adattiva dell'istogramma (CLAHE). Massimizza il contrasto locale lavorando su piccole sezioni dell'immagine. Utile per visualizzare dettagli sia nel nucleo luminoso che nella coda scura.",
 
                 ImageEnhancementMode.AdaptiveLocalNormalization =>
-                    "Normalizzazione statistica ($z-score$). Metodo scientifico 100% Float che preserva l'integrità del dato FITS.",
+                    "Normalizzazione statistica locale (Local Z-Score). Ricalcola ogni pixel basandosi sulla media e deviazione standard dei vicini. Metodo scientifico ideale per massimizzare la visibilità di strutture nascoste nel rumore.",
                 
-                _ => "Seleziona una modalità per vedere la descrizione."
+                _ => "Seleziona una modalità per visualizzare la descrizione e i parametri."
             };
         }
         return string.Empty;
