@@ -19,6 +19,8 @@ public static class ImageEnhancementModeExtensions
             ImageEnhancementMode.AdaptiveLaplacianRVSF => EnhancementCategory.RadialRotational,
             ImageEnhancementMode.AdaptiveLaplacianMosaic => EnhancementCategory.RadialRotational,
             ImageEnhancementMode.InverseRho => EnhancementCategory.RadialRotational,
+            ImageEnhancementMode.MedianComaModel => EnhancementCategory.RadialRotational,
+            ImageEnhancementMode.RadialWeightedModel => EnhancementCategory.RadialRotational,
             ImageEnhancementMode.AzimuthalAverage => EnhancementCategory.RadialRotational,
             ImageEnhancementMode.AzimuthalMedian => EnhancementCategory.RadialRotational,
             ImageEnhancementMode.AzimuthalRenormalization => EnhancementCategory.RadialRotational,

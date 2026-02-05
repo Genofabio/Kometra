@@ -33,7 +33,7 @@ public partial class ImageEnhancementToolView : Window
             // Sottoscriviamo per ricevere aggiornamenti dal VM
             _vm.PropertyChanged += OnViewModelPropertyChanged;
             
-            // [AGGIUNTO] Sottoscrizione all'evento per il fit automatico
+            // Sottoscrizione all'evento per il fit automatico
             _vm.RequestFitToScreen += OnRequestFitToScreen;
             
             // Inizializza i valori nelle TextBox all'avvio
@@ -56,8 +56,6 @@ public partial class ImageEnhancementToolView : Window
         if (_vm != null)
         {
             _vm.PropertyChanged -= OnViewModelPropertyChanged;
-            
-            // [AGGIUNTO] Rimozione sottoscrizione
             _vm.RequestFitToScreen -= OnRequestFitToScreen;
         
             // Disposizione manuale sicura
@@ -73,7 +71,6 @@ public partial class ImageEnhancementToolView : Window
         if (previewBorder != null) previewBorder.SizeChanged -= OnPreviewSizeChanged;
     }
 
-    // [AGGIUNTO] Handler dell'evento scatenato dal ViewModel
     private void OnRequestFitToScreen()
     {
         // Eseguiamo sul thread UI per sicurezza
@@ -97,8 +94,11 @@ public partial class ImageEnhancementToolView : Window
                 case nameof(ImageEnhancementToolViewModel.ShiftX): UpdateBox("ShiftXBox", _vm.ShiftX.ToString("F1")); break;
                 case nameof(ImageEnhancementToolViewModel.ShiftY): UpdateBox("ShiftYBox", _vm.ShiftY.ToString("F1")); break;
 
-                // Azimuthal / Radial
+                // Azimuthal / Radial / M.C.M. / R.W.M.
                 case nameof(ImageEnhancementToolViewModel.RadialSubsampling): UpdateBox("SubsamplingBox", _vm.RadialSubsampling.ToString()); break;
+                case nameof(ImageEnhancementToolViewModel.RadialMaxRadius): UpdateBox("McmRadiusBox", _vm.RadialMaxRadius.ToString()); break;
+                case nameof(ImageEnhancementToolViewModel.BackgroundValue): UpdateBox("BgValueBox", _vm.BackgroundValue.ToString("F2")); break;
+                
                 case nameof(ImageEnhancementToolViewModel.AzimuthalRejSigma): UpdateBox("AzimuthalRejBox", _vm.AzimuthalRejSigma.ToString("F1")); break;
                 case nameof(ImageEnhancementToolViewModel.AzimuthalNormSigma): UpdateBox("AzimuthalNormBox", _vm.AzimuthalNormSigma.ToString("F1")); break;
 
@@ -162,6 +162,8 @@ public partial class ImageEnhancementToolView : Window
         UpdateBox("ShiftYBox", _vm.ShiftY.ToString("F1"));
         
         UpdateBox("SubsamplingBox", _vm.RadialSubsampling.ToString());
+        UpdateBox("McmRadiusBox", _vm.RadialMaxRadius.ToString());
+        UpdateBox("BgValueBox", _vm.BackgroundValue.ToString("F2"));
         UpdateBox("AzimuthalRejBox", _vm.AzimuthalRejSigma.ToString("F1"));
         UpdateBox("AzimuthalNormBox", _vm.AzimuthalNormSigma.ToString("F1"));
 
@@ -216,6 +218,8 @@ public partial class ImageEnhancementToolView : Window
                 case "ShiftYBox": _vm.ShiftY = d; break;
                 
                 case "SubsamplingBox": _vm.RadialSubsampling = Math.Max(1, i); break;
+                case "McmRadiusBox": _vm.RadialMaxRadius = Math.Max(0, i); break;
+                case "BgValueBox": _vm.BackgroundValue = d; break;
                 case "AzimuthalRejBox": _vm.AzimuthalRejSigma = d; break;
                 case "AzimuthalNormBox": _vm.AzimuthalNormSigma = d; break;
 

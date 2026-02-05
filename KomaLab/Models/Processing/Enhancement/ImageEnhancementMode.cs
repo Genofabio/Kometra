@@ -7,6 +7,8 @@ public enum ImageEnhancementMode
     LarsonSekaninaSymmetric,
     AdaptiveLaplacianRVSF,
     AdaptiveLaplacianMosaic,
+    MedianComaModel,
+    RadialWeightedModel,
     InverseRho,
     AzimuthalAverage,
     AzimuthalMedian,

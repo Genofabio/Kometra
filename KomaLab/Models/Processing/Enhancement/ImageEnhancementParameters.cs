@@ -14,8 +14,10 @@ public class ImageEnhancementParameters
     public double ParamB_2 { get; set; } = 0.5;
     public double ParamN_2 { get; set; } = 0.5;
     public int RadialSubsampling { get; set; } = 5;
+    public int RadialMaxRadius { get; set; } = 0;
     public double AzimuthalRejSigma { get; set; } = 3.0;
     public double AzimuthalNormSigma { get; set; } = 20.0;
+    public double BackgroundValue { get; set; } = 0.0;
 
     // --- Feature Extraction ---
     public double FrangiSigma { get; set; } = 1.5;
