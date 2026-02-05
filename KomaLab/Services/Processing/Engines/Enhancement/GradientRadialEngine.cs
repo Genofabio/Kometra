@@ -1,8 +1,6 @@
 ﻿using System;
 using System.Buffers;
-using System.Collections.Concurrent;
 using System.Collections.Generic;
-using System.Diagnostics;
 using System.Threading;
 using System.Threading.Tasks;
 using OpenCvSharp;
@@ -22,6 +20,7 @@ public class GradientRadialEngine : IGradientRadialEngine
         await Task.Run(() =>
         {
             dst.Create(src.Size(), src.Type());
+            // OpenCV gestisce internamente il centro corretto (w/2, h/2) nelle rotazioni
             Point2f center = new Point2f(src.Cols / 2.0f, src.Rows / 2.0f);
 
             Mat GetRotatedImage(Mat input, double deg, double sx, double sy)
@@ -128,25 +127,26 @@ public class GradientRadialEngine : IGradientRadialEngine
     // PARTE 2: METODI RADIALI (POLARI)
     // =========================================================
 
-    public void ApplyInverseRho(Mat src, Mat dst, int subsampling = 10)
+    public void ApplyInverseRho(Mat src, Mat dst)
     {
         dst.Create(src.Size(), src.Type());
-        if (src.Depth() == MatType.CV_64F) InverseRhoCoreDouble(src, dst, subsampling);
-        else InverseRhoCoreFloat(src, dst, subsampling);
+        // Parametro subsampling rimosso: usa griglia 5x5 interna fissa
+        if (src.Depth() == MatType.CV_64F) InverseRhoCoreDouble(src, dst);
+        else InverseRhoCoreFloat(src, dst);
     }
 
-    public Mat ToPolar(Mat src, int nRad, int nTheta, int subsampling = 10)
+    public Mat ToPolar(Mat src, int nRad, int nTheta)
     {
         Point2f center = new Point2f(src.Cols / 2.0f, src.Rows / 2.0f);
-        double maxRadius = nRad;
-
         using Mat cvPolar = new Mat();
+        
+        // Lanczos4 gestisce internamente l'alta qualità
         Cv2.WarpPolar(
             src,
             cvPolar,
             new Size(nRad, nTheta),
             center,
-            maxRadius,
+            nRad,
             InterpolationFlags.Lanczos4 | InterpolationFlags.WarpFillOutliers,
             WarpPolarMode.Linear
         );
@@ -156,7 +156,7 @@ public class GradientRadialEngine : IGradientRadialEngine
         return dst;
     }
 
-    public void FromPolar(Mat polar, Mat dst, int width, int height, int subsampling = 10)
+    public void FromPolar(Mat polar, Mat dst, int width, int height)
     {
         using Mat polarTransposed = new Mat();
         Cv2.Transpose(polar, polarTransposed);
@@ -178,10 +178,13 @@ public class GradientRadialEngine : IGradientRadialEngine
         Parallel.For(0, height, y =>
         {
             int rowOff = y * width;
-            double dy = y - cy;
+            // CORREZIONE SUB-PIXEL: (y + 0.5) punta al centro del pixel
+            double dy = (y + 0.5) - cy;
             for (int x = 0; x < width; x++)
             {
-                double dx = x - cx;
+                // CORREZIONE SUB-PIXEL: (x + 0.5) punta al centro del pixel
+                double dx = (x + 0.5) - cx;
+                
                 double rho = Math.Sqrt(dx * dx + dy * dy);
                 double theta = Math.Atan2(dy, dx);
                 if (theta < 0) theta += 2 * Math.PI; 
@@ -220,7 +223,7 @@ public class GradientRadialEngine : IGradientRadialEngine
     // NUOVO: RADIAL WEIGHTED MODEL (R.W.M.) - ANALYTICAL NORMALIZATION
     // =========================================================
 
-    public void ApplyRadialWeightedModel(Mat src, Mat dst, double backgroundValue = 0, int maxFilterRadius = 0)
+    public void ApplyRadialWeightedModel(Mat src, Mat dst, double maxFilterRadius = 0.0)
     {
         bool isDouble = src.Depth() == MatType.CV_64F;
         MatType workType = isDouble ? MatType.CV_64F : MatType.CV_32F;
@@ -231,9 +234,8 @@ public class GradientRadialEngine : IGradientRadialEngine
         using Mat cleanSrc = srcWork.Clone();
         SanitizeInPlace(cleanSrc, isDouble);
 
-        // 2. Auto-Background
-        double bgToUse = backgroundValue;
-        if (bgToUse <= 0) bgToUse = EstimateSkyBackground(cleanSrc, isDouble);
+        // 2. Auto-Background (Calcolato sempre)
+        double bgToUse = EstimateSkyBackground(cleanSrc, isDouble);
 
         // 3. Calcolo R.W.M. RAW
         using Mat rwmResult = new Mat(src.Size(), workType);
@@ -244,30 +246,27 @@ public class GradientRadialEngine : IGradientRadialEngine
         dst.Create(src.Size(), workType);
         
         int w = src.Cols; int h = src.Rows;
-        int diag = (int)Math.Ceiling(Math.Sqrt(w * w + h * h) / 2.0);
-        int maskRadius = (maxFilterRadius > 0 && maxFilterRadius < diag) ? maxFilterRadius : diag;
+        // Diag in double per confronto preciso
+        double diag = Math.Sqrt(w * w + h * h) / 2.0;
+        
+        double maskRadius = (maxFilterRadius > 0 && maxFilterRadius < diag) ? maxFilterRadius : diag;
 
-        if (maxFilterRadius > 0 && maxFilterRadius < diag)
+        if (maxFilterRadius > 0.001 && maxFilterRadius < diag)
         {
             // A. RINORMALIZZAZIONE ANALITICA
-            // Vogliamo riportare l'RWM alla stessa scala dell'originale al raggio di taglio.
-            // Formula: RWM_Norm = (RWM / Radius) + BG
-            // Questo usa ConvertTo: alpha = 1.0/radius, beta = bgToUse.
-            
             double scale = 1.0 / maskRadius;
             
             using Mat rwmNormalized = new Mat();
-            // FIX CRASH: Usiamo ConvertTo invece di ScaleAdd
             // Dest = Src * alpha + beta
             rwmResult.ConvertTo(rwmNormalized, -1, scale, bgToUse);
 
             // B. Maschera Sfumata
+            // Cv2.Circle richiede int. Il GaussianBlur mitiga l'errore di quantizzazione.
             using Mat mask = new Mat(src.Size(), workType, Scalar.All(0));
-            Cv2.Circle(mask, w/2, h/2, maskRadius, Scalar.All(1.0), -1, LineTypes.Link8);
+            Cv2.Circle(mask, w/2, h/2, (int)maskRadius, Scalar.All(1.0), -1, LineTypes.Link8);
             Cv2.GaussianBlur(mask, mask, new Size(25, 25), 0);
 
             // C. Blending
-            // Output = rwmNormalized * Mask + Original * (1-Mask)
             using Mat termRwm = new Mat();
             Cv2.Multiply(rwmNormalized, mask, termRwm);
 
@@ -289,12 +288,14 @@ public class GradientRadialEngine : IGradientRadialEngine
     // METODO M.C.M. (MEDIAN COMA MODEL) - FINAL
     // =========================================================
 
-    public void ApplyMedianComaModel(Mat src, Mat dst, int maxFilterRadius = 0, int subsampling = 5)
+    public void ApplyMedianComaModel(Mat src, Mat dst, double maxFilterRadius = 0.0, int angularQuality = 5)
     {
         int w = src.Cols; int h = src.Rows;
         Point2f center = new Point2f(w / 2.0f, h / 2.0f);
-        int diag = (int)Math.Ceiling(Math.Sqrt(w * w + h * h) / 2.0);
-        int maskRadius = (maxFilterRadius > 0 && maxFilterRadius < diag) ? maxFilterRadius : diag;
+        
+        // Uso double per precisione massima nei calcoli di raggio
+        double diag = Math.Sqrt(w * w + h * h) / 2.0;
+        double maskRadius = (maxFilterRadius > 0 && maxFilterRadius < diag) ? maxFilterRadius : diag;
 
         bool isDouble = src.Depth() == MatType.CV_64F;
         MatType workType = isDouble ? MatType.CV_64F : MatType.CV_32F;
@@ -305,9 +306,12 @@ public class GradientRadialEngine : IGradientRadialEngine
         using Mat modelInput = srcWork.Clone();
         SanitizeInPlace(modelInput, isDouble); 
 
-        int nTheta = 720 * Math.Max(1, subsampling / 2);
+        // angularQuality definisce la risoluzione angolare della scansione
+        int nTheta = 720 * Math.Max(1, angularQuality / 2);
+        
         using Mat polar = new Mat();
-        Cv2.WarpPolar(modelInput, polar, new Size(diag, nTheta), center, diag, 
+        // WarpPolar lavora con sub-pixel accuracy anche se Size richiede int
+        Cv2.WarpPolar(modelInput, polar, new Size((int)Math.Ceiling(diag), nTheta), center, diag, 
                       InterpolationFlags.Linear | InterpolationFlags.WarpFillOutliers, WarpPolarMode.Linear);
 
         using Mat polarTransposed = new Mat();
@@ -324,15 +328,16 @@ public class GradientRadialEngine : IGradientRadialEngine
 
         dst.Create(src.Size(), workType);
 
-        if (maxFilterRadius > 0 && maxFilterRadius < diag)
+        if (maxFilterRadius > 0.001 && maxFilterRadius < diag)
         {
-            double edgeValue = GetEdgeValueAtRadiusPolar(polarTransposed, maskRadius);
+            double edgeValue = GetEdgeValueAtRadiusPolar(polarTransposed, (int)maskRadius);
 
             using Mat comaModelShifted = new Mat();
             Cv2.Subtract(comaModelFull, new Scalar(edgeValue), comaModelShifted);
 
             using Mat mask = new Mat(src.Size(), workType, Scalar.All(0));
-            Cv2.Circle(mask, (int)center.X, (int)center.Y, maskRadius, Scalar.All(1.0), -1, LineTypes.Link8);
+            // Circle richiede int
+            Cv2.Circle(mask, (int)center.X, (int)center.Y, (int)maskRadius, Scalar.All(1.0), -1, LineTypes.Link8);
             Cv2.GaussianBlur(mask, mask, new Size(25, 25), 0);
 
             using Mat subtractionTerm = new Mat();
@@ -392,16 +397,19 @@ public class GradientRadialEngine : IGradientRadialEngine
     }
 
     // =========================================================
-    // CORE METHODS R.W.M.
+    // CORE METHODS R.W.M. (CORRETTI SUB-PIXEL)
     // =========================================================
 
     private void RunRWMCoreDouble(Mat src, Mat dst, double bg) {
         int rows = src.Rows; int cols = src.Cols; double cx = cols/2.0; double cy = rows/2.0;
         src.GetArray(out double[] sArr); double[] dArr = new double[sArr.Length];
         Parallel.For(0, rows, y => {
-            int rowOffset = y * cols; double dy = y - cy; double dySq = dy * dy;
+            int rowOffset = y * cols; 
+            // CORREZIONE SUB-PIXEL: (y + 0.5)
+            double dy = (y + 0.5) - cy; double dySq = dy * dy;
             for (int x = 0; x < cols; x++) {
-                double dx = x - cx; double r = Math.Sqrt(dx * dx + dySq); if (r < 1.0) r = 1.0;
+                // CORREZIONE SUB-PIXEL: (x + 0.5)
+                double dx = (x + 0.5) - cx; double r = Math.Sqrt(dx * dx + dySq); if (r < 1.0) r = 1.0;
                 dArr[rowOffset + x] = (sArr[rowOffset + x] - bg) * r;
             }
         }); dst.SetArray(dArr);
@@ -411,9 +419,12 @@ public class GradientRadialEngine : IGradientRadialEngine
         int rows = src.Rows; int cols = src.Cols; double cx = cols/2.0; double cy = rows/2.0;
         src.GetArray(out float[] sArr); float[] dArr = new float[sArr.Length]; float bgF = (float)bg;
         Parallel.For(0, rows, y => {
-            int rowOffset = y * cols; double dy = y - cy; double dySq = dy * dy;
+            int rowOffset = y * cols; 
+            // CORREZIONE SUB-PIXEL: (y + 0.5)
+            double dy = (y + 0.5) - cy; double dySq = dy * dy;
             for (int x = 0; x < cols; x++) {
-                double dx = x - cx; double r = Math.Sqrt(dx * dx + dySq); if (r < 1.0) r = 1.0;
+                // CORREZIONE SUB-PIXEL: (x + 0.5)
+                double dx = (x + 0.5) - cx; double r = Math.Sqrt(dx * dx + dySq); if (r < 1.0) r = 1.0;
                 dArr[rowOffset + x] = (float)((sArr[rowOffset + x] - bgF) * r);
             }
         }); dst.SetArray(dArr);
@@ -446,16 +457,19 @@ public class GradientRadialEngine : IGradientRadialEngine
     }
 
     // =========================================================
-    // VECCHI CORE METHODS
+    // VECCHI CORE METHODS (RVSF CORRETTO SUB-PIXEL)
     // =========================================================
 
     private void RunRVSFCoreDouble(Mat src, Mat dst, double A, double B, double N, IProgress<double> progress) {
         int rows = src.Rows; int cols = src.Cols; double xNuc = cols / 2.0; double yNuc = rows / 2.0;
         src.GetArray(out double[] sArr); double[] dArr = new double[sArr.Length]; int completed = 0;
         Parallel.For(0, rows, (int y) => {
-            int rowOffset = y * cols; double dy = y - yNuc; double dySq = dy * dy;
+            int rowOffset = y * cols; 
+            // CORREZIONE SUB-PIXEL: (y + 0.5)
+            double dy = (y + 0.5) - yNuc; double dySq = dy * dy;
             for (int x = 0; x < cols; x++) {
-                double dx = x - xNuc; double rho = Math.Sqrt(dx * dx + dySq);
+                // CORREZIONE SUB-PIXEL: (x + 0.5)
+                double dx = (x + 0.5) - xNuc; double rho = Math.Sqrt(dx * dx + dySq);
                 int r = (int)Math.Round(A + (B * Math.Pow(rho, N))); if (r < 1) r = 1;
                 int yMin = (y - r < 0) ? 0 : (y - r >= rows ? rows - 1 : y - r); int yMax = (y + r < 0) ? 0 : (y + r >= rows ? rows - 1 : y + r);
                 int xMin = (x - r < 0) ? 0 : (x - r >= cols ? cols - 1 : x - r); int xMax = (x + r < 0) ? 0 : (x + r >= cols ? cols - 1 : x + r);
@@ -472,9 +486,12 @@ public class GradientRadialEngine : IGradientRadialEngine
         int rows = src.Rows; int cols = src.Cols; double xNuc = cols / 2.0; double yNuc = rows / 2.0;
         src.GetArray(out float[] sArr); float[] dArr = new float[sArr.Length]; int completed = 0;
         Parallel.For(0, rows, (int y) => {
-            int rowOffset = y * cols; double dy = y - yNuc; double dySq = dy * dy;
+            int rowOffset = y * cols; 
+            // CORREZIONE SUB-PIXEL: (y + 0.5)
+            double dy = (y + 0.5) - yNuc; double dySq = dy * dy;
             for (int x = 0; x < cols; x++) {
-                double dx = x - xNuc; double rho = Math.Sqrt(dx * dx + dySq);
+                // CORREZIONE SUB-PIXEL: (x + 0.5)
+                double dx = (x + 0.5) - xNuc; double rho = Math.Sqrt(dx * dx + dySq);
                 int r = (int)Math.Round(A + (B * Math.Pow(rho, N))); if (r < 1) r = 1;
                 int yMin = (y - r < 0) ? 0 : (y - r >= rows ? rows - 1 : y - r); int yMax = (y + r < 0) ? 0 : (y + r >= rows ? rows - 1 : y + r);
                 int xMin = (x - r < 0) ? 0 : (x - r >= cols ? cols - 1 : x - r); int xMax = (x + r < 0) ? 0 : (x + r >= cols ? cols - 1 : x + r);
@@ -487,28 +504,69 @@ public class GradientRadialEngine : IGradientRadialEngine
         }); dst.SetArray(dArr);
     }
     
-    private void InverseRhoCoreDouble(Mat src, Mat dst, int subsampling) {
+    // =========================================================
+    // CORE METHODS INVERSE RHO (GRIGLIA FISSA 5x5)
+    // =========================================================
+
+    private void InverseRhoCoreDouble(Mat src, Mat dst) {
         int rows = src.Rows; int cols = src.Cols; double xNuc = cols / 2.0; double yNuc = rows / 2.0;
         src.GetArray(out double[] sArr); double[] dArr = new double[sArr.Length];
         Scalar mean = Cv2.Mean(src); double renorm = 100.0 / (Math.Abs(mean.Val0) > 1e-9 ? mean.Val0 : 1.0);
+        
+        // GRIGLIA 5x5 HARDCODED (Ottimale per velocità/qualità)
+        int steps = 5; 
+        double stepSize = 1.0 / steps;
+        double normFactor = renorm * (stepSize * stepSize); 
+
         Parallel.For(0, rows, (int y) => {
             int rowOffset = y * cols;
+            // Integra sul pixel: y va da y a y+1. 
+            // Relative to center: (y - yNuc) start, (y+1 - yNuc) end.
+            double basePathY = y - yNuc;
+
             for (int x = 0; x < cols; x++) {
-                double rhoSum = 0; for (int m = 0; m < 10; m++) { double dy = (y + 0.5 - yNuc) - 0.45 + (m * 0.1); for (int n = 0; n < 10; n++) { double dx = (x + 0.5 - xNuc) - 0.45 + (n * 0.1); rhoSum += Math.Sqrt(dx * dx + dy * dy); } }
-                dArr[rowOffset + x] = sArr[rowOffset + x] * renorm * (rhoSum * 0.01);
+                double rhoSum = 0;
+                double basePathX = x - xNuc;
+
+                for (int m = 0; m < steps; m++) {
+                    double dy = basePathY + (m + 0.5) * stepSize;
+                    double dySq = dy * dy;
+                    for (int n = 0; n < steps; n++) {
+                        double dx = basePathX + (n + 0.5) * stepSize;
+                        rhoSum += Math.Sqrt(dx * dx + dySq);
+                    }
+                }
+                dArr[rowOffset + x] = sArr[rowOffset + x] * (rhoSum * normFactor);
             }
         }); dst.SetArray(dArr);
     }
 
-    private void InverseRhoCoreFloat(Mat src, Mat dst, int subsampling) {
+    private void InverseRhoCoreFloat(Mat src, Mat dst) {
         int rows = src.Rows; int cols = src.Cols; double xNuc = cols / 2.0; double yNuc = rows / 2.0;
         src.GetArray(out float[] sArr); float[] dArr = new float[sArr.Length];
         Scalar mean = Cv2.Mean(src); double renorm = 100.0 / (Math.Abs(mean.Val0) > 1e-9 ? mean.Val0 : 1.0);
+        
+        int steps = 5; 
+        double stepSize = 1.0 / steps;
+        double normFactor = renorm * (stepSize * stepSize);
+
         Parallel.For(0, rows, (int y) => {
             int rowOffset = y * cols;
+            double basePathY = y - yNuc;
+            
             for (int x = 0; x < cols; x++) {
-                double rhoSum = 0; for (int m = 0; m < 10; m++) { double dy = (y + 0.5 - yNuc) - 0.45 + (m * 0.1); for (int n = 0; n < 10; n++) { double dx = (x + 0.5 - xNuc) - 0.45 + (n * 0.1); rhoSum += Math.Sqrt(dx * dx + dy * dy); } }
-                dArr[rowOffset + x] = (float)(sArr[rowOffset + x] * renorm * (rhoSum * 0.01));
+                double rhoSum = 0;
+                double basePathX = x - xNuc;
+
+                for (int m = 0; m < steps; m++) {
+                    double dy = basePathY + (m + 0.5) * stepSize;
+                    double dySq = dy * dy;
+                    for (int n = 0; n < steps; n++) {
+                        double dx = basePathX + (n + 0.5) * stepSize;
+                        rhoSum += Math.Sqrt(dx * dx + dySq);
+                    }
+                }
+                dArr[rowOffset + x] = (float)(sArr[rowOffset + x] * (rhoSum * normFactor));
             }
         }); dst.SetArray(dArr);
     }

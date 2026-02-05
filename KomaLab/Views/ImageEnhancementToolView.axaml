@@ -90,20 +90,23 @@
                             </Grid>
                         </StackPanel>
 
-                        <StackPanel Spacing="10" IsVisible="{Binding IsAzimuthalVisible}">
-                            <TextBlock Text="Geometria Polare" FontWeight="SemiBold"/>
+                        <StackPanel Spacing="10" IsVisible="{Binding IsAzimuthalContainerVisible}">
+                            <TextBlock Text="Geometria Polare &amp; Modelli" FontWeight="SemiBold"/>
                             <Grid ColumnDefinitions="*, 80" RowDefinitions="Auto, Auto, Auto, Auto" RowSpacing="8">
                                 
-                                <TextBlock Grid.Row="0" Text="Subsampling:" VerticalAlignment="Center" Opacity="0.8"/>
+                                <TextBlock Grid.Row="0" Text="Angular Quality:" VerticalAlignment="Center" Opacity="0.8"
+                                           IsVisible="{Binding IsAngularQualityVisible}"/>
                                 <TextBox x:Name="SubsamplingBox" Text="{Binding RadialSubsampling, Mode=OneWay}"
-                                         Grid.Row="0" Grid.Column="1" Classes="compact" LostFocus="OnManualInputCommit" KeyDown="OnInputKeyDown"/>
+                                         Grid.Row="0" Grid.Column="1" Classes="compact" LostFocus="OnManualInputCommit" KeyDown="OnInputKeyDown"
+                                         IsVisible="{Binding IsAngularQualityVisible}"
+                                         ToolTip.Tip="Definisce la risoluzione angolare del modello (Spicchi)."/>
 
                                 <TextBlock Grid.Row="1" Text="Mask Radius (px):" VerticalAlignment="Center" Opacity="0.8"
-                                           IsVisible="{Binding IsMedianComaModelVisible}"
+                                           IsVisible="{Binding IsMaskRadiusVisible}"
                                            ToolTip.Tip="Raggio massimo di applicazione (0 = Tutta l'immagine)"/>
-                                <TextBox x:Name="McmRadiusBox" Text="{Binding RadialMaxRadius, Mode=OneWay}"
+                                <TextBox x:Name="McmRadiusBox" Text="{Binding RadialMaxRadius, Mode=OneWay, StringFormat={}{0:F1}}"
                                          Grid.Row="1" Grid.Column="1" Classes="compact" LostFocus="OnManualInputCommit" KeyDown="OnInputKeyDown"
-                                         IsVisible="{Binding IsMedianComaModelVisible}"/>
+                                         IsVisible="{Binding IsMaskRadiusVisible}"/>
 
                                 <TextBlock Grid.Row="2" Text="Sigma Rej:" VerticalAlignment="Center" Opacity="0.8"
                                            IsVisible="{Binding IsAzimuthalRejectionVisible}"/>
@@ -116,16 +119,6 @@
                                 <TextBox x:Name="AzimuthalNormBox" Text="{Binding AzimuthalNormSigma, Mode=OneWay, StringFormat={}{0:F1}}"
                                          Grid.Row="3" Grid.Column="1" Classes="compact" LostFocus="OnManualInputCommit" KeyDown="OnInputKeyDown"
                                          IsVisible="{Binding IsAzimuthalNormVisible}"/>
-                            </Grid>
-                        </StackPanel>
-
-                        <StackPanel Spacing="10" IsVisible="{Binding IsRadialWeightedModelVisible}">
-                            <TextBlock Text="Radial Weighted Model (R.W.M.)" FontWeight="SemiBold"/>
-                            <TextBlock Text="Background Auto." FontSize="11" FontStyle="Italic" Opacity="0.7"/>
-                            <Grid ColumnDefinitions="*, 80" RowSpacing="8">
-                                <TextBlock Text="Background Value:" VerticalAlignment="Center" Opacity="0.8"/>
-                                <TextBox x:Name="BgValueBox" Text="{Binding BackgroundValue, Mode=OneWay, StringFormat={}{0:F2}}"
-                                         Grid.Column="1" Classes="compact" LostFocus="OnManualInputCommit" KeyDown="OnInputKeyDown"/>
                             </Grid>
                         </StackPanel>
 
