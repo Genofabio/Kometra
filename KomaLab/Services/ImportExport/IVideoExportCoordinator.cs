@@ -2,10 +2,11 @@
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
+using KomaLab.Models.Export;
 using KomaLab.Models.Fits;
 using KomaLab.Models.Visualization;
 
-namespace KomaLab.Services.Processing.Coordinators;
+namespace KomaLab.Services.ImportExport;
 
 public interface IVideoExportCoordinator
 {

@@ -12,10 +12,9 @@ namespace KomaLab.Services.UI;
 
 // ---------------------------------------------------------------------------
 // FILE: DialogService.cs
-// RUOLO: UI Service (File Picking)
+// RUOLO: UI Service (File & Folder Picking)
 // DESCRIZIONE:
-// Implementazione specifica per Avalonia del servizio di dialogo.
-// Fa da ponte tra la UI (StorageProvider) e il Backend (che si aspetta percorsi stringa).
+// Implementazione Avalonia per dialoghi di file e cartelle.
 // ---------------------------------------------------------------------------
 
 public class DialogService : IDialogService
@@ -28,7 +27,7 @@ public class DialogService : IDialogService
         var fitsFilter = new FilePickerFileType("File FITS")
         {
             Patterns = new[] { "*.fits", "*.fit", "*.fts" },
-            MimeTypes = new[] { "image/fits", "application/fits" } // Aggiunto MimeType per completezza Linux/Mac
+            MimeTypes = new[] { "image/fits", "application/fits" }
         };
 
         var files = await storage.OpenFilePickerAsync(new FilePickerOpenOptions
@@ -40,10 +39,6 @@ public class DialogService : IDialogService
 
         if (files.Count >= 1)
         {
-            // NOTA: TryGetLocalPath() è cruciale. 
-            // Il nostro backend (OpenCV/CSharpFITS) lavora con FileStream su percorsi fisici.
-            // Se siamo in un ambiente sandboxed che non espone il path (es. WebAssembly), 
-            // questo filtrerà i file, che è il comportamento corretto (fail-safe) per ora.
             return files
                 .Select(f => f.TryGetLocalPath())
                 .Where(p => !string.IsNullOrEmpty(p))
@@ -58,8 +53,6 @@ public class DialogService : IDialogService
         var storage = GetStorageProvider();
         if (storage == null) return null;
 
-        // --- FIX NOME FILE ---
-        // Pulisce estensioni multiple o errate prima di proporre il nome.
         string cleanName = Path.GetFileNameWithoutExtension(defaultFileName);
         
         while (cleanName.EndsWith(".fit", StringComparison.OrdinalIgnoreCase) || 
@@ -67,7 +60,6 @@ public class DialogService : IDialogService
         {
             cleanName = Path.GetFileNameWithoutExtension(cleanName);
         }
-        // ---------------------
 
         var fitsFilter = new FilePickerFileType("File FITS")
         {
@@ -110,16 +102,27 @@ public class DialogService : IDialogService
         return file?.TryGetLocalPath();
     }
 
-    /// <summary>
-    /// Recupera il Provider di Storage in modo agnostico rispetto al Lifetime dell'app.
-    /// </summary>
+    // --- NUOVO METODO AGGIUNTO PER EXPORT VIEW MODEL ---
+    public async Task<string?> ShowOpenFolderDialogAsync(string title)
+    {
+        var storage = GetStorageProvider();
+        if (storage == null) return null;
+
+        var folders = await storage.OpenFolderPickerAsync(new FolderPickerOpenOptions
+        {
+            Title = title,
+            AllowMultiple = false
+        });
+
+        var folder = folders.FirstOrDefault();
+        return folder?.TryGetLocalPath();
+    }
+    // ---------------------------------------------------
+
     private IStorageProvider? GetStorageProvider()
     {
         if (Application.Current?.ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
-            // CERCA LA FINESTRA ATTIVA (quella in primo piano)
-            // Se l'utente ha aperto ImportView, desktop.Windows conterrà sia MainWindow che ImportView.
-            // Prendiamo l'ultima finestra attiva o l'ultima aperta nella lista.
             var activeWindow = desktop.Windows.LastOrDefault(w => w.IsActive) 
                                ?? desktop.Windows.LastOrDefault();
 

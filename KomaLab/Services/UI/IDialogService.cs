@@ -10,4 +10,6 @@ public interface IDialogService
     Task<string?> ShowSaveFitsFileDialogAsync(string defaultFileName);
     
     Task<string?> ShowSaveFileDialogAsync(string defaultFileName, string filterName, string pattern);
+    
+    Task<string?> ShowOpenFolderDialogAsync(string title);
 }

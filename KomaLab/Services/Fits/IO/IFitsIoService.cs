@@ -1,41 +1,66 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Threading.Tasks;
 using KomaLab.Models.Fits;
 using KomaLab.Models.Fits.Structure;
+using KomaLab.Models.Export; // Import necessario per FitsCompressionMode
 
 namespace KomaLab.Services.Fits.IO;
 
 /// <summary>
 /// Servizio di I/O di basso livello per il formato FITS.
-/// Si occupa esclusivamente della traduzione tra file fisico e oggetti di memoria.
+/// Si occupa della traduzione tra file fisico e oggetti di memoria, 
+/// supportando strutture a singolo HDU, Multi-Extension (MEF) e compressione Tile.
 /// </summary>
 public interface IFitsIoService
 {
     // --- LETTURA (READ) ---
 
     /// <summary>
-    /// Legge solo i metadati (Header). Utile per ispezione rapida.
+    /// Legge tutti gli HDU presenti nel file (Primario ed Estensioni).
+    /// Gestisce internamente l'ereditarietà dei metadati e la decompressione (Rice, Gzip, Deflate).
+    /// </summary>
+    Task<List<FitsHdu>> ReadAllHdusAsync(string path);
+
+    /// <summary>
+    /// Legge i metadati della prima immagine valida (non vuota) trovata nel file.
     /// </summary>
     Task<FitsHeader?> ReadHeaderAsync(string path);
 
     /// <summary>
-    /// Legge la matrice dei pixel. 
-    /// Restituisce l'array già flippato verticalmente per l'uso in RAM (Top-Down).
+    /// Legge la matrice dei pixel della prima immagine valida. 
+    /// Restituisce l'array già flippato verticalmente (Top-Down).
     /// </summary>
     Task<Array?> ReadPixelDataAsync(string path);
 
     // --- SCRITTURA (WRITE) ---
 
     /// <summary>
-    /// Crea o sovrascrive un file FITS. 
-    /// Gestisce internamente il padding di 2880 byte e il reverse flip dei dati.
+    /// Crea un file FITS standard. 
+    /// Se viene specificata una modalità di compressione, il file viene salvato come BINTABLE compressa.
     /// </summary>
-    Task WriteFileAsync(string path, Array pixelData, FitsHeader header);
+    Task WriteFileAsync(string path, Array pixelData, FitsHeader header, FitsCompressionMode mode = FitsCompressionMode.None);
+
+    /// <summary>
+    /// Crea un file FITS multi-estensione (MEF).
+    /// Applica la compressione specificata ad ogni estensione contenente dati.
+    /// </summary>
+    Task WriteMergedFileAsync(string path, List<(Array Pixels, FitsHeader Header)> blocks, FitsCompressionMode mode = FitsCompressionMode.None);
     
-    // --- Gestione Path ---
+    // --- GESTIONE FILE E PATH ---
     
+    /// <summary>
+    /// Esegue una copia diretta da disco a disco.
+    /// </summary>
     Task CopyFileAsync(string sourcePath, string destPath);
-    string BuildRawPath(string subFolder, string fileName);
-    void TryDeleteFile(string path);
     
+    /// <summary>
+    /// Costruisce un percorso assoluto sicuro nella cartella temporanea di KomaLab.
+    /// </summary>
+    string BuildRawPath(string subFolder, string fileName);
+    
+    /// <summary>
+    /// Tenta di eliminare un file se esistente, ignorando eventuali errori di accesso.
+    /// </summary>
+    void TryDeleteFile(string path);
 }

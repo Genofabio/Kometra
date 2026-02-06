@@ -1,5 +1,6 @@
 ﻿using System.Collections.Generic;
 using System.Threading.Tasks;
+using KomaLab.Models.Export;
 using KomaLab.Models.Fits;
 using KomaLab.Models.Fits.Structure;
 using KomaLab.Models.Processing.Enhancement;
@@ -17,6 +18,9 @@ public interface IWindowService
     
     // Export
     Task<VideoExportSettings?> ShowVideoExportDialogAsync(ImageNodeViewModel node, VisualizationMode currentMode);
+    
+    // Batch Export (La firma rimane invariata qui)
+    Task ShowExportWindowAsync(IEnumerable<string> filePaths);
 
     // Tools
     Task<List<string>?> ShowAlignmentWindowAsync(List<FitsFileReference> sourceFiles, VisualizationMode initialMode = VisualizationMode.Linear);

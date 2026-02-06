@@ -1,6 +1,6 @@
 using System;
-using System.IO;
 using System.Collections.Generic;
+using System.IO;
 using Avalonia;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
@@ -12,6 +12,7 @@ using KomaLab.Services.Fits;
 using KomaLab.Services.Fits.Conversion;
 using KomaLab.Services.Fits.IO;
 using KomaLab.Services.Fits.Metadata;
+using KomaLab.Services.ImportExport;
 using KomaLab.Services.Processing.Alignment;
 using KomaLab.Services.Processing.Batch;
 using KomaLab.Services.Processing.Coordinators;
@@ -24,8 +25,8 @@ using KomaLab.ViewModels;
 using KomaLab.ViewModels.Astrometry;
 using KomaLab.ViewModels.Fits;
 using KomaLab.ViewModels.ImageProcessing;
+using KomaLab.ViewModels.ImportExport;
 using KomaLab.Views;
-using ImportViewModel = KomaLab.ViewModels.ImportExport.ImportViewModel;
 
 namespace KomaLab;
 
@@ -66,7 +67,7 @@ public class App : Application
         services.AddMemoryCache(); 
         services.AddHttpClient(); 
 
-        // --- 1. Infrastruttura & I/O ---
+        // --- 1. Infrastruttura & I/O di Base ---
         services.AddSingleton<LocalFileStreamProvider>();
         services.AddSingleton<AvaloniaAssetStreamProvider>();
         services.AddSingleton<IFileStreamProvider, FileStreamResolver>();
@@ -74,7 +75,7 @@ public class App : Application
         services.AddSingleton<IWindowService, WindowService>();
         services.AddSingleton<IUndoService, UndoService>();
 
-        // --- 2. Dati & Metadata (Core) ---
+        // --- 2. Dati & Metadata (Core FITS) ---
         services.AddSingleton<FitsReader>();
         services.AddSingleton<FitsWriter>();
         services.AddSingleton<IFitsIoService, FitsIoService>();
@@ -95,8 +96,6 @@ public class App : Application
         services.AddSingleton<ILocalContrastEngine, LocalContrastEngine>();
         services.AddSingleton<IStructureShapeEngine, StructureShapeEngine>();
         services.AddSingleton<ISegmentationEngine, SegmentationEngine>();
-        
-        // [NUOVO] Registrazione Engine Inpainting (Richiesto dal MaskingCoordinator)
         services.AddSingleton<IInpaintingEngine, InpaintingEngine>();
 
         // --- 4. Servizi di Dominio & Multimedia ---
@@ -105,9 +104,10 @@ public class App : Application
         services.AddSingleton<IBatchProcessingService, BatchProcessingService>(); 
         services.AddSingleton<IJplHorizonsService, JplHorizonsService>();
         
-        // Infrastruttura Video
+        // Infrastruttura Video e Export
         services.AddSingleton<IVideoFormatProvider, VideoFormatProvider>();
         services.AddTransient<IVideoEncoder, OpenCvVideoEncoder>();
+        services.AddSingleton<IBitmapExportService, BitmapExportService>(); 
 
         // --- 5. Coordinatori (Orchestratori) ---
         services.AddSingleton<IPlateSolvingCoordinator, PlateSolvingCoordinator>();
@@ -118,27 +118,23 @@ public class App : Application
         services.AddSingleton<ICalibrationCoordinator, CalibrationCoordinator>();
         services.AddSingleton<IImageEnhancementCoordinator, ImageEnhancementCoordinator>();
         services.AddSingleton<IMaskingCoordinator, MaskingCoordinator>();
-        
         services.AddSingleton<IVideoExportCoordinator, VideoExportCoordinator>();
+        services.AddSingleton<IExportCoordinator, ExportCoordinator>();
 
         // --- 6. Factories ---
         services.AddSingleton<INodeViewModelFactory, NodeViewModelFactory>();
         services.AddSingleton<IFitsRendererFactory, FitsRendererFactory>();
         services.AddSingleton<FitsHeaderUiMapper>();
         
-        // --- 7. ViewModels Principali ---
+        // --- 7. ViewModels Principali (Risolti via DI) ---
         services.AddSingleton<MainWindowViewModel>();
         services.AddSingleton<BoardViewModel>();
 
-        // --- 8. Tool ViewModels (Transient) ---
-        services.AddTransient<HeaderEditorToolViewModel>();
-        services.AddTransient<PosterizationToolViewModel>();
-        services.AddTransient<PlateSolvingToolViewModel>();
-        services.AddTransient<AlignmentToolViewModel>();
-        services.AddTransient<ImportViewModel>();
-        services.AddTransient<ImageEnhancementToolViewModel>();
-        services.AddTransient<StarMaskingViewModel>();
-
+        // --- 8. Tool ViewModels ---
+        // NOTA: I ViewModel dei Tool (Export, Alignment, HeaderEditor, ecc.) 
+        // NON sono registrati qui perché il WindowService li istanzia manualmente 
+        // tramite 'new' per iniettare i dati di runtime (es. filePaths).
+        
         return services.BuildServiceProvider();
     }
     
@@ -152,6 +148,6 @@ public class App : Application
                 Directory.Delete(tempRoot, true);
             }
         }
-        catch { /* Silenzioso: file bloccati da processi ancora attivi */ }
+        catch { /* Silenzioso se i file sono bloccati */ }
     }
 }

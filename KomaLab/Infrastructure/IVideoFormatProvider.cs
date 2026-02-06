@@ -1,5 +1,6 @@
 ﻿using System.Collections.Generic;
 using System.Threading.Tasks;
+using KomaLab.Models.Export;
 using KomaLab.Models.Visualization;
 
 namespace KomaLab.Infrastructure;

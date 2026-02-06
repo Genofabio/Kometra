@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using KomaLab.Models.Export;
 using OpenCvSharp;
 using KomaLab.Models.Visualization;
 

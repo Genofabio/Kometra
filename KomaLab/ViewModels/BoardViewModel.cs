@@ -2,7 +2,6 @@
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Diagnostics;
-using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
 using Avalonia;
@@ -16,6 +15,7 @@ using KomaLab.Models.Visualization;
 using KomaLab.Services.Factories;
 using KomaLab.Services.Fits;
 using KomaLab.Services.Fits.Metadata;
+using KomaLab.Services.ImportExport;
 using KomaLab.Services.Processing.Coordinators;
 using KomaLab.Services.UI;
 using KomaLab.Services.Undo;
@@ -51,8 +51,11 @@ public partial class BoardViewModel : ObservableObject
         ResetNodeViewCommand.NotifyCanExecuteChanged();
         ShowAlignmentWindowCommand.NotifyCanExecuteChanged();
         StackImagesCommand.NotifyCanExecuteChanged();
-        SaveSelectedNodeCommand.NotifyCanExecuteChanged();
+        
+        // RIMOSSO: SaveSelectedNodeCommand
+        ExportSelectedNodeCommand.NotifyCanExecuteChanged(); 
         SaveVideoCommand.NotifyCanExecuteChanged();
+        
         ToggleNodeAnimationCommand.NotifyCanExecuteChanged();
         EditSelectedNodeHeaderCommand.NotifyCanExecuteChanged();
         ShowPlateSolvingWindowCommand.NotifyCanExecuteChanged();
@@ -93,7 +96,7 @@ public partial class BoardViewModel : ObservableObject
         _videoCoordinator = videoCoordinator ?? throw new ArgumentNullException(nameof(videoCoordinator));
     }
 
-    // [GRAFO: Add/Remove/Register]
+    // [GRAFO: Add/Remove/Register] - Codice invariato
     private void AddNodeToGraph(BaseNodeViewModel node, string undoLabel)
     {
         var action = new DelegateAction(undoLabel,
@@ -157,7 +160,7 @@ public partial class BoardViewModel : ObservableObject
     // TOOL DI ELABORAZIONE
     // ---------------------------------------------------------------------------
 
-    // 1. MODELLI RADIALI
+    // [Metodi Radial/Structure/LocalContrast/Posterization/Alignment/StarMasking invariati...]
     [RelayCommand(CanExecute = nameof(CanExecuteOnImageNode))]
     private async Task ShowRadialEnhancementWindow()
     {
@@ -165,13 +168,10 @@ public partial class BoardViewModel : ObservableObject
         {
             var result = await _windowService.ShowRadialEnhancementWindowAsync(files, mode);
             if (result == null) return null;
-            
-            string suffix = GetEnhancementSuffix(result.Value.Mode);
-            return (result.Value.Paths, suffix);
+            return (result.Value.Paths, GetEnhancementSuffix(result.Value.Mode));
         }, "Miglioramento Radiale");
     }
 
-    // 2. ESTRAZIONE STRUTTURE
     [RelayCommand(CanExecute = nameof(CanExecuteOnImageNode))]
     private async Task ShowStructureExtractionWindow()
     {
@@ -179,13 +179,10 @@ public partial class BoardViewModel : ObservableObject
         {
             var result = await _windowService.ShowStructureExtractionWindowAsync(files, mode);
             if (result == null) return null;
-
-            string suffix = GetEnhancementSuffix(result.Value.Mode);
-            return (result.Value.Paths, suffix);
+            return (result.Value.Paths, GetEnhancementSuffix(result.Value.Mode));
         }, "Estrazione Strutture");
     }
 
-    // 3. CONTRASTO LOCALE
     [RelayCommand(CanExecute = nameof(CanExecuteOnImageNode))]
     private async Task ShowLocalContrastWindow()
     {
@@ -193,13 +190,10 @@ public partial class BoardViewModel : ObservableObject
         {
             var result = await _windowService.ShowLocalContrastWindowAsync(files, mode);
             if (result == null) return null;
-
-            string suffix = GetEnhancementSuffix(result.Value.Mode);
-            return (result.Value.Paths, suffix);
+            return (result.Value.Paths, GetEnhancementSuffix(result.Value.Mode));
         }, "Contrasto Locale");
     }
 
-    // 4. POSTERIZZAZIONE
     [RelayCommand(CanExecute = nameof(CanExecuteOnImageNode))]
     private async Task ShowPosterizationWindow()
     {
@@ -210,7 +204,6 @@ public partial class BoardViewModel : ObservableObject
         }, "Posterizzazione");
     }
     
-    // 5. ALLINEAMENTO
     [RelayCommand(CanExecute = nameof(CanExecuteOnImageNode))]
     private async Task ShowAlignmentWindow()
     {
@@ -221,22 +214,13 @@ public partial class BoardViewModel : ObservableObject
         }, "Allineamento");
     }
     
-    // 6. MASCHERAMENTO STELLE [FIXATO]
     [RelayCommand(CanExecute = nameof(CanExecuteOnImageNode))]
     private async Task ShowStarMaskingWindow()
     {
-        // NOTA: Usiamo RunGenericProcessing per gestire la creazione nodo e l'undo
-        // in modo coerente e sicuro (gestione eccezioni inclusa)
         await RunGenericProcessing(async (files, mode) => 
         {
-            // Apri la finestra di dialogo
             var paths = await _windowService.ShowStarMaskingWindowAsync(files);
-            
-            // Se l'utente ha annullato o ci sono stati errori, ritorna null
-            if (paths == null || paths.Count == 0) return null;
-
-            // Ritorna i path e il suffisso per il titolo
-            return (paths, "(Starless)");
+            return (paths != null && paths.Any()) ? (paths, "(Starless)") : null;
         }, "Rimozione Stelle");
     }
     
@@ -246,44 +230,30 @@ public partial class BoardViewModel : ObservableObject
         string undoLabel)
     {
         if (SelectedNode is not ImageNodeViewModel imgNode) return;
-        
         var inputFiles = imgNode.CurrentFiles.ToList();
         if (!inputFiles.Any()) return;
-    
         try 
         {
             var result = await windowAction(inputFiles, imgNode.VisualizationMode);
-            
-            if (result == null) return;
-            if (result.Value.Paths == null || !result.Value.Paths.Any()) return;
+            if (result == null || result.Value.Paths == null || !result.Value.Paths.Any()) return;
 
             var (resultPaths, titleSuffix) = result.Value;
-
             double centerX = imgNode.X + (1.5 * imgNode.EstimatedTotalSize.Width);
             double centerY = imgNode.Y + (imgNode.EstimatedTotalSize.Height / 2.0);
 
-            // [SICUREZZA MEMORIA] Forziamo una pulizia prima di caricare il risultato nel nuovo nodo
-            GC.Collect();
-            GC.WaitForPendingFinalizers();
+            GC.Collect(); GC.WaitForPendingFinalizers();
 
             BaseNodeViewModel newNode = resultPaths.Count == 1
                 ? await _nodeFactory.CreateSingleImageNodeAsync(resultPaths[0], centerX + 400, centerY)
                 : await _nodeFactory.CreateMultipleImagesNodeAsync(resultPaths, centerX + 400, centerY);
 
             newNode.Title = $"{imgNode.Title} {titleSuffix}";
-            
             if (newNode is ImageNodeViewModel resNode) resNode.VisualizationMode = imgNode.VisualizationMode;
-            
             RegisterProcessingResult(newNode, imgNode, resultPaths[0], undoLabel);
         }
-        catch (Exception ex)
-        {
-            Debug.WriteLine($"Errore creazione nodo risultato: {ex.Message}");
-            // Qui potresti mostrare un messaggio d'errore all'utente se hai un DialogService per messaggi
-        }
+        catch (Exception ex) { Debug.WriteLine($"Errore creazione nodo risultato: {ex.Message}"); }
     }
 
-    // --- HELPER NOMI FILTRI ---
     private string GetEnhancementSuffix(ImageEnhancementMode mode)
     {
         return mode switch
@@ -306,7 +276,6 @@ public partial class BoardViewModel : ObservableObject
         };
     }
 
-    // [ALTRI COMANDI ESISTENTI...]
     [RelayCommand]
     private async Task AddNodeAsync()
     {
@@ -314,14 +283,7 @@ public partial class BoardViewModel : ObservableObject
         if (result == null || result.Value.Paths == null || !result.Value.Paths.Any()) return;
 
         var (paths, separateNodes) = result.Value;
-
-        var tasks = paths.Select(async path => 
-        { 
-            var header = await _dataManager.GetHeaderOnlyAsync(path); 
-            var date = _metadataService.GetObservationDate(header) ?? DateTime.MinValue; 
-            return (Path: path, Date: date); 
-        });
-        
+        var tasks = paths.Select(async path => { var header = await _dataManager.GetHeaderOnlyAsync(path); var date = _metadataService.GetObservationDate(header) ?? DateTime.MinValue; return (Path: path, Date: date); });
         var results = await Task.WhenAll(tasks);
         var sortedPaths = results.OrderBy(x => x.Date).Select(x => x.Path).ToList();
 
@@ -330,19 +292,13 @@ public partial class BoardViewModel : ObservableObject
 
         if (separateNodes)
         {
-            double offsetX = 0;
-            double offsetY = 0;
-            
+            double offsetX = 0, offsetY = 0;
             foreach (var path in sortedPaths)
             {
                 var newNode = await _nodeFactory.CreateSingleImageNodeAsync(path, pos.X + offsetX, pos.Y + offsetY);
-                bool isCalibrated = path.Contains("Calibrated", StringComparison.OrdinalIgnoreCase);
-                if (isCalibrated) newNode.Title += " (Calibrata)";
-                
+                if (path.Contains("Calibrated", StringComparison.OrdinalIgnoreCase)) newNode.Title += " (Calibrata)";
                 AddNodeToGraph(newNode, "Importa Immagine Singola");
-                
-                offsetX += 30;
-                offsetY += 30;
+                offsetX += 30; offsetY += 30;
             }
         }
         else
@@ -350,10 +306,7 @@ public partial class BoardViewModel : ObservableObject
             BaseNodeViewModel newNode;
             if (sortedPaths.Count == 1) newNode = await _nodeFactory.CreateSingleImageNodeAsync(sortedPaths[0], pos.X, pos.Y);
             else newNode = await _nodeFactory.CreateMultipleImagesNodeAsync(sortedPaths, pos.X, pos.Y);
-
-            bool isCalibrated = sortedPaths.Any(p => p.Contains("Calibrated", StringComparison.OrdinalIgnoreCase));
-            if (isCalibrated) newNode.Title += " (Calibrata)";
-            
+            if (sortedPaths.Any(p => p.Contains("Calibrated", StringComparison.OrdinalIgnoreCase))) newNode.Title += " (Calibrata)";
             AddNodeToGraph(newNode, sortedPaths.Count == 1 ? "Aggiungi Immagine" : "Aggiungi Sequenza");
         }
     }
@@ -362,21 +315,20 @@ public partial class BoardViewModel : ObservableObject
     [RelayCommand] private void ZoomBoard(string direction) { double f = direction.ToLower()=="in"?1.2:0.8; Viewport.ApplyZoomAtPoint(f, new Point(Viewport.ViewportSize.Width/2, Viewport.ViewportSize.Height/2)); }
     [RelayCommand(CanExecute = nameof(CanStackImages))] private async Task StackImages(StackingMode mode) { if(SelectedNode is not ImageNodeViewModel s) return; try { var r = await _stackingCoordinator.ExecuteStackingAsync(s.CurrentFiles, mode); double x=s.X+1.5*s.EstimatedTotalSize.Width; double y=s.Y+s.EstimatedTotalSize.Height/2.0; var n = await _nodeFactory.CreateSingleImageNodeAsync(r.FilePath, x+400, y); n.Title=$"{s.Title} ({mode})"; if(n is ImageNodeViewModel res) res.VisualizationMode=s.VisualizationMode; RegisterProcessingResult(n, s, r.FilePath, "Stacking"); } catch(Exception ex) { Debug.WriteLine($"Stacking failed: {ex.Message}"); } }
     
-    [RelayCommand(CanExecute = nameof(CanSaveNode))] 
-    private async Task SaveSelectedNode() 
-    { 
-        if(SelectedNode is not ImageNodeViewModel n || n.ActiveFile == null) return; 
-        var p = await _dialogService.ShowSaveFitsFileDialogAsync(n.ActiveFile.FileName); 
-        if(string.IsNullOrWhiteSpace(p)) return; 
-        try { 
-            var fr = n.ActiveFile;
-            var data = await _dataManager.GetDataAsync(fr.FilePath);
-            var imageHdu = data.FirstImageHdu ?? data.PrimaryHdu;
-            if (imageHdu == null) return; 
-            await _dataManager.SaveDataAsync(p, imageHdu.PixelData, fr.ModifiedHeader ?? imageHdu.Header); 
-        } catch(Exception ex) { Debug.WriteLine($"Save failed: {ex.Message}"); } 
+    // --- RIMOSSO IL VECCHIO COMANDO SAVE AS ---
+
+    // --- NUOVO COMANDO: ESPORTAZIONE BATCH (Unico metodo di salvataggio) ---
+    [RelayCommand(CanExecute = nameof(CanExecuteOnImageNode))]
+    private async Task ExportSelectedNode()
+    {
+        if (SelectedNode is not ImageNodeViewModel n) return;
+        
+        var filePaths = n.CurrentFiles.Select(f => f.FilePath).ToList();
+        if (!filePaths.Any()) return;
+
+        await _windowService.ShowExportWindowAsync(filePaths);
     }
-    
+
     [RelayCommand(CanExecute = nameof(CanSaveVideo))]
     private async Task SaveVideo()
     {
@@ -410,5 +362,6 @@ public partial class BoardViewModel : ObservableObject
     private bool CanSaveVideo() => SelectedImageNode?.Navigator.TotalCount > 1;
     private bool CanToggleAnimation() => SelectedNode is ImageNodeViewModel n && n.Navigator.CanMove;
     private bool CanStackImages(StackingMode mode) => SelectedNode is ImageNodeViewModel n && n.Navigator.TotalCount > 1;
-    private bool CanSaveNode() => SelectedNode is ImageNodeViewModel vm && vm.ActiveFile != null;
+    
+    // Rimosso CanSaveNode poiché non più utilizzato
 }

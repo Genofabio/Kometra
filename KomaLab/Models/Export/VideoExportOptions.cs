@@ -1,4 +1,6 @@
-﻿namespace KomaLab.Models.Visualization;
+﻿using KomaLab.Models.Visualization;
+
+namespace KomaLab.Models.Export;
 
 /// <summary>
 /// Impacchetta tutte le scelte dell'utente per l'esportazione video.

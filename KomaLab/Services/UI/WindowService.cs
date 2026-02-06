@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Threading.Tasks;
 using Avalonia.Controls;
 using KomaLab.Infrastructure;
+using KomaLab.Models.Export; 
 using KomaLab.Models.Fits;
 using KomaLab.Models.Fits.Structure;
 using KomaLab.Models.Processing.Enhancement;
@@ -11,10 +12,12 @@ using KomaLab.Services.Astrometry;
 using KomaLab.Services.Factories;
 using KomaLab.Services.Fits;
 using KomaLab.Services.Fits.Metadata;
+using KomaLab.Services.ImportExport;
 using KomaLab.Services.Processing.Coordinators;
 using KomaLab.ViewModels.Astrometry;
 using KomaLab.ViewModels.Fits;
 using KomaLab.ViewModels.ImageProcessing;
+using KomaLab.ViewModels.ImportExport;
 using KomaLab.ViewModels.Nodes;
 using KomaLab.Views;
 using Microsoft.Extensions.DependencyInjection;
@@ -129,11 +132,10 @@ public class WindowService : IWindowService
         var viewModel = new ImportViewModel(dialogService, coordinator, dataManager);
         var view = new ImportView { DataContext = viewModel };
 
-        // Restituiamo una tupla con i percorsi E il flag booleano
         return await ShowDialogAndGetResultAsync(
             view, 
             viewModel, 
-            vm => (vm.CalibratedResultPaths!, vm.ImportAsSeparateNodes) // Nota il ! per ignorare il warning nullable (gestito dal DialogResult true)
+            vm => (vm.CalibratedResultPaths!, vm.ImportAsSeparateNodes) 
         );
     }
     
@@ -174,55 +176,73 @@ public class WindowService : IWindowService
     {
         if (_mainWindow == null) throw new InvalidOperationException("Finestra principale non registrata.");
 
-        // Recupero di tutti i servizi necessari per l'operazione autonoma del tool
         var formatProvider = _serviceProvider.GetRequiredService<IVideoFormatProvider>();
         var dataManager = _serviceProvider.GetRequiredService<IFitsDataManager>();
         var rendererFactory = _serviceProvider.GetRequiredService<IFitsRendererFactory>();
         var videoCoordinator = _serviceProvider.GetRequiredService<IVideoExportCoordinator>();
         var dialogService = _serviceProvider.GetRequiredService<IDialogService>();
 
-        // Inizializzazione on-demand dei backend video (FFMPEG/MSMF)
         await formatProvider.InitializeAsync();
 
         var originalSize = node.ActiveRenderer.ImageSize;
         var sourceFiles = node.CurrentFiles; 
 
-        // Creazione del ViewModel con iniezione dei coordinatori
         using var viewModel = new VideoExportToolViewModel(
             formatProvider, 
             dataManager,
             rendererFactory,
-            videoCoordinator, // Iniettato per gestire l'export interno
-            dialogService,    // Iniettato per gestire il SaveFileDialog interno
+            videoCoordinator, 
+            dialogService,    
             sourceFiles,
             currentMode, 
             originalSize);
 
         var view = new VideoExportToolView { DataContext = viewModel };
 
-        // Apertura dialogo. Il controllo passa al ViewModel.
-        // Se l'utente preme "Esporta", il VM gestirà: 1. Selezione Path, 2. Export con Progress, 3. Chiusura.
         return await ShowDialogAndGetResultAsync(view, viewModel, vm => vm.GetSettings(vm.OutputPath));
     }
     
     // =======================================================================
-    // 10. MASCHERAMENTO STELLE [NUOVO]
+    // 10. MASCHERAMENTO STELLE
     // =======================================================================
     public async Task<List<string>?> ShowStarMaskingWindowAsync(List<FitsFileReference> sourceFiles)
     {
         if (_mainWindow == null) throw new InvalidOperationException("Finestra principale non registrata.");
 
-        // Recupero servizi dal container DI
         var coordinator = _serviceProvider.GetRequiredService<IMaskingCoordinator>();
         var dataManager = _serviceProvider.GetRequiredService<IFitsDataManager>();
         var rendererFactory = _serviceProvider.GetRequiredService<IFitsRendererFactory>();
 
-        // Creazione ViewModel e View
         using var viewModel = new StarMaskingViewModel(sourceFiles, coordinator, dataManager, rendererFactory);
         var view = new StarMaskingView { DataContext = viewModel };
 
-        // Apertura dialogo e recupero risultato
         return await ShowDialogAndGetResultAsync(view, viewModel, vm => vm.ResultPaths);
+    }
+
+    // =======================================================================
+    // 11. ESPORTAZIONE BATCH (FITS Multi-HDU, PNG, JPG) [AGGIORNATO]
+    // =======================================================================
+    public async Task ShowExportWindowAsync(IEnumerable<string> filePaths)
+    {
+        if (_mainWindow == null) throw new InvalidOperationException("Finestra principale non registrata.");
+
+        // Risoluzione manuale delle dipendenze (Uniforme agli altri metodi)
+        var coordinator = _serviceProvider.GetRequiredService<IExportCoordinator>();
+        var dialogService = _serviceProvider.GetRequiredService<IDialogService>();
+        var dataManager = _serviceProvider.GetRequiredService<IFitsDataManager>();
+        var rendererFactory = _serviceProvider.GetRequiredService<IFitsRendererFactory>();
+
+        // Istanziazione manuale del ViewModel con passaggio dei dati a runtime
+        using var viewModel = new ExportViewModel(
+            coordinator, 
+            dialogService, 
+            dataManager, 
+            rendererFactory, 
+            filePaths);
+            
+        var view = new ExportView { DataContext = viewModel };
+
+        await ShowDialogAsync(view, viewModel);
     }
 
     // =======================================================================

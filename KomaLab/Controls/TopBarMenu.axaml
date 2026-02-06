@@ -35,9 +35,9 @@
 
             <MenuItem Header="Salva Immagine" 
                       Classes="innerMenuItem"
-                      Command="{Binding BoardVm.SaveSelectedNodeCommand}">
+                      Command="{Binding BoardVm.ExportSelectedNodeCommand}">
                 <MenuItem.Icon>
-                    <avalonia:MaterialIcon Kind="Download" /> 
+                    <avalonia:MaterialIcon Kind="Image" /> 
                 </MenuItem.Icon>
             </MenuItem>
 

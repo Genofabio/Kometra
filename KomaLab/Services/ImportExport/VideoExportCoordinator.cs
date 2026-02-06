@@ -5,6 +5,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using KomaLab.Infrastructure;
+using KomaLab.Models.Export;
 using KomaLab.Models.Fits;
 using KomaLab.Models.Fits.Structure;
 using KomaLab.Models.Visualization;
@@ -14,7 +15,7 @@ using KomaLab.Services.Fits.Metadata;
 using KomaLab.Services.Processing.Rendering;
 using OpenCvSharp;
 
-namespace KomaLab.Services.Processing.Coordinators;
+namespace KomaLab.Services.ImportExport;
 
 public class VideoExportCoordinator : IVideoExportCoordinator
 {
