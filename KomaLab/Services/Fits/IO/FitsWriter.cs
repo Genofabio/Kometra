@@ -3,7 +3,7 @@ using System.IO;
 using System.Text;
 using System.Linq;
 using System.Collections.Generic;
-using System.Buffers.Binary; // Necessario per scrivere BigEndian
+using System.Buffers.Binary;
 using KomaLab.Models.Fits.Structure;
 using KomaLab.Services.Fits.Metadata;
 
@@ -33,13 +33,17 @@ public class FitsWriter
         int bytesWritten = 0;
         
         // 1. Recupera tutte le card tranne quelle strutturali (che riscriviamo in ordine)
-        var structuralKeys = new HashSet<string> 
+        var structuralKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase) 
         { 
             "SIMPLE", "XTENSION", "BITPIX", "NAXIS", "NAXIS1", "NAXIS2", "NAXIS3", 
             "PCOUNT", "GCOUNT", "GROUPS", "TFIELDS", "EXTEND", "END" 
         };
         
-        var userCards = header.Cards.Where(c => !structuralKeys.Contains(c.Key)).ToList();
+        // Filtriamo le card utente ignorando le chiavi strutturali
+        var userCards = header.Cards
+            .Where(c => !structuralKeys.Contains(c.Key ?? ""))
+            .ToList();
+            
         var orderedCards = new List<FitsCard>();
 
         // 2. Costruisci l'ordine RIGIDO FITS (Standard 4.4.1)
@@ -49,13 +53,14 @@ public class FitsWriter
             orderedCards.Add(FindOrMake(header, "BITPIX", "8"));
             orderedCards.Add(FindOrMake(header, "NAXIS", "0"));
             AddNaxisCards(header, orderedCards);
-            orderedCards.Add(FindOrMake(header, "EXTEND", "T")); // EXTEND solo su Primary
+            orderedCards.Add(FindOrMake(header, "EXTEND", "T")); // EXTEND suggerito su Primary
         }
         else
         {
             // Per le estensioni, XTENSION è obbligatorio come prima keyword
             var xtensionCard = header.Cards.FirstOrDefault(c => c.Key == "XTENSION");
-            if (xtensionCard.Key == null) 
+            // Controllo null safe anche qui per sicurezza
+            if (xtensionCard == null || string.IsNullOrEmpty(xtensionCard.Key)) 
                 xtensionCard = new FitsCard("XTENSION", "'IMAGE   '", "Image extension", false);
                 
             orderedCards.Add(xtensionCard);
@@ -67,7 +72,7 @@ public class FitsWriter
             
             // TFIELDS è obbligatorio solo per BINTABLE/TABLE, lo aggiungiamo se esiste
             var tfields = header.Cards.FirstOrDefault(c => c.Key == "TFIELDS");
-            if (tfields.Key != null) orderedCards.Add(tfields);
+            if (tfields != null) orderedCards.Add(tfields);
         }
 
         // 3. Aggiungi tutte le altre card utente
@@ -94,22 +99,26 @@ public class FitsWriter
 
     private FitsCard FindOrMake(FitsHeader source, string key, string defVal)
     {
-        var existing = source.Cards.FirstOrDefault(c => c.Key == key);
-        // Se la card esiste e ha un valore valido, la usiamo
-        if (!string.IsNullOrEmpty(existing.Key)) return existing;
+        // [FIX] Usare StringComparison.OrdinalIgnoreCase per robustezza
+        var existing = source.Cards.FirstOrDefault(c => c.Key.Equals(key, StringComparison.OrdinalIgnoreCase));
+        
+        // [FIX] Controllo NULL: FirstOrDefault ritorna null se non trova nulla (se FitsCard è una classe)
+        if (existing != null) return existing;
         
         // Altrimenti creiamo un default
-        return new FitsCard(key, defVal, null, false);
+        return new FitsCard(key, defVal, "Auto-generated", false);
     }
 
     private void AddNaxisCards(FitsHeader source, List<FitsCard> target)
     {
-        // Trova il valore di NAXIS (già aggiunto o default a 0)
+        // Trova il valore di NAXIS nella lista target (quella che stiamo costruendo)
         var naxisCard = target.FirstOrDefault(c => c.Key == "NAXIS");
-        if (int.TryParse(naxisCard.Value, out int naxis) && naxis > 0)
+        
+        if (naxisCard != null && int.TryParse(naxisCard.Value, out int naxis) && naxis > 0)
         {
             for (int i = 1; i <= naxis; i++)
             {
+                // Cerchiamo NAXIS1, NAXIS2, ecc. nell'header originale (source)
                 target.Add(FindOrMake(source, $"NAXIS{i}", "0"));
             }
         }
@@ -128,20 +137,18 @@ public class FitsWriter
         int w = matrix.GetLength(1);
         long bytesWritten = 0;
 
-        // Gestione di tutti i tipi numerici supportati da FITS (inclusi quelli Unsigned per CCD)
+        // Gestione di tutti i tipi numerici supportati da FITS
         
         if (type == typeof(byte)) 
             bytesWritten = WritePixelsByte(stream, (byte[,])matrix, w, h);
         
         else if (type == typeof(sbyte)) 
-            // Sbyte non è standard FITS diretto, lo trattiamo come byte raw (cast)
             bytesWritten = WritePixelsByte(stream, (sbyte[,])matrix, w, h);
 
         else if (type == typeof(short)) 
             bytesWritten = WritePixels(stream, (short[,])matrix, w, h, 2, BinaryPrimitives.WriteInt16BigEndian);
         
         else if (type == typeof(ushort))
-            // USHORT (16-bit Unsigned): Applicare XOR 0x8000 per centrare su 0 (Standard FITS BZERO=32768)
             bytesWritten = WritePixels(stream, (ushort[,])matrix, w, h, 2, 
                 (span, val) => BinaryPrimitives.WriteInt16BigEndian(span, (short)(val ^ 0x8000)));
 
@@ -149,7 +156,6 @@ public class FitsWriter
             bytesWritten = WritePixels(stream, (int[,])matrix, w, h, 4, BinaryPrimitives.WriteInt32BigEndian);
         
         else if (type == typeof(uint))
-            // UINT (32-bit Unsigned): Applicare XOR 0x80000000 (Standard FITS BZERO=2147483648)
             bytesWritten = WritePixels(stream, (uint[,])matrix, w, h, 4, 
                 (span, val) => BinaryPrimitives.WriteInt32BigEndian(span, (int)(val ^ 0x80000000)));
 
@@ -172,7 +178,6 @@ public class FitsWriter
         byte[] buffer = new byte[w * bpp];
         long count = 0;
         
-        // Loop standard Row-by-Row
         for (int y = 0; y < h; y++) 
         {
             for (int x = 0; x < w; x++) 
@@ -198,7 +203,6 @@ public class FitsWriter
         return count;
     }
 
-    // Overload per sbyte (cast a byte)
     private long WritePixelsByte(Stream s, sbyte[,] data, int w, int h)
     {
         byte[] buffer = new byte[w];
