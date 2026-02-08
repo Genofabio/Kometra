@@ -276,7 +276,7 @@
 
         <Border Grid.Row="1" Background="{DynamicResource ToolPanelBackgroundBrush}" BorderBrush="{DynamicResource Border.WhiteDimBrush}" BorderThickness="0,1,0,0" Padding="20,15">
             <Grid ColumnDefinitions="*, Auto">
-                <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                <StackPanel Grid.Column="0" VerticalAlignment="Center" Margin="0,0,30,0">
                     <StackPanel IsVisible="{Binding IsExporting}" Spacing="5">
                         <TextBlock Text="{Binding StatusText}" FontSize="12" FontWeight="SemiBold" Foreground="White"/>
                         <ProgressBar Value="{Binding ProgressValue}" Maximum="100" Height="6"/>

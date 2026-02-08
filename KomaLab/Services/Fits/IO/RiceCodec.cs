@@ -6,11 +6,12 @@ namespace KomaLab.Services.Fits.IO
 {
     /// <summary>
     /// Porting C# completo (Encode/Decode) di 'ricecomp.c' e 'rdecomp.c' (CFITSIO).
-    /// Gestisce decompressione Rice per 8, 16 e 32 bit con logica bit-exact.
+    /// Gestisce decompressione Rice per 8, 16 e 32 bit con logica bit-exact compatibile con fpack.
     /// </summary>
     public static class RiceCodec
     {
-        // Lookup table per il conteggio dei bit (da rcomp.c)
+        // Lookup table per il conteggio dei bit (da rcomp.c) - Conta la posizione del MSB
+        // Usata in Decode per contare velocemente gli Zeri consecutivi (Leading Zeros)
         private static readonly int[] NonZeroCount = {
             0, 1, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, 4, 4, 4, 4,
             5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5,
@@ -52,6 +53,7 @@ namespace KomaLab.Services.Fits.IO
             int bbits = 1 << fsbits; // 32
 
             int cIdx = 0;
+            // 32-bit seed
             int lastpix = BinaryPrimitives.ReadInt32BigEndian(c.AsSpan(cIdx));
             cIdx += 4;
 
@@ -112,6 +114,7 @@ namespace KomaLab.Services.Fits.IO
                 {
                     for (; i < imax; i++)
                     {
+                        // Conta Zeri consecutivi (fino al terminatore 1)
                         while (b == 0)
                         {
                             if (cIdx >= c.Length) break;
@@ -153,6 +156,7 @@ namespace KomaLab.Services.Fits.IO
             int bbits = 1 << fsbits; // 16
 
             int cIdx = 0;
+            // 16-bit seed
             int lastpix = BinaryPrimitives.ReadInt16BigEndian(c.AsSpan(cIdx));
             cIdx += 2;
 
@@ -213,6 +217,7 @@ namespace KomaLab.Services.Fits.IO
                 {
                     for (; i < imax; i++)
                     {
+                        // Conta Zeri consecutivi
                         while (b == 0)
                         {
                             if (cIdx >= c.Length) break;
@@ -254,6 +259,7 @@ namespace KomaLab.Services.Fits.IO
             int bbits = 1 << fsbits; // 8
 
             int cIdx = 0;
+            // 8-bit seed
             int lastpix = c[cIdx++];
 
             if (cIdx >= c.Length) { array[0] = lastpix; return array; }
@@ -313,6 +319,7 @@ namespace KomaLab.Services.Fits.IO
                 {
                     for (; i < imax; i++)
                     {
+                        // Conta Zeri consecutivi
                         while (b == 0)
                         {
                             if (cIdx >= c.Length) break;
@@ -348,12 +355,16 @@ namespace KomaLab.Services.Fits.IO
         // ENCODE METHODS (fits_rcomp)
         // =======================================================================
 
+        /// <summary>
+        /// Encode per dati 32-bit (INT/UINT/FLOAT quantizzato). Seed di 4 byte.
+        /// </summary>
         public static byte[] Encode(int[] a, int nblock = 32)
         {
             if (a == null || a.Length == 0) return Array.Empty<byte>();
             
             using var ms = new MemoryStream(a.Length * 4 + 1024);
             
+            // 32-bit: Seed di 4 byte (Big Endian)
             byte[] seedBytes = new byte[4];
             BinaryPrimitives.WriteInt32BigEndian(seedBytes, a[0]);
             ms.Write(seedBytes, 0, 4);
@@ -375,7 +386,7 @@ namespace KomaLab.Services.Fits.IO
                 for (int j = 0; j < thisblock; j++)
                 {
                     int nextpix = a[i + j];
-                    int pdiff = nextpix - lastpix;
+                    long pdiff = (long)nextpix - (long)lastpix;
                     diffs[j] = (uint)((pdiff < 0) ? ~(pdiff << 1) : (pdiff << 1));
                     pixelsum += diffs[j];
                     lastpix = nextpix;
@@ -404,34 +415,15 @@ namespace KomaLab.Services.Fits.IO
                         uint v = diffs[j];
                         int top = (int)(v >> fs);
                         
-                        if (buf.BitsToGo >= top + 1)
-                        {
-                            buf.BitBuffer <<= (top + 1);
-                            buf.BitBuffer |= 1;
-                            buf.BitsToGo -= (top + 1);
-                        }
-                        else
-                        {
-                            buf.BitBuffer <<= buf.BitsToGo;
-                            buf.FlushByte();
-                            for (top -= buf.BitsToGo; top >= 8; top -= 8)
-                            {
-                                buf.FlushZeroByte();
-                            }
-                            buf.BitBuffer = 1;
-                            buf.BitsToGo = 7 - top;
-                        }
+                        // --- UNARY FIX: Write Zeros, Terminate with One ---
+                        // Matches decoder logic that counts leading zeros.
+                        for(int k=0; k<top; k++) buf.OutputNBits(0, 1); 
+                        buf.OutputNBits(1, 1); 
 
+                        // Remainder part
                         if (fs > 0)
                         {
-                            buf.BitBuffer <<= fs;
-                            buf.BitBuffer |= (int)(v & ((1 << fs) - 1));
-                            buf.BitsToGo -= fs;
-                            while (buf.BitsToGo <= 0)
-                            {
-                                buf.FlushTop8();
-                                buf.BitsToGo += 8;
-                            }
+                            buf.OutputNBits(v & (uint)((1 << fs) - 1), fs);
                         }
                     }
                 }
@@ -440,11 +432,15 @@ namespace KomaLab.Services.Fits.IO
             return ms.ToArray();
         }
 
+        /// <summary>
+        /// Encode per dati 16-bit (SHORT/USHORT). Seed di 2 byte.
+        /// </summary>
         public static byte[] Encode(short[] a, int nblock = 32)
         {
             if (a == null || a.Length == 0) return Array.Empty<byte>();
             using var ms = new MemoryStream(a.Length * 2 + 1024);
 
+            // 16-bit: Seed di 2 byte (Big Endian)
             byte[] seedBytes = new byte[2];
             BinaryPrimitives.WriteInt16BigEndian(seedBytes, a[0]);
             ms.Write(seedBytes, 0, 2);
@@ -494,15 +490,15 @@ namespace KomaLab.Services.Fits.IO
                     {
                         uint v = diffs[j];
                         int top = (int)(v >> fs);
-                        if (buf.BitsToGo >= top + 1) { buf.BitBuffer <<= (top + 1); buf.BitBuffer |= 1; buf.BitsToGo -= (top + 1); }
-                        else {
-                            buf.BitBuffer <<= buf.BitsToGo; buf.FlushByte();
-                            for (top -= buf.BitsToGo; top >= 8; top -= 8) buf.FlushZeroByte();
-                            buf.BitBuffer = 1; buf.BitsToGo = 7 - top;
-                        }
-                        if (fs > 0) {
-                            buf.BitBuffer <<= fs; buf.BitBuffer |= (int)(v & ((1 << fs) - 1)); buf.BitsToGo -= fs;
-                            while (buf.BitsToGo <= 0) { buf.FlushTop8(); buf.BitsToGo += 8; }
+                        
+                        // Unary Fix
+                        for(int k=0; k<top; k++) buf.OutputNBits(0, 1);
+                        buf.OutputNBits(1, 1);
+
+                        // Remainder part
+                        if (fs > 0)
+                        {
+                            buf.OutputNBits(v & (uint)((1 << fs) - 1), fs);
                         }
                     }
                 }
@@ -511,11 +507,15 @@ namespace KomaLab.Services.Fits.IO
             return ms.ToArray();
         }
 
+        /// <summary>
+        /// Encode per dati 8-bit (BYTE/SBYTE). Seed di 1 byte.
+        /// </summary>
         public static byte[] Encode(byte[] a, int nblock = 32)
         {
             if (a == null || a.Length == 0) return Array.Empty<byte>();
             using var ms = new MemoryStream(a.Length + 1024);
 
+            // 8-bit: Seed di 1 byte
             ms.WriteByte(a[0]);
 
             var buf = new OutputBuffer(ms);
@@ -535,6 +535,7 @@ namespace KomaLab.Services.Fits.IO
                 for (int j = 0; j < thisblock; j++)
                 {
                     int nextpix = a[i + j];
+                    // Casting sbyte fondamentale per wrap-around corretto su differenze negative
                     int pdiff = (sbyte)nextpix - (sbyte)lastpix;
                     
                     diffs[j] = (uint)((pdiff < 0) ? ~(pdiff << 1) : (pdiff << 1));
@@ -564,15 +565,15 @@ namespace KomaLab.Services.Fits.IO
                     {
                         uint v = diffs[j];
                         int top = (int)(v >> fs);
-                        if (buf.BitsToGo >= top + 1) { buf.BitBuffer <<= (top + 1); buf.BitBuffer |= 1; buf.BitsToGo -= (top + 1); }
-                        else {
-                            buf.BitBuffer <<= buf.BitsToGo; buf.FlushByte();
-                            for (top -= buf.BitsToGo; top >= 8; top -= 8) buf.FlushZeroByte();
-                            buf.BitBuffer = 1; buf.BitsToGo = 7 - top;
-                        }
-                        if (fs > 0) {
-                            buf.BitBuffer <<= fs; buf.BitBuffer |= (int)(v & ((1 << fs) - 1)); buf.BitsToGo -= fs;
-                            while (buf.BitsToGo <= 0) { buf.FlushTop8(); buf.BitsToGo += 8; }
+                        
+                        // Unary Fix
+                        for(int k=0; k<top; k++) buf.OutputNBits(0, 1);
+                        buf.OutputNBits(1, 1);
+
+                        // Remainder part
+                        if (fs > 0)
+                        {
+                            buf.OutputNBits(v & (uint)((1 << fs) - 1), fs);
                         }
                     }
                 }
@@ -582,58 +583,56 @@ namespace KomaLab.Services.Fits.IO
         }
 
         // =======================================================================
-        // OUTPUT BUFFER HELPER CLASS
+        // OUTPUT BUFFER HELPER CLASS (Big Endian Bit Stream)
         // =======================================================================
         private class OutputBuffer
         {
-            public int BitBuffer;
-            public int BitsToGo;
             private readonly MemoryStream _stream;
-            private static readonly uint[] Mask = new uint[] { 
-                0, 0x1, 0x3, 0x7, 0xf, 0x1f, 0x3f, 0x7f, 0xff, 0x1ff, 0x3ff, 0x7ff, 0xfff, 0x1fff, 0x3fff, 0x7fff, 0xffff,
-                0x1ffff, 0x3ffff, 0x7ffff, 0xfffff, 0x1fffff, 0x3fffff, 0x7fffff, 0xffffff, 0x1ffffff, 0x3ffffff, 0x7ffffff,
-                0xfffffff, 0x1fffffff, 0x3fffffff, 0x7fffffff, 0xffffffff 
-            };
+            private byte _currentByte;
+            private int _bitsFilled;
 
             public OutputBuffer(MemoryStream s)
             {
                 _stream = s;
-                BitBuffer = 0;
-                BitsToGo = 8;
+                _currentByte = 0;
+                _bitsFilled = 0;
             }
-
-            public void FlushByte() => _stream.WriteByte((byte)(BitBuffer & 0xff));
-            public void FlushZeroByte() => _stream.WriteByte(0);
-            public void FlushTop8() => _stream.WriteByte((byte)((BitBuffer >> (-BitsToGo)) & 0xff));
 
             public void OutputNBits(uint bits, int n)
             {
-                // Inserimento bit alla fine del buffer
-                if (BitsToGo + n > 32)
+                // Scrive n bit (MSB first) nello stream.
+                // Es. se bits=3 (0...011) e n=5 -> scrive 00011
+                for (int i = n - 1; i >= 0; i--)
                 {
-                    // Special case for large n
-                    BitBuffer <<= BitsToGo;
-                    BitBuffer |= (int)((bits >> (n - BitsToGo)) & Mask[BitsToGo]);
-                    FlushByte();
-                    n -= BitsToGo;
-                    BitsToGo = 8;
-                }
-                BitBuffer <<= n;
-                BitBuffer |= (int)(bits & Mask[n]);
-                BitsToGo -= n;
-                while (BitsToGo <= 0)
-                {
-                    FlushTop8();
-                    BitsToGo += 8;
+                    // Estrai l'i-esimo bit
+                    uint bit = (bits >> i) & 1;
+
+                    // Se è 1, lo posizioniamo nel byte corrente
+                    // Riempiamo da 7 (MSB) a 0 (LSB)
+                    if (bit != 0)
+                    {
+                        _currentByte |= (byte)(1 << (7 - _bitsFilled));
+                    }
+
+                    _bitsFilled++;
+
+                    if (_bitsFilled == 8)
+                    {
+                        _stream.WriteByte(_currentByte);
+                        _currentByte = 0;
+                        _bitsFilled = 0;
+                    }
                 }
             }
 
             public void Done()
             {
-                if (BitsToGo < 8)
+                // Se rimangono bit (padding), scriviamo l'ultimo byte.
+                // I bit rimanenti sono già a 0 (perché _currentByte viene resettato a 0),
+                // che è il padding standard corretto (zero-padding dei bit bassi inutilizzati).
+                if (_bitsFilled > 0)
                 {
-                    BitBuffer <<= BitsToGo;
-                    FlushByte();
+                    _stream.WriteByte(_currentByte);
                 }
             }
         }
