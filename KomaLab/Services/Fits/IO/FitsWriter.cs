@@ -31,23 +31,50 @@ public class FitsWriter
     private void WriteHeaderInternal(Stream stream, FitsHeader header, bool isPrimary)
     {
         int bytesWritten = 0;
-        var cardsToWrite = new List<FitsCard>(header.Cards);
+        
+        // 1. Recupera tutte le card tranne quelle strutturali (che riscriviamo in ordine)
+        var structuralKeys = new HashSet<string> 
+        { 
+            "SIMPLE", "XTENSION", "BITPIX", "NAXIS", "NAXIS1", "NAXIS2", "NAXIS3", 
+            "PCOUNT", "GCOUNT", "GROUPS", "TFIELDS", "EXTEND", "END" 
+        };
+        
+        var userCards = header.Cards.Where(c => !structuralKeys.Contains(c.Key)).ToList();
+        var orderedCards = new List<FitsCard>();
 
-        // Rimuoviamo le card strutturali per riscriverle nell'ordine corretto
-        cardsToWrite.RemoveAll(c => c.Key == "SIMPLE" || c.Key == "XTENSION" || c.Key == "END");
-
+        // 2. Costruisci l'ordine RIGIDO FITS (Standard 4.4.1)
         if (isPrimary)
         {
-            cardsToWrite.Insert(0, new FitsCard("SIMPLE", "T", "Standard FITS Image", false));
+            orderedCards.Add(new FitsCard("SIMPLE", "T", "Standard FITS Image", false));
+            orderedCards.Add(FindOrMake(header, "BITPIX", "8"));
+            orderedCards.Add(FindOrMake(header, "NAXIS", "0"));
+            AddNaxisCards(header, orderedCards);
+            orderedCards.Add(FindOrMake(header, "EXTEND", "T")); // EXTEND solo su Primary
         }
         else
         {
-            cardsToWrite.Insert(0, new FitsCard("XTENSION", "'IMAGE   '", "Image extension", false));
-            EnsureCard(cardsToWrite, "PCOUNT", "0", "No group parameters");
-            EnsureCard(cardsToWrite, "GCOUNT", "1", "One group");
+            // Per le estensioni, XTENSION è obbligatorio come prima keyword
+            var xtensionCard = header.Cards.FirstOrDefault(c => c.Key == "XTENSION");
+            if (xtensionCard.Key == null) 
+                xtensionCard = new FitsCard("XTENSION", "'IMAGE   '", "Image extension", false);
+                
+            orderedCards.Add(xtensionCard);
+            orderedCards.Add(FindOrMake(header, "BITPIX", "8"));
+            orderedCards.Add(FindOrMake(header, "NAXIS", "0"));
+            AddNaxisCards(header, orderedCards);
+            orderedCards.Add(FindOrMake(header, "PCOUNT", "0"));
+            orderedCards.Add(FindOrMake(header, "GCOUNT", "1"));
+            
+            // TFIELDS è obbligatorio solo per BINTABLE/TABLE, lo aggiungiamo se esiste
+            var tfields = header.Cards.FirstOrDefault(c => c.Key == "TFIELDS");
+            if (tfields.Key != null) orderedCards.Add(tfields);
         }
 
-        foreach (var card in cardsToWrite)
+        // 3. Aggiungi tutte le altre card utente
+        orderedCards.AddRange(userCards);
+
+        // 4. Scrittura fisica
+        foreach (var card in orderedCards)
         {
             string line = FitsFormatting.PadTo80(card);
             byte[] asciiBytes = Encoding.ASCII.GetBytes(line);
@@ -55,6 +82,7 @@ public class FitsWriter
             bytesWritten += 80;
         }
 
+        // 5. Scrittura END e Padding
         byte[] endLine = Encoding.ASCII.GetBytes("END".PadRight(80, ' '));
         stream.Write(endLine, 0, endLine.Length);
         bytesWritten += 80;
@@ -62,10 +90,29 @@ public class FitsWriter
         WritePadding(stream, bytesWritten, (byte)' ');
     }
 
-    private void EnsureCard(List<FitsCard> cards, string key, string value, string comment)
+    // --- Helpers per la gestione delle Keyword Strutturali ---
+
+    private FitsCard FindOrMake(FitsHeader source, string key, string defVal)
     {
-        if (!cards.Any(c => c.Key == key))
-            cards.Insert(1, new FitsCard(key, value, comment, false));
+        var existing = source.Cards.FirstOrDefault(c => c.Key == key);
+        // Se la card esiste e ha un valore valido, la usiamo
+        if (!string.IsNullOrEmpty(existing.Key)) return existing;
+        
+        // Altrimenti creiamo un default
+        return new FitsCard(key, defVal, null, false);
+    }
+
+    private void AddNaxisCards(FitsHeader source, List<FitsCard> target)
+    {
+        // Trova il valore di NAXIS (già aggiunto o default a 0)
+        var naxisCard = target.FirstOrDefault(c => c.Key == "NAXIS");
+        if (int.TryParse(naxisCard.Value, out int naxis) && naxis > 0)
+        {
+            for (int i = 1; i <= naxis; i++)
+            {
+                target.Add(FindOrMake(source, $"NAXIS{i}", "0"));
+            }
+        }
     }
 
     // =======================================================================
@@ -74,6 +121,8 @@ public class FitsWriter
 
     public void WriteMatrix(Stream stream, Array matrix)
     {
+        if (matrix == null || matrix.Length == 0) return;
+
         Type type = matrix.GetType().GetElementType();
         int h = matrix.GetLength(0);
         int w = matrix.GetLength(1);

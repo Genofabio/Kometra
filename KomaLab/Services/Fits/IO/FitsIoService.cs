@@ -247,7 +247,7 @@ namespace KomaLab.Services.Fits.IO
         }
 
         // =======================================================================
-        // SCRITTURA (WRITE)
+        // SCRITTURA (WRITE) - AGGIORNATA
         // =======================================================================
 
         public async Task WriteFileAsync(string path, Array data, FitsHeader header) 
@@ -255,22 +255,32 @@ namespace KomaLab.Services.Fits.IO
 
         public async Task WriteFileAsync(string path, Array data, FitsHeader header, FitsCompressionMode mode) => await Task.Run(() =>
         {
-            // [FIX]: Sanitizzazione Header
-            EnsureHeaderCompliance(header, data);
-            
+            // Standard FITS è Bottom-Up: flippiamo prima di scrivere
             FlipArrayVertical(data); 
             try
             {
                 using var fs = new FileStream(path, FileMode.Create, FileAccess.Write);
+                
                 if (mode == FitsCompressionMode.None)
                 {
+                    // === FITS STANDARD (Non Compresso) ===
+                    // Qui DEVI assicurare la compliance (es. BZERO per ushort)
+                    EnsureHeaderCompliance(header, data);
                     _writer.WriteHeader(fs, header);
                     _writer.WriteMatrix(fs, data);
                 }
                 else
                 {
+                    // === FITS COMPRESSO (Rice/Gzip) ===
+                    // 1. Scrivi Dummy Primary Header
                     WriteDummyPrimaryHeader(fs);
+
+                    // 2. Comprimi i dati
+                    // Nota: Passiamo l'header "così com'è". FitsCompression genererà 
+                    // l'header BINTABLE e mapperà le chiavi (ZBITPIX, ZBZERO)
                     var body = FitsCompression.CompressImage(data, header, mode, out var cHeader);
+                    
+                    // 3. Scrivi Header Compresso e Body
                     RawWriteHeader(fs, cHeader);
                     fs.Write(body);
                     PadStream(fs);
@@ -278,6 +288,7 @@ namespace KomaLab.Services.Fits.IO
             }
             finally
             {
+                // Ripristina l'array in memoria
                 FlipArrayVertical(data); 
             }
         });
@@ -287,6 +298,7 @@ namespace KomaLab.Services.Fits.IO
             if (blocks == null || blocks.Count == 0) return;
             using var fs = new FileStream(path, FileMode.Create, FileAccess.Write);
 
+            // Se stiamo comprimendo, il file inizia con un Dummy Primary
             if (mode != FitsCompressionMode.None) WriteDummyPrimaryHeader(fs);
 
             for (int i = 0; i < blocks.Count; i++)
@@ -294,14 +306,12 @@ namespace KomaLab.Services.Fits.IO
                 var (pixels, header) = blocks[i];
                 bool hasData = pixels != null && pixels.Length > 0;
 
-                // [FIX]: Sanitizzazione Header
-                if (hasData) EnsureHeaderCompliance(header, pixels);
-
                 if (hasData) FlipArrayVertical(pixels);
                 try
                 {
                     if (mode != FitsCompressionMode.None && hasData)
                     {
+                        // === ESTENSIONE COMPRESSA ===
                         var body = FitsCompression.CompressImage(pixels!, header, mode, out var cHeader);
                         RawWriteHeader(fs, cHeader);
                         fs.Write(body);
@@ -309,10 +319,20 @@ namespace KomaLab.Services.Fits.IO
                     }
                     else
                     {
-                        if (i == 0 && mode == FitsCompressionMode.None) _writer.WriteHeader(fs, header);
-                        else _writer.WriteImageExtension(fs, header, pixels!);
+                        // === FITS STANDARD (Uncompressed) ===
+                        if (hasData) EnsureHeaderCompliance(header, pixels);
 
-                        if (hasData && i == 0 && mode == FitsCompressionMode.None) _writer.WriteMatrix(fs, pixels!);
+                        if (i == 0 && mode == FitsCompressionMode.None) 
+                        {
+                            // Primo blocco non compresso = Primary HDU
+                            _writer.WriteHeader(fs, header);
+                            if (hasData) _writer.WriteMatrix(fs, pixels!);
+                        }
+                        else 
+                        {
+                            // Estensioni successive non compresse = Image Extension
+                            _writer.WriteImageExtension(fs, header, pixels!);
+                        }
                     }
                 }
                 finally
@@ -323,7 +343,7 @@ namespace KomaLab.Services.Fits.IO
         });
 
         // =======================================================================
-        // HELPER PER LA COMPLIANCE FITS (CORRETTO)
+        // HELPER PER LA COMPLIANCE FITS
         // =======================================================================
 
         private void EnsureHeaderCompliance(FitsHeader header, Array data)
@@ -331,19 +351,23 @@ namespace KomaLab.Services.Fits.IO
             if (data == null) return;
             Type t = data.GetType().GetElementType();
 
-            // Usiamo i metodi di FitsHeader per manipolare le card
+            // Rimuoviamo vecchie definizioni per evitare conflitti
             header.RemoveCard("BSCALE");
             header.RemoveCard("BZERO");
             header.RemoveCard("BITPIX");
 
             if (t == typeof(ushort))
             {
+                // FITS Standard non supporta ushort nativamente.
+                // Si usa BITPIX=16 (short) e si trasla di 32768
                 header.AddCard(new FitsCard("BITPIX", "16", "16-bit data", false));
                 header.AddCard(new FitsCard("BSCALE", "1.0", "default scaling factor", false));
                 header.AddCard(new FitsCard("BZERO", "32768.0", "offset data range to that of unsigned short", false));
             }
             else if (t == typeof(uint))
             {
+                // FITS Standard non supporta uint nativamente.
+                // Si usa BITPIX=32 (int) e si trasla di 2^31
                 header.AddCard(new FitsCard("BITPIX", "32", "32-bit data", false));
                 header.AddCard(new FitsCard("BSCALE", "1.0", "default scaling factor", false));
                 header.AddCard(new FitsCard("BZERO", "2147483648.0", "offset data range to that of unsigned int", false));
@@ -369,8 +393,7 @@ namespace KomaLab.Services.Fits.IO
                 header.AddCard(new FitsCard("BITPIX", "-64", "64-bit floating point", false));
             }
             
-            // Gestione END: rimuoviamo se esiste e riaggiungiamo alla fine
-            // Assumiamo che RemoveCard cancelli per chiave
+            // Assicuriamoci che END sia sempre l'ultima chiave
             if (header.Cards.Any(c => c.Key == "END"))
             {
                 header.RemoveCard("END");
@@ -385,10 +408,10 @@ namespace KomaLab.Services.Fits.IO
         private void WriteDummyPrimaryHeader(Stream s)
         {
             var h = new FitsHeader();
-            h.AddCard(new FitsCard("SIMPLE", "T", "", false));
-            h.AddCard(new FitsCard("BITPIX", "8", "", false));
-            h.AddCard(new FitsCard("NAXIS", "0", "", false));
-            h.AddCard(new FitsCard("EXTEND", "T", "", false));
+            h.AddCard(new FitsCard("SIMPLE", "T", "Standard FITS format", false));
+            h.AddCard(new FitsCard("BITPIX", "8", "No data", false));
+            h.AddCard(new FitsCard("NAXIS", "0", "No data", false));
+            h.AddCard(new FitsCard("EXTEND", "T", "Extensions are permitted", false));
             RawWriteHeader(s, h);
         }
 

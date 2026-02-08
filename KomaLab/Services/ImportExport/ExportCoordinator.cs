@@ -69,7 +69,7 @@ public class ExportCoordinator : IExportCoordinator
 
         var sourceData = new List<(Array Pixels, FitsHeader Header)>();
 
-        // 1. Caricamento e analisi preliminare
+        // 1. Caricamento dati
         for (int i = 0; i < items.Count; i++)
         {
             token.ThrowIfCancellationRequested();
@@ -80,6 +80,8 @@ public class ExportCoordinator : IExportCoordinator
             {
                 var package = await _dataManager.GetDataAsync(item.FullPath);
                 var (pixels, header) = ExtractPrimaryData(package);
+                
+                // Nota: Non cloniamo qui, lo facciamo appena prima di assemblare i blocchi
                 if (pixels != null && header != null) sourceData.Add((pixels, header));
             }
             catch (Exception ex)
@@ -92,29 +94,37 @@ public class ExportCoordinator : IExportCoordinator
 
         if (sourceData.Count == 0) return;
 
-        // 2. Creazione dell'HDU Primario "Null"
+        // 2. Creazione dell'HDU Primario "Null" (contenitore vuoto)
         var commonHeader = CreateCommonHeader(sourceData.Select(d => d.Header).ToList());
         _metadataService.AddValue(commonHeader, "HISTORY", $"KomaLab MEF Container created: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
+        _metadataService.AddValue(commonHeader, "CREATOR", "KomaLab Processing Suite");
 
         var blocks = new List<(Array Pixels, FitsHeader Header)>();
         
-        // Aggiungiamo il blocco primario vuoto (Null Primary non viene mai compresso)
+        // Aggiungiamo il blocco primario vuoto
         blocks.Add((Array.CreateInstance(typeof(byte), 0, 0), commonHeader));
 
-        // 3. Aggiunta delle immagini come estensioni
+        // 3. Preparazione estensioni
         for (int i = 0; i < sourceData.Count; i++)
         {
-            var (pixels, header) = sourceData[i];
-            _metadataService.AddValue(header, "EXTNAME", $"FRAME_{i + 1}");
-            _metadataService.AddValue(header, "HISTORY", $"Merged sequence frame - Compression: {settings.Compression}");
+            var (pixels, originalHeader) = sourceData[i];
+
+            // IMPORTANTE: Cloniamo l'header per non modificare l'oggetto in memoria
+            var extHeader = _metadataService.CloneHeader(originalHeader);
+
+            // Aggiungiamo metadati specifici per l'estensione
+            _metadataService.SetValue(extHeader, "EXTNAME", $"FRAME_{i + 1}", "Extension Name");
+            _metadataService.AddValue(extHeader, "HISTORY", $"Merged sequence frame - Compression: {settings.Compression}");
             
-            blocks.Add((pixels, header));
+            blocks.Add((pixels, extHeader));
         }
 
-        // 4. Scrittura fisica tramite IO Service passando la modalità di compressione
+        // 4. Scrittura fisica
         try
         {
-            progress.Report(new BatchProgressReport(items.Count, items.Count, "Compressione e Scrittura MEF...", 90));
+            progress.Report(new BatchProgressReport(items.Count, items.Count, "Scrittura su disco...", 90));
+            
+            // Il servizio IO gestirà la compressione di ogni blocco se necessario
             await _ioService.WriteMergedFileAsync(finalPath, blocks, settings.Compression);
             
             foreach (var item in items.Where(x => !x.IsError))
@@ -126,7 +136,7 @@ public class ExportCoordinator : IExportCoordinator
         catch (Exception ex)
         {
             Debug.WriteLine($"Critical Merge IO Error: {ex.Message}");
-            throw;
+            throw; // Rilancia per gestire l'errore UI a livello superiore se serve
         }
     }
 
@@ -152,22 +162,33 @@ public class ExportCoordinator : IExportCoordinator
                 string outPath = Path.Combine(settings.OutputDirectory, outName + extension);
 
                 var package = await _dataManager.GetDataAsync(item.FullPath);
-                var (pixels, header) = ExtractPrimaryData(package);
+                var (pixels, originalHeader) = ExtractPrimaryData(package);
 
-                if (pixels == null || header == null) throw new InvalidDataException("Dati mancanti.");
+                if (pixels == null || originalHeader == null) throw new InvalidDataException("Dati mancanti o corrotti.");
 
                 if (settings.Format == ExportFormat.Fits)
                 {
-                    _metadataService.AddValue(header, "HISTORY", $"KomaLab Export - Compression: {settings.Compression}");
-                    // Passiamo il flag di compressione al servizio IO
-                    await _ioService.WriteFileAsync(outPath, pixels, header, settings.Compression);
+                    // 1. CLONAZIONE HEADER
+                    // Evita effetti collaterali se l'immagine è aperta nel visualizzatore
+                    var exportHeader = _metadataService.CloneHeader(originalHeader);
+
+                    // 2. METADATI SEMANTICI
+                    _metadataService.AddValue(exportHeader, "HISTORY", $"Exported by KomaLab on {DateTime.Now:O}");
+                    _metadataService.AddValue(exportHeader, "HISTORY", $"Compression Mode: {settings.Compression}");
+                    _metadataService.SetValue(exportHeader, "CREATOR", "KomaLab Processing Suite", "Software name");
+
+                    // 3. SCRITTURA
+                    // Passiamo l'header standard. Se la compressione è attiva, FitsIoService 
+                    // chiamerà FitsCompression che trasformerà questo header in BINTABLE.
+                    await _ioService.WriteFileAsync(outPath, pixels, exportHeader, settings.Compression);
                 }
                 else
                 {
+                    // Export Bitmap (PNG/JPG)
                     var absoluteProfile = settings.Profile as AbsoluteContrastProfile;
                     await Task.Run(() =>
                     {
-                        _bitmapService.ExportBitmap(pixels, header, outPath, settings.Format, settings.JpegQuality, absoluteProfile);
+                        _bitmapService.ExportBitmap(pixels, originalHeader, outPath, settings.Format, settings.JpegQuality, absoluteProfile);
                     }, token);
                 }
 
@@ -179,6 +200,7 @@ public class ExportCoordinator : IExportCoordinator
             {
                 item.Status = $"Errore: {ex.Message}";
                 item.IsError = true;
+                Debug.WriteLine($"Export Error on {item.FileName}: {ex}");
             }
         }
     }
@@ -186,16 +208,20 @@ public class ExportCoordinator : IExportCoordinator
     private FitsHeader CreateCommonHeader(List<FitsHeader> headers)
     {
         var common = new FitsHeader();
-        common.AddCard(new FitsCard("BITPIX", "8", "No data", false));
-        common.AddCard(new FitsCard("NAXIS", "0", "Null Primary HDU", false));
-        common.AddCard(new FitsCard("EXTEND", "T", "File contains extensions", false));
+        
+        // Header minimale per il Primary HDU di un file MEF
+        _metadataService.SetValue(common, "SIMPLE", true, "Standard FITS format");
+        _metadataService.SetValue(common, "BITPIX", 8, "No data in primary HDU");
+        _metadataService.SetValue(common, "NAXIS", 0, "No data axes");
+        _metadataService.SetValue(common, "EXTEND", true, "Extensions are permitted");
 
-        string[] keysToSync = { "OBJECT", "TELESCOP", "INSTRUME", "OBSERVER", "LOCATION", "DATE-OBS" };
+        // Tentativo di preservare metadati comuni (Telescopio, Oggetto, ecc.)
+        string[] keysToSync = { "OBJECT", "TELESCOP", "INSTRUME", "OBSERVER", "SITENAME", "DATE-OBS" };
         foreach (var key in keysToSync)
         {
             string commonValue = GetCommonValue(headers, key);
             if (commonValue != null)
-                common.AddCard(new FitsCard(key, commonValue, "Common metadata", false));
+                _metadataService.SetValue(common, key, commonValue, "Common metadata");
         }
         return common;
     }
@@ -203,14 +229,18 @@ public class ExportCoordinator : IExportCoordinator
     private string? GetCommonValue(List<FitsHeader> headers, string key)
     {
         if (headers.Count == 0) return null;
-        var firstValue = headers[0].Cards.FirstOrDefault(c => c.Key == key)?.Value;
+        
+        // Usa MetadataService per leggere in modo robusto (gestione commenti, apici, ecc.)
+        var firstValue = _metadataService.GetStringValue(headers[0], key);
         if (string.IsNullOrEmpty(firstValue)) return null;
-        bool isCommon = headers.All(h => h.Cards.FirstOrDefault(c => c.Key == key)?.Value == firstValue);
+
+        bool isCommon = headers.All(h => _metadataService.GetStringValue(h, key) == firstValue);
         return isCommon ? firstValue : null;
     }
 
     private (Array? pixels, FitsHeader? header) ExtractPrimaryData(FitsDataPackage package)
     {
+        // Logica per estrarre l'immagine principale (o dal primario o dalla prima estensione valida)
         var hdu = package.FirstImageHdu ?? package.PrimaryHdu;
         return (hdu?.PixelData, hdu?.Header);
     }

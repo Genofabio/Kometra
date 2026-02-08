@@ -37,7 +37,7 @@ public class FitsMetadataService : IFitsMetadataService
                GetIntValue(h1, "NAXIS2") == GetIntValue(h2, "NAXIS2");
     }
 
-    // --- LETTURA GENERICA (Invariata) ---
+    // --- LETTURA GENERICA ---
 
     public int GetIntValue(FitsHeader header, string key, int defaultValue = 0)
     {
@@ -61,6 +61,7 @@ public class FitsMetadataService : IFitsMetadataService
         if (string.IsNullOrWhiteSpace(card.Value)) return string.Empty;
 
         string val = card.Value.Trim();
+        // Rimuove gli apici se presenti per restituire il valore pulito
         if (val.StartsWith("'") && val.EndsWith("'"))
         {
             val = val.Substring(1, val.Length - 2).Replace("''", "'");
@@ -69,69 +70,45 @@ public class FitsMetadataService : IFitsMetadataService
     }
 
     // =======================================================================
-    // NUOVA IMPLEMENTAZIONE: GESTIONE TEMPORALE SCIENTIFICA
+    // GESTIONE TEMPORALE SCIENTIFICA
     // =======================================================================
 
     public DateTime? GetObservationDate(FitsHeader header)
     {
-        // Lettura ISO-8601 (Precisione millisecondo richiesta per NEO/Comete) [cite: 170]
         string dateStr = GetStringValue(header, "DATE-OBS");
         if (string.IsNullOrEmpty(dateStr)) dateStr = GetStringValue(header, "DATE");
         
-        // Uso di Round-trip ("O") o generico per supportare formati come "2025-01-26T14:30:00.123"
         if (DateTime.TryParse(dateStr, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var dt)) 
             return dt;
             
         return null;
     }
 
-    /// <summary>
-    /// Restituisce la durata dell'esposizione in secondi.
-    /// Necessaria per calcolare il punto medio dell'osservazione.
-    /// </summary>
     public double GetExposureDuration(FitsHeader header)
     {
-        // Standard FITS 
         double exp = GetDoubleValue(header, "EXPTIME");
-        // Fallback comune
         if (exp <= 0) exp = GetDoubleValue(header, "EXPOSURE");
         return exp;
     }
 
-    /// <summary>
-    /// Calcola il punto medio temporale (Time Mid-Point) dell'esposizione.
-    /// CRUCIALE per l'astrometria di oggetti veloci (Comete/NEO).
-    /// Formula: DATE-OBS + (EXPTIME / 2) 
-    /// </summary>
     public DateTime? GetObservationMidPoint(FitsHeader header)
     {
         var start = GetObservationDate(header);
         if (start == null) return null;
 
         double duration = GetExposureDuration(header);
-        // Se l'esposizione è 0 (es. Bias frame), il midpoint coincide con lo start
         return start.Value.AddSeconds(duration / 2.0);
     }
 
-    /// <summary>
-    /// Restituisce il Modified Julian Date (MJD).
-    /// Preferibile per calcoli orbitali numerici in quanto continuo.
-    /// Se manca la chiave MJD-OBS, la calcola da DATE-OBS.
-    /// 
-    /// </summary>
     public double? GetModifiedJulianDate(FitsHeader header)
     {
-        // 1. Tentativo diretto (Standard)
         double mjd = GetDoubleValue(header, "MJD-OBS", -1.0);
         if (mjd > 0) return mjd;
 
-        // 2. Fallback: Calcolo da DATE-OBS
-        // Epoch MJD: 17 Nov 1858 00:00:00 UTC
         var dateObs = GetObservationDate(header);
         if (dateObs.HasValue)
         {
             var mjdEpoch = new DateTime(1858, 11, 17, 0, 0, 0, DateTimeKind.Utc);
-            // Assicuriamoci che la data sia UTC
             var utcDate = dateObs.Value.Kind == DateTimeKind.Unspecified 
                 ? DateTime.SpecifyKind(dateObs.Value, DateTimeKind.Utc) 
                 : dateObs.Value.ToUniversalTime();
@@ -142,28 +119,19 @@ public class FitsMetadataService : IFitsMetadataService
         return null;
     }
 
-    /// <summary>
-    /// Rileva se il telescopio stava inseguendo un oggetto non siderale (Cometa).
-    /// Controlla flag espliciti (MTFLAG) o la presenza di tassi di moto (Rates).
-    /// 
-    /// </summary>
     public bool IsMovingTarget(FitsHeader header)
     {
-        // 1. Check Flag Hubble/Standard [cite: 172]
         string mtFlag = GetStringValue(header, "MTFLAG");
         if (mtFlag == "T") return true;
 
-        // 2. Check differenziali di moto (Rates) [cite: 184]
-        // Spesso presenti nei commenti o chiavi non standard come RA_RATE/DEC_RATE
         double raRate = GetDoubleValue(header, "RA_RATE");
         double decRate = GetDoubleValue(header, "DEC_RATE");
 
-        // Se i tassi sono significativamente diversi da zero, è tracking non-siderale
         return Math.Abs(raRate) > 1e-9 || Math.Abs(decRate) > 1e-9;
     }
 
     // =======================================================================
-    // FINE NUOVA IMPLEMENTAZIONE
+    // PARSER SPECIALIZZATI
     // =======================================================================
 
     public double? GetFocalLength(FitsHeader header) => OpticalParser.ParseFocalLength(header, this);
@@ -205,7 +173,56 @@ public class FitsMetadataService : IFitsMetadataService
         return new SkyCoordinate(raDeg, decDeg);
     }
     
-    // --- SCRITTURA / MANIPOLAZIONE (CORRETTA) ---
+    // =======================================================================
+    // SCRITTURA / MANIPOLAZIONE (CORRETTA E ROBUSTA)
+    // =======================================================================
+
+    private FitsCard CreateCard(string key, object value, string? comment)
+    {
+        string keyUpper = key.ToUpperInvariant();
+        string valStr;
+
+        // 1. GESTIONE COMMENTI/HISTORY (Chiavi additive)
+        // Queste chiavi NON devono avere apici né segno uguale nel writer (gestito qui passando stringa raw)
+        if (AdditiveKeys.Contains(keyUpper))
+        {
+            return new FitsCard(keyUpper, value?.ToString() ?? "", null, false);
+        }
+
+        // 2. GESTIONE VALORI STANDARD
+        valStr = value switch
+        {
+            bool b => b ? "T" : "F", // FITS Booleans sono T/F
+            double d => d.ToString("G", CultureInfo.InvariantCulture), // Importante: usare punto, non virgola
+            float f => f.ToString("G", CultureInfo.InvariantCulture),
+            int i => i.ToString(),
+            long l => l.ToString(),
+            string s => FormatFitsString(s), // Gestione intelligente apici
+            _ => value?.ToString() ?? ""
+        };
+
+        return new FitsCard(keyUpper, valStr, comment, false);
+    }
+
+    /// <summary>
+    /// Formatta una stringa per FITS, evitando il doppio quoting.
+    /// </summary>
+    private string FormatFitsString(string s)
+    {
+        if (s == null) return "''";
+
+        string trimmed = s.Trim();
+        // SE LA STRINGA È GIÀ VIRGOLETTATA (es. arriva da un altro header), la ritorniamo così com'è.
+        // Questo previene il problema '''Valore'''
+        if (trimmed.Length >= 2 && trimmed.StartsWith("'") && trimmed.EndsWith("'"))
+        {
+            return s; 
+        }
+
+        // Altrimenti, escape degli apici interni e aggiunta apici esterni
+        string escaped = s.Replace("'", "''");
+        return $"'{escaped}'"; 
+    }
 
     private void InsertCardRaw(FitsHeader header, FitsCard card)
     {
@@ -260,7 +277,6 @@ public class FitsMetadataService : IFitsMetadataService
         SetValue(newHeader, "NAXIS1", newPixels.GetLength(1), "Image Width");
         SetValue(newHeader, "NAXIS2", newPixels.GetLength(0), "Image Height");
         
-        // Uso di DATE generico per creazione file, non confondibile con DATE-OBS
         SetValue(newHeader, "DATE", DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ss"), "File creation date (UTC)");
         SetValue(newHeader, "CREATOR", "KomaLab v0.4", "Software used to create this file");
         
@@ -272,7 +288,7 @@ public class FitsMetadataService : IFitsMetadataService
         return newHeader;
     }
 
-    // --- ALTRI METODI (Invariati) ---
+    // --- UTILS ---
 
     public FitsBitDepth ResolveOutputBitDepth(FitsBitDepth original, bool hasSpecialValues)
     {
@@ -297,7 +313,6 @@ public class FitsMetadataService : IFitsMetadataService
     public IEnumerable<T> SortByDate<T>(IEnumerable<T> items, Func<T, FitsHeader?> headerSelector)
     {
         if (items == null) return Enumerable.Empty<T>();
-        // Usa il GetObservationDate potenziato che supporta i millisecondi
         return items.OrderBy(item => GetObservationDate(headerSelector(item)!) ?? DateTime.MinValue);
     }
     
@@ -309,27 +324,6 @@ public class FitsMetadataService : IFitsMetadataService
         {
             header.RemoveCard("END");
         }
-    }
-
-    private FitsCard CreateCard(string key, object value, string? comment)
-    {
-        string keyUpper = key.ToUpper();
-        string valStr = value switch
-        {
-            bool b => b ? "T" : "F",
-            double d => d.ToString("G", CultureInfo.InvariantCulture),
-            int i => i.ToString(),
-            string s => FormatFitsString(s, keyUpper),
-            _ => value?.ToString() ?? ""
-        };
-        return new FitsCard(keyUpper, valStr, comment, false);
-    }
-
-    private string FormatFitsString(string s, string key)
-    {
-        if (AdditiveKeys.Contains(key)) return s; 
-        if (string.IsNullOrEmpty(s)) return "''";
-        return $"'{s.Replace("'", "''"),-8}'"; 
     }
 
     private string GetBitpixComment(int bitpix) => bitpix switch

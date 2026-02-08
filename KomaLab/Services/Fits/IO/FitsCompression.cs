@@ -39,11 +39,14 @@ public static class FitsCompression
         int rowStride = useQuantization ? 24 : 8;
         long theapOffset = (long)rowCount * rowStride;
 
-        // 3. Creiamo l'Header (Ora include THEAP e ZBLANK)
-        compressedHeader = CreateZHeader(originalHeader, bitpix, width, height, zTile1, zTile2, mode, useQuantization, theapOffset);
+        // 3. Creiamo l'Header Compresso (Include traduzione BSCALE/BZERO)
+        compressedHeader = CreateCompressedHeader(originalHeader, pixels, width, height, zTile1, zTile2, mode, useQuantization, theapOffset);
 
         byte[] tableBuffer = new byte[theapOffset];
         using var heapStream = new MemoryStream();
+
+        // Variabile per tracciare la dimensione massima del blocco compresso
+        int maxCompressedSize = 0;
 
         // 4. Ciclo di Compressione Tile
         for (int r = 0; r < rowCount; r++)
@@ -66,17 +69,12 @@ public static class FitsCompression
                     float[] rowData = GetRowAsFloats(pixels, r, width);
 
                     // --- FIX CRITICO PER NAN ---
-                    // float.NaN == float.NaN è FALSE in C#. Se passiamo NaN al quantizzatore,
-                    // il confronto fallisce e il NaN viene processato matematicamente (diventando 0).
-                    // Sostituiamo i NaN con una sentinella sicura (MaxValue) e passiamo quella come nullval.
                     float sentinelNull = float.MaxValue;
-                    bool hasNans = false;
                     for (int i = 0; i < rowData.Length; i++)
                     {
                         if (float.IsNaN(rowData[i]) || float.IsInfinity(rowData[i]))
                         {
                             rowData[i] = sentinelNull;
-                            hasNans = true;
                         }
                     }
 
@@ -86,20 +84,15 @@ public static class FitsCompression
                     int imin, imax;
                     int[] intsToCompress;
 
-                    // Chiamiamo il quantizzatore usando la sentinella
                     bool qSuccess = FitsQuantizerHighLevel.QuantizeFloat(
                         r + 1, 
                         rowData, width, 1, 
-                        true, sentinelNull, // Null checking usa la sentinella
+                        true, sentinelNull,
                         qLevel, ditherMethod,
                         out intsToCompress, out scale, out zero, out imin, out imax
                     );
 
-                    if (!qSuccess)
-                    {
-                        // Fallback in caso di errore (es. range dinamico impossibile)
-                        intsToCompress = new int[width]; 
-                    }
+                    if (!qSuccess) intsToCompress = new int[width]; // Fallback
 
                     // I dati quantizzati sono sempre int32
                     compressedBlock = RiceCodec.Encode(intsToCompress, BlockSize);
@@ -125,6 +118,10 @@ public static class FitsCompression
                 }
             }
 
+            // Aggiorna max block size per TFORM1
+            if (compressedBlock.Length > maxCompressedSize)
+                maxCompressedSize = compressedBlock.Length;
+
             // C. Scrittura nella Binary Table
             int compressedSize = compressedBlock.Length;
             int heapPtr = (int)heapStream.Position; 
@@ -145,8 +142,14 @@ public static class FitsCompression
             heapStream.Write(compressedBlock);
         }
 
-        // 5. Finalizzazione PCOUNT
+        // 5. Finalizzazione Header
+        // Aggiorna PCOUNT con la dimensione reale dello heap
         compressedHeader.AddOrUpdateCard("PCOUNT", heapStream.Length.ToString(), "Size of the heap");
+        
+        // [FIX IMPORTANTE] Aggiorna TFORM1 con la dimensione massima reale del blocco
+        // Invece di 1PB(0), mettiamo ad esempio 1PB(384) se il blocco più grande è 384 byte.
+        // Questo aiuta i lettori a pre-allocare il buffer corretto.
+        compressedHeader.AddOrUpdateCard("TFORM1", $"1PB({maxCompressedSize})", "Variable length byte array");
 
         // 6. Assemblaggio Finale
         byte[] finalHduBody = new byte[tableBuffer.Length + heapStream.Length];
@@ -254,19 +257,18 @@ public static class FitsCompression
     }
 
     // =======================================================================
-    // HEADER GENERATION
+    // HEADER GENERATION (TRADUZIONE HEADER STANDARD -> HEADER COMPRESSO)
     // =======================================================================
 
-    // In KomaLab.Services.Fits.IO.FitsCompression
-
-    private static FitsHeader CreateZHeader(FitsHeader original, int originalBitpix, int w, int h, int zt1, int zt2, FitsCompressionMode mode, bool useQuantization, long theapSize)
+    private static FitsHeader CreateCompressedHeader(FitsHeader original, Array pixels, int w, int h, int zt1, int zt2, FitsCompressionMode mode, bool useQuantization, long theapSize)
     {
         var hC = new FitsHeader();
+        int originalBitpix = GetBitpix(pixels);
 
-        // 1. CORREZIONE VIRGOLETTE: Rimuovi gli apici interni ('...') dalle stringhe.
-        // Assumiamo che la tua classe FitsCard o il Writer aggiungano automaticamente gli apici
-        // richiesti dallo standard FITS per i valori stringa.
-        
+        // ---------------------------------------------------------
+        // 1. STRUTTURA BINTABLE
+        // ---------------------------------------------------------
+        // Nota: Qui non usiamo apici extra. FitsCard gestirà la formattazione stringa.
         hC.AddCard(new FitsCard("XTENSION", "BINTABLE", "Binary Table extension", false));
         hC.AddCard(new FitsCard("BITPIX", "8", "Binary Table data is bytes", false));
         hC.AddCard(new FitsCard("NAXIS", "2", "2-dimensional binary table", false));
@@ -275,54 +277,48 @@ public static class FitsCompression
         hC.AddCard(new FitsCard("NAXIS1", rowWidth.ToString(), "Width of table row in bytes", false));
         hC.AddCard(new FitsCard("NAXIS2", h.ToString(), "Number of rows", false));
 
-        hC.AddCard(new FitsCard("PCOUNT", "0", "Size of the heap area", false));
+        hC.AddCard(new FitsCard("PCOUNT", "0", "Size of the heap area", false)); // Aggiornato dopo
         hC.AddCard(new FitsCard("GCOUNT", "1", "One group", false));
         hC.AddCard(new FitsCard("TFIELDS", useQuantization ? "3" : "1", "Number of columns", false));
 
-        // Correggi TFORM e TTYPE rimuovendo gli apici extra
         hC.AddCard(new FitsCard("TTYPE1", "COMPRESSED_DATA", "Compressed byte stream", false));
+        // Impostiamo un placeholder per TFORM1, verrà aggiornato alla fine della compressione
         hC.AddCard(new FitsCard("TFORM1", "1PB(0)", "Variable length byte array", false));
 
         if (useQuantization)
         {
             hC.AddCard(new FitsCard("TTYPE2", "ZSCALE", "Linear scaling factor", false));
             hC.AddCard(new FitsCard("TFORM2", "1D", "Double precision float", false));
-
             hC.AddCard(new FitsCard("TTYPE3", "ZZERO", "Zero point", false));
             hC.AddCard(new FitsCard("TFORM3", "1D", "Double precision float", false));
         }
 
+        // ---------------------------------------------------------
+        // 2. MAPPATURA Z-KEYWORDS (Proprietà Immagine Originale)
+        // ---------------------------------------------------------
+        // Nome Estensione (Convenzione standard fpack)
+        hC.AddCard(new FitsCard("EXTNAME", "COMPRESSED_IMAGE", "Name of this extension", false));
+        
         hC.AddCard(new FitsCard("ZIMAGE", "T", "Extension contains compressed image", false));
         hC.AddCard(new FitsCard("ZBITPIX", originalBitpix.ToString(), "Original BITPIX", false));
         hC.AddCard(new FitsCard("ZNAXIS", "2", "Original NAXIS", false));
         hC.AddCard(new FitsCard("ZNAXIS1", w.ToString(), "Original Width", false));
         hC.AddCard(new FitsCard("ZNAXIS2", h.ToString(), "Original Height", false));
+        
         hC.AddCard(new FitsCard("ZTILE1", zt1.ToString(), "Tile Width", false));
         hC.AddCard(new FitsCard("ZTILE2", zt2.ToString(), "Tile Height", false));
 
-        // 2. CORREZIONE ALGORITMO E PARAMETRI RICE
         string algo = mode == FitsCompressionMode.Rice ? "RICE_1" : "GZIP_1";
         hC.AddCard(new FitsCard("ZCMPTYPE", algo, "Compression algorithm", false));
 
         if (mode == FitsCompressionMode.Rice)
         {
-            // === AGGIUNTA FONDAMENTALE ===
-            // Devi specificare i parametri di compressione Rice:
-            // ZNAME1='BLOCKSIZE', ZVAL1=32
-            // ZNAME2='BYTEPIX',   ZVAL2=... (4, 2, o 1)
-            
+            // Parametri OBBLIGATORI per Rice (Blocksize e BytePix)
             hC.AddCard(new FitsCard("ZNAME1", "BLOCKSIZE", "Compression block size", false));
             hC.AddCard(new FitsCard("ZVAL1", "32", "Pixels per block", false));
 
+            int bytePix = useQuantization ? 4 : Math.Abs(originalBitpix) / 8;
             hC.AddCard(new FitsCard("ZNAME2", "BYTEPIX", "Bytes per pixel", false));
-            
-            // Calcola BYTEPIX corretto per il decompressore
-            int bytePix = 4; // Default per float quantizzati (diventano int32)
-            if (!useQuantization)
-            {
-                // Se non quantizziamo, dipende dal tipo originale (assoluto)
-                bytePix = Math.Abs(originalBitpix) / 8;
-            }
             hC.AddCard(new FitsCard("ZVAL2", bytePix.ToString(), "Bytes per pixel in original", false));
         }
 
@@ -331,20 +327,47 @@ public static class FitsCompression
             hC.AddCard(new FitsCard("ZQUANTIZ", "SUBTRACTIVE_DITHER_1", "Quantization method", false));
             if (originalBitpix < 0)
             {
-                // FITS_NULL_VALUE è definito nella classe (-2147483647)
                 hC.AddCard(new FitsCard("ZBLANK", FITS_NULL_VALUE.ToString(), "Value for NaN pixels", false));
             }
         }
+        
+        // Flag per indicare che non si attraversa i blocchi FITS
+        hC.AddCard(new FitsCard("ZBLOCKED", "T", "True if blocked", false));
 
+        // ---------------------------------------------------------
+        // 3. GESTIONE CRITICA BSCALE/BZERO (Mapping Tipi Unsigned)
+        // ---------------------------------------------------------
+        // Qui decidiamo come mappare i dati in base al tipo C# dei pixel.
+        // NON copiamo mai BSCALE/BZERO dall'header originale per evitare conflitti.
+        
+        Type t = pixels.GetType().GetElementType();
+        if (t == typeof(ushort))
+        {
+            // USHORT (16 bit) -> FITS Signed Short + Offset 32768
+            hC.AddCard(new FitsCard("ZBSCALE", "1.0", "Linear scaling factor", false));
+            hC.AddCard(new FitsCard("ZBZERO", "32768.0", "Zero point", false));
+        }
+        else if (t == typeof(uint))
+        {
+            // UINT (32 bit) -> FITS Signed Int + Offset 2^31
+            hC.AddCard(new FitsCard("ZBSCALE", "1.0", "Linear scaling factor", false));
+            hC.AddCard(new FitsCard("ZBZERO", "2147483648.0", "Zero point", false));
+        }
+        
         hC.AddCard(new FitsCard("THEAP", theapSize.ToString(), "Offset of heap", false));
 
-        // Copia altri metadati, ignorando quelli strutturali
+        // ---------------------------------------------------------
+        // 4. COPIA METADATI (Con Blacklist Strutturale)
+        // ---------------------------------------------------------
         var structural = new HashSet<string> {
-            "SIMPLE", "BITPIX", "NAXIS", "NAXIS1", "NAXIS2", "EXTEND", "PCOUNT", "GCOUNT",
-            "TFIELDS", "THEAP", "END", "XTENSION", 
-            // Filtra anche le chiavi Z generate sopra per evitare duplicati se presenti nel source
+            "SIMPLE", "XTENSION", "BITPIX", "NAXIS", "NAXIS1", "NAXIS2", "NAXIS3",
+            "PCOUNT", "GCOUNT", "GROUPS", "TFIELDS", "THEAP", "END", "EXTEND",
+            "BSCALE", "BZERO", "BUNIT", "BLANK", "DATAMAX", "DATAMIN",
+            "CHECKSUM", "DATASUM",
+            // Filtra chiavi Z già generate per evitare duplicati
             "ZIMAGE", "ZCMPTYPE", "ZBITPIX", "ZNAXIS", "ZNAXIS1", "ZNAXIS2", "ZTILE1", "ZTILE2",
-            "ZNAME1", "ZVAL1", "ZNAME2", "ZVAL2", "ZQUANTIZ", "ZBLANK"
+            "ZNAME1", "ZVAL1", "ZNAME2", "ZVAL2", "ZQUANTIZ", "ZBLANK", "ZBSCALE", "ZBZERO", 
+            "ZBLOCKED", "EXTNAME"
         };
 
         foreach (var card in original.Cards)
@@ -352,7 +375,6 @@ public static class FitsCompression
             string key = card.Key.ToUpperInvariant().Trim();
             if (!structural.Contains(key) && !key.StartsWith("TFORM") && !key.StartsWith("TTYPE"))
             {
-                // Anche qui assicurati che card.Value non abbia apici doppi se FitsCard li aggiunge
                 hC.AddCard(new FitsCard(card.Key, card.Value, card.Comment, false));
             }
         }
