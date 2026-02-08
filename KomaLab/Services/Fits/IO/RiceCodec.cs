@@ -1,181 +1,641 @@
 ﻿using System;
 using System.IO;
-using System.Linq;
+using System.Buffers.Binary;
 
-namespace KomaLab.Services.Fits.IO;
-
-/// <summary>
-/// Codec per l'algoritmo Rice-Golomb utilizzato nello standard FITS (RICE_1).
-/// Gestisce sia la decompressione (Decode) che la compressione (Encode) di flussi di interi.
-/// </summary>
-public static class RiceCodec
+namespace KomaLab.Services.Fits.IO
 {
-    // =======================================================================
-    // 1. DECOMPRESSIONE (DECODE)
-    // =======================================================================
-    
-    public static int[] Decode(byte[] compressedData, int pixelCount, int blockSize = 32)
-    {
-        var output = new int[pixelCount];
-        if (compressedData == null || compressedData.Length == 0) return output;
-
-        var bitStream = new BitStreamReader(compressedData);
-        int outputIdx = 0;
-        int lastValue = 0; 
-
-        while (outputIdx < pixelCount)
-        {
-            int pixelsInBlock = Math.Min(blockSize, pixelCount - outputIdx);
-            int fs = bitStream.ReadBits(5); 
-
-            if (fs == 0)
-            {
-                for (int i = 0; i < pixelsInBlock; i++) output[outputIdx + i] = lastValue;
-                outputIdx += pixelsInBlock;
-                continue;
-            }
-
-            if (fs == 31)
-            {
-                for (int i = 0; i < pixelsInBlock; i++) output[outputIdx + i] = bitStream.ReadBits(32);
-                lastValue = output[outputIdx + pixelsInBlock - 1];
-                outputIdx += pixelsInBlock;
-                continue;
-            }
-
-            for (int i = 0; i < pixelsInBlock; i++)
-            {
-                int q = 0;
-                while (bitStream.ReadBit() == 1) { q++; if (q > 1024) break; }
-                int r = bitStream.ReadBits(fs);
-                
-                int diff = (q << fs) + r;
-                int finalDiff = (diff & 1) != 0 ? ~(diff >> 1) : diff >> 1;
-
-                int actualValue = lastValue + finalDiff;
-                output[outputIdx + i] = actualValue;
-                lastValue = actualValue;
-            }
-            outputIdx += pixelsInBlock;
-        }
-        return output;
-    }
-
-    // =======================================================================
-    // 2. COMPRESSIONE (ENCODE)
-    // =======================================================================
-
     /// <summary>
-    /// Comprime un array di interi utilizzando l'algoritmo Rice_1.
+    /// Porting C# completo (Encode/Decode) di 'ricecomp.c' e 'rdecomp.c' (CFITSIO).
+    /// Gestisce decompressione Rice per 8, 16 e 32 bit con logica bit-exact.
     /// </summary>
-    public static byte[] Encode(int[] data, int blockSize = 32)
+    public static class RiceCodec
     {
-        if (data == null || data.Length == 0) return Array.Empty<byte>();
+        // Lookup table per il conteggio dei bit (da rcomp.c)
+        private static readonly int[] NonZeroCount = {
+            0, 1, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, 4, 4, 4, 4,
+            5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5,
+            6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6,
+            6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6,
+            7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,
+            7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,
+            7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,
+            7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,
+            8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8,
+            8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8,
+            8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8,
+            8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8,
+            8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8,
+            8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8,
+            8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8,
+            8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8
+        };
 
-        using var ms = new MemoryStream();
-        var bitWriter = new BitStreamWriter(ms);
-        int lastValue = 0;
+        // =======================================================================
+        // DECODE METHODS (fits_rdecomp)
+        // =======================================================================
 
-        for (int i = 0; i < data.Length; i += blockSize)
+        public static int[] Decode(byte[] c, int pixelCount, int bitPix, int blockSize = 32)
         {
-            int pixelsInBlock = Math.Min(blockSize, data.Length - i);
+            int absBitPix = Math.Abs(bitPix);
+            if (absBitPix == 8) return DecodeByte(c, pixelCount, blockSize);
+            if (absBitPix == 16) return DecodeShort(c, pixelCount, blockSize);
+            return DecodeInt(c, pixelCount, blockSize);
+        }
+
+        private static int[] DecodeInt(byte[] c, int nx, int nblock)
+        {
+            int[] array = new int[nx];
+            if (c == null || c.Length < 4) return array;
+
+            int fsbits = 5;
+            int fsmax = 25;
+            int bbits = 1 << fsbits; // 32
+
+            int cIdx = 0;
+            int lastpix = BinaryPrimitives.ReadInt32BigEndian(c.AsSpan(cIdx));
+            cIdx += 4;
+
+            if (cIdx >= c.Length) { array[0] = lastpix; return array; }
+            uint b = c[cIdx++];
+            int nbits = 8;
+
+            for (int i = 0; i < nx;)
+            {
+                nbits -= fsbits;
+                while (nbits < 0)
+                {
+                    if (cIdx >= c.Length) break;
+                    b = (b << 8) | c[cIdx++];
+                    nbits += 8;
+                }
+                int fs = (int)(b >> nbits) - 1;
+                b &= (uint)((1 << nbits) - 1);
+
+                int imax = i + nblock;
+                if (imax > nx) imax = nx;
+
+                if (fs < 0)
+                {
+                    for (; i < imax; i++) array[i] = lastpix;
+                }
+                else if (fs == fsmax)
+                {
+                    for (; i < imax; i++)
+                    {
+                        int k = bbits - nbits;
+                        uint diff = b << k;
+                        for (k -= 8; k >= 0; k -= 8)
+                        {
+                            if (cIdx >= c.Length) break;
+                            b = c[cIdx++];
+                            diff |= (uint)(b << k);
+                        }
+                        if (nbits > 0)
+                        {
+                            if (cIdx < c.Length)
+                            {
+                                b = c[cIdx++];
+                                diff |= (b >> (-k));
+                                b &= (uint)((1 << nbits) - 1);
+                            }
+                        }
+                        else b = 0;
+
+                        if ((diff & 1) == 0) diff >>= 1;
+                        else diff = ~(diff >> 1);
+
+                        array[i] = (int)(diff + lastpix);
+                        lastpix = array[i];
+                    }
+                }
+                else
+                {
+                    for (; i < imax; i++)
+                    {
+                        while (b == 0)
+                        {
+                            if (cIdx >= c.Length) break;
+                            nbits += 8;
+                            b = c[cIdx++];
+                        }
+                        int nzero = nbits - NonZeroCount[b];
+                        nbits -= nzero + 1;
+                        b ^= (uint)(1 << nbits);
+
+                        nbits -= fs;
+                        while (nbits < 0)
+                        {
+                            if (cIdx >= c.Length) break;
+                            b = (b << 8) | c[cIdx++];
+                            nbits += 8;
+                        }
+                        uint diff = (uint)((nzero << fs) | (b >> nbits));
+                        b &= (uint)((1 << nbits) - 1);
+
+                        if ((diff & 1) == 0) diff >>= 1;
+                        else diff = ~(diff >> 1);
+
+                        array[i] = (int)(diff + lastpix);
+                        lastpix = array[i];
+                    }
+                }
+            }
+            return array;
+        }
+
+        private static int[] DecodeShort(byte[] c, int nx, int nblock)
+        {
+            int[] array = new int[nx];
+            if (c == null || c.Length < 2) return array;
+
+            int fsbits = 4;
+            int fsmax = 14;
+            int bbits = 1 << fsbits; // 16
+
+            int cIdx = 0;
+            int lastpix = BinaryPrimitives.ReadInt16BigEndian(c.AsSpan(cIdx));
+            cIdx += 2;
+
+            if (cIdx >= c.Length) { array[0] = lastpix; return array; }
+            uint b = c[cIdx++];
+            int nbits = 8;
+
+            for (int i = 0; i < nx;)
+            {
+                nbits -= fsbits;
+                while (nbits < 0)
+                {
+                    if (cIdx >= c.Length) break;
+                    b = (b << 8) | c[cIdx++];
+                    nbits += 8;
+                }
+                int fs = (int)(b >> nbits) - 1;
+                b &= (uint)((1 << nbits) - 1);
+
+                int imax = i + nblock;
+                if (imax > nx) imax = nx;
+
+                if (fs < 0)
+                {
+                    for (; i < imax; i++) array[i] = lastpix;
+                }
+                else if (fs == fsmax)
+                {
+                    for (; i < imax; i++)
+                    {
+                        int k = bbits - nbits;
+                        uint diff = b << k;
+                        for (k -= 8; k >= 0; k -= 8)
+                        {
+                            if (cIdx >= c.Length) break;
+                            b = c[cIdx++];
+                            diff |= (uint)(b << k);
+                        }
+                        if (nbits > 0)
+                        {
+                            if (cIdx < c.Length)
+                            {
+                                b = c[cIdx++];
+                                diff |= (b >> (-k));
+                                b &= (uint)((1 << nbits) - 1);
+                            }
+                        }
+                        else b = 0;
+
+                        if ((diff & 1) == 0) diff >>= 1;
+                        else diff = ~(diff >> 1);
+
+                        array[i] = (int)(diff + lastpix);
+                        lastpix = array[i];
+                    }
+                }
+                else
+                {
+                    for (; i < imax; i++)
+                    {
+                        while (b == 0)
+                        {
+                            if (cIdx >= c.Length) break;
+                            nbits += 8;
+                            b = c[cIdx++];
+                        }
+                        int nzero = nbits - NonZeroCount[b];
+                        nbits -= nzero + 1;
+                        b ^= (uint)(1 << nbits);
+
+                        nbits -= fs;
+                        while (nbits < 0)
+                        {
+                            if (cIdx >= c.Length) break;
+                            b = (b << 8) | c[cIdx++];
+                            nbits += 8;
+                        }
+                        uint diff = (uint)((nzero << fs) | (b >> nbits));
+                        b &= (uint)((1 << nbits) - 1);
+
+                        if ((diff & 1) == 0) diff >>= 1;
+                        else diff = ~(diff >> 1);
+
+                        array[i] = (int)(diff + lastpix);
+                        lastpix = array[i];
+                    }
+                }
+            }
+            return array;
+        }
+
+        private static int[] DecodeByte(byte[] c, int nx, int nblock)
+        {
+            int[] array = new int[nx];
+            if (c == null || c.Length < 1) return array;
+
+            int fsbits = 3;
+            int fsmax = 6;
+            int bbits = 1 << fsbits; // 8
+
+            int cIdx = 0;
+            int lastpix = c[cIdx++];
+
+            if (cIdx >= c.Length) { array[0] = lastpix; return array; }
+            uint b = c[cIdx++];
+            int nbits = 8;
+
+            for (int i = 0; i < nx;)
+            {
+                nbits -= fsbits;
+                while (nbits < 0)
+                {
+                    if (cIdx >= c.Length) break;
+                    b = (b << 8) | c[cIdx++];
+                    nbits += 8;
+                }
+                int fs = (int)(b >> nbits) - 1;
+                b &= (uint)((1 << nbits) - 1);
+
+                int imax = i + nblock;
+                if (imax > nx) imax = nx;
+
+                if (fs < 0)
+                {
+                    for (; i < imax; i++) array[i] = lastpix;
+                }
+                else if (fs == fsmax)
+                {
+                    for (; i < imax; i++)
+                    {
+                        int k = bbits - nbits;
+                        uint diff = b << k;
+                        for (k -= 8; k >= 0; k -= 8)
+                        {
+                            if (cIdx >= c.Length) break;
+                            b = c[cIdx++];
+                            diff |= (uint)(b << k);
+                        }
+                        if (nbits > 0)
+                        {
+                            if (cIdx < c.Length)
+                            {
+                                b = c[cIdx++];
+                                diff |= (b >> (-k));
+                                b &= (uint)((1 << nbits) - 1);
+                            }
+                        }
+                        else b = 0;
+
+                        if ((diff & 1) == 0) diff >>= 1;
+                        else diff = ~(diff >> 1);
+
+                        lastpix = (byte)(diff + lastpix);
+                        array[i] = lastpix;
+                    }
+                }
+                else
+                {
+                    for (; i < imax; i++)
+                    {
+                        while (b == 0)
+                        {
+                            if (cIdx >= c.Length) break;
+                            nbits += 8;
+                            b = c[cIdx++];
+                        }
+                        int nzero = nbits - NonZeroCount[b];
+                        nbits -= nzero + 1;
+                        b ^= (uint)(1 << nbits);
+
+                        nbits -= fs;
+                        while (nbits < 0)
+                        {
+                            if (cIdx >= c.Length) break;
+                            b = (b << 8) | c[cIdx++];
+                            nbits += 8;
+                        }
+                        uint diff = (uint)((nzero << fs) | (b >> nbits));
+                        b &= (uint)((1 << nbits) - 1);
+
+                        if ((diff & 1) == 0) diff >>= 1;
+                        else diff = ~(diff >> 1);
+
+                        lastpix = (byte)(diff + lastpix);
+                        array[i] = lastpix;
+                    }
+                }
+            }
+            return array;
+        }
+
+        // =======================================================================
+        // ENCODE METHODS (fits_rcomp)
+        // =======================================================================
+
+        public static byte[] Encode(int[] a, int nblock = 32)
+        {
+            if (a == null || a.Length == 0) return Array.Empty<byte>();
             
-            // A. Preparazione: Delta e Mapping ZigZag
-            uint[] mappedValues = new uint[pixelsInBlock];
-            long absSum = 0;
+            using var ms = new MemoryStream(a.Length * 4 + 1024);
+            
+            byte[] seedBytes = new byte[4];
+            BinaryPrimitives.WriteInt32BigEndian(seedBytes, a[0]);
+            ms.Write(seedBytes, 0, 4);
 
-            for (int j = 0; j < pixelsInBlock; j++)
+            var buf = new OutputBuffer(ms);
+            int fsbits = 5;
+            int fsmax = 25;
+            int bbits = 32;
+
+            int lastpix = a[0];
+            int nx = a.Length;
+
+            for (int i = 0; i < nx; i += nblock)
             {
-                int val = data[i + j];
-                int diff = val - lastValue;
-                lastValue = val;
-                
-                // ZigZag Mapping per rendere tutto positivo
-                mappedValues[j] = (uint)((diff << 1) ^ (diff >> 31));
-                absSum += mappedValues[j];
+                int thisblock = Math.Min(nblock, nx - i);
+                long pixelsum = 0;
+                uint[] diffs = new uint[thisblock];
+
+                for (int j = 0; j < thisblock; j++)
+                {
+                    int nextpix = a[i + j];
+                    int pdiff = nextpix - lastpix;
+                    diffs[j] = (uint)((pdiff < 0) ? ~(pdiff << 1) : (pdiff << 1));
+                    pixelsum += diffs[j];
+                    lastpix = nextpix;
+                }
+
+                double dpsum = (pixelsum - (thisblock / 2.0) - 1.0) / thisblock;
+                if (dpsum < 0) dpsum = 0.0;
+                uint psum = (uint)((long)dpsum >> 1);
+                int fs = 0;
+                while (psum > 0) { fs++; psum >>= 1; }
+
+                if (fs >= fsmax)
+                {
+                    buf.OutputNBits((uint)(fsmax + 1), fsbits);
+                    for (int j = 0; j < thisblock; j++) buf.OutputNBits(diffs[j], bbits);
+                }
+                else if (fs == 0 && pixelsum == 0)
+                {
+                    buf.OutputNBits(0u, fsbits);
+                }
+                else
+                {
+                    buf.OutputNBits((uint)(fs + 1), fsbits);
+                    for (int j = 0; j < thisblock; j++)
+                    {
+                        uint v = diffs[j];
+                        int top = (int)(v >> fs);
+                        
+                        if (buf.BitsToGo >= top + 1)
+                        {
+                            buf.BitBuffer <<= (top + 1);
+                            buf.BitBuffer |= 1;
+                            buf.BitsToGo -= (top + 1);
+                        }
+                        else
+                        {
+                            buf.BitBuffer <<= buf.BitsToGo;
+                            buf.FlushByte();
+                            for (top -= buf.BitsToGo; top >= 8; top -= 8)
+                            {
+                                buf.FlushZeroByte();
+                            }
+                            buf.BitBuffer = 1;
+                            buf.BitsToGo = 7 - top;
+                        }
+
+                        if (fs > 0)
+                        {
+                            buf.BitBuffer <<= fs;
+                            buf.BitBuffer |= (int)(v & ((1 << fs) - 1));
+                            buf.BitsToGo -= fs;
+                            while (buf.BitsToGo <= 0)
+                            {
+                                buf.FlushTop8();
+                                buf.BitsToGo += 8;
+                            }
+                        }
+                    }
+                }
             }
-
-            // B. Selezione parametro k (fs) ottimale basata sulla media del blocco
-            int fs = 0;
-            if (absSum > 0)
-            {
-                double average = (double)absSum / pixelsInBlock;
-                // Heuristic per k: log2(media)
-                fs = Math.Clamp((int)Math.Log2(average), 0, 30);
-            }
-
-            // C. Scrittura parametro fs (5 bit)
-            bitWriter.WriteBits(fs, 5);
-
-            // D. Codifica Rice-Golomb
-            foreach (uint val in mappedValues)
-            {
-                uint q = val >> fs;
-                uint r = val & (uint)((1 << fs) - 1);
-
-                // Quoziente in Unario (serie di '1' terminata da '0')
-                for (int b = 0; b < q; b++) bitWriter.WriteBit(1);
-                bitWriter.WriteBit(0);
-
-                // Resto in Binario (fs bit)
-                bitWriter.WriteBits((int)r, fs);
-            }
+            buf.Done();
+            return ms.ToArray();
         }
 
-        bitWriter.Flush();
-        return ms.ToArray();
-    }
-
-    // =======================================================================
-    // HELPERS: BIT STREAMING
-    // =======================================================================
-
-    private class BitStreamReader
-    {
-        private readonly byte[] _data;
-        private int _byteIdx, _bitIdx = 7;
-        public BitStreamReader(byte[] d) => _data = d;
-        public int ReadBit() {
-            if (_byteIdx >= _data.Length) return 0;
-            int bit = (_data[_byteIdx] >> _bitIdx) & 1;
-            if (--_bitIdx < 0) { _bitIdx = 7; _byteIdx++; }
-            return bit;
-        }
-        public int ReadBits(int n) {
-            int v = 0;
-            for (int i = 0; i < n; i++) v = (v << 1) | ReadBit();
-            return v;
-        }
-    }
-
-    private class BitStreamWriter
-    {
-        private readonly Stream _stream;
-        private byte _currentByte;
-        private int _bitPos = 7;
-
-        public BitStreamWriter(Stream s) => _stream = s;
-
-        public void WriteBit(int bit)
+        public static byte[] Encode(short[] a, int nblock = 32)
         {
-            if (bit != 0) _currentByte |= (byte)(1 << _bitPos);
-            if (--_bitPos < 0)
+            if (a == null || a.Length == 0) return Array.Empty<byte>();
+            using var ms = new MemoryStream(a.Length * 2 + 1024);
+
+            byte[] seedBytes = new byte[2];
+            BinaryPrimitives.WriteInt16BigEndian(seedBytes, a[0]);
+            ms.Write(seedBytes, 0, 2);
+
+            var buf = new OutputBuffer(ms);
+            int fsbits = 4;
+            int fsmax = 14;
+            int bbits = 16;
+
+            int lastpix = a[0];
+            int nx = a.Length;
+
+            for (int i = 0; i < nx; i += nblock)
             {
-                _stream.WriteByte(_currentByte);
-                _currentByte = 0;
-                _bitPos = 7;
+                int thisblock = Math.Min(nblock, nx - i);
+                double pixelsum = 0;
+                uint[] diffs = new uint[thisblock];
+
+                for (int j = 0; j < thisblock; j++)
+                {
+                    int nextpix = a[i + j];
+                    int pdiff = nextpix - lastpix;
+                    diffs[j] = (uint)((pdiff < 0) ? ~(pdiff << 1) : (pdiff << 1));
+                    pixelsum += diffs[j];
+                    lastpix = nextpix;
+                }
+
+                double dpsum = (pixelsum - (thisblock / 2.0) - 1.0) / thisblock;
+                if (dpsum < 0) dpsum = 0.0;
+                ushort psum = (ushort)((long)dpsum >> 1);
+                int fs = 0;
+                while (psum > 0) { fs++; psum >>= 1; }
+
+                if (fs >= fsmax)
+                {
+                    buf.OutputNBits((uint)(fsmax + 1), fsbits);
+                    for (int j = 0; j < thisblock; j++) buf.OutputNBits(diffs[j], bbits);
+                }
+                else if (fs == 0 && pixelsum == 0)
+                {
+                    buf.OutputNBits(0u, fsbits);
+                }
+                else
+                {
+                    buf.OutputNBits((uint)(fs + 1), fsbits);
+                    for (int j = 0; j < thisblock; j++)
+                    {
+                        uint v = diffs[j];
+                        int top = (int)(v >> fs);
+                        if (buf.BitsToGo >= top + 1) { buf.BitBuffer <<= (top + 1); buf.BitBuffer |= 1; buf.BitsToGo -= (top + 1); }
+                        else {
+                            buf.BitBuffer <<= buf.BitsToGo; buf.FlushByte();
+                            for (top -= buf.BitsToGo; top >= 8; top -= 8) buf.FlushZeroByte();
+                            buf.BitBuffer = 1; buf.BitsToGo = 7 - top;
+                        }
+                        if (fs > 0) {
+                            buf.BitBuffer <<= fs; buf.BitBuffer |= (int)(v & ((1 << fs) - 1)); buf.BitsToGo -= fs;
+                            while (buf.BitsToGo <= 0) { buf.FlushTop8(); buf.BitsToGo += 8; }
+                        }
+                    }
+                }
             }
+            buf.Done();
+            return ms.ToArray();
         }
 
-        public void WriteBits(int val, int count)
+        public static byte[] Encode(byte[] a, int nblock = 32)
         {
-            for (int i = count - 1; i >= 0; i--)
-                WriteBit((val >> i) & 1);
+            if (a == null || a.Length == 0) return Array.Empty<byte>();
+            using var ms = new MemoryStream(a.Length + 1024);
+
+            ms.WriteByte(a[0]);
+
+            var buf = new OutputBuffer(ms);
+            int fsbits = 3;
+            int fsmax = 6;
+            int bbits = 8;
+
+            int lastpix = a[0];
+            int nx = a.Length;
+
+            for (int i = 0; i < nx; i += nblock)
+            {
+                int thisblock = Math.Min(nblock, nx - i);
+                double pixelsum = 0;
+                uint[] diffs = new uint[thisblock];
+
+                for (int j = 0; j < thisblock; j++)
+                {
+                    int nextpix = a[i + j];
+                    int pdiff = (sbyte)nextpix - (sbyte)lastpix;
+                    
+                    diffs[j] = (uint)((pdiff < 0) ? ~(pdiff << 1) : (pdiff << 1));
+                    pixelsum += diffs[j];
+                    lastpix = nextpix;
+                }
+
+                double dpsum = (pixelsum - (thisblock / 2.0) - 1.0) / thisblock;
+                if (dpsum < 0) dpsum = 0.0;
+                byte psum = (byte)((long)dpsum >> 1);
+                int fs = 0;
+                while (psum > 0) { fs++; psum >>= 1; }
+
+                if (fs >= fsmax)
+                {
+                    buf.OutputNBits((uint)(fsmax + 1), fsbits);
+                    for (int j = 0; j < thisblock; j++) buf.OutputNBits(diffs[j], bbits);
+                }
+                else if (fs == 0 && pixelsum == 0)
+                {
+                    buf.OutputNBits(0u, fsbits);
+                }
+                else
+                {
+                    buf.OutputNBits((uint)(fs + 1), fsbits);
+                    for (int j = 0; j < thisblock; j++)
+                    {
+                        uint v = diffs[j];
+                        int top = (int)(v >> fs);
+                        if (buf.BitsToGo >= top + 1) { buf.BitBuffer <<= (top + 1); buf.BitBuffer |= 1; buf.BitsToGo -= (top + 1); }
+                        else {
+                            buf.BitBuffer <<= buf.BitsToGo; buf.FlushByte();
+                            for (top -= buf.BitsToGo; top >= 8; top -= 8) buf.FlushZeroByte();
+                            buf.BitBuffer = 1; buf.BitsToGo = 7 - top;
+                        }
+                        if (fs > 0) {
+                            buf.BitBuffer <<= fs; buf.BitBuffer |= (int)(v & ((1 << fs) - 1)); buf.BitsToGo -= fs;
+                            while (buf.BitsToGo <= 0) { buf.FlushTop8(); buf.BitsToGo += 8; }
+                        }
+                    }
+                }
+            }
+            buf.Done();
+            return ms.ToArray();
         }
 
-        public void Flush()
+        // =======================================================================
+        // OUTPUT BUFFER HELPER CLASS
+        // =======================================================================
+        private class OutputBuffer
         {
-            if (_bitPos != 7) _stream.WriteByte(_currentByte);
+            public int BitBuffer;
+            public int BitsToGo;
+            private readonly MemoryStream _stream;
+            private static readonly uint[] Mask = new uint[] { 
+                0, 0x1, 0x3, 0x7, 0xf, 0x1f, 0x3f, 0x7f, 0xff, 0x1ff, 0x3ff, 0x7ff, 0xfff, 0x1fff, 0x3fff, 0x7fff, 0xffff,
+                0x1ffff, 0x3ffff, 0x7ffff, 0xfffff, 0x1fffff, 0x3fffff, 0x7fffff, 0xffffff, 0x1ffffff, 0x3ffffff, 0x7ffffff,
+                0xfffffff, 0x1fffffff, 0x3fffffff, 0x7fffffff, 0xffffffff 
+            };
+
+            public OutputBuffer(MemoryStream s)
+            {
+                _stream = s;
+                BitBuffer = 0;
+                BitsToGo = 8;
+            }
+
+            public void FlushByte() => _stream.WriteByte((byte)(BitBuffer & 0xff));
+            public void FlushZeroByte() => _stream.WriteByte(0);
+            public void FlushTop8() => _stream.WriteByte((byte)((BitBuffer >> (-BitsToGo)) & 0xff));
+
+            public void OutputNBits(uint bits, int n)
+            {
+                // Inserimento bit alla fine del buffer
+                if (BitsToGo + n > 32)
+                {
+                    // Special case for large n
+                    BitBuffer <<= BitsToGo;
+                    BitBuffer |= (int)((bits >> (n - BitsToGo)) & Mask[BitsToGo]);
+                    FlushByte();
+                    n -= BitsToGo;
+                    BitsToGo = 8;
+                }
+                BitBuffer <<= n;
+                BitBuffer |= (int)(bits & Mask[n]);
+                BitsToGo -= n;
+                while (BitsToGo <= 0)
+                {
+                    FlushTop8();
+                    BitsToGo += 8;
+                }
+            }
+
+            public void Done()
+            {
+                if (BitsToGo < 8)
+                {
+                    BitBuffer <<= BitsToGo;
+                    FlushByte();
+                }
+            }
         }
     }
 }

@@ -3,6 +3,7 @@ using System.IO;
 using System.Text;
 using System.Linq;
 using System.Collections.Generic;
+using System.Buffers.Binary; // Necessario per scrivere BigEndian
 using KomaLab.Models.Fits.Structure;
 using KomaLab.Services.Fits.Metadata;
 
@@ -32,6 +33,7 @@ public class FitsWriter
         int bytesWritten = 0;
         var cardsToWrite = new List<FitsCard>(header.Cards);
 
+        // Rimuoviamo le card strutturali per riscriverle nell'ordine corretto
         cardsToWrite.RemoveAll(c => c.Key == "SIMPLE" || c.Key == "XTENSION" || c.Key == "END");
 
         if (isPrimary)
@@ -67,7 +69,7 @@ public class FitsWriter
     }
 
     // =======================================================================
-    // 2. SCRITTURA MATRICE (Corretta per il Flip centralizzato)
+    // 2. SCRITTURA MATRICE (Con supporto Unsigned CCD)
     // =======================================================================
 
     public void WriteMatrix(Stream stream, Array matrix)
@@ -77,31 +79,57 @@ public class FitsWriter
         int w = matrix.GetLength(1);
         long bytesWritten = 0;
 
-        // NOTA: Il loop ora va da 0 a H-1 perché il Flip è gestito dal FitsIoService
-        if (type == typeof(short)) 
-            bytesWritten = WritePixels(stream, (short[,])matrix, w, h, 2, FitsStreamHelper.WriteInt16);
-        else if (type == typeof(int)) 
-            bytesWritten = WritePixels(stream, (int[,])matrix, w, h, 4, FitsStreamHelper.WriteInt32);
-        else if (type == typeof(float)) 
-            bytesWritten = WritePixels(stream, (float[,])matrix, w, h, 4, FitsStreamHelper.WriteFloat);
-        else if (type == typeof(double)) 
-            bytesWritten = WritePixels(stream, (double[,])matrix, w, h, 8, FitsStreamHelper.WriteDouble);
-        else if (type == typeof(byte)) 
+        // Gestione di tutti i tipi numerici supportati da FITS (inclusi quelli Unsigned per CCD)
+        
+        if (type == typeof(byte)) 
             bytesWritten = WritePixelsByte(stream, (byte[,])matrix, w, h);
+        
+        else if (type == typeof(sbyte)) 
+            // Sbyte non è standard FITS diretto, lo trattiamo come byte raw (cast)
+            bytesWritten = WritePixelsByte(stream, (sbyte[,])matrix, w, h);
+
+        else if (type == typeof(short)) 
+            bytesWritten = WritePixels(stream, (short[,])matrix, w, h, 2, BinaryPrimitives.WriteInt16BigEndian);
+        
+        else if (type == typeof(ushort))
+            // USHORT (16-bit Unsigned): Applicare XOR 0x8000 per centrare su 0 (Standard FITS BZERO=32768)
+            bytesWritten = WritePixels(stream, (ushort[,])matrix, w, h, 2, 
+                (span, val) => BinaryPrimitives.WriteInt16BigEndian(span, (short)(val ^ 0x8000)));
+
+        else if (type == typeof(int)) 
+            bytesWritten = WritePixels(stream, (int[,])matrix, w, h, 4, BinaryPrimitives.WriteInt32BigEndian);
+        
+        else if (type == typeof(uint))
+            // UINT (32-bit Unsigned): Applicare XOR 0x80000000 (Standard FITS BZERO=2147483648)
+            bytesWritten = WritePixels(stream, (uint[,])matrix, w, h, 4, 
+                (span, val) => BinaryPrimitives.WriteInt32BigEndian(span, (int)(val ^ 0x80000000)));
+
+        else if (type == typeof(float)) 
+            bytesWritten = WritePixels(stream, (float[,])matrix, w, h, 4, BinaryPrimitives.WriteSingleBigEndian);
+        
+        else if (type == typeof(double)) 
+            bytesWritten = WritePixels(stream, (double[,])matrix, w, h, 8, BinaryPrimitives.WriteDoubleBigEndian);
+        
         else
-            throw new NotSupportedException($"Tipo {type.Name} non supportato.");
+            throw new NotSupportedException($"Tipo {type.Name} non supportato per la scrittura FITS.");
 
         WritePadding(stream, bytesWritten, 0);
     }
+
+    // --- Helpers Generici ---
 
     private long WritePixels<T>(Stream s, T[,] data, int w, int h, int bpp, Action<Span<byte>, T> writeFunc)
     {
         byte[] buffer = new byte[w * bpp];
         long count = 0;
-        // SCRITTURA SEQUENZIALE: Delega l'ordine Y al chiamante (FitsIoService)
+        
+        // Loop standard Row-by-Row
         for (int y = 0; y < h; y++) 
         {
-            for (int x = 0; x < w; x++) writeFunc(buffer.AsSpan(x * bpp), data[y, x]);
+            for (int x = 0; x < w; x++) 
+            {
+                writeFunc(buffer.AsSpan(x * bpp), data[y, x]);
+            }
             s.Write(buffer, 0, buffer.Length);
             count += buffer.Length;
         }
@@ -115,6 +143,20 @@ public class FitsWriter
         for (int y = 0; y < h; y++) 
         {
             for (int x = 0; x < w; x++) buffer[x] = data[y, x];
+            s.Write(buffer, 0, buffer.Length);
+            count += buffer.Length;
+        }
+        return count;
+    }
+
+    // Overload per sbyte (cast a byte)
+    private long WritePixelsByte(Stream s, sbyte[,] data, int w, int h)
+    {
+        byte[] buffer = new byte[w];
+        long count = 0;
+        for (int y = 0; y < h; y++) 
+        {
+            for (int x = 0; x < w; x++) buffer[x] = (byte)data[y, x];
             s.Write(buffer, 0, buffer.Length);
             count += buffer.Length;
         }

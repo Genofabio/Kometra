@@ -248,7 +248,7 @@ Lettura header per time per ordinare caricamento immagini MultipleImageNode
                                                               Errore Astrometrico	Sistematico (metà del moto durante l'exp)	Minimizzato (centrato sul flusso luminoso)
                                                               Tracking Telescopio	Ignorato (Assunto Siderale)	Rilevato (MTFLAG / RA_RATE)
                                                               Dati UI (Metadata)	Solo Nome e Data grezza	Flag IsTracked + Dati WCS validati                             
-                                  
+    - https://heasarc.gsfc.nasa.gov/docs/software/fitsio/fpack/fpack.html#:~:text=fpack%20is%20a%20utility%20program%20for%20optimally%20compressing,the%20compressed%20file%20back%20to%20its%20original%20state.                                  
                                   
                                   
                                   
