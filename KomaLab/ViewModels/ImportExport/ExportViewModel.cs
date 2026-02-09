@@ -66,7 +66,7 @@ public partial class ExportViewModel : ObservableObject, IDisposable
     [NotifyPropertyChangedFor(nameof(IsFitsOptionsVisible))]
     [NotifyPropertyChangedFor(nameof(IsJpegOptionsVisible))]
     [NotifyPropertyChangedFor(nameof(IsVisualProcessingVisible))]
-    [NotifyPropertyChangedFor(nameof(CanMergeToMef))] // Notifica anche la nuova proprietà
+    [NotifyPropertyChangedFor(nameof(CanMergeToMef))] 
     private ExportFormat _selectedFormat = ExportFormat.Fits;
 
     [ObservableProperty] private bool _mergeIntoSingleFile;
@@ -106,17 +106,13 @@ public partial class ExportViewModel : ObservableObject, IDisposable
 
     public event Action? RequestClose;
 
-    // Computed Properties
+    // --- Computed Properties ---
     public bool IsInteractionEnabled => !IsExporting;
-    
-    // CORREZIONE: Solo JPEG mostra lo slider qualità (PNG è lossless)
     public bool IsJpegOptionsVisible => SelectedFormat == ExportFormat.Jpeg;
-    
     public bool IsFitsOptionsVisible => SelectedFormat == ExportFormat.Fits;
     public bool IsVisualProcessingVisible => !IsFitsOptionsVisible;
     public bool IsManualStretch => StretchMode == "Manuale" && IsVisualProcessingVisible;
 
-    // NUOVA PROPRIETÀ: Determina se l'opzione MEF deve essere visibile
     // Visibile solo se è formato FITS E ci sono più di 1 file selezionati.
     public bool CanMergeToMef => IsFitsOptionsVisible && _navigableItems.Count > 1;
 
@@ -181,7 +177,7 @@ public partial class ExportViewModel : ObservableObject, IDisposable
         {
             MergeIntoSingleFile = false;
         }
-        OnPropertyChanged(nameof(CanMergeToMef)); // Aggiorna la visibilità del CheckBox
+        OnPropertyChanged(nameof(CanMergeToMef)); 
 
         if (SelectedPreviewItem != null && _navigableItems.Contains(SelectedPreviewItem))
         {
@@ -303,6 +299,22 @@ public partial class ExportViewModel : ObservableObject, IDisposable
 
     private bool CanExport() => !IsExporting && !string.IsNullOrWhiteSpace(OutputDirectory) && _navigableItems.Count > 0;
 
+    /// <summary>
+    /// Calcola l'estensione corretta in base al formato e alla compressione.
+    /// Importante per distinguere .fits (standard) da .fits.fz (compresso).
+    /// </summary>
+    private string GetCorrectExtension()
+    {
+        switch (SelectedFormat)
+        {
+            case ExportFormat.Jpeg: return ".jpg";
+            case ExportFormat.Png: return ".png";
+            case ExportFormat.Fits:
+                return SelectedCompression != FitsCompressionMode.None ? ".fits.fz" : ".fits";
+            default: return ".dat";
+        }
+    }
+
     [RelayCommand(CanExecute = nameof(CanExport))]
     private async Task ConfirmExport()
     {
@@ -319,6 +331,21 @@ public partial class ExportViewModel : ObservableObject, IDisposable
 
         try
         {
+            // 1. Pulizia Nome File Input
+            string cleanedFileName = BaseFileName;
+            if (!string.IsNullOrWhiteSpace(cleanedFileName))
+            {
+                // Rimuove estensioni errate se l'utente le ha digitate manualmente
+                if (cleanedFileName.EndsWith(".fits", StringComparison.OrdinalIgnoreCase))
+                    cleanedFileName = cleanedFileName.Substring(0, cleanedFileName.Length - 5);
+                else if (cleanedFileName.EndsWith(".fit", StringComparison.OrdinalIgnoreCase))
+                    cleanedFileName = cleanedFileName.Substring(0, cleanedFileName.Length - 4);
+                else if (cleanedFileName.EndsWith(".jpg", StringComparison.OrdinalIgnoreCase) || 
+                         cleanedFileName.EndsWith(".png", StringComparison.OrdinalIgnoreCase))
+                    cleanedFileName = cleanedFileName.Substring(0, cleanedFileName.Length - 4);
+            }
+
+            // 2. Preparazione Profilo
             ContrastProfile profile;
             if (IsFitsOptionsVisible) profile = new AbsoluteContrastProfile(0, 65535);
             else if (_activeRenderer != null)
@@ -328,9 +355,17 @@ public partial class ExportViewModel : ObservableObject, IDisposable
             }
             else profile = new AbsoluteContrastProfile(0, 65535);
 
+            // 3. Creazione Job Settings
+            // Nota: Passiamo il nome pulito. Il Coordinator appenderà l'estensione corretta
+            // basandosi su SelectedFormat/Compression o sulla logica implementata qui.
             var settings = new ExportJobSettings(
-                OutputDirectory, BaseFileName, SelectedFormat, MergeIntoSingleFile,
-                SelectedCompression, JpegQuality, profile);
+                OutputDirectory, 
+                cleanedFileName, // Nome pulito
+                SelectedFormat, 
+                MergeIntoSingleFile,
+                SelectedCompression, 
+                JpegQuality, 
+                profile);
 
             var progress = new Progress<BatchProgressReport>(r =>
             {

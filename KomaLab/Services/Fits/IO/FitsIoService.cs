@@ -422,7 +422,7 @@ namespace KomaLab.Services.Fits.IO
                     p.AddCard(new FitsCard(card.Key, card.Value, card.Comment, false));
                 }
             }
-            p.AddCard(new FitsCard("COMMENT", "KomaLab MEF Container", "", false));
+            p.AddCard(new FitsCard("COMMENT", "KomaLab - MEF Container", "", false));
             RawWriteHeader(s, p);
         }
 

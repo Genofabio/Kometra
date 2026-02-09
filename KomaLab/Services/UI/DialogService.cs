@@ -24,10 +24,11 @@ public class DialogService : IDialogService
         var storage = GetStorageProvider();
         if (storage == null) return null;
 
+        // [MODIFICA] Aggiunto supporto per .fz (FITS compresso fpack)
         var fitsFilter = new FilePickerFileType("File FITS")
         {
-            Patterns = new[] { "*.fits", "*.fit", "*.fts" },
-            MimeTypes = new[] { "image/fits", "application/fits" }
+            Patterns = new[] { "*.fits", "*.fit", "*.fts", "*.fz", "*.fits.fz" },
+            MimeTypes = new[] { "image/fits", "application/fits", "application/x-fits" }
         };
 
         var files = await storage.OpenFilePickerAsync(new FilePickerOpenOptions
@@ -55,15 +56,18 @@ public class DialogService : IDialogService
 
         string cleanName = Path.GetFileNameWithoutExtension(defaultFileName);
         
+        // Pulizia iterativa per gestire casi come image.fits.fz -> image
         while (cleanName.EndsWith(".fit", StringComparison.OrdinalIgnoreCase) || 
-               cleanName.EndsWith(".fits", StringComparison.OrdinalIgnoreCase))
+               cleanName.EndsWith(".fits", StringComparison.OrdinalIgnoreCase) ||
+               cleanName.EndsWith(".fz", StringComparison.OrdinalIgnoreCase))
         {
             cleanName = Path.GetFileNameWithoutExtension(cleanName);
         }
 
+        // [MODIFICA] Anche in salvataggio permettiamo di vedere i .fz esistenti
         var fitsFilter = new FilePickerFileType("File FITS")
         {
-            Patterns = new[] { "*.fits", "*.fit", "*.fts" },
+            Patterns = new[] { "*.fits", "*.fit", "*.fts", "*.fz" },
             MimeTypes = new[] { "image/fits", "application/fits" }
         };
 
@@ -102,7 +106,6 @@ public class DialogService : IDialogService
         return file?.TryGetLocalPath();
     }
 
-    // --- NUOVO METODO AGGIUNTO PER EXPORT VIEW MODEL ---
     public async Task<string?> ShowOpenFolderDialogAsync(string title)
     {
         var storage = GetStorageProvider();
@@ -117,7 +120,6 @@ public class DialogService : IDialogService
         var folder = folders.FirstOrDefault();
         return folder?.TryGetLocalPath();
     }
-    // ---------------------------------------------------
 
     private IStorageProvider? GetStorageProvider()
     {
