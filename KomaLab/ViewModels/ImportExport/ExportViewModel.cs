@@ -66,6 +66,7 @@ public partial class ExportViewModel : ObservableObject, IDisposable
     [NotifyPropertyChangedFor(nameof(IsFitsOptionsVisible))]
     [NotifyPropertyChangedFor(nameof(IsJpegOptionsVisible))]
     [NotifyPropertyChangedFor(nameof(IsVisualProcessingVisible))]
+    [NotifyPropertyChangedFor(nameof(CanMergeToMef))] // Notifica anche la nuova proprietà
     private ExportFormat _selectedFormat = ExportFormat.Fits;
 
     [ObservableProperty] private bool _mergeIntoSingleFile;
@@ -114,6 +115,10 @@ public partial class ExportViewModel : ObservableObject, IDisposable
     public bool IsFitsOptionsVisible => SelectedFormat == ExportFormat.Fits;
     public bool IsVisualProcessingVisible => !IsFitsOptionsVisible;
     public bool IsManualStretch => StretchMode == "Manuale" && IsVisualProcessingVisible;
+
+    // NUOVA PROPRIETÀ: Determina se l'opzione MEF deve essere visibile
+    // Visibile solo se è formato FITS E ci sono più di 1 file selezionati.
+    public bool CanMergeToMef => IsFitsOptionsVisible && _navigableItems.Count > 1;
 
     private bool CanInteract() => !IsExporting;
 
@@ -170,6 +175,13 @@ public partial class ExportViewModel : ObservableObject, IDisposable
     {
         _navigableItems = Items.Where(i => i.IsSelected).ToList();
         Navigator.UpdateStatus(0, _navigableItems.Count);
+
+        // Se abbiamo 1 o 0 file selezionati, disabilitiamo il Merge e notifichiamo la UI
+        if (_navigableItems.Count <= 1)
+        {
+            MergeIntoSingleFile = false;
+        }
+        OnPropertyChanged(nameof(CanMergeToMef)); // Aggiorna la visibilità del CheckBox
 
         if (SelectedPreviewItem != null && _navigableItems.Contains(SelectedPreviewItem))
         {

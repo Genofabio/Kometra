@@ -4,7 +4,6 @@ using System.Linq;
 using System.Text;
 using System.Diagnostics; // Fondamentale per i print
 using System.Buffers.Binary;
-using KomaLab.Models.Fits;
 using KomaLab.Models.Fits.Structure;
 using KomaLab.Services.Fits.Metadata;
 

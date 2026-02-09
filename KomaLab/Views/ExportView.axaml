@@ -259,10 +259,13 @@
                                         </StackPanel>
                                     </StackPanel>
 
-                                    <StackPanel IsVisible="{Binding IsFitsOptionsVisible}">
+                                    <StackPanel IsVisible="{Binding CanMergeToMef}">
                                         <Separator Background="{DynamicResource Border.WhiteDimBrush}" Opacity="0.2" Margin="0,0,0,10"/>
                                         <TextBlock Text="Merge" FontSize="11" Opacity="0.6"/>
-                                        <CheckBox IsChecked="{Binding MergeIntoSingleFile}" Content="Unisci in un unico file (MEF)" FontSize="12" VerticalContentAlignment="Center"/>
+                                        <CheckBox IsChecked="{Binding MergeIntoSingleFile}" 
+                                                  Content="Unisci in un unico file (MEF)" 
+                                                  FontSize="12" 
+                                                  VerticalContentAlignment="Center"/>
                                     </StackPanel>
 
                                 </StackPanel>
