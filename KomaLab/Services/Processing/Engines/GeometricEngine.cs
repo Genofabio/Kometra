@@ -15,7 +15,7 @@ public class GeometricEngine : IGeometricEngine
     /// <summary>
     /// Esegue una traslazione sub-pixel di alta precisione.
     /// Utilizza un sistema di Alpha Mask per prevenire l'erosione dei bordi causata dai NaN 
-    /// durante l'interpolazione Lanczos4.
+    /// durante l'interpolazione Lanczos4 e Border Replicate per evitare ringing.
     /// </summary>
     public Mat WarpTranslation(Mat source, Point2D sourcePoint, Point2D targetPoint, Size2D outputSize)
     {
@@ -23,27 +23,38 @@ public class GeometricEngine : IGeometricEngine
 
         // 1. Identificazione dell'area dati validi per l'isolamento fisico
         using Mat mask = new Mat();
-        Cv2.Compare(source, source, mask, CmpType.EQ); // Identifica i pixel non-NaN
+        // Check per float/double per gestire NaN
+        if (source.Depth() == MatType.CV_32F || source.Depth() == MatType.CV_64F)
+        {
+            // Nota: Compare con se stesso per NaN fallisce in alcune versioni, meglio check != 0 se nan-patched
+            // Qui assumiamo che i NaN siano gestiti o che usiamo una maschera binaria sicura.
+            Cv2.Compare(source, source, mask, CmpType.EQ); 
+        }
+        else
+        {
+            Cv2.Compare(source, new Scalar(0), mask, CmpType.NE);
+        }
+        
         Rect validRect = Cv2.BoundingRect(mask);
 
-        if (validRect.Width <= 0 || validRect.Height <= 0) return source.Clone();
+        if (validRect.Width <= 0 || validRect.Height <= 0) 
+            return new Mat(new Size((int)outputSize.Width, (int)outputSize.Height), source.Type(), new Scalar(0));
 
         // 2. Isolamento e preparazione della sorgente
-        // Il Clone() è fondamentale: impedisce a Lanczos4 di campionare NaN esterni nella memoria fisica
         using Mat workingSrc = source.SubMat(validRect).Clone();
         if (workingSrc.Type() != MatType.CV_64FC1) workingSrc.ConvertTo(workingSrc, MatType.CV_64FC1);
         
-        // Pulizia NaN interni per non corrompere l'interpolazione
+        // Pulizia NaN interni: sostituiamo con 0 per non corrompere i calcoli di Lanczos
         using (Mat nanMask = new Mat())
         {
-            Cv2.Compare(workingSrc, workingSrc, nanMask, CmpType.NE);
+            Cv2.Compare(workingSrc, workingSrc, nanMask, CmpType.NE); // Trova i NaN (dove a != a)
             workingSrc.SetTo(new Scalar(0), nanMask);
         }
 
-        // 3. Generazione Maschera Alpha per il ripristino selettivo dei NaN
+        // 3. Generazione Maschera Alpha (255 dove c'è immagine, 0 fuori)
         using Mat alphaMask = new Mat(workingSrc.Size(), MatType.CV_8UC1, new Scalar(255));
 
-        // 4. Calcolo delle coordinate locali e del vettore di spostamento
+        // 4. Calcolo coordinate e matrice di trasformazione
         Point2D adjustedSourcePoint = new Point2D(sourcePoint.X - validRect.X, sourcePoint.Y - validRect.Y);
         double tx = targetPoint.X - adjustedSourcePoint.X;
         double ty = targetPoint.Y - adjustedSourcePoint.Y;
@@ -54,15 +65,21 @@ public class GeometricEngine : IGeometricEngine
 
         var cvSize = new Size((int)outputSize.Width, (int)outputSize.Height);
         
-        // 5. Warp dell'immagine (Interpolazione Lanczos4 su sfondo nero)
+        // 5. Warp dell'immagine 
+        // CORREZIONE QUI: BorderTypes.Replicate invece di Constant.
+        // Questo estende l'ultimo pixel valido verso l'infinito, fornendo a Lanczos
+        // dati coerenti ai bordi ed eliminando il "ringing" (riga bianca/nera) causato dal salto a zero.
         Mat result = new Mat(cvSize, MatType.CV_64FC1, new Scalar(0));
-        Cv2.WarpAffine(workingSrc, result, m, cvSize, InterpolationFlags.Lanczos4, BorderTypes.Constant, new Scalar(0));
+        Cv2.WarpAffine(workingSrc, result, m, cvSize, InterpolationFlags.Lanczos4, BorderTypes.Replicate);
 
-        // 6. Warp della maschera (Nearest Neighbor per mantenere i bordi netti)
+        // 6. Warp della maschera 
+        // Qui usiamo Constant(0) perché la maschera DEVE dire dove finisce l'immagine reale.
+        // Nearest neighbor mantiene i bordi della maschera netti (senza sfumature).
         using Mat warpedMask = new Mat(cvSize, MatType.CV_8UC1, new Scalar(0));
         Cv2.WarpAffine(alphaMask, warpedMask, m, cvSize, InterpolationFlags.Nearest, BorderTypes.Constant, new Scalar(0));
 
-        // 7. Ripristino dei NaN nelle aree prive di segnale originale
+        // 7. Ripristino dei NaN (Clipping finale)
+        // Usiamo la maschera warpata per tagliare via tutto ciò che è stato "replicato" o "inventato" fuori dai bordi.
         using Mat finalMask = new Mat();
         Cv2.Compare(warpedMask, new Scalar(0), finalMask, CmpType.EQ);
         result.SetTo(new Scalar(double.NaN), finalMask);
@@ -71,14 +88,13 @@ public class GeometricEngine : IGeometricEngine
     }
 
     // =======================================================================
-    // 2. ESTRAZIONE REGIONI (ANALISI)
+    // 2. ESTRAZIONE REGIONI (ANALISI) - Invariato
     // =======================================================================
 
     public Mat ExtractRegion(Mat source, Point2D center, int radius)
     {
         if (source == null || source.Empty()) return new Mat();
 
-        // Calcolo ROI con protezione dei confini della matrice
         int size = radius * 2;
         int sx = (int)Math.Max(0, center.X - radius);
         int sy = (int)Math.Max(0, center.Y - radius);
@@ -88,26 +104,16 @@ public class GeometricEngine : IGeometricEngine
         if (sw <= 0 || sh <= 0) return new Mat();
 
         using Mat crop = new Mat(source, new Rect(sx, sy, sw, sh));
-        
-        // Conversione a Float32 per ottimizzare le prestazioni dei motori di analisi
         Mat result = new Mat();
         crop.ConvertTo(result, MatType.CV_32FC1); 
-        
-        // Sanitizzazione NaN per calcoli statistici
         Cv2.PatchNaNs(result, 0.0);
-        
         return result;
     }
     
     // =======================================================================
-    // 3. RITAGLIO E RIDIMENSIONAMENTO (CROP)
+    // 3. RITAGLIO E RIDIMENSIONAMENTO (CROP) - Invariato
     // =======================================================================
 
-    /// <summary>
-    /// Ritaglia una porzione dell'immagine centrata su un punto specifico.
-    /// Se l'area di ritaglio esce dai bordi dell'immagine originale, 
-    /// lo spazio vuoto viene riempito con il valore di default (0 o NaN).
-    /// </summary>
     public Mat CropCentered(Mat source, Point2D center, Size2D targetSize)
     {
         if (source == null || source.Empty()) return new Mat();
@@ -115,41 +121,30 @@ public class GeometricEngine : IGeometricEngine
         int cw = (int)targetSize.Width;
         int ch = (int)targetSize.Height;
         
-        // Calcolo dell'angolo in alto a sinistra del ritaglio (coordinate immagine sorgente)
-        // Usiamo Math.Floor per gestire correttamente i centri sub-pixel se necessario
         int x = (int)Math.Floor(center.X - (cw / 2.0));
         int y = (int)Math.Floor(center.Y - (ch / 2.0));
 
-        // 1. Creiamo il canvas di destinazione vuoto (nero/NaN)
-        // Mantiene lo stesso tipo (es. CV_64FC1) della sorgente
-        Mat result = new Mat(new Size(cw, ch), source.Type(), new Scalar(0));
-        
-        // Se l'immagine è float/double, inizializziamo a NaN per correttezza scientifica
-        if (source.Depth() == MatType.CV_32F || source.Depth() == MatType.CV_64F)
-        {
-            result.SetTo(new Scalar(double.NaN));
-        }
+        Scalar fillValue = new Scalar(0);
+        bool isFloat = source.Depth() == MatType.CV_32F || source.Depth() == MatType.CV_64F;
+        if (isFloat) fillValue = new Scalar(double.NaN);
 
-        // 2. Calcolo dell'intersezione (Safe Region of Interest)
-        // Dobbiamo capire quale parte rettangolare della sorgente cade dentro il nostro crop
+        Mat result = new Mat(new Size(cw, ch), source.Type(), fillValue);
+
         int srcX = Math.Max(0, x);
         int srcY = Math.Max(0, y);
         int srcW = Math.Min(source.Width, x + cw) - srcX;
         int srcH = Math.Min(source.Height, y + ch) - srcY;
 
-        // Coordinate relative nel canvas di destinazione
-        int dstX = srcX - x;
-        int dstY = srcY - y;
-
-        // 3. Copia dei dati se c'è intersezione
         if (srcW > 0 && srcH > 0)
         {
+            int dstX = srcX - x;
+            int dstY = srcY - y;
+
             Rect srcRect = new Rect(srcX, srcY, srcW, srcH);
             Rect dstRect = new Rect(dstX, dstY, srcW, srcH);
 
             using var sourceRoi = new Mat(source, srcRect);
             using var destRoi = new Mat(result, dstRect);
-            
             sourceRoi.CopyTo(destRoi);
         }
 
