@@ -1,6 +1,5 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Diagnostics;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -45,25 +44,25 @@ public class CalibrationCoordinator : ICalibrationCoordinator
         IProgress<BatchProgressReport>? progress = null,
         CancellationToken token = default)
     {
-        Debug.WriteLine("[CalibrationCoordinator] --- INIZIO PROCESSO ---");
         var resultPaths = new List<string>();
-        var lights = lightPaths.ToList();
         
-        if (!darkPaths.Any() && !flatPaths.Any() && !biasPaths.Any())
+        // Stabilizziamo le liste e contiamo gli elementi per il report sintetico
+        var lights = lightPaths.ToList();
+        var darks = darkPaths.ToList();
+        var flats = flatPaths.ToList();
+        var biases = biasPaths.ToList();
+        
+        // Se non c'è nulla da calibrare, restituiamo i file originali
+        if (darks.Count == 0 && flats.Count == 0 && biases.Count == 0)
         {
-            Debug.WriteLine("[Calibration] Nessuna calibrazione richiesta. Uso i file originali.");
-            return lightPaths.ToList();
+            return lights;
         }
         
-        Debug.WriteLine($"[CalibrationCoordinator] Luci da elaborare: {lights.Count}");
-
         // 1. CREAZIONE MASTER (In RAM)
-        Debug.WriteLine("[CalibrationCoordinator] Creazione Master Frames...");
-        Mat? masterBias = await CreateMasterAsync(biasPaths, "Bias", token);
-        Mat? masterDark = await CreateMasterAsync(darkPaths, "Dark", token);
-        Mat? masterFlat = await CreateMasterAsync(flatPaths, "Flat", token);
-
-        Debug.WriteLine($"[CalibrationCoordinator] Stato Master: Bias={(masterBias != null)}, Dark={(masterDark != null)}, Flat={(masterFlat != null)}");
+        // Nota: Qui potremmo implementare una cache se i master fossero riutilizzabili
+        Mat? masterBias = await CreateMasterAsync(biases, token);
+        Mat? masterDark = await CreateMasterAsync(darks, token);
+        Mat? masterFlat = await CreateMasterAsync(flats, token);
 
         try
         {
@@ -72,8 +71,7 @@ public class CalibrationCoordinator : ICalibrationCoordinator
             {
                 token.ThrowIfCancellationRequested();
                 string currentPath = lights[i];
-                Debug.WriteLine($"[CalibrationCoordinator] ({i + 1}/{lights.Count}) Elaboro: {System.IO.Path.GetFileName(currentPath)}");
-
+                
                 progress?.Report(new BatchProgressReport(
                     i + 1, lights.Count, System.IO.Path.GetFileName(currentPath), (double)(i + 1) / lights.Count * 100));
 
@@ -82,15 +80,10 @@ public class CalibrationCoordinator : ICalibrationCoordinator
                     // A. Caricamento Light
                     var data = await _dataManager.GetDataAsync(currentPath);
                     
-                    // [MODIFICA MEF] Accesso sicuro all'HDU immagine
                     var imageHdu = data.FirstImageHdu ?? data.PrimaryHdu;
-                    if (imageHdu == null) 
-                    {
-                        Debug.WriteLine($"[CalibrationCoordinator] SKIP: Nessuna immagine valida in {currentPath}");
-                        continue;
-                    }
+                    if (imageHdu == null) continue;
 
-                    // Cloniamo l'header dell'HDU specifico
+                    // Cloniamo l'header originale
                     var header = _metadata.CloneHeader(imageHdu.Header);
                     
                     // Usiamo i PixelData dell'HDU
@@ -98,13 +91,10 @@ public class CalibrationCoordinator : ICalibrationCoordinator
                         _metadata.GetDoubleValue(header, "BSCALE", 1.0),
                         _metadata.GetDoubleValue(header, "BZERO", 0.0));
                     
-                    Debug.WriteLine($"[CalibrationCoordinator] Matrice Light creata: {lightMat.Width}x{lightMat.Height}, Tipo: {lightMat.Type()}");
-
-                    // B. Calibrazione tramite Engine
+                    // B. Calibrazione effettiva
                     using var calibratedMat = _calibrationEngine.ApplyCalibration(lightMat, masterDark, masterFlat, masterBias);
-                    Debug.WriteLine($"[CalibrationCoordinator] Calibrazione completata. Tipo output: {calibratedMat.Type()}");
 
-                    // C. Finalizzazione Header e Salvataggio Temporaneo
+                    // C. Finalizzazione
                     FitsBitDepth outputDepth = (calibratedMat.Depth() == MatType.CV_64F) 
                         ? FitsBitDepth.Double 
                         : FitsBitDepth.Float;
@@ -112,67 +102,65 @@ public class CalibrationCoordinator : ICalibrationCoordinator
                     var calibratedPixels = _converter.MatToRaw(calibratedMat, outputDepth);
                     var finalHeader = _metadata.CreateHeaderFromTemplate(header, calibratedPixels, outputDepth);
                     
-                    _metadata.SetValue(finalHeader, "DARKCORR", "COMPLETE", "Dark frame subtraction applied");
-                    _metadata.SetValue(finalHeader, "FLATCORR", "COMPLETE", "Flat field correction applied");
-                    _metadata.SetValue(finalHeader, "BIASCORR", "COMPLETE", "Bias frame subtraction applied");
+                    // --- AGGIUNTA METADATI STANDARD (NOAO/IRAF CONVENTION) ---
+                    // Usiamo 'T' (True) come da standard FITS per i booleani
                     
-                    _metadata.AddValue(finalHeader, "HISTORY", $"KomaLab - Calibrated (D:{darkPaths.Any()} F:{flatPaths.Any()} B:{biasPaths.Any()})");
+                    if (masterBias != null)
+                    {
+                        _metadata.SetValue(finalHeader, "ZEROCORR", "T", "Zero/Bias correction applied");
+                        _metadata.AddValue(finalHeader, "HISTORY", $"Bias correction applied using Master Bias ({biases.Count} frames)");
+                    }
 
-                    Debug.WriteLine("[CalibrationCoordinator] Tentativo di salvataggio file temporaneo...");
+                    if (masterDark != null)
+                    {
+                        _metadata.SetValue(finalHeader, "DARKCORR", "T", "Dark frame subtraction applied");
+                        _metadata.AddValue(finalHeader, "HISTORY", $"Dark subtraction applied using Master Dark ({darks.Count} frames)");
+                    }
+
+                    if (masterFlat != null)
+                    {
+                        _metadata.SetValue(finalHeader, "FLATCORR", "T", "Flat field correction applied");
+                        _metadata.AddValue(finalHeader, "HISTORY", $"Flat field correction applied using Master Flat ({flats.Count} frames)");
+                    }
+                    
+                    _metadata.AddValue(finalHeader, "HISTORY", "Calibration performed by KomaLab");
+
+                    // D. Salvataggio
                     var fileRef = await _dataManager.SaveAsTemporaryAsync(calibratedPixels, finalHeader, "Calibrated");
                     
                     if (fileRef != null && !string.IsNullOrEmpty(fileRef.FilePath))
                     {
-                        Debug.WriteLine($"[CalibrationCoordinator] Salvataggio riuscito: {fileRef.FilePath}");
                         resultPaths.Add(fileRef.FilePath);
                     }
-                    else
-                    {
-                        Debug.WriteLine("[CalibrationCoordinator] ERRORE: SaveAsTemporaryAsync ha restituito un riferimento nullo o path vuoto.");
-                    }
                 }
-                catch (Exception ex)
+                catch (Exception)
                 {
-                    Debug.WriteLine($"[CalibrationCoordinator] ERRORE durante l'elaborazione di {currentPath}: {ex.Message}");
+                    // Continua con il prossimo file in caso di errore su uno singolo
                     throw; 
                 }
             }
         }
-        catch (Exception ex)
-        {
-            Debug.WriteLine($"[CalibrationCoordinator] ERRORE CRITICO nel ciclo batch: {ex.Message}");
-            throw;
-        }
         finally
         {
-            Debug.WriteLine("[CalibrationCoordinator] Cleanup Master frames.");
+            // Pulizia risorse OpenCV
             masterBias?.Dispose();
             masterDark?.Dispose();
             masterFlat?.Dispose();
         }
 
-        Debug.WriteLine($"[CalibrationCoordinator] --- FINE PROCESSO --- Risultati: {resultPaths.Count}");
         return resultPaths;
     }
 
-    private async Task<Mat?> CreateMasterAsync(IEnumerable<string> paths, string type, CancellationToken token)
+    private async Task<Mat?> CreateMasterAsync(List<string> paths, CancellationToken token)
     {
-        var pathList = paths.ToList();
-        if (!pathList.Any()) 
-        {
-            Debug.WriteLine($"[CalibrationCoordinator] Nessun file per Master {type}.");
-            return null;
-        }
+        if (paths.Count == 0) return null;
 
-        Debug.WriteLine($"[CalibrationCoordinator] Generazione Master {type} da {pathList.Count} file...");
         var mats = new List<Mat>();
         try
         {
-            foreach (var p in pathList)
+            foreach (var p in paths)
             {
                 var data = await _dataManager.GetDataAsync(p);
-                
-                // [MODIFICA MEF] Accesso sicuro all'HDU immagine
                 var imageHdu = data.FirstImageHdu ?? data.PrimaryHdu;
                 if (imageHdu == null) continue;
 
@@ -183,15 +171,8 @@ public class CalibrationCoordinator : ICalibrationCoordinator
 
             if (mats.Count == 0) return null;
 
-            // Usiamo l'engine di stacking esistente per fare la Media
-            var master = await _stackingEngine.ComputeStackAsync(mats, StackingMode.Average);
-            Debug.WriteLine($"[CalibrationCoordinator] Master {type} creato con successo.");
-            return master;
-        }
-        catch (Exception ex)
-        {
-            Debug.WriteLine($"[CalibrationCoordinator] ERRORE durante creazione Master {type}: {ex.Message}");
-            throw;
+            // Per i Master di calibrazione si usa tipicamente la Media (o la Mediana)
+            return await _stackingEngine.ComputeStackAsync(mats, StackingMode.Average);
         }
         finally
         {

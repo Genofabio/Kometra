@@ -223,9 +223,22 @@ public class VideoExportCoordinator : IVideoExportCoordinator
 
     private Mat ApplyRescale(Mat source, double factor)
     {
-        int w = (int)(source.Width * factor) & ~1;
-        int h = (int)(source.Height * factor) & ~1;
+        // Calcola le nuove dimensioni
+        int rawW = (int)(source.Width * factor);
+        int rawH = (int)(source.Height * factor);
+
+        // [FIX H.265] 
+        // Allinea a multipli di 32 per massima compatibilità con encoder hardware e software.
+        // Esempio: 1920 diventa 1920, 1925 diventa 1920.
+        int w = (rawW / 32) * 32;
+        int h = (rawH / 32) * 32;
+
+        // Protezione per immagini piccolissime (minimo 32x32)
+        w = Math.Max(32, w);
+        h = Math.Max(32, h);
+
         if (w == source.Width && h == source.Height) return source.Clone();
+    
         Mat resized = new Mat();
         Cv2.Resize(source, resized, new Size(w, h), 0, 0, InterpolationFlags.Area);
         return resized;

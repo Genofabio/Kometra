@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -54,10 +55,49 @@ public partial class VideoExportToolViewModel : ObservableObject, IDisposable
 
     [ObservableProperty] private double _exportProgress;
     [ObservableProperty] private string _statusText = "Pronto";
+    
+    // --- GESTIONE PERCORSO E NOME FILE ---
+    
     [ObservableProperty] 
     [NotifyCanExecuteChangedFor(nameof(ConfirmCommand))]
-    private string _outputPath = string.Empty;
+    [NotifyPropertyChangedFor(nameof(OutputPath))] // Notifica cambiamenti alla proprietà legacy
+    private string _outputFolder = string.Empty;
 
+    [ObservableProperty] 
+    [NotifyPropertyChangedFor(nameof(OutputPath))] // Notifica cambiamenti alla proprietà legacy
+    private string _outputFileName = "VideoExport"; 
+
+    // Proprietà calcolata per mostrare l'estensione nella UI (es. ".mp4")
+    public string CurrentExtension => _formatProvider.GetExtension(SelectedContainer);
+
+    // [FIX PER WINDOWSERVICE]
+    // Questa proprietà ricostruisce il percorso completo per soddisfare le dipendenze esterne
+    // che si aspettano ancora di trovare "OutputPath".
+    public string OutputPath 
+    {
+        get 
+        {
+            if (string.IsNullOrWhiteSpace(OutputFolder)) return string.Empty;
+            string finalName = string.IsNullOrWhiteSpace(OutputFileName) ? "VideoExport" : OutputFileName;
+            return Path.Combine(OutputFolder, finalName + CurrentExtension);
+        }
+        set 
+        {
+            // Se WindowService prova a settare il percorso (es. caricando un preset),
+            // proviamo a separare Cartella e Nome file.
+            if (!string.IsNullOrWhiteSpace(value))
+            {
+                try 
+                {
+                    OutputFolder = Path.GetDirectoryName(value) ?? string.Empty;
+                    OutputFileName = Path.GetFileNameWithoutExtension(value);
+                }
+                catch { /* Ignora percorsi non validi */ }
+            }
+        }
+    }
+
+    // --- PROPRIETÀ CALCOLATE ---
     public bool IsInteractionEnabled => !IsExporting;
     public double CurrentBlackPoint => ActiveRenderer?.BlackPoint ?? 0;
     public double CurrentWhitePoint => ActiveRenderer?.WhitePoint ?? 0;
@@ -68,9 +108,16 @@ public partial class VideoExportToolViewModel : ObservableObject, IDisposable
     [ObservableProperty] private int _originalHeight;
     public int FinalWidth => (int)(OriginalWidth * ScaleFactor) & ~1;
     public int FinalHeight => (int)(OriginalHeight * ScaleFactor) & ~1;
-    public string DurationText => Fps <= 0 ? "0s" : TimeSpan.FromSeconds((double)_sourceFiles.Count / Fps).ToString(@"mm\:ss") + "s";
+    
+    public string DurationText => Fps <= 0 
+        ? "0s" 
+        : TimeSpan.FromSeconds((double)_sourceFiles.Count / Fps).ToString(@"mm\:ss") + "s";
 
-    [ObservableProperty] private VideoContainer _selectedContainer;
+    [ObservableProperty] 
+    [NotifyPropertyChangedFor(nameof(CurrentExtension))] // Aggiorna UI estensione
+    [NotifyPropertyChangedFor(nameof(OutputPath))]       // Aggiorna Path completo
+    private VideoContainer _selectedContainer;
+    
     [ObservableProperty] private VideoCodec _selectedCodec;
     public ObservableCollection<VideoContainer> Containers { get; }
     [ObservableProperty] private ObservableCollection<VideoCodec> _availableCodecs;
@@ -100,6 +147,17 @@ public partial class VideoExportToolViewModel : ObservableObject, IDisposable
         _originalWidth = (int)originalSize.Width;
         _originalHeight = (int)originalSize.Height;
 
+        // Imposta una cartella di default (Documenti)
+        OutputFolder = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
+
+        // Imposta il nome file di default basato sul primo file della sequenza
+        if (_sourceFiles.Any())
+        {
+            var rawName = _sourceFiles[0].FileName;
+            OutputFileName = Path.GetFileNameWithoutExtension(rawName);
+        }
+
+        // Inizializza Contenitori e Codec
         var supported = _formatProvider.GetSupportedContainers().ToList();
         Containers = new ObservableCollection<VideoContainer>(supported);
         SelectedContainer = supported.Contains(VideoContainer.MP4) ? VideoContainer.MP4 : supported.FirstOrDefault();
@@ -127,11 +185,9 @@ public partial class VideoExportToolViewModel : ObservableObject, IDisposable
             var fileRef = _sourceFiles[index];
             var data = await _dataManager.GetDataAsync(fileRef.FilePath);
         
-            // [MODIFICA MEF] Accesso sicuro all'HDU immagine
             var imageHdu = data.FirstImageHdu ?? data.PrimaryHdu;
-            if (imageHdu == null) return; // O loggare errore
+            if (imageHdu == null) return;
 
-            // Usiamo PixelData e Header dell'HDU
             var newRenderer = await _rendererFactory.CreateAsync(imageHdu.PixelData, fileRef.ModifiedHeader ?? imageHdu.Header);
             newRenderer.VisualizationMode = Mode;
 
@@ -157,25 +213,23 @@ public partial class VideoExportToolViewModel : ObservableObject, IDisposable
     {
         var supported = _formatProvider.GetSupportedCodecs(SelectedContainer).ToList();
         AvailableCodecs = new ObservableCollection<VideoCodec>(supported);
-        SelectedCodec = AvailableCodecs.FirstOrDefault();
+        
+        if (supported.Contains(VideoCodec.H264))
+            SelectedCodec = VideoCodec.H264;
+        else
+            SelectedCodec = AvailableCodecs.FirstOrDefault();
+
         ConfirmCommand.NotifyCanExecuteChanged();
     }
 
     // --- COMANDI PRINCIPALI ---
 
     [RelayCommand]
-    private async Task SelectPath()
+    private async Task SelectFolder()
     {
-        string extension = _formatProvider.GetExtension(SelectedContainer);
-        string rawName = _sourceFiles.FirstOrDefault()?.FileName ?? "VideoExport";
-        string defaultFileName = rawName.Contains('.') ? rawName.Substring(0, rawName.IndexOf('.')) : rawName;
-
-        var path = await _dialogService.ShowSaveFileDialogAsync(
-            $"{defaultFileName}{extension}", 
-            $"{SelectedContainer} Video", 
-            $"*{extension}");
-
-        if (!string.IsNullOrWhiteSpace(path)) OutputPath = path;
+        // Selettore cartella
+        var path = await _dialogService.ShowOpenFolderDialogAsync("Seleziona cartella di destinazione");
+        if (!string.IsNullOrWhiteSpace(path)) OutputFolder = path;
     }
 
     [RelayCommand(CanExecute = nameof(CanConfirm))]
@@ -186,7 +240,9 @@ public partial class VideoExportToolViewModel : ObservableObject, IDisposable
 
         try 
         {
+            // Usiamo la proprietà calcolata OutputPath che unisce tutto
             var settings = GetSettings(OutputPath);
+            
             var progress = new Progress<double>(p => {
                 ExportProgress = p;
                 if (p >= 99) 
@@ -195,7 +251,6 @@ public partial class VideoExportToolViewModel : ObservableObject, IDisposable
                     StatusText = $"Elaborazione frame... {p:N0}%";
             });
 
-            // L'await qui sotto ora aspetterà anche la "Barriera di Stabilità"
             await _videoCoordinator.ExportVideoAsync(
                 _sourceFiles, 
                 settings, 
@@ -203,16 +258,15 @@ public partial class VideoExportToolViewModel : ObservableObject, IDisposable
                 progress, 
                 _exportCts.Token);
 
-            // Ultimo check di sicurezza UI
             StatusText = "Video Salvato!";
             ExportProgress = 100;
-            await Task.Delay(1000); // Mostra il successo per un secondo
+            await Task.Delay(1000); 
 
             DialogResult = true; 
             RequestClose?.Invoke(); 
         }
         catch (OperationCanceledException) { StatusText = "Annullato."; }
-        catch (Exception ex) { StatusText = "Errore.";  }
+        catch (Exception) { StatusText = "Errore durante l'esportazione.";  }
         finally 
         { 
             IsExporting = false;
@@ -221,7 +275,7 @@ public partial class VideoExportToolViewModel : ObservableObject, IDisposable
         }
     }
 
-    private bool CanConfirm() => !IsExporting && !string.IsNullOrWhiteSpace(OutputPath) && SelectedCodec != null;
+    private bool CanConfirm() => !IsExporting && !string.IsNullOrWhiteSpace(OutputFolder) && SelectedCodec != null;
 
     [RelayCommand] 
     private void Cancel() 

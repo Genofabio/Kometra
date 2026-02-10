@@ -62,27 +62,11 @@
         
         <MenuItem Header="_Modifica">
             
-            <MenuItem Header="Allinea"
+            <MenuItem Header="Allinea e centra"
                       Classes="innerMenuItem"
                       Command="{Binding BoardVm.ShowAlignmentWindowCommand}">
                 <MenuItem.Icon>
                     <avalonia:MaterialIcon Kind="ImageFilterCenterFocus" />
-                </MenuItem.Icon>
-            </MenuItem>
-            
-            <MenuItem Header="Maschera Stelle"
-                      Classes="innerMenuItem"
-                      Command="{Binding BoardVm.ShowStarMaskingWindowCommand}">
-                <MenuItem.Icon>
-                    <avalonia:MaterialIcon Kind="StarOff" /> 
-                </MenuItem.Icon>
-            </MenuItem>
-
-            <MenuItem Header="Posterizzazione"
-                      Classes="innerMenuItem"
-                      Command="{Binding BoardVm.ShowPosterizationWindowCommand}">
-                <MenuItem.Icon>
-                    <avalonia:MaterialIcon Kind="Layers" />
                 </MenuItem.Icon>
             </MenuItem>
             
@@ -116,6 +100,22 @@
                         <avalonia:MaterialIcon Kind="ContrastBox" />
                     </MenuItem.Icon>
                 </MenuItem>
+            </MenuItem>
+            
+            <MenuItem Header="Maschera Stelle"
+                      Classes="innerMenuItem"
+                      Command="{Binding BoardVm.ShowStarMaskingWindowCommand}">
+                <MenuItem.Icon>
+                    <avalonia:MaterialIcon Kind="StarOff" /> 
+                </MenuItem.Icon>
+            </MenuItem>
+
+            <MenuItem Header="Posterizzazione"
+                      Classes="innerMenuItem"
+                      Command="{Binding BoardVm.ShowPosterizationWindowCommand}">
+                <MenuItem.Icon>
+                    <avalonia:MaterialIcon Kind="GradientVertical" />
+                </MenuItem.Icon>
             </MenuItem>
             
             <Separator />
@@ -218,7 +218,7 @@
 
             <Separator />
             
-            <MenuItem Header="Reset Vista Immagine"
+            <MenuItem Header="Reset Posizione Immagine"
                       Classes="innerMenuItem"
                       Command="{Binding BoardVm.ResetNodeViewCommand}">
                 <MenuItem.Icon>

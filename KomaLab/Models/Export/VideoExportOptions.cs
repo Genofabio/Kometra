@@ -38,6 +38,9 @@ public enum VideoCodec
     /// <summary> XVID MPEG-4: Ottimo bilanciamento qualità/peso. </summary>
     XVID, 
     
-    /// <summary> H.264: Standard moderno ad alta efficienza. </summary>
+    /// <summary> H.264 (AVC): Standard moderno ad alta efficienza. </summary>
     H264,
+
+    /// <summary> H.265 (HEVC): Massima efficienza. Copre ICVC/HEIC. </summary>
+    H265 // <--- AGGIUNGI QUESTO
 }

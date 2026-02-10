@@ -5,8 +5,8 @@
         x:Class="KomaLab.Views.VideoExportToolView"
         x:DataType="importExport:VideoExportToolViewModel"
         Title="Configurazione Esportazione Video"
-        Width="1020" Height="580"
-        MinWidth="1010" MinHeight="550"
+        Width="1020" Height="620"
+        MinWidth="1010" MinHeight="620"
         WindowStartupLocation="CenterOwner"
         CanResize="True"
         Background="{DynamicResource ToolWindowBackgroundBrush}"
@@ -23,6 +23,7 @@
             
             <Border Grid.Column="0" Background="{DynamicResource ToolPanelBackgroundBrush}" Padding="20" BorderBrush="{DynamicResource Border.WhiteDimBrush}" BorderThickness="0,0,1,0" IsEnabled="{Binding IsInteractionEnabled}">
                 <StackPanel Spacing="18">
+                    
                     <StackPanel Spacing="6">
                         <TextBlock Text="ESPORTAZIONE VIDEO" FontWeight="Bold" Foreground="White" FontSize="18"/>
                         <TextBlock Text="Configura il formato e la qualità" FontSize="11" Opacity="0.6" FontStyle="Italic"/>
@@ -30,54 +31,81 @@
 
                     <Separator Background="{DynamicResource Border.WhiteDimBrush}" Opacity="0.4" Margin="-5,0"/>
 
-                    <StackPanel Spacing="8">
-                        <TextBlock Text="DESTINAZIONE SALVATAGGIO" FontSize="12" FontWeight="Bold" Opacity="0.7" Foreground="White"/>
-                        <Grid ColumnDefinitions="*, Auto" ColumnSpacing="6">
-                            <TextBox Grid.Column="0" Watermark="Scegli percorso..." 
-                                     Text="{Binding OutputPath}" IsReadOnly="True" 
-                                     FontSize="11" Height="34" VerticalContentAlignment="Center"
-                                     Background="{DynamicResource ToolWindowBackgroundBrush}"
-                                     BorderBrush="{DynamicResource Border.WhiteDimBrush}" BorderThickness="1"/>
-                            <Button Grid.Column="1" Command="{Binding SelectPathCommand}" 
-                                    Padding="10,0" Height="34" 
-                                    Background="{DynamicResource ToolWindowBackgroundBrush}"
-                                    BorderBrush="{DynamicResource Border.WhiteDimBrush}" BorderThickness="1">
-                                <avalonia:MaterialIcon Kind="FolderOpen" Width="20" Height="20" Foreground="White"/>
-                            </Button>
-                        </Grid>
+                    <StackPanel Spacing="12">
+                        <StackPanel Spacing="4">
+                            <TextBlock Text="Cartella di destinazione" FontSize="11" FontWeight="SemiBold" Opacity="0.7" Foreground="White"/>
+                            <Grid ColumnDefinitions="*, Auto" ColumnSpacing="6">
+                                <TextBox Grid.Column="0" Watermark="Seleziona cartella..." 
+                                         Text="{Binding OutputFolder}" IsReadOnly="True" 
+                                         FontSize="11" Height="34" VerticalContentAlignment="Center"
+                                         Background="{DynamicResource ToolWindowBackgroundBrush}"
+                                         BorderBrush="{DynamicResource Border.WhiteDimBrush}" BorderThickness="1"/>
+                                
+                                <Button Grid.Column="1" Command="{Binding SelectFolderCommand}" 
+                                        Padding="10,0" Height="34" 
+                                        Background="{DynamicResource ToolWindowBackgroundBrush}"
+                                        BorderBrush="{DynamicResource Border.WhiteDimBrush}" BorderThickness="1">
+                                    <avalonia:MaterialIcon Kind="FolderOpen" Width="20" Height="20" Foreground="White"/>
+                                </Button>
+                            </Grid>
+                        </StackPanel>
+
+                        <StackPanel Spacing="4">
+                            <TextBlock Text="Nome del file (opzionale)" FontSize="11" FontWeight="SemiBold" Opacity="0.7" Foreground="White"/>
+                            <Grid ColumnDefinitions="*, Auto" ColumnSpacing="6">
+                                <TextBox Grid.Column="0" Watermark="Nome file (senza estensione)" 
+                                         Text="{Binding OutputFileName}"
+                                         FontSize="12" Height="34" VerticalContentAlignment="Center"
+                                         Background="{DynamicResource ToolWindowBackgroundBrush}"
+                                         BorderBrush="{DynamicResource Border.WhiteDimBrush}" BorderThickness="1"/>
+                                
+                                <Border Grid.Column="1" Background="{DynamicResource ToolPanelBackgroundBrush}" 
+                                        BorderBrush="{DynamicResource Border.WhiteDimBrush}" BorderThickness="1"
+                                        CornerRadius="4" Padding="12,0" Height="34" MinWidth="50">
+                                    <TextBlock Text="{Binding CurrentExtension}" 
+                                               VerticalAlignment="Center" HorizontalAlignment="Center"
+                                               FontSize="12" FontWeight="Bold" Foreground="Gray"/>
+                                </Border>
+                            </Grid>
+                        </StackPanel>
                     </StackPanel>
 
                     <Separator Background="{DynamicResource Border.WhiteDimBrush}" Opacity="0.4" Margin="-5,0"/>
 
-                    <StackPanel Spacing="15">
-                        <StackPanel Spacing="5">
-                            <TextBlock Text="Formato Contenitore" FontSize="13" FontWeight="SemiBold" Margin="0,0,0,2"/>
-                            <ComboBox HorizontalAlignment="Stretch" ItemsSource="{Binding Containers}" SelectedItem="{Binding SelectedContainer}"/>
+                    <StackPanel Spacing="12">
+                        <StackPanel Spacing="4">
+                            <TextBlock Text="Formato Contenitore" FontSize="11" FontWeight="SemiBold" Opacity="0.7" Foreground="White"/>
+                            <ComboBox HorizontalAlignment="Stretch" Height="34"
+                                      ItemsSource="{Binding Containers}" SelectedItem="{Binding SelectedContainer}"/>
                         </StackPanel>
 
-                        <StackPanel Spacing="5">
-                            <TextBlock Text="Compressione (Codec)" FontSize="13" FontWeight="SemiBold" Margin="0,0,0,2"/>
-                            <ComboBox HorizontalAlignment="Stretch" ItemsSource="{Binding AvailableCodecs}" SelectedItem="{Binding SelectedCodec}"/>
+                        <StackPanel Spacing="4">
+                            <TextBlock Text="Compressione (Codec)" FontSize="11" FontWeight="SemiBold" Opacity="0.7" Foreground="White"/>
+                            <ComboBox HorizontalAlignment="Stretch" Height="34"
+                                      ItemsSource="{Binding AvailableCodecs}" SelectedItem="{Binding SelectedCodec}"/>
                         </StackPanel>
                     </StackPanel>
 
                     <Separator Background="{DynamicResource Border.WhiteDimBrush}" Opacity="0.4" Margin="-5,0"/>
 
-                    <StackPanel Spacing="20">
-                        <StackPanel Spacing="5">
-                            <TextBlock Text="Frame Rate (FPS)" FontSize="13" FontWeight="SemiBold" Margin="0,0,0,2"/>
-                            <NumericUpDown Value="{Binding Fps}" Minimum="1" Maximum="120" FormatString="0" HorizontalAlignment="Stretch"/> 
+                    <StackPanel Spacing="12">
+                        <StackPanel Spacing="4">
+                            <TextBlock Text="Frame Rate (FPS)" FontSize="11" FontWeight="SemiBold" Opacity="0.7" Foreground="White"/>
+                            <NumericUpDown Value="{Binding Fps}" Minimum="1" Maximum="120" FormatString="0" 
+                                           HorizontalAlignment="Stretch" Height="34"/> 
                         </StackPanel>
 
-                        <StackPanel Spacing="5">
-                            <TextBlock Text="Riscalamento Fattore" FontSize="13" FontWeight="SemiBold" Margin="0,0,0,2"/>
+                        <StackPanel Spacing="4">
+                            <TextBlock Text="Fattore di Riscalamento" FontSize="11" FontWeight="SemiBold" Opacity="0.7" Foreground="White"/>
                             <Grid ColumnDefinitions="Auto, *" ColumnSpacing="10">
                                 <TextBox Grid.Column="0" x:Name="ScaleFactorBox" 
                                          Text="{Binding ScaleFactor, Mode=OneWay, StringFormat={}{0:N2}}" 
-                                         MinWidth="60" VerticalAlignment="Center" HorizontalContentAlignment="Right"
+                                         MinWidth="60" Height="34" 
+                                         VerticalAlignment="Center" HorizontalContentAlignment="Right" VerticalContentAlignment="Center"
                                          LostFocus="OnManualInputCommit" 
                                          KeyDown="OnInputKeyDown"/>
-                                <Slider Grid.Column="1" Minimum="0.1" Maximum="2.0" Value="{Binding ScaleFactor}" TickFrequency="0.1" IsSnapToTickEnabled="True" VerticalAlignment="Center"/>
+                                <Slider Grid.Column="1" Minimum="0.1" Maximum="2.0" Value="{Binding ScaleFactor}" 
+                                        TickFrequency="0.1" IsSnapToTickEnabled="True" VerticalAlignment="Center"/>
                             </Grid>
                         </StackPanel>
                     </StackPanel>
