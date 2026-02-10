@@ -10,7 +10,7 @@
         x:DataType="imageProcessing:PosterizationToolViewModel"
         
         Title="Analisi Morfologica / Posterizzazione"
-        Width="1000" Height="700"
+        Width="1000" Height="600"
         MinHeight="500" MinWidth="850"
         WindowStartupLocation="CenterScreen"
         Background="{DynamicResource ToolWindowBackgroundBrush}"
@@ -19,6 +19,28 @@
     <Window.Resources>
         <conv:PosterizationModeConverter x:Key="ModeConverter"/>
     </Window.Resources>
+
+    <Window.Styles>
+        <Style Selector="TextBlock.description">
+            <Setter Property="FontSize" Value="11"/>
+            <Setter Property="Opacity" Value="0.6"/>
+            <Setter Property="FontStyle" Value="Italic"/>
+            <Setter Property="TextWrapping" Value="Wrap"/>
+            <Setter Property="Margin" Value="0,0,0,4"/>
+        </Style>
+
+        <Style Selector="TextBlock.sectionTitle">
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Margin" Value="0,0,0,2"/>
+        </Style>
+
+        <Style Selector="TextBox.valueInput">
+            <Setter Property="MinWidth" Value="60"/>       <Setter Property="Height" Value="28"/>         <Setter Property="MinHeight" Value="28"/>
+            <Setter Property="Margin" Value="10,0,0,0"/>   <Setter Property="VerticalContentAlignment" Value="Center"/>
+            <Setter Property="HorizontalContentAlignment" Value="Center"/>
+            <Setter Property="Padding" Value="5,0"/>       <Setter Property="FontSize" Value="12"/>       </Style>
+    </Window.Styles>
     
     <Grid ColumnDefinitions="320, *">
         
@@ -31,57 +53,68 @@
                 <ScrollViewer Grid.Row="1" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
                     <StackPanel Spacing="15" Margin="5,0,14,0">
                         
-                        <StackPanel Spacing="6">
+                        <StackPanel Spacing="2">
                             <TextBlock Classes="sectionTitle" Text="Numero Livelli"/>
                             <TextBlock Classes="description" Text="Divide l'immagine in toni discreti per isolare le isofote."/>
+                            
                             <Grid ColumnDefinitions="*, Auto">
-                                <Slider Grid.Column="0" Minimum="2" Maximum="{Binding MaxLevels}" Value="{Binding Levels}" IsSnapToTickEnabled="True" TickFrequency="1" VerticalAlignment="Center"/>
-                                <TextBox Name="LevelsInput" Grid.Column="1" Text="{Binding Levels, Mode=OneWay}" LostFocus="OnValueInputLostFocus" KeyDown="OnInputKeyDown" Classes="valueInput"/>
+                                <Slider Grid.Column="0" Minimum="2" Maximum="{Binding MaxLevels}" Value="{Binding Levels}" 
+                                        IsSnapToTickEnabled="True" TickFrequency="1" VerticalAlignment="Center"/>
+                                <TextBox Name="LevelsInput" Grid.Column="1" Classes="valueInput"
+                                         Text="{Binding Levels, Mode=OneWay}" 
+                                         LostFocus="OnValueInputLostFocus" KeyDown="OnInputKeyDown"/>
                             </Grid>
                         </StackPanel>
                         
-                        <Border Height="1" Background="{DynamicResource ActionDisabledBackgroundBrush}" Margin="0,0,0,2"/>
+                        <Border Height="1" Background="{DynamicResource ActionDisabledBackgroundBrush}" Margin="0,4"/>
                         
-                        <StackPanel Spacing="6">
+                        <StackPanel Spacing="2">
                             <TextBlock Classes="sectionTitle" Text="Metodo Distribuzione"/>
                             <TextBlock Classes="description" Text="Scegli come ripartire i toni per enfatizzare dettagli deboli."/>
                             <ComboBox ItemsSource="{Binding AvailableModes}" 
                                       SelectedItem="{Binding SelectedMode}" 
-                                      HorizontalAlignment="Stretch" Margin="0,8,0,0">
+                                      HorizontalAlignment="Stretch" Margin="0,6,0,0">
                                 <ComboBox.ItemTemplate>
                                     <DataTemplate><TextBlock Text="{Binding Converter={StaticResource ModeConverter}}"/></DataTemplate>
                                 </ComboBox.ItemTemplate>
                             </ComboBox>
                         </StackPanel>
                         
-                        <Border Height="1" Background="{DynamicResource ActionDisabledBackgroundBrush}" Margin="0,6,0,2"/>
+                        <Border Height="1" Background="{DynamicResource ActionDisabledBackgroundBrush}" Margin="0,4"/>
                         
                         <StackPanel Spacing="10">
-                            <TextBlock Classes="sectionTitle" Text="Range Dinamico (Clip)"/>
-                            <TextBlock Classes="description" Text="Definisce l'intervallo di segnale ADU (0-65535)."/>
+                            <StackPanel Spacing="0">
+                                <TextBlock Classes="sectionTitle" Text="Range Dinamico (Clip)"/>
+                                <TextBlock Classes="description" Text="Definisce l'intervallo di segnale ADU (0-65535)."/>
+                            </StackPanel>
                             
-                            <StackPanel Spacing="2" Margin="0,2,0,0">
-                                <TextBlock Text="Soglia Nero" FontSize="12" Foreground="{DynamicResource Text.MediumGreyBrush}" FontWeight="SemiBold" FontStyle="Italic"/>
+                            <StackPanel Spacing="2">
+                                <TextBlock Text="Soglia Nero" FontSize="11" Foreground="{DynamicResource Text.MediumGreyBrush}" FontWeight="SemiBold"/>
                                 <Grid ColumnDefinitions="*, Auto">
-                                    <Slider Grid.Column="0" Minimum="0" Maximum="65535" Value="{Binding BlackPoint}"/>
-                                    <TextBox Name="BlackInput" Grid.Column="1" Text="{Binding BlackPoint, Mode=OneWay, StringFormat={}{0:0.0}}" LostFocus="OnValueInputLostFocus" KeyDown="OnInputKeyDown" Classes="valueInput"/>
+                                    <Slider Grid.Column="0" Minimum="0" Maximum="65535" Value="{Binding BlackPoint}" VerticalAlignment="Center"/>
+                                    <TextBox Name="BlackInput" Grid.Column="1" Classes="valueInput"
+                                             Text="{Binding BlackPoint, Mode=OneWay, StringFormat={}{0:0.0}}" 
+                                             LostFocus="OnValueInputLostFocus" KeyDown="OnInputKeyDown"/>
                                 </Grid>
                             </StackPanel>
                             
-                            <StackPanel Spacing="2" Margin="0,2,0,0">
-                                <TextBlock Text="Soglia Bianco" FontSize="12" Foreground="{DynamicResource Text.MediumGreyBrush}" FontWeight="SemiBold" FontStyle="Italic"/>
+                            <StackPanel Spacing="2">
+                                <TextBlock Text="Soglia Bianco" FontSize="11" Foreground="{DynamicResource Text.MediumGreyBrush}" FontWeight="SemiBold"/>
                                 <Grid ColumnDefinitions="*, Auto">
-                                    <Slider Grid.Column="0" Minimum="0" Maximum="65535" Value="{Binding WhitePoint}"/>
-                                    <TextBox Name="WhiteInput" Grid.Column="1" Text="{Binding WhitePoint, Mode=OneWay, StringFormat={}{0:0.0}}" LostFocus="OnValueInputLostFocus" KeyDown="OnInputKeyDown" Classes="valueInput"/>
+                                    <Slider Grid.Column="0" Minimum="0" Maximum="65535" Value="{Binding WhitePoint}" VerticalAlignment="Center"/>
+                                    <TextBox Name="WhiteInput" Grid.Column="1" Classes="valueInput"
+                                             Text="{Binding WhitePoint, Mode=OneWay, StringFormat={}{0:0.0}}" 
+                                             LostFocus="OnValueInputLostFocus" KeyDown="OnInputKeyDown"/>
                                 </Grid>
                             </StackPanel>
                         </StackPanel>
                         
-                        <Border Height="1" Background="{DynamicResource ActionDisabledBackgroundBrush}" Margin="0,0,0,2"/>
+                        <Border Height="1" Background="{DynamicResource ActionDisabledBackgroundBrush}" Margin="0,4"/>
                         
                         <StackPanel Spacing="8">
                             <TextBlock Classes="sectionTitle" Text="Opzioni aggiuntive"/>
-                            <CheckBox IsChecked="{Binding AutoAdaptThresholds}" Padding="8,0,0,0" FontSize="12" Content="Adatta luminosità al cambio immagine" Margin="0,0,0,6"/>
+                            <CheckBox IsChecked="{Binding AutoAdaptThresholds}" Padding="8,0,0,0" FontSize="12" 
+                                      Content="Adatta luminosità al cambio immagine" Margin="0,0,0,6"/>
                         </StackPanel>
                     </StackPanel>
                 </ScrollViewer>

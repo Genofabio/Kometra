@@ -31,9 +31,9 @@ namespace KomaLab.Views
             if (DataContext is PosterizationToolViewModel vm)
             {
                 vm.Viewport.ViewportSize = e.NewSize;
-        
-                // Se è la prima volta che abbiamo dimensioni reali, adattiamo l'immagine
-                if (_isFirstLayout && e.NewSize.Width > 0)
+
+                // SE VUOI CHE SI ADATTI SEMPRE AL RESIZE (togli il check _isFirstLayout se vuoi comportamento tipo visualizzatore foto standard)
+                if (e.NewSize.Width > 0)
                 {
                     vm.Viewport.ResetView();
                     _isFirstLayout = false;
