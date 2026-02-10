@@ -22,13 +22,18 @@ public class FitsHeaderUiMapper
     {
         if (header == null) return new List<FitsHeaderEditorRow>();
 
+        // [FIX FONDAMENTALE]
+        // Prima di mappare, forziamo l'ordinamento standard sull'oggetto Header.
+        // Questo sposta SIMPLE, BITPIX, NAXIS in cima alla lista interna.
+        _metadataService.EnforceStandardOrder(header);
+
         var list = new List<FitsHeaderEditorRow>();
         foreach (var card in header.Cards)
         {
             // Chiede al servizio se questa chiave è strutturale (ReadOnly)
             bool isReadOnly = _metadataService.IsStructuralKey(card.Key);
 
-            // Crea la riga UI (nota: il costruttore setta IsModified = false)
+            // Crea la riga UI
             var row = new FitsHeaderEditorRow(card.Key, card.Value, card.Comment, isReadOnly);
             list.Add(row);
         }
@@ -49,15 +54,12 @@ public class FitsHeaderUiMapper
 
             string keyUpper = row.Key.Trim().ToUpper();
         
-            // Se è END, lo aggiungiamo così com'è (o lo saltiamo se lo gestisce il Writer, 
-            // ma per l'editor in memoria meglio averlo).
             if (keyUpper == "END")
             {
                 newHeader.AddCard(new FitsCard("END", "", "", true));
                 continue;
             }
 
-            // FORMATTAZIONE INTELLIGENTE DEL VALORE
             string rawValue = row.Value;
             string formattedValue = FormatValueForFits(keyUpper, rawValue);
 
@@ -67,6 +69,11 @@ public class FitsHeaderUiMapper
                 Comment: row.Comment, 
                 IsCommentStyle: false));
         }
+
+        // [FIX OPZIONALE MA CONSIGLIATO]
+        // Anche quando salviamo/ricostruiamo, ci assicuriamo che l'header generato sia ordinato.
+        _metadataService.EnforceStandardOrder(newHeader);
+
         return newHeader;
     }
     
@@ -78,7 +85,6 @@ public class FitsHeaderUiMapper
         if (uiValue.StartsWith("'") && uiValue.EndsWith("'")) return uiValue;
 
         // Tentiamo di capire il tipo
-        // Numeri e Booleani (T/F) vanno scritti senza apici
         if (double.TryParse(uiValue, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out _))
             return uiValue; // È un numero
 
@@ -86,7 +92,6 @@ public class FitsHeaderUiMapper
             return uiValue; // È un booleano logico
 
         // Se siamo qui, è una stringa libera -> AGGIUNGIAMO APICI
-        // Es. L'utente scrive: M31 -> FITS vuole: 'M31'
         return $"'{uiValue.Replace("'", "''")}'";
     }
 }

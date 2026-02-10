@@ -17,7 +17,7 @@
 
     <Style Selector="Border.Body">
         <Setter Property="Background" Value="{DynamicResource NodeContentBackgroundBrush}"/>
-        <Setter Property="CornerRadius" Value="0,0,8,8"/>
+        <Setter Property="CornerRadius" Value="0,0,0,0"/>
         <Setter Property="ClipToBounds" Value="True"/>
     </Style>
     

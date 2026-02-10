@@ -66,6 +66,7 @@ public interface IFitsMetadataService
     
     // --- Utility ---
     IEnumerable<T> SortByDate<T>(IEnumerable<T> items, Func<T, FitsHeader?> headerSelector);
+    void EnforceStandardOrder(FitsHeader header);
     
     // Crea una copia isolata per evitare di sporcare i file sorgente in cache
     FitsHeader CloneHeader(FitsHeader header);

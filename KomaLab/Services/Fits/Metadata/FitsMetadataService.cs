@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Globalization;
 using System.Linq;
 using KomaLab.Models.Astrometry;
@@ -13,12 +14,17 @@ public class FitsMetadataService : IFitsMetadataService
 {
     // --- COSTANTI ---
 
-    private static readonly HashSet<string> StructuralKeys = new(StringComparer.OrdinalIgnoreCase)
+    private static readonly List<string> StandardKeyOrder = new()
     {
-        "SIMPLE", "BITPIX", "NAXIS", "NAXIS1", "NAXIS2", "NAXIS3", 
-        "EXTEND", "PCOUNT", "GCOUNT", "GROUPS", "BSCALE", "BZERO", "END",
-        "CHECKSUM", "DATASUM", "DATE", "CREATOR", "ORIGIN"
+        "SIMPLE", "XTENSION", 
+        "BITPIX", 
+        "NAXIS", "NAXIS1", "NAXIS2", "NAXIS3", 
+        "EXTEND", "PCOUNT", "GCOUNT", "GROUPS", 
+        "BSCALE", "BZERO", "BUNIT",
+        "DATE", "DATE-OBS", "CREATOR", "INSTRUME", "TELESCOP", "OBJECT"
     };
+
+    private static readonly HashSet<string> StructuralKeysSet = new(StandardKeyOrder, StringComparer.OrdinalIgnoreCase);
 
     private static readonly HashSet<string> AdditiveKeys = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -28,7 +34,7 @@ public class FitsMetadataService : IFitsMetadataService
     // --- REGOLE DI DOMINIO ---
 
     public bool IsStructuralKey(string key) => 
-        !string.IsNullOrWhiteSpace(key) && StructuralKeys.Contains(key);
+        !string.IsNullOrWhiteSpace(key) && StructuralKeysSet.Contains(key);
 
     public bool AreGeometricallyCompatible(FitsHeader h1, FitsHeader h2)
     {
@@ -54,14 +60,13 @@ public class FitsMetadataService : IFitsMetadataService
     public string GetStringValue(FitsHeader header, string key)
     {
         if (header == null) return string.Empty;
-        var card = header.Cards.FirstOrDefault(c => c.Key.Equals(key, StringComparison.OrdinalIgnoreCase));
+        var card = header.Cards.FirstOrDefault(c => c.Key != null && c.Key.Equals(key, StringComparison.OrdinalIgnoreCase));
         if (card == null) return string.Empty;
 
         if (AdditiveKeys.Contains(key)) return card.Comment ?? card.Value ?? string.Empty;
         if (string.IsNullOrWhiteSpace(card.Value)) return string.Empty;
 
         string val = card.Value.Trim();
-        // Rimuove gli apici se presenti per restituire il valore pulito
         if (val.StartsWith("'") && val.EndsWith("'"))
         {
             val = val.Substring(1, val.Length - 2).Replace("''", "'");
@@ -174,7 +179,7 @@ public class FitsMetadataService : IFitsMetadataService
     }
     
     // =======================================================================
-    // SCRITTURA / MANIPOLAZIONE (CORRETTA E ROBUSTA)
+    // SCRITTURA / MANIPOLAZIONE
     // =======================================================================
 
     private FitsCard CreateCard(string key, object value, string? comment)
@@ -182,60 +187,47 @@ public class FitsMetadataService : IFitsMetadataService
         string keyUpper = key.ToUpperInvariant();
         string valStr;
 
-        // 1. GESTIONE COMMENTI/HISTORY (Chiavi additive)
-        // Queste chiavi NON devono avere apici né segno uguale nel writer (gestito qui passando stringa raw)
         if (AdditiveKeys.Contains(keyUpper))
         {
             return new FitsCard(keyUpper, value?.ToString() ?? "", null, false);
         }
 
-        // 2. GESTIONE VALORI STANDARD
         valStr = value switch
         {
-            bool b => b ? "T" : "F", // FITS Booleans sono T/F
-            double d => d.ToString("G", CultureInfo.InvariantCulture), // Importante: usare punto, non virgola
+            bool b => b ? "T" : "F",
+            double d => d.ToString("G", CultureInfo.InvariantCulture),
             float f => f.ToString("G", CultureInfo.InvariantCulture),
             int i => i.ToString(),
             long l => l.ToString(),
-            string s => FormatFitsString(s), // Gestione intelligente apici
+            string s => FormatFitsString(s),
             _ => value?.ToString() ?? ""
         };
 
         return new FitsCard(keyUpper, valStr, comment, false);
     }
 
-    /// <summary>
-    /// Formatta una stringa per FITS, evitando il doppio quoting.
-    /// </summary>
     private string FormatFitsString(string s)
     {
         if (s == null) return "''";
-
         string trimmed = s.Trim();
-        // SE LA STRINGA È GIÀ VIRGOLETTATA (es. arriva da un altro header), la ritorniamo così com'è.
-        // Questo previene il problema '''Valore'''
-        if (trimmed.Length >= 2 && trimmed.StartsWith("'") && trimmed.EndsWith("'"))
-        {
-            return s; 
-        }
-
-        // Altrimenti, escape degli apici interni e aggiunta apici esterni
+        if (trimmed.Length >= 2 && trimmed.StartsWith("'") && trimmed.EndsWith("'")) return s; 
         string escaped = s.Replace("'", "''");
         return $"'{escaped}'"; 
     }
 
     private void InsertCardRaw(FitsHeader header, FitsCard card)
     {
-        if (!AdditiveKeys.Contains(card.Key))
+        if (AdditiveKeys.Contains(card.Key))
         {
-            header.RemoveCard(card.Key);
+            header.AddCard(card);
+            return;
         }
-        header.AddCard(card);
+        header.AddOrUpdateCard(card.Key, card.Value, card.Comment);
     }
 
     private void EnforceEndKey(FitsHeader header)
     {
-        while (header.Cards.Any(c => c.Key.Equals("END", StringComparison.OrdinalIgnoreCase)))
+        while (header.Cards.Any(c => c.Key != null && c.Key.Equals("END", StringComparison.OrdinalIgnoreCase)))
         {
             header.RemoveCard("END");
         }
@@ -261,7 +253,7 @@ public class FitsMetadataService : IFitsMetadataService
 
         foreach (var card in source.Cards)
         {
-            if (StructuralKeys.Contains(card.Key)) continue;
+            if (StructuralKeysSet.Contains(card.Key)) continue;
             InsertCardRaw(destination, card);
         }
         EnforceEndKey(destination);
@@ -284,8 +276,58 @@ public class FitsMetadataService : IFitsMetadataService
         SetValue(newHeader, "BZERO", 0.0);
         
         if (template != null) TransferMetadata(template, newHeader);
-        EnforceEndKey(newHeader);
+        
+        // Ordina e aggiunge END
+        EnforceStandardOrder(newHeader);
+        
         return newHeader;
+    }
+
+    /// <summary>
+    /// Riordina le card secondo lo standard FITS, preservando duplicati (commenti).
+    /// CORREZIONE: Assicura che la chiave END sia sempre presente alla fine.
+    /// </summary>
+    public void EnforceStandardOrder(FitsHeader header)
+    {
+        // 1. Snapshot di tutte le card
+        var originalCards = header.Cards.ToList();
+        
+        // 2. Svuotiamo l'header
+        var uniqueKeys = originalCards.Select(c => c.Key).Distinct().ToList();
+        foreach (var key in uniqueKeys)
+        {
+            if (!string.IsNullOrEmpty(key)) header.RemoveCard(key);
+        }
+
+        // 3. Creiamo la lista ordinata
+        var sortedList = new List<FitsCard>();
+
+        // A. Chiavi strutturali in ordine
+        foreach (var key in StandardKeyOrder)
+        {
+            var match = originalCards.FirstOrDefault(c => string.Equals(c.Key, key, StringComparison.OrdinalIgnoreCase));
+            if (match != null)
+            {
+                sortedList.Add(match);
+                originalCards.Remove(match);
+            }
+        }
+
+        // B. Altre chiavi (saltando END che gestiamo dopo)
+        foreach (var card in originalCards)
+        {
+            if (string.Equals(card.Key, "END", StringComparison.OrdinalIgnoreCase)) continue; 
+            sortedList.Add(card);
+        }
+
+        // 4. Reinseriamo tutto
+        foreach (var card in sortedList)
+        {
+            header.AddCard(card);
+        }
+
+        // 5. [FIX] Reinseriamo END alla fine
+        header.AddCard(new FitsCard("END", string.Empty, string.Empty, false));
     }
 
     // --- UTILS ---
@@ -320,7 +362,7 @@ public class FitsMetadataService : IFitsMetadataService
 
     private void RemoveEndKey(FitsHeader header)
     {
-        while (header.Cards.Any(c => c.Key.Equals("END", StringComparison.OrdinalIgnoreCase)))
+        while (header.Cards.Any(c => c.Key != null && c.Key.Equals("END", StringComparison.OrdinalIgnoreCase)))
         {
             header.RemoveCard("END");
         }
