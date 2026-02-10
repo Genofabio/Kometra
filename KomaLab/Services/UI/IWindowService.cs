@@ -28,6 +28,7 @@ public interface IWindowService
     Task ShowPlateSolvingWindowAsync(ImageNodeViewModel node);
     Task<List<string>?> ShowStarMaskingWindowAsync(List<FitsFileReference> sourceFiles);
     Task<List<string>?> ShowPosterizationWindowAsync(List<FitsFileReference> sourceFiles, VisualizationMode initialMode);
+    Task<List<string>?> ShowCropToolWindowAsync(List<FitsFileReference> sourceFiles, VisualizationMode initialMode);
     
     // Enhancement
     Task<(List<string> Paths, ImageEnhancementMode Mode)?> ShowRadialEnhancementWindowAsync(List<FitsFileReference> sourceFiles, VisualizationMode initialMode);

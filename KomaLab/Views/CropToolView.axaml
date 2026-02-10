@@ -1,0 +1,259 @@
+﻿<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:avalonia="clr-namespace:Material.Icons.Avalonia;assembly=Material.Icons.Avalonia"
+        xmlns:imageProcessing="clr-namespace:KomaLab.ViewModels.ImageProcessing"
+        xmlns:converters="clr-namespace:KomaLab.Converters"
+        xmlns:coordinators="clr-namespace:KomaLab.Services.Processing.Coordinators"
+        mc:Ignorable="d" d:DesignWidth="1000" d:DesignHeight="700"
+        x:Class="KomaLab.Views.CropToolView"
+        x:DataType="imageProcessing:CropToolViewModel"
+        Title="Ritaglio e Centratura"
+        Width="1000" Height="700"
+        MinHeight="550" MinWidth="850"
+        WindowStartupLocation="CenterScreen"
+        Background="{DynamicResource ToolWindowBackgroundBrush}"
+        Focusable="True">
+
+    <Window.Resources>
+        <converters:EnumToBoolConverter x:Key="EnumToBool"/>
+    </Window.Resources>
+
+    <Window.Styles>
+        <Style Selector="TextBlock.description">
+            <Setter Property="FontSize" Value="11"/>
+            <Setter Property="Opacity" Value="0.6"/>
+            <Setter Property="FontStyle" Value="Italic"/>
+            <Setter Property="TextWrapping" Value="Wrap"/>
+            <Setter Property="Margin" Value="0,0,0,4"/>
+        </Style>
+
+        <Style Selector="TextBlock.sectionTitle">
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Margin" Value="0,0,0,2"/>
+        </Style>
+
+        <Style Selector="TextBox.valueInput">
+            <Setter Property="Height" Value="28"/>
+            <Setter Property="MinHeight" Value="28"/>
+            <Setter Property="VerticalContentAlignment" Value="Center"/>
+            <Setter Property="HorizontalContentAlignment" Value="Center"/>
+            <Setter Property="Padding" Value="5,0"/>
+            <Setter Property="FontSize" Value="12"/>
+        </Style>
+
+        <Style Selector="RadioButton.segmented">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="Foreground" Value="{DynamicResource Text.MediumGreyBrush}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource Border.WhiteDimBrush}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="HorizontalContentAlignment" Value="Center"/>
+            <Setter Property="VerticalContentAlignment" Value="Center"/>
+            <Setter Property="Padding" Value="10,8"/> 
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="HorizontalAlignment" Value="Stretch"/> 
+            <Setter Property="Template">
+                <ControlTemplate>
+                    <Border Background="{TemplateBinding Background}" 
+                            BorderBrush="{TemplateBinding BorderBrush}" 
+                            BorderThickness="{TemplateBinding BorderThickness}"
+                            CornerRadius="{TemplateBinding CornerRadius}">
+                        <ContentPresenter Content="{TemplateBinding Content}" 
+                                          Margin="{TemplateBinding Padding}"
+                                          HorizontalAlignment="Center"/>
+                    </Border>
+                </ControlTemplate>
+            </Setter>
+        </Style>
+        <Style Selector="RadioButton.segmented:checked">
+            <Setter Property="Background" Value="{DynamicResource ActionPrimaryBackgroundBrush}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource ActionPrimaryBackgroundBrush}"/>
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+        </Style>
+    </Window.Styles>
+
+    <Grid ColumnDefinitions="320, *">
+
+        <Border Grid.Column="0" Background="{DynamicResource ToolPanelBackgroundBrush}" Padding="15">
+            <Grid RowDefinitions="Auto, *, Auto">
+                
+                <StackPanel Grid.Row="0" Spacing="5" Margin="0,0,0,15">
+                    <TextBlock Text="RITAGLIO IMMAGINI" FontSize="18" FontWeight="Bold" Foreground="White"/>
+                    <Border Height="1" Background="{DynamicResource Border.WhiteDimBrush}" Opacity="0.3" Margin="0,5"/>
+                </StackPanel>
+
+                <ScrollViewer Grid.Row="1" HorizontalScrollBarVisibility="Disabled">
+                    <StackPanel Spacing="20">
+                        
+                        <StackPanel Spacing="8">
+                            <StackPanel Spacing="0">
+                                <TextBlock Classes="sectionTitle" Text="Modalità Ritaglio"/>
+                                <TextBlock Classes="description" Text="Come viene applicato il centro del ritaglio."/>
+                            </StackPanel>
+
+                            <Grid ColumnDefinitions="*,*">
+                                <RadioButton Grid.Column="0" GroupName="Mode" Content="Statica" 
+                                             Classes="segmented" CornerRadius="4,0,0,4" BorderThickness="1,1,0,1"
+                                             IsChecked="{Binding SelectedMode, Converter={StaticResource EnumToBool}, ConverterParameter={x:Static coordinators:CropMode.Static}}"
+                                             ToolTip.Tip="Usa lo stesso centro per tutte le immagini."/>
+                                
+                                <RadioButton Grid.Column="1" GroupName="Mode" Content="Dinamica" 
+                                             Classes="segmented" CornerRadius="0,4,4,0" BorderThickness="1,1,1,1"
+                                             IsChecked="{Binding SelectedMode, Converter={StaticResource EnumToBool}, ConverterParameter={x:Static coordinators:CropMode.Dynamic}}"
+                                             ToolTip.Tip="Definisci un centro diverso per ogni immagine."/>
+                            </Grid>
+                            
+                            <TextBlock Text="{Binding InstructionsText}" 
+                                       FontSize="11" Foreground="{DynamicResource Text.WarningBrush}" 
+                                       TextWrapping="Wrap" Margin="0,2,0,0" FontStyle="Italic"/>
+                        </StackPanel>
+
+                        <Border Height="1" Background="{DynamicResource Border.WhiteDimBrush}" Opacity="0.3" Margin="0,5"/>
+
+                        <StackPanel Spacing="10">
+                            <StackPanel Spacing="0">
+                                <TextBlock Classes="sectionTitle" Text="Dimensioni Ritaglio"/>
+                                <TextBlock Classes="description" Text="Dimensione finale dell'immagine (in pixel)."/>
+                            </StackPanel>
+
+                            <StackPanel Spacing="2">
+                                <TextBlock Text="Larghezza (Width)" FontSize="11" Foreground="{DynamicResource Text.MediumGreyBrush}" FontWeight="SemiBold"/>
+                                <Grid ColumnDefinitions="*, 75"> 
+                                    <Slider Grid.Column="0" Minimum="10" Maximum="{Binding MaxAllowedWidth}" Value="{Binding CropWidth}" 
+                                            IsSnapToTickEnabled="True" TickFrequency="2" VerticalAlignment="Center" Margin="0,0,10,0"/>
+                                    <TextBox Grid.Column="1" Classes="valueInput" Text="{Binding CropWidth}"/>
+                                </Grid>
+                            </StackPanel>
+
+                            <StackPanel Spacing="2">
+                                <TextBlock Text="Altezza (Height)" FontSize="11" Foreground="{DynamicResource Text.MediumGreyBrush}" FontWeight="SemiBold"/>
+                                <Grid ColumnDefinitions="*, 75">
+                                    <Slider Grid.Column="0" Minimum="10" Maximum="{Binding MaxAllowedHeight}" Value="{Binding CropHeight}" 
+                                            IsSnapToTickEnabled="True" TickFrequency="2" VerticalAlignment="Center" Margin="0,0,10,0"/>
+                                    <TextBox Grid.Column="1" Classes="valueInput" Text="{Binding CropHeight}"/>
+                                </Grid>
+                            </StackPanel>
+                            
+                            <TextBlock Text="{Binding MaxAllowedWidth, StringFormat='Max consentito: {0:0}px (dal file più piccolo)'}" 
+                                       FontSize="10" Foreground="Gray" HorizontalAlignment="Right" Margin="0,-5,0,0"/>
+                        </StackPanel>
+
+                    </StackPanel>
+                </ScrollViewer>
+
+                <StackPanel Grid.Row="2" Spacing="10" Margin="0,15,0,0">
+                    <Border Height="1" Background="{DynamicResource Border.WhiteDimBrush}" Opacity="0.3" Margin="0,0,0,5"/>
+
+                    <StackPanel Spacing="5" IsVisible="{Binding IsBusy}">
+                        <TextBlock Text="{Binding StatusText}" HorizontalAlignment="Center" FontSize="12" FontStyle="Italic" Foreground="{DynamicResource Text.MediumGreyBrush}"/>
+                        <ProgressBar IsIndeterminate="True" Height="4" Foreground="{DynamicResource ActionPrimaryBackgroundBrush}"/>
+                    </StackPanel>
+
+                    <Button IsVisible="{Binding !IsBusy}" 
+                            Content="Applica" 
+                            Command="{Binding ApplyCommand}" 
+                            Background="{DynamicResource ActionSuccessBackgroundBrush}" 
+                            Foreground="White"
+                            Height="38"
+                            HorizontalAlignment="Stretch" 
+                            HorizontalContentAlignment="Center" 
+                            VerticalContentAlignment="Center"
+                            FontWeight="Bold" FontSize="14"/>
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <Border Grid.Column="1" Background="{DynamicResource ToolWindowBackgroundBrush}" Padding="10">
+            <Border Name="PreviewBorder" Background="{DynamicResource ToolPreviewBackgroundBrush}" ClipToBounds="True"
+                    PointerPressed="OnPreviewPointerPressed"
+                    PointerReleased="OnPreviewPointerReleased"
+                    PointerMoved="OnPreviewPointerMoved"
+                    PointerWheelChanged="OnPreviewPointerWheelChanged"
+                    SizeChanged="OnPreviewSizeChanged">
+                <Grid>
+                    <Canvas Name="Viewport" RenderTransformOrigin="0,0">
+                        <Canvas.RenderTransform>
+                            <TransformGroup>
+                                <ScaleTransform ScaleX="{Binding Viewport.Scale}" ScaleY="{Binding Viewport.Scale}"/>
+                                <TranslateTransform X="{Binding Viewport.OffsetX}" Y="{Binding Viewport.OffsetY}"/>
+                            </TransformGroup>
+                        </Canvas.RenderTransform>
+
+                        <Image Name="PreviewImage" Source="{Binding ActiveRenderer.Image}" Stretch="None" RenderOptions.BitmapInterpolationMode="None" Canvas.Left="0" Canvas.Top="0"/>
+                    </Canvas>
+
+                    <Canvas IsHitTestVisible="False" IsVisible="{Binding Viewport.IsCropVisible}">
+                        
+                        <Rectangle Canvas.Left="{Binding Viewport.ScreenRectX}"
+                                   Canvas.Top="{Binding Viewport.ScreenRectY}"
+                                   Width="{Binding Viewport.ScreenRectW}"
+                                   Height="{Binding Viewport.ScreenRectH}"
+                                   Stroke="{DynamicResource OverlaySearchBoxBrush}" 
+                                   StrokeThickness="1" 
+                                   Fill="#22FEC530"/> 
+                        
+                        <Line StartPoint="{Binding Viewport.ScreenRectCenterXLess10}" 
+                              EndPoint="{Binding Viewport.ScreenRectCenterXPlus10}" 
+                              Stroke="{DynamicResource OverlaySearchBoxBrush}" 
+                              StrokeThickness="1.5"/>
+
+                        <Line StartPoint="{Binding Viewport.ScreenRectCenterYLess10}" 
+                              EndPoint="{Binding Viewport.ScreenRectCenterYPlus10}" 
+                              Stroke="{DynamicResource OverlaySearchBoxBrush}" 
+                              StrokeThickness="1.5"/>
+                    </Canvas>
+
+                    <Border HorizontalAlignment="Left" VerticalAlignment="Top" Margin="10" Padding="8,4" Background="{DynamicResource OverlayTextBackgroundBrush}" CornerRadius="4" IsHitTestVisible="False">
+                        <TextBlock Text="{Binding Viewport.Scale, StringFormat={}{0:P0}}" Foreground="{DynamicResource OverlayTextForegroundBrush}" FontSize="14"/>
+                    </Border>
+                    
+                    <Border HorizontalAlignment="Right" VerticalAlignment="Top" Margin="10" Padding="8,4" 
+                            Background="{DynamicResource OverlayTextBackgroundBrush}" CornerRadius="4" IsHitTestVisible="False"
+                            IsVisible="{Binding !Viewport.IsCropVisible}">
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <avalonia:MaterialIcon Kind="CursorDefaultClick" Foreground="{DynamicResource OverlayTextForegroundBrush}" Width="16" Height="16"/>
+                            <TextBlock Text="Clicca sull'immagine per definire il centro" 
+                                       Foreground="{DynamicResource OverlayTextForegroundBrush}" FontSize="14" VerticalAlignment="Center"/>
+                        </StackPanel>
+                    </Border>
+
+                    <StackPanel Orientation="Horizontal" Spacing="4" Margin="10" HorizontalAlignment="Right" VerticalAlignment="Bottom" ZIndex="1" Background="Transparent" PointerPressed="OnControlsPointerPressed"> 
+                        <Button Name="ZoomOutButton" ToolTip.Tip="Zoom Out" Background="Transparent" BorderThickness="0"><avalonia:MaterialIcon Kind="Minus" Width="16" Height="16" Foreground="White"/></Button>
+                        <Button Name="ZoomInButton" ToolTip.Tip="Zoom In" Background="Transparent" BorderThickness="0"><avalonia:MaterialIcon Kind="Plus" Width="16" Height="16" Foreground="White"/></Button>
+                        <Button Name="ResetViewButton" Margin="8,0,0,0" ToolTip.Tip="Reset Vista" Background="Transparent" BorderThickness="0"><avalonia:MaterialIcon Kind="FitToScreen" Width="16" Height="16" Foreground="White"/></Button>
+                        <Path Data="M0,0 V18" Stroke="#666666" StrokeThickness="1" Margin="8,4,8,4" VerticalAlignment="Center" />
+                        <Button Name="ResetThresholdsButton" ToolTip.Tip="Reset Stretch" Background="Transparent" BorderThickness="0"><avalonia:MaterialIcon Kind="Contrast" Width="16" Height="16" Foreground="White"/></Button>
+                    </StackPanel>
+
+                    <StackPanel Orientation="Horizontal" Spacing="4" Margin="10" 
+                                HorizontalAlignment="Left" VerticalAlignment="Bottom" 
+                                ZIndex="1" Background="Transparent" 
+                                PointerPressed="OnControlsPointerPressed">
+    
+                        <Button Name="GoToFirstImageButton" Command="{Binding Navigator.MoveToFirstCommand}" ToolTip.Tip="Prima Immagine" Background="Transparent" BorderThickness="0">
+                            <avalonia:MaterialIcon Kind="ChevronDoubleLeft" Width="16" Height="16" Foreground="White"/>
+                        </Button>
+
+                        <Button Name="PreviousImageButton" Command="{Binding Navigator.PreviousCommand}" ToolTip.Tip="Precedente" Background="Transparent" BorderThickness="0">
+                            <avalonia:MaterialIcon Kind="ChevronLeft" Width="16" Height="16" Foreground="White"/>
+                        </Button>
+    
+                        <TextBlock Text="{Binding CurrentImageText}" VerticalAlignment="Center" Margin="8,0" Foreground="White" FontWeight="Bold"/>
+    
+                        <Button Name="NextImageButton" Command="{Binding Navigator.NextCommand}" ToolTip.Tip="Successiva" Background="Transparent" BorderThickness="0">
+                            <avalonia:MaterialIcon Kind="ChevronRight" Width="16" Height="16" Foreground="White"/>
+                        </Button>
+
+                        <Button Name="GoToLastImageButton" Command="{Binding Navigator.MoveToLastCommand}" ToolTip.Tip="Ultima Immagine" Background="Transparent" BorderThickness="0">
+                            <avalonia:MaterialIcon Kind="ChevronDoubleRight" Width="16" Height="16" Foreground="White"/>
+                        </Button>
+                    </StackPanel>
+
+                </Grid>
+            </Border>
+        </Border>
+    </Grid>
+</Window>

@@ -244,6 +244,41 @@ public class WindowService : IWindowService
 
         await ShowDialogAsync(view, viewModel);
     }
+    
+    // =======================================================================
+    // 12. CROP TOOL (RITAGLIO)
+    // =======================================================================
+    public async Task<List<string>?> ShowCropToolWindowAsync(List<FitsFileReference> sourceFiles, VisualizationMode initialMode)
+    {
+        // 1. Controllo finestra principale
+        if (_mainWindow == null) 
+            throw new InvalidOperationException("Finestra principale non registrata nel WindowService.");
+
+        // 2. Risoluzione dipendenze (Assicurati di aver registrato ICropCoordinator in App.cs!)
+        var coordinator = _serviceProvider.GetRequiredService<ICropCoordinator>();
+        var dataManager = _serviceProvider.GetRequiredService<IFitsDataManager>();
+        var rendererFactory = _serviceProvider.GetRequiredService<IFitsRendererFactory>();
+
+        // 3. Creazione ViewModel
+        using var viewModel = new CropToolViewModel(sourceFiles, coordinator, dataManager, rendererFactory);
+    
+        // IMPORTANTE: Passiamo la modalità di visualizzazione (Logaritmica, ecc.)
+        viewModel.VisualizationMode = initialMode;
+
+        // 4. Creazione View e assegnazione DataContext
+        var view = new CropToolView 
+        { 
+            DataContext = viewModel 
+        };
+
+        // 5. Apertura Finestra Modale
+        await view.ShowDialog(_mainWindow);
+
+        // 6. RECUPERO DEL RISULTATO
+        // Questo è il punto critico: quando ShowDialog ritorna (finestra chiusa),
+        // dobbiamo leggere cosa ha prodotto il ViewModel.
+        return viewModel.ResultPaths;
+    }
 
     // =======================================================================
     // HELPERS PER APERTURA DIALOGHI

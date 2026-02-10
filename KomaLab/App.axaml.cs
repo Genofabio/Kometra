@@ -114,6 +114,7 @@ public class App : Application
         services.AddSingleton<IHeaderEditorCoordinator, HeaderEditorCoordinator>(); 
         services.AddSingleton<IPosterizationCoordinator, PosterizationCoordinator>();
         services.AddSingleton<IAlignmentCoordinator, AlignmentCoordinator>(); 
+        services.AddSingleton<ICropCoordinator, CropCoordinator>();
         services.AddSingleton<IStackingCoordinator, StackingCoordinator>();
         services.AddSingleton<ICalibrationCoordinator, CalibrationCoordinator>();
         services.AddSingleton<IImageEnhancementCoordinator, ImageEnhancementCoordinator>();

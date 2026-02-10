@@ -21,4 +21,6 @@ public interface IGeometricEngine
     /// applicando normalizzazione per analisi o pattern matching.
     /// </summary>
     Mat ExtractRegion(Mat source, Point2D center, int radius);
+
+    Mat CropCentered(Mat source, Point2D center, Size2D targetSize);
 }

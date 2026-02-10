@@ -98,4 +98,61 @@ public class GeometricEngine : IGeometricEngine
         
         return result;
     }
+    
+    // =======================================================================
+    // 3. RITAGLIO E RIDIMENSIONAMENTO (CROP)
+    // =======================================================================
+
+    /// <summary>
+    /// Ritaglia una porzione dell'immagine centrata su un punto specifico.
+    /// Se l'area di ritaglio esce dai bordi dell'immagine originale, 
+    /// lo spazio vuoto viene riempito con il valore di default (0 o NaN).
+    /// </summary>
+    public Mat CropCentered(Mat source, Point2D center, Size2D targetSize)
+    {
+        if (source == null || source.Empty()) return new Mat();
+
+        int cw = (int)targetSize.Width;
+        int ch = (int)targetSize.Height;
+        
+        // Calcolo dell'angolo in alto a sinistra del ritaglio (coordinate immagine sorgente)
+        // Usiamo Math.Floor per gestire correttamente i centri sub-pixel se necessario
+        int x = (int)Math.Floor(center.X - (cw / 2.0));
+        int y = (int)Math.Floor(center.Y - (ch / 2.0));
+
+        // 1. Creiamo il canvas di destinazione vuoto (nero/NaN)
+        // Mantiene lo stesso tipo (es. CV_64FC1) della sorgente
+        Mat result = new Mat(new Size(cw, ch), source.Type(), new Scalar(0));
+        
+        // Se l'immagine è float/double, inizializziamo a NaN per correttezza scientifica
+        if (source.Depth() == MatType.CV_32F || source.Depth() == MatType.CV_64F)
+        {
+            result.SetTo(new Scalar(double.NaN));
+        }
+
+        // 2. Calcolo dell'intersezione (Safe Region of Interest)
+        // Dobbiamo capire quale parte rettangolare della sorgente cade dentro il nostro crop
+        int srcX = Math.Max(0, x);
+        int srcY = Math.Max(0, y);
+        int srcW = Math.Min(source.Width, x + cw) - srcX;
+        int srcH = Math.Min(source.Height, y + ch) - srcY;
+
+        // Coordinate relative nel canvas di destinazione
+        int dstX = srcX - x;
+        int dstY = srcY - y;
+
+        // 3. Copia dei dati se c'è intersezione
+        if (srcW > 0 && srcH > 0)
+        {
+            Rect srcRect = new Rect(srcX, srcY, srcW, srcH);
+            Rect dstRect = new Rect(dstX, dstY, srcW, srcH);
+
+            using var sourceRoi = new Mat(source, srcRect);
+            using var destRoi = new Mat(result, dstRect);
+            
+            sourceRoi.CopyTo(destRoi);
+        }
+
+        return result;
+    }
 }

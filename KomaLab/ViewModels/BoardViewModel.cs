@@ -29,7 +29,6 @@ public partial class BoardViewModel : ObservableObject
 {
     // --- Dipendenze ---
     private readonly INodeViewModelFactory _nodeFactory;
-    private readonly IDialogService _dialogService;
     private readonly IWindowService _windowService;
     private readonly IFitsMetadataService _metadataService;
     private readonly IUndoService _undoService;
@@ -65,6 +64,7 @@ public partial class BoardViewModel : ObservableObject
         ShowStructureExtractionWindowCommand.NotifyCanExecuteChanged();
         ShowLocalContrastWindowCommand.NotifyCanExecuteChanged();
         ShowStarMaskingWindowCommand.NotifyCanExecuteChanged();
+        ShowCropWindowCommand.NotifyCanExecuteChanged(); // <--- AGGIUNTO
     }
     
     public bool IsGlobalAnimationRunning => 
@@ -87,7 +87,6 @@ public partial class BoardViewModel : ObservableObject
         IVideoExportCoordinator videoCoordinator)
     {
         _nodeFactory = nodeFactory ?? throw new ArgumentNullException(nameof(nodeFactory));
-        _dialogService = dialogService ?? throw new ArgumentNullException(nameof(dialogService));
         _windowService = windowService ?? throw new ArgumentNullException(nameof(windowService));
         _metadataService = metadataService ?? throw new ArgumentNullException(nameof(metadataService));
         _undoService = undoService ?? throw new ArgumentNullException(nameof(undoService));
@@ -160,7 +159,16 @@ public partial class BoardViewModel : ObservableObject
     // TOOL DI ELABORAZIONE
     // ---------------------------------------------------------------------------
 
-    // [Metodi Radial/Structure/LocalContrast/Posterization/Alignment/StarMasking invariati...]
+    [RelayCommand(CanExecute = nameof(CanExecuteOnImageNode))]
+    private async Task ShowCropWindow()
+    {
+        await RunGenericProcessing(async (files, mode) => 
+        {
+            var paths = await _windowService.ShowCropToolWindowAsync(files, mode);
+            return paths != null ? (paths, "(Cropped)") : null;
+        }, "Ritaglio Immagine");
+    }
+
     [RelayCommand(CanExecute = nameof(CanExecuteOnImageNode))]
     private async Task ShowRadialEnhancementWindow()
     {
