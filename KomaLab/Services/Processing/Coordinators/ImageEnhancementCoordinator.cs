@@ -92,7 +92,6 @@ public class ImageEnhancementCoordinator : IImageEnhancementCoordinator
             // Gestione del cambio dimensioni (es. mosaici o crop)
             if (processingResult.Size() != src.Size())
             {
-                dst.Create(processingResult.Size(), src.Type());
                 _metadataService.AddValue(header, "NAXIS1", processingResult.Cols, "New Width");
                 _metadataService.AddValue(header, "NAXIS2", processingResult.Rows, "New Height");
                 
@@ -103,7 +102,7 @@ public class ImageEnhancementCoordinator : IImageEnhancementCoordinator
             // --- GESTIONE TIPI DI DATO (Float/Double vs Interi) ---
             if (processingResult.Depth() == MatType.CV_32F || processingResult.Depth() == MatType.CV_64F)
             {
-                // Copia diretta per preservare valori negativi e precisione decimale (fondamentale per MCM/RWM)
+                // Copia diretta per preservare valori negativi e precisione decimale (fondamentale per MCM/RWM/Laplace)
                 processingResult.CopyTo(dst);
                 
                 // Aggiorniamo il BITPIX per riflettere il dato Float
@@ -154,20 +153,15 @@ public class ImageEnhancementCoordinator : IImageEnhancementCoordinator
                 await _radialEngine.ApplyRVSFMosaicAsync(src, dst, (p.ParamA_1, p.ParamA_2), (p.ParamB_1, p.ParamB_2), (p.ParamN_1, p.ParamN_2), p.UseLog); break;
             
             case ImageEnhancementMode.InverseRho:
-                // FIX: Rimosso parametro subsampling (l'engine usa griglia 5x5 fissa interna)
                 await Task.Run(() => _radialEngine.ApplyInverseRho(src, dst), token); break;
 
             case ImageEnhancementMode.RadialWeightedModel:
-                // FIX: Rimosso BackgroundValue (calcolato internamente). Passato solo RadialMaxRadius (double).
                 await Task.Run(() => _radialEngine.ApplyRadialWeightedModel(src, dst, p.RadialMaxRadius), token); 
                 break;
 
             case ImageEnhancementMode.MedianComaModel:
-                // FIX: RadialSubsampling passato come angularQuality (risoluzione spicchi)
-                // RadialMaxRadius passato come double
                 await Task.Run(() => _radialEngine.ApplyMedianComaModel(src, dst, p.RadialMaxRadius, angularQuality: p.RadialSubsampling), token); break;
 
-            // FIX: Rimossi parametri subsampling dai metodi polari (usano Lanczos4)
             case ImageEnhancementMode.AzimuthalAverage:
                 await RunPolarFilterAsync(src, dst, polar => _radialEngine.ApplyAzimuthalAverage(polar, p.AzimuthalRejSigma), token); break;
             case ImageEnhancementMode.AzimuthalMedian:
@@ -181,6 +175,10 @@ public class ImageEnhancementCoordinator : IImageEnhancementCoordinator
                 await _shapeEngine.ApplyStructureTensorEnhancementAsync(src, dst, p.TensorSigma, p.TensorRho, progress); break;
             case ImageEnhancementMode.WhiteTopHatExtraction:
                 await _shapeEngine.ApplyWhiteTopHatAsync(src, dst, p.TopHatKernelSize); break;
+                
+            // === NUOVO CASE ===
+            case ImageEnhancementMode.AdaptiveLaplaceFilter:
+                await _shapeEngine.ApplyAdaptiveLaplaceAsync(src, dst, progress); break;
 
             case ImageEnhancementMode.UnsharpMaskingMedian:
                 await _contrastEngine.ApplyUnsharpMaskingMedianAsync(src, dst, p.KernelSize, progress); break;
@@ -203,7 +201,6 @@ public class ImageEnhancementCoordinator : IImageEnhancementCoordinator
             int nRad = Math.Min(src.Cols, src.Rows) / 2;
             int nTheta = nRad * 3;
 
-            // FIX: Rimosso parametro subsampling (Usa Lanczos4)
             using Mat polar = _radialEngine.ToPolar(src, nRad, nTheta);
             
             if (token.IsCancellationRequested) return;
@@ -212,7 +209,6 @@ public class ImageEnhancementCoordinator : IImageEnhancementCoordinator
 
             if (token.IsCancellationRequested) return;
 
-            // FIX: Rimosso parametro subsampling
             _radialEngine.FromPolar(polar, dst, src.Cols, src.Rows);
         }, token);
     }
@@ -230,10 +226,10 @@ public class ImageEnhancementCoordinator : IImageEnhancementCoordinator
                 $"RVSF A={p.ParamA_1}, B={p.ParamB_1}, N={p.ParamN_1}",
 
             ImageEnhancementMode.AzimuthalAverage or ImageEnhancementMode.AzimuthalMedian or ImageEnhancementMode.AzimuthalRenormalization => 
-                $"RejSig={p.AzimuthalRejSigma}, NormSig={p.AzimuthalNormSigma}", // Rimosso Subsampling log
+                $"RejSig={p.AzimuthalRejSigma}, NormSig={p.AzimuthalNormSigma}", 
 
             ImageEnhancementMode.InverseRho => 
-                $"Method=Integration5x5", // Aggiornato log
+                $"Method=Integration5x5",
             
             ImageEnhancementMode.RadialWeightedModel =>
                 $"MaxRadius={(p.RadialMaxRadius > 0 ? p.RadialMaxRadius.ToString("F1") : "Full")}, Background=Auto",
@@ -249,6 +245,9 @@ public class ImageEnhancementCoordinator : IImageEnhancementCoordinator
 
             ImageEnhancementMode.WhiteTopHatExtraction => 
                 $"KernelSize={p.TopHatKernelSize}",
+
+            ImageEnhancementMode.AdaptiveLaplaceFilter =>
+                "Method=SNN_Smoothing + Laplace3x3",
 
             ImageEnhancementMode.UnsharpMaskingMedian => 
                 $"Kernel={p.KernelSize}",

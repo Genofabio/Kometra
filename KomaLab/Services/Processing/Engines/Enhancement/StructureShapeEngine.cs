@@ -96,6 +96,170 @@ public class StructureShapeEngine : IStructureShapeEngine
             Cv2.Max(dst, Scalar.All(0), dst);
         });
     }
+    
+    // =========================================================
+    // 4. ADAPTIVE LAPLACE FILTER (Symmetric Nearest Neighbours)
+    // =========================================================
+
+    public async Task ApplyAdaptiveLaplaceAsync(Mat src, Mat dst, IProgress<double> progress = null)
+    {
+        await _memSemaphore.WaitAsync();
+        try
+        {
+            await Task.Run(() =>
+            {
+                // 1. GESTIONE TIPI E CONVERSIONE
+                // Il filtro di Laplace produce numeri negativi e decimali. 
+                // Se l'input è intero (es. 8UC1), dobbiamo lavorare in Float/Double.
+                bool isDouble = src.Depth() == MatType.CV_64F;
+                bool isFloat = src.Depth() == MatType.CV_32F;
+                
+                // Determina il tipo di lavoro. Se non è float/double, promuoviamo a Float.
+                MatType workType = isDouble ? MatType.CV_64F : MatType.CV_32F;
+                
+                // Creiamo una matrice di lavoro convertita (se necessario)
+                using Mat workSrc = new Mat();
+                if (!isDouble && !isFloat)
+                    src.ConvertTo(workSrc, workType);
+                else
+                    src.CopyTo(workSrc);
+
+                dst.Create(src.Size(), workType);
+
+                // Matrice temporanea per il risultato dello smoothing SNN
+                using Mat smoothed = new Mat(src.Size(), workType);
+
+                // 2. FASE 1: SNN SMOOTHING (NaN Safe)
+                if (workType == MatType.CV_64F)
+                    RunSnnSmoothingSafe<double>(workSrc, smoothed, progress);
+                else
+                    RunSnnSmoothingSafe<float>(workSrc, smoothed, progress);
+
+                // 3. FASE 2: LAPLACE KERNEL
+                // Maschera normalizzata 1/8:
+                // [ 1  1  1 ]
+                // [ 1 -8  1 ]
+                // [ 1  1  1 ]
+                double[] kernelData = {
+                     0.125,  0.125,  0.125,
+                     0.125, -1.0,    0.125,
+                     0.125,  0.125,  0.125
+                };
+
+                using Mat kernel = Mat.FromPixelData(3, 3, MatType.CV_64F, kernelData);
+                
+                // Usiamo Filter2D. Nota: Filter2D propaga i NaN.
+                // Poiché abbiamo già gestito i NaN in fase SNN (o li abbiamo lasciati dove devono stare),
+                // il comportamento qui è corretto.
+                Cv2.Filter2D(smoothed, dst, workType.Depth, kernel, new Point(-1, -1), 0, BorderTypes.Reflect101);
+            });
+        }
+        finally
+        {
+            _memSemaphore.Release();
+        }
+    }
+
+    // =========================================================
+    // PRIVATE HELPERS FOR ADAPTIVE LAPLACE
+    // =========================================================
+
+    private void RunSnnSmoothingSafe<T>(Mat src, Mat dst, IProgress<double> progress) where T : struct, IEquatable<T>
+    {
+        var sIdx = src.GetGenericIndexer<T>();
+        var dIdx = dst.GetGenericIndexer<T>();
+
+        int rows = src.Rows;
+        int cols = src.Cols;
+        int completed = 0;
+
+        // I bordi vengono copiati "as-is" o messi a NaN/0. 
+        // Copiare l'originale è la strategia più sicura per evitare artefatti neri.
+        src.CopyTo(dst);
+
+        Parallel.For(1, rows - 1, y =>
+        {
+            for (int x = 1; x < cols - 1; x++)
+            {
+                T centerRaw = sIdx[y, x];
+                double centerVal = Convert.ToDouble(centerRaw);
+
+                // CHECK NaN: Se il pixel centrale è guasto, resta guasto.
+                if (double.IsNaN(centerVal) || double.IsInfinity(centerVal))
+                {
+                    dIdx[y, x] = centerRaw;
+                    continue;
+                }
+
+                double sum = 0;
+                int count = 0;
+
+                // 4 Coppie di vicini simmetrici
+                // N-S, W-E, NW-SE, NE-SW
+                int[] offY = { -1, 0, -1, -1 };
+                int[] offX = { 0, -1, -1, 1 };
+
+                for (int k = 0; k < 4; k++)
+                {
+                    // Coordinate
+                    int y1 = y + offY[k]; int x1 = x + offX[k];
+                    int y2 = y - offY[k]; int x2 = x - offX[k];
+
+                    double v1 = Convert.ToDouble(sIdx[y1, x1]);
+                    double v2 = Convert.ToDouble(sIdx[y2, x2]);
+
+                    bool v1Bad = double.IsNaN(v1) || double.IsInfinity(v1);
+                    bool v2Bad = double.IsNaN(v2) || double.IsInfinity(v2);
+
+                    // LOGICA NaN ROBUSTA PER SNN:
+                    if (v1Bad && v2Bad)
+                    {
+                        // Entrambi i vicini sono NaN: questa direzione non contribuisce
+                        continue; 
+                    }
+                    else if (v1Bad)
+                    {
+                        // v1 è rotto, usiamo v2 forzatamente
+                        sum += v2;
+                        count++;
+                    }
+                    else if (v2Bad)
+                    {
+                        // v2 è rotto, usiamo v1 forzatamente
+                        sum += v1;
+                        count++;
+                    }
+                    else
+                    {
+                        // Entrambi validi: logica standard SNN
+                        // Selezioniamo quello con valore più simile al centro
+                        double diff1 = Math.Abs(v1 - centerVal);
+                        double diff2 = Math.Abs(v2 - centerVal);
+
+                        if (diff1 < diff2) sum += v1;
+                        else sum += v2;
+                        
+                        count++;
+                    }
+                }
+
+                // Includiamo il pixel centrale nella media per stabilità
+                sum += centerVal;
+                count++;
+
+                // Assegnazione risultato
+                double result = sum / count;
+                dIdx[y, x] = (T)Convert.ChangeType(result, typeof(T));
+            }
+
+            if (progress != null)
+            {
+                var current = Interlocked.Increment(ref completed);
+                // Report meno frequente per performance
+                if (current % 100 == 0) progress.Report((double)current / (rows - 2) * 100);
+            }
+        });
+    }
 
     // =========================================================
     // PRIVATE HELPERS (GENERICS)

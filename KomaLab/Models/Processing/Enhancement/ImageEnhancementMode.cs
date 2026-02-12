@@ -18,6 +18,7 @@ public enum ImageEnhancementMode
     FrangiVesselnessFilter,
     StructureTensorCoherence,
     WhiteTopHatExtraction,
+    AdaptiveLaplaceFilter,
 
     // --- 3. LOCAL CONTRAST ENHANCEMENT (Contrasto Locale) ---
     UnsharpMaskingMedian,

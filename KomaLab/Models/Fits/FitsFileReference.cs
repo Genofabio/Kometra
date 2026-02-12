@@ -18,20 +18,10 @@ public class FitsFileReference
     // Stato Volatile (Mutabile)
     // Se diverso da null, il Renderer deve usare questo invece di quello su disco.
     public FitsHeader? ModifiedHeader { get; set; }
-    
-    public bool HasUnsavedChanges => ModifiedHeader != null;
 
     public FitsFileReference(string path)
     {
         if (string.IsNullOrWhiteSpace(path)) throw new ArgumentNullException(nameof(path));
         FilePath = path;
-    }
-
-    /// <summary>
-    /// Annulla le modifiche in memoria.
-    /// </summary>
-    public void RevertChanges()
-    {
-        ModifiedHeader = null;
     }
 }

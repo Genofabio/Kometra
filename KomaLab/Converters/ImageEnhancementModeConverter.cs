@@ -21,8 +21,8 @@ public class ImageEnhancementModeConverter : IValueConverter
                 
                 // --- Geometric Models (Filtri Fisici) ---
                 ImageEnhancementMode.InverseRho => "Correzione Fisica (1/Rho)",
-                ImageEnhancementMode.RadialWeightedModel => "Radial Weighted Model (R.W.M.)", // AGGIUNTO
-                ImageEnhancementMode.MedianComaModel => "Median Coma Model (M.C.M.)",         // AGGIUNTO
+                ImageEnhancementMode.RadialWeightedModel => "Radial Weighted Model (R.W.M.)",
+                ImageEnhancementMode.MedianComaModel => "Median Coma Model (M.C.M.)",
 
                 // --- Azimuthal ---
                 ImageEnhancementMode.AzimuthalAverage => "Media Azimutale",
@@ -33,6 +33,9 @@ public class ImageEnhancementModeConverter : IValueConverter
                 ImageEnhancementMode.FrangiVesselnessFilter => "Filtro di Frangi (Getti Curvi)",
                 ImageEnhancementMode.StructureTensorCoherence => "Esaltazione Coerenza (Tensore)",
                 ImageEnhancementMode.WhiteTopHatExtraction => "White Top-Hat (Morfologico)",
+                
+                // --- NUOVO: Adaptive Laplace ---
+                ImageEnhancementMode.AdaptiveLaplaceFilter => "Laplace Adattivo (SNN)",
 
                 // --- Local Contrast ---
                 ImageEnhancementMode.UnsharpMaskingMedian => "Unsharp Masking (Mediana)",

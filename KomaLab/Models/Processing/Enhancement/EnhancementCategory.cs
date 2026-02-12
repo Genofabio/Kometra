@@ -28,6 +28,7 @@ public static class ImageEnhancementModeExtensions
             ImageEnhancementMode.FrangiVesselnessFilter => EnhancementCategory.FeatureExtraction,
             ImageEnhancementMode.StructureTensorCoherence => EnhancementCategory.FeatureExtraction,
             ImageEnhancementMode.WhiteTopHatExtraction => EnhancementCategory.FeatureExtraction,
+            ImageEnhancementMode.AdaptiveLaplaceFilter => EnhancementCategory.FeatureExtraction, // <--- AGGIUNTO QUI
 
             ImageEnhancementMode.UnsharpMaskingMedian => EnhancementCategory.LocalContrast,
             ImageEnhancementMode.ClaheLocalContrast => EnhancementCategory.LocalContrast,

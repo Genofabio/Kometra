@@ -56,6 +56,10 @@ public class ImageEnhancementDescriptionConverter : IValueConverter
                 ImageEnhancementMode.WhiteTopHatExtraction =>
                     "Filtro morfologico che estrae dettagli luminosi più piccoli della dimensione del kernel specificato, rimuovendo completamente il gradiente di fondo a bassa frequenza.",
 
+                // --- NUOVO: Adaptive Laplace ---
+                ImageEnhancementMode.AdaptiveLaplaceFilter =>
+                    "Calcola la derivata seconda dell'immagine per isolare le variazioni fini (bordi) rimuovendo i gradienti graduali. Utilizza uno smoothing 'Symmetric Nearest Neighbour' preliminare per ridurre il rumore senza sfocare i bordi delle strutture.",
+
                 // --- Local Contrast ---
                 ImageEnhancementMode.UnsharpMaskingMedian => 
                     "Tecnica di maschera di contrasto che utilizza una mediana per sfocare il fondo. Sottrae le basse frequenze per aumentare drasticamente la nitidezza dei bordi e delle strutture fini.",

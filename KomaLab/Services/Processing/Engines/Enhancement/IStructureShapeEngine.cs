@@ -12,4 +12,10 @@ public interface IStructureShapeEngine
     
     // --- MORFOLOGIA ---
     Task ApplyWhiteTopHatAsync(Mat src, Mat dst, int kernelSize);
+
+    // --- BORDI & DETTAGLI ---
+    /// <summary>
+    /// Applica il filtro di Laplace adattivo (SNN Smoothing + Laplace Kernel) per estrarre strutture fini riducendo il rumore.
+    /// </summary>
+    Task ApplyAdaptiveLaplaceAsync(Mat src, Mat dst, IProgress<double> progress = null);
 }

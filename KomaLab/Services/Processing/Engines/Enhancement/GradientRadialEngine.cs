@@ -368,16 +368,75 @@ public class GradientRadialEngine : IGradientRadialEngine
 
     private double EstimateSkyBackground(Mat src, bool isDouble)
     {
-        int w = src.Cols; int h = src.Rows;
-        int boxW = Math.Max(5, w / 15); int boxH = Math.Max(5, h / 15);
-        Rect[] corners = { new Rect(0,0,boxW,boxH), new Rect(w-boxW,0,boxW,boxH), new Rect(0,h-boxH,boxW,boxH), new Rect(w-boxW,h-boxH,boxW,boxH) };
-        double minMedian = double.MaxValue;
-        foreach(var r in corners) {
-            using Mat roi = src.SubMat(r);
-            double m = GetMedianOfMat(roi, isDouble);
-            if (m < minMedian) minMedian = m;
+        // 1. CAMPIONAMENTO: Invece di 4 angoli, prendiamo una griglia distribuita 
+        // per catturare il fondo anche se un angolo fosse occupato da una stella luminosa.
+        int samplesCount = 10; 
+        int boxW = Math.Max(10, src.Cols / 20);
+        int boxH = Math.Max(10, src.Rows / 20);
+        
+        List<double> pixelPool = new List<double>();
+
+        for (int i = 1; i <= samplesCount; i++)
+        {
+            for (int j = 1; j <= samplesCount; j++)
+            {
+                int x = (src.Cols / (samplesCount + 1)) * i - (boxW / 2);
+                int y = (src.Rows / (samplesCount + 1)) * j - (boxH / 2);
+                
+                using Mat roi = src.SubMat(new Rect(x, y, boxW, boxH));
+                
+                if (isDouble)
+                {
+                    roi.GetArray(out double[] temp);
+                    pixelPool.AddRange(temp);
+                }
+                else
+                {
+                    roi.GetArray(out float[] temp);
+                    foreach (var f in temp) pixelPool.Add(f);
+                }
+            }
         }
-        return minMedian == double.MaxValue ? 0.0 : minMedian;
+
+        // 2. SIGMA-CLIPPING ITERATIVO
+        // Questo processo rimuove sistematicamente stelle e outlier.
+        double[] data = pixelPool.ToArray();
+        double median = 0;
+        double sigma = 0;
+        int iterations = 5;
+
+        for (int iter = 0; iter < iterations; iter++)
+        {
+            if (data.Length < 10) break;
+
+            // Calcolo Mediana e Deviazione Standard
+            Array.Sort(data);
+            median = data[data.Length / 2];
+            
+            // Calcolo della deviazione standard robusta (MAD - Median Absolute Deviation)
+            // o DS standard. Usiamo la DS standard filtrata per semplicità qui:
+            double sumSq = 0;
+            foreach (var v in data) sumSq += Math.Pow(v - median, 2);
+            sigma = Math.Sqrt(sumSq / data.Length);
+
+            if (sigma < 1e-9) break;
+
+            // Filtro: teniamo solo i pixel nel range [mediana - 2sigma, mediana + 2sigma]
+            // Usiamo un fattore 2.0 per essere molto aggressivi contro le ali delle stelle.
+            double low = median - (2.0 * sigma);
+            double high = median + (2.0 * sigma);
+
+            List<double> filtered = new List<double>();
+            foreach (var v in data)
+            {
+                if (v >= low && v <= high) filtered.Add(v);
+            }
+
+            if (filtered.Count == data.Length) break; // Convergenza raggiunta
+            data = filtered.ToArray();
+        }
+
+        return median;
     }
 
     private double GetMedianOfMat(Mat m, bool isDouble) {

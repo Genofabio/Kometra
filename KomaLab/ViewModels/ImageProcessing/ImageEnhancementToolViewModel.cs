@@ -96,6 +96,7 @@ public partial class ImageEnhancementToolViewModel : ObservableObject, IDisposab
     [NotifyPropertyChangedFor(nameof(IsClaheVisible))]
     [NotifyPropertyChangedFor(nameof(IsLocalNormVisible))]
     [NotifyPropertyChangedFor(nameof(IsKernelVisible))]
+    [NotifyPropertyChangedFor(nameof(IsLaplaceVisible))] // <--- AGGIUNTO
     private ImageEnhancementMode _selectedMode;
 
     // --- PARAMETRI SCIENTIFICI ---
@@ -171,6 +172,9 @@ public partial class ImageEnhancementToolViewModel : ObservableObject, IDisposab
     public bool IsKernelVisible => SelectedMode == ImageEnhancementMode.UnsharpMaskingMedian;
     public bool IsClaheVisible => SelectedMode == ImageEnhancementMode.ClaheLocalContrast;
     public bool IsLocalNormVisible => SelectedMode == ImageEnhancementMode.AdaptiveLocalNormalization;
+    
+    // <--- AGGIUNTO
+    public bool IsLaplaceVisible => SelectedMode == ImageEnhancementMode.AdaptiveLaplaceFilter;
 
     public ImageEnhancementToolViewModel(
         EnhancementCategory targetCategory,
