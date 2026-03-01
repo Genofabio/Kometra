@@ -128,6 +128,9 @@ public partial class ExportView : Window
     private void OnPreviewPointerWheelChanged(object? sender, PointerWheelEventArgs e)
     {
         if (_vm?.ActiveRenderer == null) return;
+        
+        var visual = e.Source as Visual;
+        if (visual == null) return;
 
         var modifiers = e.KeyModifiers;
         

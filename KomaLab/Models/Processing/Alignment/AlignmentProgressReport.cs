@@ -9,5 +9,4 @@ public class AlignmentProgressReport
     public string? FileName { get; set; }
     public Point2D? FoundCenter { get; set; }
     public string? Message { get; set; }
-    public bool IsCompleted { get; set; }
 }

@@ -1,7 +1,7 @@
 ﻿using System;
 using System.IO;
 using System.Collections.Generic;
-using System.Collections.Concurrent; // <--- Necessario per il multi-threading
+using System.Collections.Concurrent;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -24,7 +24,7 @@ public class VideoFormatProvider : IVideoFormatProvider
     private bool _isInitialized = false;
     private Dictionary<VideoContainer, List<VideoCodec>> _validatedFormats = new();
     
-    // [OTTIMIZZAZIONE] ConcurrentDictionary per supportare scritture da thread paralleli
+    // Cache thread-safe per le API funzionanti
     private ConcurrentDictionary<(VideoContainer, VideoCodec), VideoCaptureAPIs> _apiCache = new();
 
     public async Task InitializeAsync()
@@ -40,77 +40,72 @@ public class VideoFormatProvider : IVideoFormatProvider
         finally { _semaphore.Release(); }
     }
 
-    // [OTTIMIZZAZIONE] Versione Parallela: 10x più veloce
     private Dictionary<VideoContainer, List<VideoCodec>> ValidateAvailableCodecsParallel()
     {
         var result = new ConcurrentDictionary<VideoContainer, ConcurrentBag<VideoCodec>>();
         string tempDir = Path.GetTempPath();
 
-        // 1. Appiattiamo la lista di tutti i test da fare (Container + Codec)
+        // 1. Lista di tutti i test da fare
         var allTests = _registry.SelectMany(kvp => 
             kvp.Value.Codecs.Select(codec => new { Container = kvp.Key, Codec = codec }))
             .ToList();
 
-        // 2. Definiamo i backend
+        // 2. CORREZIONE: Ordine dei backend.
+        // FFMPEG deve essere il primo perché è il più compatibile (specialmente per MKV).
+        // MSMF spesso fallisce su formati non nativi Windows.
         var backendsToTest = new[] { 
-            VideoCaptureAPIs.MSMF,   
-            VideoCaptureAPIs.FFMPEG, 
-            VideoCaptureAPIs.AVFOUNDATION, 
-            VideoCaptureAPIs.V4L2    
+            VideoCaptureAPIs.FFMPEG,       // <--- PRIORITARIO
+            VideoCaptureAPIs.MSMF,         // Windows Native
+            VideoCaptureAPIs.AVFOUNDATION, // MacOS
+            VideoCaptureAPIs.V4L2          // Linux
         };
 
-        // 3. Eseguiamo i test in PARALLELO
-        // MaxDegreeOfParallelism evita di intasare la CPU, usiamo il numero di core logici.
-        var options = new ParallelOptions { MaxDegreeOfParallelism = Environment.ProcessorCount };
+        // 3. CORREZIONE: Limitazione del parallelismo.
+        // Usare ProcessorCount (es. 12-16 thread) causa race conditions nelle DLL native di OpenCV/FFMPEG.
+        // 4 thread sono il bilanciamento perfetto tra velocità e stabilità.
+        var options = new ParallelOptions { MaxDegreeOfParallelism = 4 };
 
         Parallel.ForEach(allTests, options, testItem => 
         {
-            // Per ogni combinazione, proviamo i backend (sequenzialmente per rispettare la priorità)
             foreach (var api in backendsToTest) 
             {
                 if (TryAndCache(testItem.Container, testItem.Codec, api, tempDir)) 
                 {
-                    // Se funziona, aggiungiamo al risultato thread-safe
                     var list = result.GetOrAdd(testItem.Container, _ => new ConcurrentBag<VideoCodec>());
                     list.Add(testItem.Codec);
-                    
-                    // Break qui ferma solo il ciclo dei backend per QUESTO codec, 
-                    // non ferma gli altri thread paralleli.
-                    break; 
+                    break; // Trovato un backend funzionante per questo codec, passo al prossimo codec
                 }
             }
         });
 
-        // 4. Convertiamo il risultato "grezzo" parallelo in un Dictionary ordinato pulito per la UI
         return result.ToDictionary(
             k => k.Key,
-            v => v.Value.Distinct().OrderBy(c => c).ToList() // Ordiniamo per estetica
+            v => v.Value.Distinct().OrderBy(c => c).ToList()
         );
     }
 
     private bool TryAndCache(VideoContainer cont, VideoCodec cod, VideoCaptureAPIs api, string dir)
     {
-        // Guid univoco essenziale per evitare collisioni su disco durante il parallelismo
         string file = Path.Combine(dir, $"komalab_test_{Guid.NewGuid():N}{GetExtension(cont)}");
         int fourcc = GetFourCC(cod, cont);
         var size = new Size(128, 128);
 
         try {
+            // Nota: Se openCV fallisce l'init, spesso non lancia eccezione ma IsOpened resta false
             using var writer = new VideoWriter(file, api, fourcc, 25, size, true);
             
             if (writer.IsOpened()) 
             {
-                // Test scrittura fisica
                 using var dummyFrame = Mat.Zeros(size, MatType.CV_8UC3);
                 writer.Write(dummyFrame);
-                writer.Release();
+                writer.Release(); // Importante: finalizza il file
 
                 var fileInfo = new FileInfo(file);
-                bool isValid = fileInfo.Exists && fileInfo.Length > 1000;
+                // Controllo robusto: il file deve esistere ed avere contenuto
+                bool isValid = fileInfo.Exists && fileInfo.Length > 500;
 
                 if (isValid)
                 {
-                    // Scrittura thread-safe nella cache
                     _apiCache.TryAdd((cont, cod), api);
                 }
 
@@ -118,7 +113,10 @@ public class VideoFormatProvider : IVideoFormatProvider
                 return isValid;
             }
         } 
-        catch { }
+        catch 
+        {
+            // Ignoriamo errori qui, significa semplicemente che il codec non è supportato
+        }
         
         try { if (File.Exists(file)) File.Delete(file); } catch { }
         return false;
@@ -131,14 +129,22 @@ public class VideoFormatProvider : IVideoFormatProvider
     public IEnumerable<VideoCodec> GetSupportedCodecs(VideoContainer c) => _validatedFormats.GetValueOrDefault(c) ?? new();
     public string GetExtension(VideoContainer c) => _registry[c].Ext;
 
+    // CORREZIONE: FourCC aggiornati per massima compatibilità
     public int GetFourCC(VideoCodec codec, VideoContainer container) => (codec, container) switch
     {
+        // MP4 usa standard Apple/ISO
         (VideoCodec.H264, VideoContainer.MP4) => VideoWriter.FourCC('a', 'v', 'c', '1'),
-        (VideoCodec.H264, VideoContainer.MKV) => VideoWriter.FourCC('H', '2', '6', '4'),
         (VideoCodec.H265, VideoContainer.MP4) => VideoWriter.FourCC('H', 'E', 'V', 'C'),
+        
+        // MKV preferisce codici Open Source (X264 invece di H264 è cruciale per FFMPEG)
+        (VideoCodec.H264, VideoContainer.MKV) => VideoWriter.FourCC('X', '2', '6', '4'),
         (VideoCodec.H265, VideoContainer.MKV) => VideoWriter.FourCC('H', 'E', 'V', 'C'),
+        
+        // Codec legacy
         (VideoCodec.XVID, VideoContainer.AVI) => VideoWriter.FourCC('X', 'V', 'I', 'D'),
         (VideoCodec.XVID, VideoContainer.MKV) => VideoWriter.FourCC('X', 'V', 'I', 'D'),
+        
+        // Fallback MJPG
         (VideoCodec.MJPG, _) => VideoWriter.FourCC('M', 'J', 'P', 'G'),
         _ => VideoWriter.FourCC('M', 'J', 'P', 'G')
     };

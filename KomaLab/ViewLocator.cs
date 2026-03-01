@@ -12,15 +12,13 @@ public class ViewLocator : IDataTemplate
         if (param is null)
             return null;
 
-        // Logica di sostituzione nome: BoardViewModel -> BoardView
         var name = param.GetType().FullName!.Replace("ViewModel", "View", StringComparison.Ordinal);
-        
-        // (Opzionale) Se le View sono in un namespace diverso (es. .Views), potresti dover aggiustare 'name' qui.
-        // Ma di solito la struttura di default di Avalonia le mette in parallelo o gestisce i namespace in modo semplice.
         
         var type = Type.GetType(name);
 
-        if (type != null)
+        // MODIFICA QUI: Aggiungi il controllo "IsAssignableFrom"
+        // Questo impedisce di istanziare Modelli o oggetti che non sono View.
+        if (type != null && typeof(Control).IsAssignableFrom(type))
         {
             return (Control)Activator.CreateInstance(type)!;
         }

@@ -227,7 +227,7 @@
 
                             <Grid ColumnDefinitions="*,10,*" IsVisible="{Binding IsResultActionsVisible}">
                                 <Button Grid.Column="0" Content="Annulla" Command="{Binding CancelCommand}" Classes="cancel" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"/>
-                                <Button Grid.Column="2" Content="Applica Batch" Command="{Binding ApplyBatchCommand}" Classes="apply" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"/>
+                                <Button Grid.Column="2" Content="Applica" Command="{Binding ApplyBatchCommand}" Classes="apply" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"/>
                             </Grid>
                         </Panel>
                     </Panel>
