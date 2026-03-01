@@ -19,19 +19,16 @@ public class ManualCometAlignmentStrategy : AlignmentStrategyBase
     private readonly IFitsMetadataService _metadataService;
     private readonly IFitsOpenCvConverter _converter;
     private readonly IImageAnalysisEngine _analysis;
-    private readonly CenteringMethod _method;
 
     public ManualCometAlignmentStrategy(
         IFitsDataManager dataManager,
         IFitsMetadataService metadataService,
         IFitsOpenCvConverter converter, 
-        IImageAnalysisEngine analysis,
-        CenteringMethod method) : base(dataManager, analysis)
+        IImageAnalysisEngine analysis) : base(dataManager, analysis)
     {
         _metadataService = metadataService;
         _converter = converter;
         _analysis = analysis;
-        _method = method;
     }
 
     public override async Task<Point2D?[]> CalculateAsync(
@@ -53,7 +50,7 @@ public class ManualCometAlignmentStrategy : AlignmentStrategyBase
         {
             token.ThrowIfCancellationRequested();
             int index = i;
-            var fileRef = fileList[index]; // Prendiamo il Reference completo
+            var fileRef = fileList[index];
             var guess = (index < guessList.Count) ? guessList[index] : null;
 
             if (guess == null) {
@@ -70,7 +67,7 @@ public class ManualCometAlignmentStrategy : AlignmentStrategyBase
                         results[index] = guess;
                     }
                     else {
-                        // Raffinamento sub-pixel: passiamo il fileRef per i metadati di sessione
+                        // Raffinamento sub-pixel con il metodo asimmetrico
                         results[index] = await ExecuteWithRetryAsync(
                             operation: async () => await RefineCenterCoreAsync(fileRef, guess.Value, searchRadius),
                             itemIndex: index
@@ -95,39 +92,25 @@ public class ManualCometAlignmentStrategy : AlignmentStrategyBase
 
     private async Task<Point2D?> RefineCenterCoreAsync(FitsFileReference fileRef, Point2D guess, int radius)
     {
-        // 1. Recupero dati originali dalla cache
         var data = await DataManager.GetDataAsync(fileRef.FilePath);
-        
-        // [MODIFICA MEF] Accesso sicuro all'immagine
         var imageHdu = data.FirstImageHdu ?? data.PrimaryHdu;
-        if (imageHdu == null) return guess; // Impossibile raffinare senza pixel
+        if (imageHdu == null) return guess; 
 
-        // 2. PRIORITÀ HEADER: Rispettiamo BSCALE/BZERO modificati in RAM
         var header = fileRef.ModifiedHeader ?? imageHdu.Header;
         double bScale = _metadataService.GetDoubleValue(header, "BSCALE", 1.0);
         double bZero = _metadataService.GetDoubleValue(header, "BZERO", 0.0);
 
-        // 3. SMART PROMOTION & CONVERSIONE (Uso pixel dell'HDU)
         using var fullMat = _converter.RawToMat(imageHdu.PixelData, bScale, bZero);
-        
-        // ====================================================================
-        // 4. SANITIZZAZIONE E CROP DINAMICO
-        // ====================================================================
         var (workMat, offset) = SanitizeAndCrop(fullMat, guess);
 
         using (workMat)
         {
-            // Adattiamo il guess (Globale) in coordinate locali del crop
             Point2D localGuess = new Point2D(guess.X - offset.X, guess.Y - offset.Y);
 
-            // Controllo limiti
             if (localGuess.X < 0 || localGuess.Y < 0 || 
                 localGuess.X >= workMat.Width || localGuess.Y >= workMat.Height)
                 return guess;
 
-            // ====================================================================
-            // 5. ESECUZIONE ROI (Regione di interesse sui dati puliti)
-            // ====================================================================
             var roi = new Rect(
                 (int)(localGuess.X - radius), 
                 (int)(localGuess.Y - radius), 
@@ -138,21 +121,26 @@ public class ManualCometAlignmentStrategy : AlignmentStrategyBase
 
             using var roiMat = new Mat(workMat, roi);
             
-            // 6. Analisi del centroide con il metodo scelto dall'utente
-            Point2D localCenter = _method switch {
-                CenteringMethod.Centroid => _analysis.FindCentroid(roiMat),
-                CenteringMethod.GaussianFit => _analysis.FindGaussianCenter(roiMat),
-                CenteringMethod.Peak => _analysis.FindPeak(roiMat),
-                _ => _analysis.FindCenterOfLocalRegion(roiMat)
-            };
+            // 6. FORZATURA DEL METODO ASIMMETRICO A QUADRANTI
+            Point2D localCenter = _analysis.FindAsymmetricQuadrantCenter(roiMat);
             
-            // ====================================================================
             // 7. RICONVERSIONE COORDINATE GLOBALI
-            // ====================================================================
-            return new Point2D(
+            Point2D globalCenter = new Point2D(
                 localCenter.X + roi.X + offset.X, 
                 localCenter.Y + roi.Y + offset.Y
             );
+
+            // ====================================================================
+            // LOG DI DEBUG GLOBALE PER TRACCIARE L'INSTABILITÀ
+            // ====================================================================
+            System.Diagnostics.Debug.WriteLine($"\n--- DEBUG ALLINEAMENTO MANUALE ---");
+            System.Diagnostics.Debug.WriteLine($"File: {System.IO.Path.GetFileName(fileRef.FilePath)}");
+            System.Diagnostics.Debug.WriteLine($"Guess Iniziale (Globale): X={guess.X:F2}, Y={guess.Y:F2}");
+            System.Diagnostics.Debug.WriteLine($"Centro Trovato (Globale): X={globalCenter.X:F2}, Y={globalCenter.Y:F2}");
+            System.Diagnostics.Debug.WriteLine($"Spostamento: Delta X={globalCenter.X - guess.X:F2}, Delta Y={globalCenter.Y - guess.Y:F2}");
+            System.Diagnostics.Debug.WriteLine("----------------------------------\n");
+
+            return globalCenter;
         }
     }
 }

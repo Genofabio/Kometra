@@ -243,34 +243,50 @@ public class GuidedCometAlignmentStrategy : AlignmentStrategyBase
         double bScale = _metadataService.GetDoubleValue(header, "BSCALE", 1.0);
         double bZero = _metadataService.GetDoubleValue(header, "BZERO", 0.0);
         
-        using var fullMat = _converter.RawToMat(imageHdu.PixelData, bScale, bZero);
-        
-        // SanitizeAndCrop (ereditato) è safe
-        var (workMat, offset) = SanitizeAndCrop(fullMat, guess);
-
-        using (workMat)
+        // =========================================================================
+        // FIX UI LAG: Esecuzione su ThreadPool per non bloccare la UI
+        // =========================================================================
+        return await Task.Run(() =>
         {
-            Point2D localGuess = new Point2D(guess.X - offset.X, guess.Y - offset.Y);
+            using var fullMat = _converter.RawToMat(imageHdu.PixelData, bScale, bZero);
             
-            if (localGuess.X < 0 || localGuess.Y < 0 || 
-                localGuess.X >= workMat.Width || localGuess.Y >= workMat.Height)
-                return guess;
+            // SanitizeAndCrop (ereditato) è safe
+            var (workMat, offset) = SanitizeAndCrop(fullMat, guess);
 
-            var roiRect = new Rect(
-                (int)(localGuess.X - radius), 
-                (int)(localGuess.Y - radius), 
-                radius * 2, radius * 2
-            ).Intersect(new Rect(0, 0, workMat.Width, workMat.Height));
+            using (workMat)
+            {
+                Point2D localGuess = new Point2D(guess.X - offset.X, guess.Y - offset.Y);
+                
+                if (localGuess.X < 0 || localGuess.Y < 0 || 
+                    localGuess.X >= workMat.Width || localGuess.Y >= workMat.Height)
+                    return guess;
 
-            if (roiRect.Width <= 4 || roiRect.Height <= 4) return guess;
+                var roiRect = new Rect(
+                    (int)(localGuess.X - radius), 
+                    (int)(localGuess.Y - radius), 
+                    radius * 2, radius * 2
+                ).Intersect(new Rect(0, 0, workMat.Width, workMat.Height));
 
-            using var roiMat = new Mat(workMat, roiRect);
-            var localCenter = _analysis.FindCenterOfLocalRegion(roiMat);
-            
-            return new Point2D(
-                localCenter.X + roiRect.X + offset.X, 
-                localCenter.Y + roiRect.Y + offset.Y
-            );
-        }
+                if (roiRect.Width <= 4 || roiRect.Height <= 4) return guess;
+
+                using var roiMat = new Mat(workMat, roiRect);
+                
+                // --- UTILIZZO DEL NUOVO METODO ALGLIB ---
+                var localCenter = _analysis.FindAsymmetricQuadrantCenter(roiMat);
+                
+                // Fallback di sicurezza: se il fit fallisce, ripieghiamo sulla stima calcolata
+                if (double.IsInfinity(localCenter.X) || double.IsInfinity(localCenter.Y) || 
+                    localCenter.X < 0 || localCenter.Y < 0)
+                {
+                    System.Diagnostics.Debug.WriteLine($"[WARNING] Fit asimmetrico fallito su {System.IO.Path.GetFileName(fileRef.FilePath)}. Ripiego sulla stima (guess).");
+                    return guess;
+                }
+                
+                return new Point2D(
+                    localCenter.X + roiRect.X + offset.X, 
+                    localCenter.Y + roiRect.Y + offset.Y
+                );
+            }
+        });
     }
 }

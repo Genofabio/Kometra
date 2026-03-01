@@ -77,6 +77,7 @@ public class AutomaticCometAlignmentStrategy : AlignmentStrategyBase
 
     private async Task<Point2D?> FindObjectCoreAsync(FitsFileReference fileRef, Point2D? guess)
     {
+        // Lettura asincrona da disco (I/O veloce, non blocca la UI)
         var data = await DataManager.GetDataAsync(fileRef.FilePath);
         
         // [MODIFICA MEF] Accesso sicuro all'HDU immagine
@@ -92,57 +93,81 @@ public class AutomaticCometAlignmentStrategy : AlignmentStrategyBase
         double bScale = _metadataService.GetDoubleValue(header, "BSCALE", 1.0);
         double bZero = _metadataService.GetDoubleValue(header, "BZERO", 0.0);
         
-        // Usiamo i PixelData dell'HDU immagine specifica
-        using var rawMat = _converter.RawToMat(imageHdu.PixelData, bScale, bZero);
-
-        // 1. Sanitizzazione e ritaglio automatico sui dati validi (rimuove il padding NaN)
-        var (mat, offset) = SanitizeAndCrop(rawMat, guess);
-
-        try
+        // =========================================================================
+        // FIX UI LAG: Avvolgiamo tutta l'elaborazione CPU-bound in un Task.Run
+        // =========================================================================
+        return await Task.Run(() =>
         {
-            // 2. Pulizia morfologica per isolare la chioma cometaria dalle stelle di fondo
-            _effects.ApplyMorphologicalCleanup(mat, mat, kernelSize: 3);
+            // Usiamo i PixelData dell'HDU immagine specifica
+            using var rawMat = _converter.RawToMat(imageHdu.PixelData, bScale, bZero);
 
-            // 3. Calcolo del centroide locale
-            Point2D localResult;
+            // 1. Sanitizzazione e ritaglio automatico sui dati validi (rimuove il padding NaN)
+            var (mat, offset) = SanitizeAndCrop(rawMat, guess);
 
-            if (guess.HasValue) 
+            try
             {
-                // Raffinamento locale attorno al punto suggerito (NASA/JPL o giro precedente)
-                var localGuess = new Point2D(guess.Value.X - offset.X, guess.Value.Y - offset.Y);
+                // 2. Pulizia morfologica per isolare la chioma cometaria dalle stelle di fondo
+                _effects.ApplyMorphologicalCleanup(mat, mat, kernelSize: 3);
+
+                // 3. Determinazione del punto di partenza (Guess locale o Blind Search)
+                Point2D localInitialPoint;
+
+                if (guess.HasValue) 
+                {
+                    // Abbiamo i dati WCS: convertiamo il punto suggerito in coordinate locali
+                    localInitialPoint = new Point2D(guess.Value.X - offset.X, guess.Value.Y - offset.Y);
+                }
+                else
+                {
+                    // Niente WCS: usiamo il vecchio metodo per trovare approssimativamente l'oggetto nell'immagine intera
+                    localInitialPoint = _analysis.FindCenterOfLocalRegion(mat);
+                }
+
+                // 4. Costruzione della ROI e Raffinamento con il nuovo modello
+                Point2D localResult;
                 int smartRadius = EstimateSmartRadius(mat);
                 
                 var roiRect = new Rect(
-                    (int)(localGuess.X - smartRadius), 
-                    (int)(localGuess.Y - smartRadius), 
+                    (int)(localInitialPoint.X - smartRadius), 
+                    (int)(localInitialPoint.Y - smartRadius), 
                     smartRadius * 2, 
                     smartRadius * 2)
                     .Intersect(new Rect(0, 0, mat.Width, mat.Height));
 
+                // Procediamo al fit solo se la ROI è grande a sufficienza
                 if (roiRect.Width > 4 && roiRect.Height > 4) 
                 {
                     using var crop = new Mat(mat, roiRect);
-                    var localCenter = _analysis.FindCenterOfLocalRegion(crop);
-                    localResult = new Point2D(localCenter.X + roiRect.X, localCenter.Y + roiRect.Y);
+                    
+                    // Utilizziamo il nuovo metodo per trovare il centro asimmetrico
+                    var localRefinedCenter = _analysis.FindAsymmetricQuadrantCenter(crop);
+                    
+                    // Fallback di sicurezza: se il fit fallisce restituiamo il punto di partenza calcolato al punto 3
+                    if (double.IsInfinity(localRefinedCenter.X) || double.IsInfinity(localRefinedCenter.Y) || 
+                        localRefinedCenter.X < 0 || localRefinedCenter.Y < 0)
+                    {
+                        System.Diagnostics.Debug.WriteLine($"[WARNING] Fit asimmetrico fallito su {System.IO.Path.GetFileName(fileRef.FilePath)}. Ripiego sul punto di stima iniziale.");
+                        localResult = localInitialPoint;
+                    }
+                    else
+                    {
+                        // Riconversione delle coordinate del crop in coordinate dell'immagine 'mat'
+                        localResult = new Point2D(localRefinedCenter.X + roiRect.X, localRefinedCenter.Y + roiRect.Y);
+                    }
                 }
                 else
                 {
-                    localResult = localGuess;
+                    localResult = localInitialPoint;
                 }
-            }
-            else
-            {
-                // Ricerca globale sull'intera area valida (Blind Search)
-                localResult = _analysis.FindCenterOfLocalRegion(mat);
-            }
 
-            // 4. Riconversione in coordinate assolute dell'immagine originale
-            return new Point2D(localResult.X + offset.X, localResult.Y + offset.Y);
-        }
-        finally
-        {
-            mat.Dispose();
-        }
+                // 5. Riconversione in coordinate assolute dell'immagine FITS originale
+                return new Point2D(localResult.X + offset.X, localResult.Y + offset.Y);
+            }
+            finally
+            {
+                mat.Dispose();
+            }
+        });
     }
 
     private int EstimateSmartRadius(Mat mat) 

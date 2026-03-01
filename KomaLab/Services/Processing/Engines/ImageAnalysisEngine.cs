@@ -4,6 +4,7 @@ using System.Linq;
 using KomaLab.Models.Primitives;
 using MathNet.Numerics;
 using MathNet.Numerics.LinearAlgebra;
+using MathNet.Numerics.Optimization;
 using OpenCvSharp;
 
 namespace KomaLab.Services.Processing.Engines;
@@ -278,7 +279,102 @@ public class ImageAnalysisEngine : IImageAnalysisEngine
         
         return new Point2D(blurredMat.Width / 2.0, blurredMat.Height / 2.0);
     }
+    
+    // =======================================================================
+    // 2.1 ASYMMETRIC QUADRANT FIT (PORTING DA PYTHON)
+    // =======================================================================
 
+    public Point2D FindAsymmetricQuadrantCenter(Mat region)
+    {
+        if (region == null || region.Empty()) return new Point2D(-1, -1);
+
+        // Utilizziamo un blocco unico per la gestione della memoria e della conversione
+        using Mat workingMat = new Mat();
+        if (region.Type() != MatType.CV_64FC1) region.ConvertTo(workingMat, MatType.CV_64FC1);
+        else region.CopyTo(workingMat);
+
+        // 1. CONVERSIONE SICURA E PULIZIA DATI
+        Cv2.PatchNaNs(workingMat, 0.0);
+        
+        int w = workingMat.Width;
+        int h = workingMat.Height;
+        int totalPixels = w * h;
+
+        try
+        {
+            // 2. ANALISI PRELIMINARE
+            Cv2.MinMaxLoc(workingMat, out double minVal, out double maxVal, out _, out Point maxLoc);
+            
+            // Se l'immagine è piatta (segnale assente), usiamo il centroide come fallback immediato
+            if ((maxVal - minVal) <= 1e-7) 
+                return FindCentroid(workingMat, sigma: 2.0);
+
+            // Estrazione array per ALGLIB
+            double[] zArray = new double[totalPixels];
+            workingMat.GetArray(out zArray);
+
+            double[] sortedZ = (double[])zArray.Clone();
+            Array.Sort(sortedZ);
+            double bg = sortedZ[(int)(totalPixels * 0.05)];
+            double amp = (maxVal - bg) * 1.5;
+
+            // 3. PARAMETRI INIZIALI (Partiamo dal picco reale)
+            double[] p0 = new double[] { maxLoc.X, maxLoc.Y, amp, 1.0, 1.0, 1.0, 1.0, 1.5, bg };
+            double[] bndl = new double[] { 0, 0, 0, 0.1, 0.1, 0.1, 0.1, 0.1, -1e6 };
+            double[] bndu = new double[] { w, h, 1e9, 5.0, 5.0, 5.0, 5.0, 20.0, 1e9 };
+
+            // 4. PREPARAZIONE DATI ALGLIB
+            double[,] xyData = new double[totalPixels, 2];
+            double[] zData = new double[totalPixels];
+            int idx = 0;
+            for (int y = 0; y < h; y++) {
+                for (int x = 0; x < w; x++) {
+                    xyData[idx, 0] = x;
+                    xyData[idx, 1] = y;
+                    zData[idx] = zArray[idx];
+                    idx++;
+                }
+            }
+
+            // 5. ESECUZIONE FIT
+            alglib.lsfitstate state;
+            alglib.lsfitreport rep;
+            int info;
+            double[] finalParams;
+
+            alglib.lsfitcreatef(xyData, zData, p0, 1e-5, out state);
+            alglib.lsfitsetcond(state, 1e-5, 0);
+            alglib.lsfitsetbc(state, bndl, bndu);
+
+            alglib.lsfitfit(state, (double[] p, double[] x, ref double func, object obj) => 
+            {
+                double dx = x[0] - p[0];
+                double dy = x[1] - p[1];
+                double term_x = Math.Pow(Math.Abs(dx), dx >= 0 ? p[3] : p[4]);
+                double term_y = Math.Pow(Math.Abs(dy), dy >= 0 ? p[5] : p[6]);
+                func = (p[2] / (term_x + term_y + p[7])) + p[8];
+            }, null, null);
+
+            alglib.lsfitresults(state, out info, out finalParams, out rep);
+
+            // 6. VERIFICA CONVERGENZA E FALLBACK SU CENTRO DI MASSA
+            if (info > 0 && !double.IsNaN(finalParams[0]) && !double.IsInfinity(finalParams[0]))
+            {
+                return new Point2D(finalParams[0], finalParams[1]);
+            }
+
+            // Fallback 1: Il fit ha fallito o non è confluito -> Centroide
+            return FindCentroid(workingMat, sigma: 2.0);
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"[WARNING] FindAsymmetricQuadrantCenter fallito: {ex.Message}. Uso Centroide.");
+            
+            // Fallback 2: Errore critico nel calcolo -> Centroide (usando il metodo robusto esistente)
+            return FindCentroid(workingMat, sigma: 2.0);
+        }
+    }
+    
     // =======================================================================
     // 3. REGISTRAZIONE & SHIFT (FFT + SOBEL) - LOGICA OLD
     // =======================================================================

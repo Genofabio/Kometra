@@ -28,4 +28,5 @@ public interface IImageAnalysisEngine
     Point2D FindGaussianCenter(Mat image, double sigma = 3.0);
     Point2D FindPeak(Mat image, double sigma = 1.0);
     Point2D FindCentroid(Mat image, double sigma = 5.0);
+    Point2D FindAsymmetricQuadrantCenter(Mat region);
 }

@@ -54,7 +54,7 @@ public class AlignmentService : IAlignmentService
         IProgress<AlignmentProgressReport>? progress = null,
         CancellationToken token = default)
     {
-        IAlignmentStrategy strategy = CreateStrategy(target, mode, method);
+        IAlignmentStrategy strategy = CreateStrategy(target, mode);
         return await strategy.CalculateAsync(files, guesses, searchRadius, progress, token);
     }
 
@@ -333,14 +333,14 @@ public class AlignmentService : IAlignmentService
          return (w, h);
     }
 
-    private IAlignmentStrategy CreateStrategy(AlignmentTarget target, AlignmentMode mode, CenteringMethod method)
+    private IAlignmentStrategy CreateStrategy(AlignmentTarget target, AlignmentMode mode)
     {
         if (target == AlignmentTarget.Stars)
             return new StarAlignmentStrategy(_dataManager, _metadataService, _converter, _analysis);
 
         return mode switch
         {
-            AlignmentMode.Manual => new ManualCometAlignmentStrategy(_dataManager, _metadataService, _converter, _analysis, method),
+            AlignmentMode.Manual => new ManualCometAlignmentStrategy(_dataManager, _metadataService, _converter, _analysis),
             AlignmentMode.Guided => new GuidedCometAlignmentStrategy(_dataManager, _metadataService, _converter, _analysis),
             AlignmentMode.Automatic => new AutomaticCometAlignmentStrategy(_dataManager, _metadataService, _converter, _analysis, _effectsEngine),
             _ => throw new NotSupportedException($"Modalità {mode} non supportata.")
