@@ -21,7 +21,7 @@ public class FitsOpenCvConverter : IFitsOpenCvConverter
         int cols = rawPixels.GetLength(1);
 
         // --- DIAGNOSTICA VELOCE ---
-        Debug.WriteLine($"[FitsConverter] Fast Path: {cols}x{rows}, Type: {rawPixels.GetType().Name}");
+        Debug.WriteLine($"[FitsConverter] Elaborazione: {cols}x{rows}, Type: {rawPixels.GetType().Name}");
 
         if (rows == 0 || cols == 0) return new Mat();
 
@@ -31,21 +31,33 @@ public class FitsOpenCvConverter : IFitsOpenCvConverter
             
         MatType destType = (depthBit == 32) ? MatType.CV_32FC1 : MatType.CV_64FC1;
 
-        // FIX UNIFORMITÀ: Se arriva unsigned nativo, azzeriamo bZero.
+        // Se l'array è ESPLICITAMENTE unsigned nativo C#, evitiamo doppie traslazioni BZERO.
         if (rawPixels is ushort[,] || rawPixels is uint[,]) bZero = 0.0;
 
-        // 1. PINNING: Blocchiamo l'array in memoria (Safe Interop)
+        Type elementType = rawPixels.GetType().GetElementType();
+
+        // =========================================================
+        // FIX PER IL TIPO UINT (Mancanza di CV_32UC1 in OpenCV)
+        // =========================================================
+        if (elementType == typeof(uint))
+        {
+            Debug.WriteLine("[FitsConverter] Applicato Safe-Path per UINT.");
+            return ConvertUIntToMatSafe((uint[,])rawPixels, destType, bScale, bZero);
+        }
+
+        // =========================================================
+        // FAST PATH STANDARD (Zero-Copy) PER TUTTI GLI ALTRI TIPI
+        // =========================================================
         GCHandle handle = GCHandle.Alloc(rawPixels, GCHandleType.Pinned);
 
         try
         {
             IntPtr rawDataPtr = handle.AddrOfPinnedObject();
-            Type type = rawPixels.GetType().GetElementType();
 
-            // 2. WRAPPER: Creiamo una vista OpenCV sui dati C#
-            using Mat rawWrapper = CreateWrapperWithFix(rows, cols, type, rawDataPtr);
+            // Creiamo una vista OpenCV sui dati C#
+            using Mat rawWrapper = CreateWrapper(rows, cols, elementType, rawDataPtr);
 
-            // 3. CONVERSIONE
+            // ConvertTo applica matematicamente bScale e bZero in modo corretto
             Mat result = new Mat(rows, cols, destType);
             rawWrapper.ConvertTo(result, destType, bScale, bZero);
 
@@ -57,20 +69,61 @@ public class FitsOpenCvConverter : IFitsOpenCvConverter
         }
     }
 
-    private Mat CreateWrapperWithFix(int rows, int cols, Type elementType, IntPtr ptr)
+    private Mat CreateWrapper(int rows, int cols, Type elementType, IntPtr ptr)
     {
-        // FIX CRITICO "SOLE NERO": Short -> UShort (CV_16U)
-        if (elementType == typeof(short)) return Mat.FromPixelData(rows, cols, MatType.CV_16UC1, ptr);
-        
+        // Lasciamo che OpenCV legga il tipo esatto.
+        if (elementType == typeof(short)) return Mat.FromPixelData(rows, cols, MatType.CV_16SC1, ptr);
         if (elementType == typeof(ushort)) return Mat.FromPixelData(rows, cols, MatType.CV_16UC1, ptr);
+        
         if (elementType == typeof(byte)) return Mat.FromPixelData(rows, cols, MatType.CV_8UC1, ptr);
         if (elementType == typeof(sbyte)) return Mat.FromPixelData(rows, cols, MatType.CV_8SC1, ptr);
+        
         if (elementType == typeof(int)) return Mat.FromPixelData(rows, cols, MatType.CV_32SC1, ptr);
-        if (elementType == typeof(uint)) return Mat.FromPixelData(rows, cols, MatType.CV_32SC1, ptr); 
+        // typeof(uint) è già intercettato e gestito dal Safe-Path
+        
         if (elementType == typeof(float)) return Mat.FromPixelData(rows, cols, MatType.CV_32FC1, ptr);
         if (elementType == typeof(double)) return Mat.FromPixelData(rows, cols, MatType.CV_64FC1, ptr);
 
-        throw new NotSupportedException($"Tipo {elementType} non supportato per Fast-Path.");
+        throw new NotSupportedException($"Tipo {elementType} non supportato.");
+    }
+
+    /// <summary>
+    /// Metodo sicuro (no unsafe blocks) per convertire uint in float/double senza overflow.
+    /// Usa un buffer di riga e Marshal.Copy per mantenere alte le performance.
+    /// </summary>
+    private Mat ConvertUIntToMatSafe(uint[,] source, MatType destType, double bScale, double bZero)
+    {
+        int rows = source.GetLength(0);
+        int cols = source.GetLength(1);
+        Mat result = new Mat(rows, cols, destType);
+        bool isFloat = destType == MatType.CV_32FC1;
+
+        if (isFloat)
+        {
+            float[] rowBuffer = new float[cols];
+            for (int y = 0; y < rows; y++)
+            {
+                for (int x = 0; x < cols; x++)
+                {
+                    rowBuffer[x] = (float)(source[y, x] * bScale + bZero);
+                }
+                Marshal.Copy(rowBuffer, 0, result.Ptr(y), cols);
+            }
+        }
+        else
+        {
+            double[] rowBuffer = new double[cols];
+            for (int y = 0; y < rows; y++)
+            {
+                for (int x = 0; x < cols; x++)
+                {
+                    rowBuffer[x] = source[y, x] * bScale + bZero;
+                }
+                Marshal.Copy(rowBuffer, 0, result.Ptr(y), cols);
+            }
+        }
+
+        return result;
     }
 
     private int DetermineOptimalDepth(Array rawPixels)
@@ -134,7 +187,7 @@ public class FitsOpenCvConverter : IFitsOpenCvConverter
         }
     }
 
-    // --- Metodi Tipizzati per evitare 'unsafe' ---
+    // --- Metodi Tipizzati per esportazione ---
 
     private byte[,] MatTo2DArrayByte(Mat mat, int rows, int cols)
     {
@@ -143,9 +196,7 @@ public class FitsOpenCvConverter : IFitsOpenCvConverter
         
         for (int y = 0; y < rows; y++)
         {
-            // Copia da IntPtr (OpenCV) a Array Managed Temporaneo
             Marshal.Copy(mat.Ptr(y), rowBuffer, 0, cols);
-            // Copia veloce da Array a Array (Buffer.BlockCopy gestisce anche i 2D)
             Buffer.BlockCopy(rowBuffer, 0, result, y * cols, cols);
         }
         return result;
@@ -155,7 +206,7 @@ public class FitsOpenCvConverter : IFitsOpenCvConverter
     {
         short[,] result = new short[rows, cols];
         short[] rowBuffer = new short[cols];
-        int bytesPerRow = cols * 2; // sizeof(short)
+        int bytesPerRow = cols * 2; 
 
         for (int y = 0; y < rows; y++)
         {
@@ -169,7 +220,7 @@ public class FitsOpenCvConverter : IFitsOpenCvConverter
     {
         int[,] result = new int[rows, cols];
         int[] rowBuffer = new int[cols];
-        int bytesPerRow = cols * 4; // sizeof(int)
+        int bytesPerRow = cols * 4; 
 
         for (int y = 0; y < rows; y++)
         {
@@ -183,7 +234,7 @@ public class FitsOpenCvConverter : IFitsOpenCvConverter
     {
         float[,] result = new float[rows, cols];
         float[] rowBuffer = new float[cols];
-        int bytesPerRow = cols * 4; // sizeof(float)
+        int bytesPerRow = cols * 4; 
 
         for (int y = 0; y < rows; y++)
         {
@@ -197,7 +248,7 @@ public class FitsOpenCvConverter : IFitsOpenCvConverter
     {
         double[,] result = new double[rows, cols];
         double[] rowBuffer = new double[cols];
-        int bytesPerRow = cols * 8; // sizeof(double)
+        int bytesPerRow = cols * 8; 
 
         for (int y = 0; y < rows; y++)
         {
