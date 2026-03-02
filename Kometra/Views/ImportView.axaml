@@ -9,6 +9,7 @@
         mc:Ignorable="d" d:DesignWidth="1100" d:DesignHeight="750"
         x:Class="Kometra.Views.ImportView"
         x:DataType="importExport:ImportViewModel"
+        Icon="/Assets/Icon/icon32.ico"
         Title="Importazione e Calibrazione Scientifica"
         Width="1000" Height="668"
         WindowStartupLocation="CenterOwner"

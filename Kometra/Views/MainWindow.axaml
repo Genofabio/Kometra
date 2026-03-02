@@ -11,7 +11,7 @@
         x:Class="Kometra.Views.MainWindow"
         x:DataType="vm:MainWindowViewModel"
         
-        Icon="/Assets/avalonia-logo.ico"
+        Icon="/Assets/Icon/icon32.ico"
         Title="{Binding WindowTitle}" 
         WindowState="Maximized">
         

@@ -8,6 +8,7 @@
         mc:Ignorable="d" d:DesignWidth="1000" d:DesignHeight="700"
         x:Class="Kometra.Views.StarMaskingView"
         x:DataType="imageProcessing:StarMaskingViewModel"
+        Icon="/Assets/Icon/icon32.ico"
         Title="Rimozione Stelle"
         Width="1000" Height="700"
         MinHeight="600" MinWidth="850"

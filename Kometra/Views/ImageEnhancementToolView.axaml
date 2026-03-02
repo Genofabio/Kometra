@@ -8,7 +8,7 @@
         mc:Ignorable="d" d:DesignWidth="1100" d:DesignHeight="750"
         x:Class="Kometra.Views.ImageEnhancementToolView"
         x:DataType="vm:ImageEnhancementToolViewModel"
-        
+        Icon="/Assets/Icon/icon32.ico"
         Width="900" Height="650" MinHeight="600" MinWidth="850"
         WindowStartupLocation="CenterScreen"
         Background="{DynamicResource ToolWindowBackgroundBrush}"
