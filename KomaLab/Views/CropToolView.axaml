@@ -10,8 +10,8 @@
         x:Class="KomaLab.Views.CropToolView"
         x:DataType="imageProcessing:CropToolViewModel"
         Title="Ritaglio e Centratura"
-        Width="1000" Height="700"
-        MinHeight="550" MinWidth="850"
+        Width="820" Height="600"
+        MinHeight="550" MinWidth="800"
         WindowStartupLocation="CenterScreen"
         Background="{DynamicResource ToolWindowBackgroundBrush}"
         Focusable="True">
@@ -220,35 +220,64 @@
                         </StackPanel>
                     </Border>
 
-                    <StackPanel Orientation="Horizontal" Spacing="4" Margin="10" HorizontalAlignment="Right" VerticalAlignment="Bottom" ZIndex="1" Background="Transparent" PointerPressed="OnControlsPointerPressed"> 
-                        <Button Name="ZoomOutButton" ToolTip.Tip="Zoom Out" Background="Transparent" BorderThickness="0"><avalonia:MaterialIcon Kind="Minus" Width="16" Height="16" Foreground="White"/></Button>
-                        <Button Name="ZoomInButton" ToolTip.Tip="Zoom In" Background="Transparent" BorderThickness="0"><avalonia:MaterialIcon Kind="Plus" Width="16" Height="16" Foreground="White"/></Button>
-                        <Button Name="ResetViewButton" Margin="8,0,0,0" ToolTip.Tip="Reset Vista" Background="Transparent" BorderThickness="0"><avalonia:MaterialIcon Kind="FitToScreen" Width="16" Height="16" Foreground="White"/></Button>
-                        <Path Data="M0,0 V18" Stroke="#666666" StrokeThickness="1" Margin="8,4,8,4" VerticalAlignment="Center" />
-                        <Button Name="ResetThresholdsButton" ToolTip.Tip="Reset Stretch" Background="Transparent" BorderThickness="0"><avalonia:MaterialIcon Kind="Contrast" Width="16" Height="16" Foreground="White"/></Button>
+                    <StackPanel Orientation="Horizontal" Spacing="4" Margin="10" 
+                                HorizontalAlignment="Right" VerticalAlignment="Bottom" 
+                                ZIndex="1"
+                                Background="Transparent" 
+                                PointerPressed="OnControlsPointerPressed">
+                        
+                        <Button Command="{Binding SetCenterToImageMiddleCommand}" 
+                                ToolTip.Tip="Centra area di interesse nell'immagine">
+                            <avalonia:MaterialIcon Kind="CrosshairsGps" Width="16" Height="16"/>
+                        </Button>
+
+                        <Path Data="M0,0 V18" Stroke="{DynamicResource ActionDisabledBackgroundBrush}" 
+                              StrokeThickness="1" Margin="8,4,8,4" VerticalAlignment="Center" />
+    
+                        <Button Click="OnZoomOutClicked" ToolTip.Tip="Zoom Out">
+                            <avalonia:MaterialIcon Kind="Minus" Width="16" Height="16"/>
+                        </Button>
+    
+                        <Button Click="OnZoomInClicked" ToolTip.Tip="Zoom In">
+                            <avalonia:MaterialIcon Kind="Plus" Width="16" Height="16"/>
+                        </Button>
+    
+                        <Button Click="OnResetViewClicked" Margin="8,0,0,0" ToolTip.Tip="Adatta allo schermo">
+                            <avalonia:MaterialIcon Kind="FitToScreen" Width="16" Height="16"/>
+                        </Button>
+    
+                        <Path Data="M0,0 V18" Stroke="{DynamicResource ActionDisabledBackgroundBrush}" 
+                              StrokeThickness="1" Margin="8,4,8,4" VerticalAlignment="Center" />
+    
+                        <Button Click="OnResetThresholdsClicked" ToolTip.Tip="Reset Stretch (Contrast)">
+                            <avalonia:MaterialIcon Kind="Contrast" Width="16" Height="16"/>
+                        </Button>
                     </StackPanel>
 
                     <StackPanel Orientation="Horizontal" Spacing="4" Margin="10" 
                                 HorizontalAlignment="Left" VerticalAlignment="Bottom" 
-                                ZIndex="1" Background="Transparent" 
-                                PointerPressed="OnControlsPointerPressed">
+                                ZIndex="1"
+                                Background="Transparent"
+                                PointerPressed="OnControlsPointerPressed"> 
     
-                        <Button Name="GoToFirstImageButton" Command="{Binding Navigator.MoveToFirstCommand}" ToolTip.Tip="Prima Immagine" Background="Transparent" BorderThickness="0">
-                            <avalonia:MaterialIcon Kind="ChevronDoubleLeft" Width="16" Height="16" Foreground="White"/>
+                        <Button Command="{Binding Navigator.MoveToFirstCommand}" ToolTip.Tip="Prima Immagine">
+                            <avalonia:MaterialIcon Kind="ChevronDoubleLeft" Width="16" Height="16"/>
                         </Button>
 
-                        <Button Name="PreviousImageButton" Command="{Binding Navigator.PreviousCommand}" ToolTip.Tip="Precedente" Background="Transparent" BorderThickness="0">
-                            <avalonia:MaterialIcon Kind="ChevronLeft" Width="16" Height="16" Foreground="White"/>
-                        </Button>
-    
-                        <TextBlock Text="{Binding CurrentImageText}" VerticalAlignment="Center" Margin="8,0" Foreground="White" FontWeight="Bold"/>
-    
-                        <Button Name="NextImageButton" Command="{Binding Navigator.NextCommand}" ToolTip.Tip="Successiva" Background="Transparent" BorderThickness="0">
-                            <avalonia:MaterialIcon Kind="ChevronRight" Width="16" Height="16" Foreground="White"/>
+                        <Button Command="{Binding Navigator.PreviousCommand}" ToolTip.Tip="Precedente">
+                            <avalonia:MaterialIcon Kind="ChevronLeft" Width="16" Height="16"/>
                         </Button>
 
-                        <Button Name="GoToLastImageButton" Command="{Binding Navigator.MoveToLastCommand}" ToolTip.Tip="Ultima Immagine" Background="Transparent" BorderThickness="0">
-                            <avalonia:MaterialIcon Kind="ChevronDoubleRight" Width="16" Height="16" Foreground="White"/>
+                        <TextBlock Text="{Binding CurrentImageText}" VerticalAlignment="Center" 
+                                   Margin="8,0" Foreground="{DynamicResource Text.StaticWhiteBrush}" 
+                                   FontWeight="SemiBold" FontSize="13"/>
+
+                        <Button Command="{Binding Navigator.NextCommand}" ToolTip.Tip="Successiva">
+                            <avalonia:MaterialIcon Kind="ChevronRight" Width="16" Height="16"/>
+                        </Button>
+
+                        <Button Command="{Binding Navigator.MoveToLastCommand}" ToolTip.Tip="Ultima Immagine">
+                            <avalonia:MaterialIcon Kind="ChevronDoubleRight" Width="16" Height="16"/>
                         </Button>
                     </StackPanel>
 

@@ -98,16 +98,44 @@ public partial class CropToolViewModel : ObservableObject, IDisposable
         IsBusy = true;
         try
         {
+            // 1. Analisi dei limiti (già esistente)
             var minSize = await _coordinator.AnalyzeSequenceLimitsAsync(_files);
             MaxAllowedWidth = minSize.Width;
             MaxAllowedHeight = minSize.Height;
 
-            // Default sicuri (50% della dimensione minima)
+            // Default dimensioni crop (già esistente)
             CropWidth = Math.Min(500, (int)(MaxAllowedWidth / 2));
             CropHeight = Math.Min(500, (int)(MaxAllowedHeight / 2));
 
+            // 2. Caricamento della prima immagine (già esistente)
             await LoadImageAsync(0);
-            StatusText = "Pronto. Imposta il centro.";
+
+            // --- NUOVA LOGICA: IMPOSTAZIONE CENTRO DI DEFAULT ---
+            if (ActiveRenderer != null)
+            {
+                // Calcoliamo il centro geometrico
+                double midX = Viewport.ImageSize.Width / 2.0;
+                double midY = Viewport.ImageSize.Height / 2.0;
+                var midPoint = new Point2D(midX, midY);
+
+                // Impostiamo il centro statico (per la modalità Statica)
+                _staticCenter = midPoint;
+
+                // Pre-popoliamo anche l'array dei centri dinamici (per la modalità Dinamica)
+                // così se l'utente switcha modalità, non trova i campi vuoti.
+                for (int i = 0; i < _centers.Length; i++)
+                {
+                    _centers[i] = midPoint;
+                }
+
+                // Forza l'aggiornamento visivo dell'overlay (mirino)
+                UpdateViewportOverlay(Navigator.CurrentIndex);
+            
+                // Notifica al comando Apply che ora può essere eseguito
+                ApplyCommand.NotifyCanExecuteChanged();
+            }
+
+            StatusText = "Pronto. Centro inizializzato al centro del frame.";
         }
         catch (Exception ex)
         {
@@ -330,6 +358,23 @@ public partial class CropToolViewModel : ObservableObject, IDisposable
     // --- View Utils ---
 
     [RelayCommand] public void ResetView() => Viewport.ResetView();
+    
+    [RelayCommand]
+    public void SetCenterToImageMiddle()
+    {
+        // Verifichiamo che ci sia un'immagine caricata
+        if (ActiveRenderer == null || Viewport.ImageSize.Width <= 0) return;
+
+        // Calcoliamo il centro esatto
+        double centerX = Viewport.ImageSize.Width / 2.0;
+        double centerY = Viewport.ImageSize.Height / 2.0;
+
+        // Usiamo il metodo SetCenter già esistente che gestisce 
+        // correttamente sia la modalità Statica che Dinamica
+        SetCenter(new Point(centerX, centerY));
+    
+        StatusText = "Centro impostato al centro geometrico dell'immagine.";
+    }
     
     [RelayCommand] 
     public async Task ResetThresholds() 
