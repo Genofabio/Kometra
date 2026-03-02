@@ -222,7 +222,7 @@ Lettura header per time per ordinare caricamento immagini MultipleImageNode
 
     - azimuthal_renormalization: Gestione dei NaN: Il tuo codice Python originale usava valid_mask_1 = (avect >= 0.0). Se c'erano dei NaN (Not a Number), il calcolo di np.mean o np.std poteva fallire o restituire risultati errati. La nostra versione C# controlla esplicitamente float.IsNaN() e li ignora, preservando la statistica della riga.
                                  
-                                 Precisione Scientifica (Z-Score): Nel tuo Python, il calcolo finale era (avect - rowmin) * 255.0 / diff. Questo forzava il dato in un formato "immagine 8-bit" (0-255). La nostra versione C# calcola lo Z-Score puro: (valore - media) / (nsig * sigma). Questo mantiene il dato "scientifico" e permette alla UI di KomaLab di gestirlo con molta più flessibilità.
+                                 Precisione Scientifica (Z-Score): Nel tuo Python, il calcolo finale era (avect - rowmin) * 255.0 / diff. Questo forzava il dato in un formato "immagine 8-bit" (0-255). La nostra versione C# calcola lo Z-Score puro: (valore - media) / (nsig * sigma). Questo mantiene il dato "scientifico" e permette alla UI di Kometra di gestirlo con molta più flessibilità.
                                  
                                  Efficienza Multi-core: La versione Python usa un ciclo for i in range(nrad). Anche se NumPy è veloce, quel ciclo gira su un solo core della CPU. La nostra versione C# usa Parallel.For, processando centinaia di anelli della cometa simultaneamente.
                                  
