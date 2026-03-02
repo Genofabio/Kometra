@@ -1,0 +1,43 @@
+<Application xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="Kometra.App"
+             xmlns:local="using:Kometra"
+             xmlns:avalonia="clr-namespace:Material.Icons.Avalonia;assembly=Material.Icons.Avalonia"
+             RequestedThemeVariant="Default">
+             <!-- "Default" ThemeVariant follows system theme variant. "Dark" or "Light" are other available options. -->
+
+    <Application.DataTemplates>
+        <local:ViewLocator/>
+    </Application.DataTemplates>
+             
+    <Application.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceInclude Source="/Styles/AppPalette.axaml"/>
+            </ResourceDictionary.MergedDictionaries>
+        </ResourceDictionary>
+    </Application.Resources>
+  
+    <Application.Styles>
+        <FluentTheme>
+            <FluentTheme.Palettes>
+                <!-- <ColorPaletteResources x:Key="Light" Accent="#8058E8" AltHigh="White" AltLow="White" AltMedium="White" AltMediumHigh="White" AltMediumLow="White" BaseHigh="Black" BaseLow="#ffc4c4c4" BaseMedium="#ff848484" BaseMediumHigh="#ff595959" BaseMediumLow="#ff6e6e6e" ChromeAltLow="#ff595959" ChromeBlackHigh="Black" ChromeBlackLow="#ffc4c4c4" ChromeBlackMedium="#ff595959" ChromeBlackMediumLow="#ff848484" ChromeDisabledHigh="#ffc4c4c4" ChromeDisabledLow="#ff848484" ChromeGray="#ff6e6e6e" ChromeHigh="#ffc4c4c4" ChromeLow="#ffe9e9e9" ChromeMedium="#ffe2e2e2" ChromeMediumLow="#ffe9e9e9" ChromeWhite="White" ListLow="#ffe2e2e2" ListMedium="#ffc4c4c4" RegionColor="WhiteSmoke" /> -->
+                <ColorPaletteResources x:Key="Light" Accent="#8058E8" AltHigh="Black" AltLow="Black" AltMedium="Black" AltMediumHigh="Black" AltMediumLow="Black" BaseHigh="White" BaseLow="#ff444444" BaseMedium="#ffa2a2a2" BaseMediumHigh="#ffbababa" BaseMediumLow="#ff737373" ChromeAltLow="#ffbababa" ChromeBlackHigh="Black" ChromeBlackLow="#ffbababa" ChromeBlackMedium="Black" ChromeBlackMediumLow="Black" ChromeDisabledHigh="#ff444444" ChromeDisabledLow="#ffa2a2a2" ChromeGray="#ff8b8b8b" ChromeHigh="#ff8b8b8b" ChromeLow="#ff1d1d1d" ChromeMedium="#ff272727" ChromeMediumLow="#ff3a3a3a" ChromeWhite="White" ListLow="#ff272727" ListMedium="#ff444444" RegionColor="#ff121212" />
+                <ColorPaletteResources x:Key="Dark" Accent="#8058E8" AltHigh="Black" AltLow="Black" AltMedium="Black" AltMediumHigh="Black" AltMediumLow="Black" BaseHigh="White" BaseLow="#ff444444" BaseMedium="#ffa2a2a2" BaseMediumHigh="#ffbababa" BaseMediumLow="#ff737373" ChromeAltLow="#ffbababa" ChromeBlackHigh="Black" ChromeBlackLow="#ffbababa" ChromeBlackMedium="Black" ChromeBlackMediumLow="Black" ChromeDisabledHigh="#ff444444" ChromeDisabledLow="#ffa2a2a2" ChromeGray="#ff8b8b8b" ChromeHigh="#ff8b8b8b" ChromeLow="#ff1d1d1d" ChromeMedium="#ff272727" ChromeMediumLow="#ff3a3a3a" ChromeWhite="White" ListLow="#ff272727" ListMedium="#ff444444" RegionColor="#ff121212" />
+            </FluentTheme.Palettes>
+        </FluentTheme>
+        
+        <avalonia:MaterialIconStyles />
+
+        <StyleInclude Source="avares://Kometra/Styles/NodeStyles.axaml" />
+        <StyleInclude Source="avares://Kometra/Styles/ConnectionStyles.axaml" />
+        <StyleInclude Source="avares://Kometra/Styles/TopBarMenuStyles.axaml" />
+    
+        <StyleInclude Source="avares://Kometra/Styles/EnhancementToolsStyles.axaml" />
+        <StyleInclude Source="avares://Kometra/Styles/PlateSolvingToolStyles.axaml" />
+        <StyleInclude Source="avares://Kometra/Styles/AlignmentToolStyles.axaml" />
+        <StyleInclude Source="avares://Kometra/Styles/HeaderEditorToolStyles.axaml" />
+        
+        <StyleInclude Source="avares://Avalonia.Controls.DataGrid/Themes/Fluent.xaml"/>
+    </Application.Styles>
+</Application>

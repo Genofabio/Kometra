@@ -1,0 +1,268 @@
+﻿using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
+using Kometra.Services.Processing.Engines;
+using Kometra.Models.Fits;
+using Kometra.Models.Fits.Structure;
+using Kometra.Models.Processing;
+using Kometra.Models.Processing.Batch;
+using Kometra.Models.Processing.Enhancement;
+using Kometra.Services.Fits;
+using Kometra.Services.Fits.Conversion;
+using Kometra.Services.Fits.Metadata;
+using Kometra.Services.Processing.Batch;
+using Kometra.Services.Processing.Engines.Enhancement;
+using OpenCvSharp;
+
+namespace Kometra.Services.Processing.Coordinators;
+
+public class ImageEnhancementCoordinator : IImageEnhancementCoordinator
+{
+    private readonly IBatchProcessingService _batchService;
+    private readonly IFitsMetadataService _metadataService;
+    private readonly IFitsDataManager _dataManager;
+    private readonly IFitsOpenCvConverter _converter;
+
+    private readonly IGradientRadialEngine _radialEngine;
+    private readonly IStructureShapeEngine _shapeEngine;
+    private readonly ILocalContrastEngine _contrastEngine;
+
+    public ImageEnhancementCoordinator(
+        IBatchProcessingService batchService,
+        IFitsMetadataService metadataService,
+        IFitsDataManager dataManager,
+        IFitsOpenCvConverter converter,
+        IGradientRadialEngine radialEngine,
+        IStructureShapeEngine shapeEngine,
+        ILocalContrastEngine contrastEngine)
+    {
+        _batchService = batchService;
+        _metadataService = metadataService;
+        _dataManager = dataManager;
+        _converter = converter;
+        _radialEngine = radialEngine;
+        _shapeEngine = shapeEngine;
+        _contrastEngine = contrastEngine;
+    }
+
+    public async Task<Array> CalculatePreviewDataAsync(
+        FitsFileReference sourceFile,
+        ImageEnhancementMode mode,
+        ImageEnhancementParameters parameters,
+        CancellationToken token = default) 
+    {
+        var data = await _dataManager.GetDataAsync(sourceFile.FilePath);
+        token.ThrowIfCancellationRequested();
+        
+        var imageHdu = data.FirstImageHdu ?? data.PrimaryHdu;
+        if (imageHdu == null) 
+            throw new InvalidOperationException("No valid image found for preview.");
+
+        // Convertiamo sempre in Double per la preview per massima qualità visiva
+        using Mat src = _converter.RawToMat(imageHdu.PixelData, 1.0, 0.0, FitsBitDepth.Double);
+        using Mat dst = new Mat();
+        
+        await RunEngineLogicAsync(src, dst, mode, parameters, null, token);
+
+        if (dst.Empty()) return imageHdu.PixelData;
+
+        // Ritorniamo l'array Double. Il renderer si occuperà di fare lo stretch per la visualizzazione.
+        return _converter.MatToRaw(dst, FitsBitDepth.Double);
+    }
+
+    public async Task<List<string>> ExecuteBatchAsync(
+        IEnumerable<FitsFileReference> sourceFiles,
+        ImageEnhancementMode mode,
+        ImageEnhancementParameters parameters,
+        IProgress<BatchProgressReport>? progress = null,
+        CancellationToken token = default)
+    {
+        Func<Mat, Mat, FitsHeader, int, Task> processOpAsync = async (src, dst, header, index) =>
+        {
+            token.ThrowIfCancellationRequested();
+
+            using Mat processingResult = new Mat();
+            
+            // Eseguiamo la logica
+            await RunEngineLogicAsync(src, processingResult, mode, parameters, null, token);
+
+            token.ThrowIfCancellationRequested();
+
+            // Gestione del cambio dimensioni (es. mosaici o crop)
+            if (processingResult.Size() != src.Size())
+            {
+                _metadataService.AddValue(header, "NAXIS1", processingResult.Cols, "New Width");
+                _metadataService.AddValue(header, "NAXIS2", processingResult.Rows, "New Height");
+                
+                if (mode == ImageEnhancementMode.InverseRho || mode == ImageEnhancementMode.AzimuthalAverage)
+                     _metadataService.AddValue(header, "HISTORY", "Geometry: Radial/Polar Transform applied");
+            }
+
+            // --- GESTIONE TIPI DI DATO (Float/Double vs Interi) ---
+            if (processingResult.Depth() == MatType.CV_32F || processingResult.Depth() == MatType.CV_64F)
+            {
+                // Copia diretta per preservare valori negativi e precisione decimale (fondamentale per MCM/RWM/Laplace)
+                processingResult.CopyTo(dst);
+                
+                // Aggiorniamo il BITPIX per riflettere il dato Float
+                int bitpix = processingResult.Depth() == MatType.CV_64F ? -64 : -32;
+                _metadataService.AddValue(header, "BITPIX", bitpix, "Floating Point Data");
+            }
+            else
+            {
+                // Comportamento Legacy per immagini intere (solo visualizzazione/filtri semplici)
+                dst.Create(processingResult.Size(), src.Type());
+                Cv2.Normalize(processingResult, processingResult, 0, 65535, NormTypes.MinMax);
+                processingResult.ConvertTo(dst, src.Type());
+            }
+
+            UpdateHeaderHistory(header, mode, parameters);
+        };
+
+        return await _batchService.ProcessFilesAsync(
+            sourceFiles,
+            $"Enhancement_{mode}", 
+            processOpAsync,
+            progress,
+            token);
+    }
+
+    // =========================================================
+    // DISPATCHER CENTRALE
+    // =========================================================
+    private async Task RunEngineLogicAsync(
+        Mat src, Mat dst, 
+        ImageEnhancementMode mode, 
+        ImageEnhancementParameters p, 
+        IProgress<double>? progress,
+        CancellationToken token)
+    {
+        token.ThrowIfCancellationRequested();
+
+        switch (mode)
+        {
+            case ImageEnhancementMode.LarsonSekaninaStandard:
+                await _radialEngine.ApplyLarsonSekaninaAsync(src, dst, p.RotationAngle, p.ShiftX, p.ShiftY, false); break;
+            case ImageEnhancementMode.LarsonSekaninaSymmetric:
+                await _radialEngine.ApplyLarsonSekaninaAsync(src, dst, p.RotationAngle, p.ShiftX, p.ShiftY, true); break;
+            
+            case ImageEnhancementMode.AdaptiveLaplacianRVSF:
+                await _radialEngine.ApplyAdaptiveRVSFAsync(src, dst, p.ParamA_1, p.ParamB_1, p.ParamN_1, p.UseLog, progress); break;
+            case ImageEnhancementMode.AdaptiveLaplacianMosaic:
+                await _radialEngine.ApplyRVSFMosaicAsync(src, dst, (p.ParamA_1, p.ParamA_2), (p.ParamB_1, p.ParamB_2), (p.ParamN_1, p.ParamN_2), p.UseLog); break;
+            
+            case ImageEnhancementMode.InverseRho:
+                await Task.Run(() => _radialEngine.ApplyInverseRho(src, dst), token); break;
+
+            case ImageEnhancementMode.RadialWeightedModel:
+                await Task.Run(() => _radialEngine.ApplyRadialWeightedModel(src, dst, p.RadialMaxRadius), token); 
+                break;
+
+            case ImageEnhancementMode.MedianComaModel:
+                await Task.Run(() => _radialEngine.ApplyMedianComaModel(src, dst, p.RadialMaxRadius, angularQuality: p.RadialSubsampling), token); break;
+
+            case ImageEnhancementMode.AzimuthalAverage:
+                await RunPolarFilterAsync(src, dst, polar => _radialEngine.ApplyAzimuthalAverage(polar, p.AzimuthalRejSigma), token); break;
+            case ImageEnhancementMode.AzimuthalMedian:
+                await RunPolarFilterAsync(src, dst, polar => _radialEngine.ApplyAzimuthalMedian(polar), token); break;
+            case ImageEnhancementMode.AzimuthalRenormalization:
+                await RunPolarFilterAsync(src, dst, polar => _radialEngine.ApplyAzimuthalRenormalization(polar, p.AzimuthalRejSigma, p.AzimuthalNormSigma), token); break;
+
+            case ImageEnhancementMode.FrangiVesselnessFilter:
+                await _shapeEngine.ApplyFrangiVesselnessAsync(src, dst, p.FrangiSigma, p.FrangiBeta, p.FrangiC, progress); break;
+            case ImageEnhancementMode.StructureTensorCoherence:
+                await _shapeEngine.ApplyStructureTensorEnhancementAsync(src, dst, p.TensorSigma, p.TensorRho, progress); break;
+            case ImageEnhancementMode.WhiteTopHatExtraction:
+                await _shapeEngine.ApplyWhiteTopHatAsync(src, dst, p.TopHatKernelSize); break;
+                
+            // === NUOVO CASE ===
+            case ImageEnhancementMode.AdaptiveLaplaceFilter:
+                await _shapeEngine.ApplyAdaptiveLaplaceAsync(src, dst, progress); break;
+
+            case ImageEnhancementMode.UnsharpMaskingMedian:
+                await _contrastEngine.ApplyUnsharpMaskingMedianAsync(src, dst, p.KernelSize, progress); break;
+            case ImageEnhancementMode.ClaheLocalContrast:
+                await _contrastEngine.ApplyClaheAsync(src, dst, p.ClaheClipLimit, p.ClaheTileSize); break;
+            case ImageEnhancementMode.AdaptiveLocalNormalization:
+                await _contrastEngine.ApplyLocalNormalizationAsync(src, dst, p.LocalNormWindowSize, p.LocalNormIntensity, progress); break;
+
+            default:
+                throw new ArgumentOutOfRangeException(nameof(mode), mode, null);
+        }
+    }
+
+    private async Task RunPolarFilterAsync(Mat src, Mat dst, Action<Mat> polarFilterAction, CancellationToken token)
+    {
+        token.ThrowIfCancellationRequested();
+
+        await Task.Run(() =>
+        {
+            int nRad = Math.Min(src.Cols, src.Rows) / 2;
+            int nTheta = nRad * 3;
+
+            using Mat polar = _radialEngine.ToPolar(src, nRad, nTheta);
+            
+            if (token.IsCancellationRequested) return;
+
+            polarFilterAction(polar);
+
+            if (token.IsCancellationRequested) return;
+
+            _radialEngine.FromPolar(polar, dst, src.Cols, src.Rows);
+        }, token);
+    }
+
+    private void UpdateHeaderHistory(FitsHeader header, ImageEnhancementMode mode, ImageEnhancementParameters p)
+    {
+        _metadataService.AddValue(header, "HISTORY", $"Kometra - Enhancement Mode={mode}");
+        
+        string paramsLog = mode switch
+        {
+            ImageEnhancementMode.LarsonSekaninaStandard or ImageEnhancementMode.LarsonSekaninaSymmetric => 
+                $"Angle={p.RotationAngle:F2}, Shift=({p.ShiftX:F1}, {p.ShiftY:F1})",
+
+            ImageEnhancementMode.AdaptiveLaplacianRVSF => 
+                $"RVSF A={p.ParamA_1}, B={p.ParamB_1}, N={p.ParamN_1}",
+
+            ImageEnhancementMode.AzimuthalAverage or ImageEnhancementMode.AzimuthalMedian or ImageEnhancementMode.AzimuthalRenormalization => 
+                $"RejSig={p.AzimuthalRejSigma}, NormSig={p.AzimuthalNormSigma}", 
+
+            ImageEnhancementMode.InverseRho => 
+                $"Method=Integration5x5",
+            
+            ImageEnhancementMode.RadialWeightedModel =>
+                $"MaxRadius={(p.RadialMaxRadius > 0 ? p.RadialMaxRadius.ToString("F1") : "Full")}, Background=Auto",
+
+            ImageEnhancementMode.MedianComaModel =>
+                $"MaxRadius={(p.RadialMaxRadius > 0 ? p.RadialMaxRadius.ToString("F1") : "Full")}, AngularQuality={p.RadialSubsampling}",
+
+            ImageEnhancementMode.FrangiVesselnessFilter => 
+                $"Sigma={p.FrangiSigma:F2}, Beta={p.FrangiBeta:F2}, C={p.FrangiC:F4}",
+
+            ImageEnhancementMode.StructureTensorCoherence => 
+                $"Sigma={p.TensorSigma}, Rho={p.TensorRho}",
+
+            ImageEnhancementMode.WhiteTopHatExtraction => 
+                $"KernelSize={p.TopHatKernelSize}",
+
+            ImageEnhancementMode.AdaptiveLaplaceFilter =>
+                "Method=SNN_Smoothing + Laplace3x3",
+
+            ImageEnhancementMode.UnsharpMaskingMedian => 
+                $"Kernel={p.KernelSize}",
+
+            ImageEnhancementMode.ClaheLocalContrast => 
+                $"Clip={p.ClaheClipLimit:F1}, Tile={p.ClaheTileSize}",
+
+            ImageEnhancementMode.AdaptiveLocalNormalization => 
+                $"Win={p.LocalNormWindowSize}, Int={p.LocalNormIntensity:F1}",
+
+            _ => ""
+        };
+
+        if (!string.IsNullOrEmpty(paramsLog))
+            _metadataService.AddValue(header, "HISTORY", $"Kometra - Params: {paramsLog}");
+    }
+}

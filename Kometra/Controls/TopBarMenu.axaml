@@ -1,0 +1,266 @@
+﻿<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:avalonia="clr-namespace:Material.Icons.Avalonia;assembly=Material.Icons.Avalonia"
+             xmlns:vm="clr-namespace:Kometra.ViewModels"
+             xmlns:conv="clr-namespace:Kometra.Converters"
+             xmlns:processing="clr-namespace:Kometra.Models.Processing"
+             xmlns:visualization="clr-namespace:Kometra.Models.Visualization"
+             xmlns:stacking="clr-namespace:Kometra.Models.Processing.Stacking"
+             mc:Ignorable="d" d:DesignWidth="800" d:DesignHeight="450"
+             x:Class="Kometra.Controls.TopBarMenu"
+             x:DataType="vm:MainWindowViewModel">
+    
+    <UserControl.Resources>
+        <conv:AnimationIconConverter x:Key="AnimIconConv" />
+        <conv:AnimationTextConverter x:Key="AnimTextConv" />
+    </UserControl.Resources>
+    
+    <UserControl.Styles>
+        <StyleInclude Source="/Styles/TopBarMenuStyles.axaml" />
+    </UserControl.Styles>
+
+    <Menu VerticalAlignment="Top">
+        
+        <MenuItem Header="_File">
+            <MenuItem Header="Aggiungi Nodo" 
+                      Classes="innerMenuItem"
+                      Command="{Binding BoardVm.AddNodeCommand}">
+                <MenuItem.Icon>
+                    <avalonia:MaterialIcon Kind="Plus" />
+                </MenuItem.Icon>
+            </MenuItem>
+
+            <Separator />
+
+            <MenuItem Header="Salva Immagine" 
+                      Classes="innerMenuItem"
+                      Command="{Binding BoardVm.ExportSelectedNodeCommand}">
+                <MenuItem.Icon>
+                    <avalonia:MaterialIcon Kind="Image" /> 
+                </MenuItem.Icon>
+            </MenuItem>
+
+            <MenuItem Header="Salva Video" 
+                      Classes="innerMenuItem"
+                      Command="{Binding BoardVm.SaveVideoCommand}">
+                <MenuItem.Icon>
+                    <avalonia:MaterialIcon Kind="Movie" /> 
+                </MenuItem.Icon>
+            </MenuItem>
+            
+            <Separator />
+            
+            <MenuItem Header="Exit" 
+                      Classes="innerMenuItem"
+                      Command="{Binding ExitAppCommand}">
+                <MenuItem.Icon>
+                    <avalonia:MaterialIcon Kind="ExitToApp" />
+                </MenuItem.Icon>
+            </MenuItem>
+        </MenuItem>
+        
+        <MenuItem Header="_Modifica">
+            
+            <MenuItem Header="Allinea e centra"
+                      Classes="innerMenuItem"
+                      Command="{Binding BoardVm.ShowAlignmentWindowCommand}">
+                <MenuItem.Icon>
+                    <avalonia:MaterialIcon Kind="ImageFilterCenterFocus" />
+                </MenuItem.Icon>
+            </MenuItem>
+
+            <MenuItem Header="Ritaglia"
+                      Classes="innerMenuItem"
+                      Command="{Binding BoardVm.ShowCropWindowCommand}">
+                <MenuItem.Icon>
+                    <avalonia:MaterialIcon Kind="Crop" />
+                </MenuItem.Icon>
+            </MenuItem>
+            
+            <Separator />
+
+            <MenuItem Header="Analisi Morfologica" Classes="innerMenuItem">
+                <MenuItem.Icon>
+                    <avalonia:MaterialIcon Kind="Creation" />
+                </MenuItem.Icon>
+
+                <MenuItem Header="Modelli Radiali"
+                          Classes="innerMenuItem"
+                          Command="{Binding BoardVm.ShowRadialEnhancementWindowCommand}">
+                    <MenuItem.Icon>
+                        <avalonia:MaterialIcon Kind="Radius" />
+                    </MenuItem.Icon>
+                </MenuItem>
+
+                <MenuItem Header="Estrazione Strutture"
+                          Classes="innerMenuItem"
+                          Command="{Binding BoardVm.ShowStructureExtractionWindowCommand}">
+                    <MenuItem.Icon>
+                        <avalonia:MaterialIcon Kind="Radar" />
+                    </MenuItem.Icon>
+                </MenuItem>
+
+                <MenuItem Header="Contrasto Locale"
+                          Classes="innerMenuItem"
+                          Command="{Binding BoardVm.ShowLocalContrastWindowCommand}">
+                    <MenuItem.Icon>
+                        <avalonia:MaterialIcon Kind="ContrastBox" />
+                    </MenuItem.Icon>
+                </MenuItem>
+            </MenuItem>
+            
+            <MenuItem Header="Maschera Stelle"
+                      Classes="innerMenuItem"
+                      Command="{Binding BoardVm.ShowStarMaskingWindowCommand}">
+                <MenuItem.Icon>
+                    <avalonia:MaterialIcon Kind="StarOff" /> 
+                </MenuItem.Icon>
+            </MenuItem>
+
+            <MenuItem Header="Posterizzazione"
+                      Classes="innerMenuItem"
+                      Command="{Binding BoardVm.ShowPosterizationWindowCommand}">
+                <MenuItem.Icon>
+                    <avalonia:MaterialIcon Kind="GradientVertical" />
+                </MenuItem.Icon>
+            </MenuItem>
+            
+            <Separator />
+            
+            <MenuItem Header="Editor Header / Metadati"
+                      Classes="innerMenuItem"
+                      Command="{Binding BoardVm.EditSelectedNodeHeaderCommand}">
+                <MenuItem.Icon>
+                    <avalonia:MaterialIcon Kind="FileDocumentEdit" />
+                </MenuItem.Icon>
+            </MenuItem>
+            
+            <MenuItem Header="Risoluzione Astrometrica (ASTAP)"
+                      Classes="innerMenuItem"
+                      Command="{Binding BoardVm.ShowPlateSolvingWindowCommand}">
+                <MenuItem.Icon>
+                    <avalonia:MaterialIcon Kind="Telescope" />
+                </MenuItem.Icon>
+            </MenuItem>
+            
+            <Separator />
+
+            <MenuItem Header="Operazioni Stack" Classes="innerMenuItem">
+                <MenuItem.Icon>
+                    <avalonia:MaterialIcon Kind="Layers" />
+                </MenuItem.Icon>
+
+                <MenuItem Header="Somma"
+                          Classes="innerMenuItem"
+                          Command="{Binding BoardVm.StackImagesCommand}"
+                          CommandParameter="{x:Static stacking:StackingMode.Sum}">
+                    <MenuItem.Icon>
+                        <avalonia:MaterialIcon Kind="PlusBoxMultiple" />
+                    </MenuItem.Icon>
+                </MenuItem>
+
+                <MenuItem Header="Media"
+                          Classes="innerMenuItem"
+                          Command="{Binding BoardVm.StackImagesCommand}"
+                          CommandParameter="{x:Static stacking:StackingMode.Average}">
+                    <MenuItem.Icon>
+                        <avalonia:MaterialIcon Kind="DivisionBox" />
+                    </MenuItem.Icon>
+                </MenuItem>
+        
+                <MenuItem Header="Mediana"
+                          Classes="innerMenuItem"
+                          Command="{Binding BoardVm.StackImagesCommand}"
+                          CommandParameter="{x:Static stacking:StackingMode.Median}">
+                    <MenuItem.Icon>
+                        <avalonia:MaterialIcon Kind="ChartBox" /> 
+                    </MenuItem.Icon>
+                </MenuItem>
+            </MenuItem>
+        </MenuItem>
+
+        <MenuItem Header="_View">
+            <MenuItem Header="Modalità Visualizzazione" Classes="innerMenuItem">
+                <MenuItem.Icon>
+                    <avalonia:MaterialIcon Kind="EyeSettings" />
+                </MenuItem.Icon>
+
+                <MenuItem Header="Lineare"
+                          Classes="innerMenuItem"
+                          Command="{Binding BoardVm.SetVisualizationModeCommand}"
+                          CommandParameter="{x:Static visualization:VisualizationMode.Linear}">
+                    <MenuItem.Icon>
+                        <avalonia:MaterialIcon Kind="ChartLineVariant" /> 
+                    </MenuItem.Icon>
+                </MenuItem>
+
+                <MenuItem Header="Radice Quadrata"
+                          Classes="innerMenuItem"
+                          Command="{Binding BoardVm.SetVisualizationModeCommand}"
+                          CommandParameter="{x:Static visualization:VisualizationMode.SquareRoot}">
+                    <MenuItem.Icon>
+                        <avalonia:MaterialIcon Kind="SquareRoot" /> 
+                    </MenuItem.Icon>
+                </MenuItem>
+
+                <MenuItem Header="Logaritmica"
+                          Classes="innerMenuItem"
+                          Command="{Binding BoardVm.SetVisualizationModeCommand}"
+                          CommandParameter="{x:Static visualization:VisualizationMode.Logarithmic}">
+                    <MenuItem.Icon>
+                        <avalonia:MaterialIcon Kind="MathLog" /> 
+                    </MenuItem.Icon>
+                </MenuItem>
+            </MenuItem>
+
+            <Separator />
+            
+            <MenuItem Header="Reset Board" 
+                      Classes="innerMenuItem"
+                      Command="{Binding BoardVm.ResetBoardCommand}">
+                <MenuItem.Icon>
+                    <avalonia:MaterialIcon Kind="Autorenew" />
+                </MenuItem.Icon>
+            </MenuItem>
+
+            <Separator />
+            
+            <MenuItem Header="Reset Posizione Immagine"
+                      Classes="innerMenuItem"
+                      Command="{Binding BoardVm.ResetNodeViewCommand}">
+                <MenuItem.Icon>
+                    <avalonia:MaterialIcon Kind="FitToScreen" />
+                </MenuItem.Icon>
+            </MenuItem>
+
+            <MenuItem Header="Reset Soglie Immagine"
+                      Classes="innerMenuItem"
+                      Command="{Binding BoardVm.ResetNormalizationCommand}">
+                <MenuItem.Icon>
+                    <avalonia:MaterialIcon Kind="Contrast" />
+                </MenuItem.Icon>
+            </MenuItem>
+
+            <Separator />
+
+            <MenuItem Header="{Binding BoardVm.IsGlobalAnimationRunning, Converter={StaticResource AnimTextConv}}"
+                      Classes="innerMenuItem"
+                      Command="{Binding BoardVm.ToggleNodeAnimationCommand}">
+                <MenuItem.Icon>
+                    <avalonia:MaterialIcon Kind="{Binding BoardVm.IsGlobalAnimationRunning, Converter={StaticResource AnimIconConv}}" />
+                </MenuItem.Icon>
+            </MenuItem>
+
+        </MenuItem>
+
+        <MenuItem Header="_Help">
+            <MenuItem Header="About" Classes="innerMenuItem">
+                <MenuItem.Icon>
+                    <avalonia:MaterialIcon Kind="InformationOutline" />
+                </MenuItem.Icon>
+            </MenuItem>
+        </MenuItem>
+    </Menu>
+</UserControl>

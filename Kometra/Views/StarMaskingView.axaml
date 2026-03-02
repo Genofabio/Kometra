@@ -1,0 +1,293 @@
+﻿<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:avalonia="clr-namespace:Material.Icons.Avalonia;assembly=Material.Icons.Avalonia"
+        xmlns:converters="clr-namespace:Kometra.Converters"
+        xmlns:imageProcessing="clr-namespace:Kometra.ViewModels.ImageProcessing"
+        mc:Ignorable="d" d:DesignWidth="1000" d:DesignHeight="700"
+        x:Class="Kometra.Views.StarMaskingView"
+        x:DataType="imageProcessing:StarMaskingViewModel"
+        Title="Rimozione Stelle"
+        Width="1000" Height="700"
+        MinHeight="600" MinWidth="850"
+        WindowStartupLocation="CenterScreen"
+        Focusable="True">
+
+    <Window.Resources>
+        <converters:EnumToBoolConverter x:Key="EnumToBool" />
+    </Window.Resources>
+
+    <Window.Styles>
+        <StyleInclude Source="/Styles/AlignmentToolStyles.axaml" />
+
+        <Style Selector="Button.calculate">
+            <Setter Property="Background" Value="{DynamicResource ActionPrimaryBackgroundBrush}"/>
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="FontWeight" Value="Bold"/>
+            <Setter Property="FontSize" Value="14"/>
+            <Setter Property="CornerRadius" Value="4"/>
+            <Setter Property="Padding" Value="10,8"/>
+            <Setter Property="HorizontalContentAlignment" Value="Center"/>
+        </Style>
+        <Style Selector="Button.calculate:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="{DynamicResource ActionPrimaryBackgroundBrush}"/>
+            <Setter Property="Opacity" Value="0.9"/>
+            <Setter Property="Foreground" Value="White"/>
+        </Style>
+        <Style Selector="Button.calculate:disabled /template/ ContentPresenter">
+            <Setter Property="Background" Value="#444444"/>
+            <Setter Property="Foreground" Value="#AAAAAA"/>
+        </Style>
+
+        <Style Selector="Slider.comet">
+            <Setter Property="Foreground" Value="#FFEA7B"/> 
+        </Style>
+        <Style Selector="Slider.comet /template/ Thumb">
+            <Setter Property="Background" Value="#FFEA7B"/> <Setter Property="BorderBrush" Value="#FFEA7B"/>
+        </Style>
+        <Style Selector="Slider.comet /template/ RepeatButton#PART_DecreaseButton">
+            <Setter Property="Background" Value="#FFEA7B"/> 
+        </Style>
+        
+        <Style Selector="CheckBox.comet:checked /template/ Border#NormalRectangle">
+            <Setter Property="Background" Value="#FFEA7B"/><Setter Property="BorderBrush" Value="#FFEA7B"/>
+        </Style>
+        <Style Selector="CheckBox.comet:checked /template/ Path#CheckGlyph">
+            <Setter Property="Fill" Value="Black"/>
+        </Style>
+        
+        <Style Selector="CheckBox.comet:disabled /template/ Border#NormalRectangle">
+            <Setter Property="BorderBrush" Value="#666666"/>
+        </Style>
+        <Style Selector="CheckBox.comet:checked:disabled /template/ Border#NormalRectangle">
+            <Setter Property="Background" Value="#666666"/>
+            <Setter Property="BorderBrush" Value="#666666"/>
+        </Style>
+        
+        <Style Selector="Slider.star">
+            <Setter Property="Foreground" Value="#567FFF"/>
+        </Style>
+        <Style Selector="Slider.star /template/ Thumb">
+            <Setter Property="Background" Value="#567FFF"/><Setter Property="BorderBrush" Value="#567FFF"/>
+        </Style>
+        <Style Selector="Slider.star /template/ RepeatButton#PART_DecreaseButton">
+            <Setter Property="Background" Value="#567FFF"/>
+        </Style>
+
+        <Style Selector="CheckBox.star:checked /template/ Border#NormalRectangle">
+            <Setter Property="Background" Value="#567FFF"/><Setter Property="BorderBrush" Value="#567FFF"/>
+        </Style>
+        <Style Selector="CheckBox.star:checked /template/ Path#CheckGlyph">
+            <Setter Property="Fill" Value="Black"/>
+        </Style>
+
+        <Style Selector="CheckBox.star:disabled /template/ Border#NormalRectangle">
+            <Setter Property="BorderBrush" Value="#666666"/>
+        </Style>
+        <Style Selector="CheckBox.star:checked:disabled /template/ Border#NormalRectangle">
+            <Setter Property="Background" Value="#666666"/>
+            <Setter Property="BorderBrush" Value="#666666"/>
+        </Style>
+
+        <Style Selector="TextBox.valueBox">
+            <Setter Property="Width" Value="55"/>
+            <Setter Property="MinHeight" Value="22"/>
+            <Setter Property="Height" Value="22"/>
+            <Setter Property="Padding" Value="4,0"/> 
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="VerticalContentAlignment" Value="Center"/>
+            <Setter Property="HorizontalContentAlignment" Value="Right"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+            <Setter Property="CornerRadius" Value="3"/>
+        </Style>
+        
+        <Style Selector="TextBlock.paramLabel">
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="Foreground" Value="{DynamicResource Text.MediumGreyBrush}"/>
+            <Setter Property="Margin" Value="0,0,0,3"/>
+        </Style>
+    </Window.Styles>
+
+    <Grid ColumnDefinitions="360, *">
+        
+        <Border Grid.Column="0" Background="{DynamicResource ToolPanelBackgroundBrush}" Padding="15" IsEnabled="{Binding IsInteractionEnabled}">
+            <Grid RowDefinitions="Auto, *, Auto">
+                
+                <StackPanel Grid.Row="0" Spacing="5" Margin="0,0,0,10">
+                    <TextBlock Text="Rimozione Stelle" FontSize="18" FontWeight="Bold"/>
+                    <TextBlock Text="Definisci i parametri e calcola l'anteprima." 
+                               FontSize="12" Opacity="0.7" TextWrapping="Wrap"/>
+                    <Separator Background="{DynamicResource Border.WhiteDimBrush}" Opacity="0.3" Margin="0,10"/>
+                </StackPanel>
+
+                <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" Padding="0,0,12,0" IsEnabled="{Binding IsSetupVisible}">
+                    <StackPanel Spacing="20">
+
+                        <StackPanel Spacing="8">
+                            <StackPanel Orientation="Horizontal" Spacing="10">
+                                <CheckBox Classes="comet" IsChecked="{Binding ShowCometMask}" ToolTip.Tip="Mostra maschera cometa" VerticalAlignment="Center"/>
+                                <TextBlock Text="Mascheramento Cometa" FontWeight="SemiBold" VerticalAlignment="Center" FontSize="15" Foreground="White"/>
+                            </StackPanel>
+                            
+                            <StackPanel Spacing="8" IsVisible="{Binding ShowCometMask}">
+                                <StackPanel>
+                                    <TextBlock Text="Soglia (Sigma)" Classes="paramLabel"/>
+                                    <Grid ColumnDefinitions="Auto, 10, *">
+                                        <TextBox Grid.Column="0" Name="CometThresholdBox" Classes="valueBox"
+                                                 Text="{Binding CometThreshold, StringFormat=N1}" 
+                                                 LostFocus="OnManualInputCommit" KeyDown="OnInputKeyDown"/>
+                                        <Slider Grid.Column="2" Classes="comet" 
+                                                Minimum="0.1" Maximum="10.0" Value="{Binding CometThreshold}" 
+                                                TickFrequency="0.1" IsSnapToTickEnabled="True" VerticalAlignment="Center"/>
+                                    </Grid>
+                                </StackPanel>
+
+                                <StackPanel>
+                                    <TextBlock Text="Dilatazione (px)" Classes="paramLabel"/>
+                                    <Grid ColumnDefinitions="Auto, 10, *">
+                                        <TextBox Grid.Column="0" Name="CometDilationBox" Classes="valueBox"
+                                                 Text="{Binding CometDilation}" 
+                                                 LostFocus="OnManualInputCommit" KeyDown="OnInputKeyDown"/>
+                                        <Slider Grid.Column="2" Classes="comet" 
+                                                Minimum="0" Maximum="20" Value="{Binding CometDilation}" 
+                                                TickFrequency="1" IsSnapToTickEnabled="True" VerticalAlignment="Center"/>
+                                    </Grid>
+                                </StackPanel>
+                            </StackPanel>
+                        </StackPanel>
+
+                        <Separator Background="{DynamicResource Border.WhiteDimBrush}" Opacity="0.2" Margin="0,5"/>
+
+                        <StackPanel Spacing="8">
+                            <StackPanel Orientation="Horizontal" Spacing="10">
+                                <CheckBox Classes="star" IsChecked="{Binding ShowStarMask}" ToolTip.Tip="Mostra maschera stelle" VerticalAlignment="Center"/>
+                                <TextBlock Text="Mascheramento Stelle" FontWeight="SemiBold" VerticalAlignment="Center" FontSize="15" Foreground="White"/>
+                            </StackPanel>
+                            
+                            <StackPanel Spacing="8" IsVisible="{Binding ShowStarMask}">
+                                <StackPanel>
+                                    <TextBlock Text="Soglia (Sigma)" Classes="paramLabel"/>
+                                    <Grid ColumnDefinitions="Auto, 10, *">
+                                        <TextBox Grid.Column="0" Name="StarThresholdBox" Classes="valueBox"
+                                                 Text="{Binding StarThreshold, StringFormat=N1}" 
+                                                 LostFocus="OnManualInputCommit" KeyDown="OnInputKeyDown"/>
+                                        <Slider Grid.Column="2" Classes="star" 
+                                                Minimum="0.1" Maximum="20.0" Value="{Binding StarThreshold}" 
+                                                TickFrequency="0.1" IsSnapToTickEnabled="True" VerticalAlignment="Center"/>
+                                    </Grid>
+                                </StackPanel>
+                                
+                                <StackPanel>
+                                    <TextBlock Text="Diametro Minimo (px)" Classes="paramLabel" 
+                                               ToolTip.Tip="Ignora stelle/rumore più piccoli di questo diametro."/>
+                                    <Grid ColumnDefinitions="Auto, 10, *">
+                                        <TextBox Grid.Column="0" Name="MinStarDiameterBox" Classes="valueBox"
+                                                 Text="{Binding MinStarDiameter}" 
+                                                 LostFocus="OnManualInputCommit" KeyDown="OnInputKeyDown"/>
+                                        <Slider Grid.Column="2" Classes="star" 
+                                                Minimum="1" Maximum="10" Value="{Binding MinStarDiameter}" 
+                                                TickFrequency="1" IsSnapToTickEnabled="True" VerticalAlignment="Center"/>
+                                    </Grid>
+                                </StackPanel>
+
+                                <StackPanel>
+                                    <TextBlock Text="Dilatazione (px)" Classes="paramLabel"/>
+                                    <Grid ColumnDefinitions="Auto, 10, *">
+                                        <TextBox Grid.Column="0" Name="StarDilationBox" Classes="valueBox"
+                                                 Text="{Binding StarDilation}" 
+                                                 LostFocus="OnManualInputCommit" KeyDown="OnInputKeyDown"/>
+                                        <Slider Grid.Column="2" Classes="star" 
+                                                Minimum="0" Maximum="20" Value="{Binding StarDilation}" 
+                                                TickFrequency="1" IsSnapToTickEnabled="True" VerticalAlignment="Center"/>
+                                    </Grid>
+                                </StackPanel>
+                            </StackPanel>
+                        </StackPanel>
+
+                    </StackPanel>
+                </ScrollViewer>
+
+                <StackPanel Grid.Row="2" Spacing="10" Margin="0,10,0,0">
+                    <Separator Background="{DynamicResource Border.WhiteDimBrush}" Opacity="0.3" Margin="0,5"/>
+                    <Panel>
+                        <StackPanel Spacing="8" VerticalAlignment="Center" IsVisible="{Binding IsBusy}">
+                            <TextBlock Text="{Binding StatusMessage}" HorizontalAlignment="Center" 
+                                       FontStyle="Italic" FontSize="13" FontWeight="SemiBold" Opacity="0.9"/>
+                            <ProgressBar IsIndeterminate="True" Height="6" 
+                                         Foreground="{DynamicResource ActionPrimaryBackgroundBrush}"
+                                         HorizontalAlignment="Stretch" CornerRadius="3"/>
+                        </StackPanel>
+
+                        <Panel IsVisible="{Binding !IsBusy}">
+                            <Button Content="Calcola Anteprima" Command="{Binding CalculateCommand}" 
+                                    Classes="calculate" 
+                                    IsVisible="{Binding IsSetupVisible}"
+                                    HorizontalAlignment="Stretch"/>
+
+                            <Grid ColumnDefinitions="*,10,*" IsVisible="{Binding IsResultActionsVisible}">
+                                <Button Grid.Column="0" Content="Annulla" Command="{Binding CancelCommand}" Classes="cancel" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"/>
+                                <Button Grid.Column="2" Content="Applica" Command="{Binding ApplyBatchCommand}" Classes="apply" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"/>
+                            </Grid>
+                        </Panel>
+                    </Panel>
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <Border Grid.Column="1" Background="{DynamicResource ToolWindowBackgroundBrush}" Padding="10">
+            <Border Name="PreviewBorder" Background="{DynamicResource ToolPreviewBackgroundBrush}" ClipToBounds="True"
+                    PointerPressed="OnPreviewPointerPressed" 
+                    PointerReleased="OnPreviewPointerReleased" 
+                    PointerMoved="OnPreviewPointerMoved" 
+                    PointerWheelChanged="OnPreviewPointerWheelChanged"
+                    SizeChanged="OnPreviewSizeChanged">
+                <Grid>
+                    <Canvas Name="ViewportCanvas" RenderTransformOrigin="0,0">
+                        <Canvas.RenderTransform>
+                            <TransformGroup>
+                                <ScaleTransform ScaleX="{Binding Viewport.Scale}" ScaleY="{Binding Viewport.Scale}"/>
+                                <TranslateTransform X="{Binding Viewport.OffsetX}" Y="{Binding Viewport.OffsetY}"/>
+                            </TransformGroup>
+                        </Canvas.RenderTransform>
+
+                        <Image Source="{Binding ActiveRenderer.Image}" Stretch="None" RenderOptions.BitmapInterpolationMode="None"/>
+                        
+                        <Panel IsVisible="{Binding IsSetupVisible}">
+                            <Image Source="{Binding CometMaskOverlay}" 
+                                   IsVisible="{Binding ShowCometMask}"
+                                   Stretch="None" RenderOptions.BitmapInterpolationMode="None" Opacity="0.5" IsHitTestVisible="False"/>
+
+                            <Image Source="{Binding StarMaskOverlay}" 
+                                   IsVisible="{Binding ShowStarMask}"
+                                   Stretch="None" RenderOptions.BitmapInterpolationMode="None" Opacity="0.5" IsHitTestVisible="False"/>
+                        </Panel>
+                    </Canvas>
+                    
+                    <Border HorizontalAlignment="Left" VerticalAlignment="Top" Margin="10" Padding="8,4" 
+                            Background="{DynamicResource OverlayTextBackgroundBrush}" CornerRadius="4" IsHitTestVisible="False">
+                        <TextBlock Text="{Binding Viewport.Scale, StringFormat={}{0:P0}}" Foreground="{DynamicResource OverlayTextForegroundBrush}" FontSize="14" FontWeight="Bold"/>
+                    </Border>
+
+                    <StackPanel Orientation="Horizontal" Spacing="4" Margin="10" HorizontalAlignment="Left" VerticalAlignment="Bottom" ZIndex="1" PointerPressed="OnControlsPointerPressed" IsEnabled="{Binding IsInteractionEnabled}">
+                        <Button Command="{Binding Navigator.MoveToFirstCommand}" ToolTip.Tip="Prima"><avalonia:MaterialIcon Kind="ChevronDoubleLeft" Width="16" Height="16"/></Button>
+                        <Button Command="{Binding Navigator.PreviousCommand}" ToolTip.Tip="Precedente"><avalonia:MaterialIcon Kind="ChevronLeft" Width="16" Height="16"/></Button>
+                        <Border Background="#66000000" CornerRadius="4" Padding="8,0" VerticalAlignment="Stretch">
+                            <TextBlock Text="{Binding CurrentImageText}" VerticalAlignment="Center" Foreground="White" FontWeight="Bold" FontSize="12"/>
+                        </Border>
+                        <Button Command="{Binding Navigator.NextCommand}" ToolTip.Tip="Successiva"><avalonia:MaterialIcon Kind="ChevronRight" Width="16" Height="16"/></Button>
+                        <Button Command="{Binding Navigator.MoveToLastCommand}" ToolTip.Tip="Ultima"><avalonia:MaterialIcon Kind="ChevronDoubleRight" Width="16" Height="16"/></Button>
+                    </StackPanel>
+                    
+                    <StackPanel Orientation="Horizontal" Spacing="4" Margin="10" HorizontalAlignment="Right" VerticalAlignment="Bottom" ZIndex="1" PointerPressed="OnControlsPointerPressed">
+                        <Button Click="OnZoomOutClicked" ToolTip.Tip="Zoom Out"><avalonia:MaterialIcon Kind="Minus" Width="16" Height="16"/></Button>
+                        <Button Click="OnZoomInClicked" ToolTip.Tip="Zoom In"><avalonia:MaterialIcon Kind="Plus" Width="16" Height="16"/></Button>
+                        <Button Command="{Binding ResetViewCommand}" ToolTip.Tip="Adatta alla finestra"><avalonia:MaterialIcon Kind="FitToScreen" Width="16" Height="16"/></Button>
+                        <Path Data="M0,0 V18" Stroke="#666666" StrokeThickness="1" Margin="8,4,8,4" VerticalAlignment="Center" />
+                        <Button Command="{Binding ResetThresholdsCommand}" ToolTip.Tip="Reset Stretch"><avalonia:MaterialIcon Kind="Contrast" Width="16" Height="16"/></Button>
+                    </StackPanel>
+                </Grid>
+            </Border>
+        </Border>
+    </Grid>
+</Window>

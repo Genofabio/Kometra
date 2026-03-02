@@ -1,0 +1,300 @@
+﻿<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:sys="using:System" 
+        xmlns:avalonia="clr-namespace:Material.Icons.Avalonia;assembly=Material.Icons.Avalonia"
+        xmlns:vm="clr-namespace:Kometra.ViewModels.ImportExport"
+        xmlns:models="using:Kometra.Models.Export"
+        xmlns:converters="using:Avalonia.Data.Converters"
+        xmlns:converters1="clr-namespace:Kometra.Converters"
+        x:Class="Kometra.Views.ExportView"
+        x:DataType="vm:ExportViewModel"
+        Title="Esportazione immagine"
+        Width="1150" Height="640"
+        MinWidth="1000" MinHeight="600"
+        WindowStartupLocation="CenterOwner"
+        Background="{DynamicResource ToolWindowBackgroundBrush}"
+        CanResize="True"
+        Focusable="True">
+
+    <Window.Resources>
+        <converters1:CompressionNameConverter x:Key="CompressionConverter"/>
+    </Window.Resources>
+
+    <Window.Styles>
+        <StyleInclude Source="/Styles/AlignmentToolStyles.axaml" />
+        
+        <Style Selector="ListBoxItem">
+            <Setter Property="Padding" Value="6,4"/>
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="CornerRadius" Value="4"/>
+        </Style>
+        <Style Selector="ListBoxItem:selected /template/ ContentPresenter">
+            <Setter Property="Background" Value="#1FFFFFFF"/>
+        </Style>
+        
+        <Style Selector="TextBlock.sectionHeader">
+            <Setter Property="FontSize" Value="11"/>
+            <Setter Property="FontWeight" Value="Bold"/>
+            <Setter Property="Opacity" Value="0.7"/>
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="Margin" Value="0,0,0,6"/>
+        </Style>
+
+        <Style Selector="Separator">
+            <Setter Property="Background" Value="{DynamicResource Border.WhiteDimBrush}"/>
+            <Setter Property="Opacity" Value="0.3"/>
+            <Setter Property="Margin" Value="0,15"/>
+        </Style>
+    </Window.Styles>
+
+    <Grid RowDefinitions="*, Auto">
+        <Grid Grid.Row="0" ColumnDefinitions="320, *, 350">
+            
+            <Border Grid.Column="0" Background="{DynamicResource ToolPanelBackgroundBrush}" 
+                    BorderBrush="{DynamicResource Border.WhiteDimBrush}" BorderThickness="0,0,1,0"
+                    IsEnabled="{Binding IsInteractionEnabled}">
+                <Grid RowDefinitions="Auto, *">
+                    <StackPanel Grid.Row="0" Spacing="6" Margin="20,20,20,10">
+                        <TextBlock Text="ESPORTAZIONE" FontWeight="Bold" Foreground="White" FontSize="18"/>
+                        <Separator Margin="0,10,0,0"/>
+                    </StackPanel>
+
+                    <Grid Grid.Row="1" RowDefinitions="Auto, *, Auto">
+                        <StackPanel Grid.Row="0" Margin="20,6,20,5">
+                            <TextBlock Text="FILE DA SALVARE" Classes="sectionHeader"/>
+                            <TextBlock Text="Seleziona i file da elaborare." FontSize="11" Opacity="0.5" FontStyle="Italic"/>
+                        </StackPanel>
+
+                        <Border Grid.Row="1" Margin="15,10,15,10" Background="{DynamicResource ToolWindowBackgroundBrush}" CornerRadius="4" BorderBrush="#33FFFFFF" BorderThickness="1">
+                            <ListBox ItemsSource="{Binding Items}" SelectedItem="{Binding SelectedPreviewItem}" SelectionMode="Single" Background="Transparent">
+                                <ListBox.ItemTemplate>
+                                    <DataTemplate DataType="models:ExportableItem">
+                                        <Grid ColumnDefinitions="24, *">
+                                            <CheckBox IsChecked="{Binding IsSelected}" VerticalAlignment="Center"/>
+                                            <TextBlock Grid.Column="1" Text="{Binding FileName}" FontSize="12" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" Margin="5,0"/>
+                                        </Grid>
+                                    </DataTemplate>
+                                </ListBox.ItemTemplate>
+                            </ListBox>
+                        </Border>
+
+                        <Grid Grid.Row="2" ColumnDefinitions="*, *" Margin="15,0,15,15" ColumnSpacing="10">
+                            <Button Grid.Column="0" Command="{Binding SelectAllCommand}" 
+                                    Content="Seleziona tutto" 
+                                    HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" VerticalContentAlignment="Center"
+                                    Padding="0" Height="32" FontSize="10" FontWeight="Bold"
+                                    Classes="calculate"/>
+                            
+                            <Button Grid.Column="1" Command="{Binding DeselectAllCommand}" 
+                                    Content="Deseleziona tutto" 
+                                    HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" VerticalContentAlignment="Center"
+                                    Padding="0" Height="32" FontSize="10" FontWeight="Bold"
+                                    Classes="cancel"/>
+                        </Grid>
+                    </Grid>
+                </Grid>
+            </Border>
+
+            <Border Grid.Column="1" Background="{DynamicResource ToolWindowBackgroundBrush}" Padding="10">
+                <Border Name="PreviewBorder" Background="{DynamicResource ToolPreviewBackgroundBrush}" ClipToBounds="True"
+                        PointerPressed="OnPreviewPointerPressed" PointerReleased="OnPreviewPointerReleased" 
+                        PointerMoved="OnPreviewPointerMoved" PointerWheelChanged="OnPreviewPointerWheelChanged">
+                    <Grid>
+                        <Canvas Name="ViewportCanvas" RenderTransformOrigin="0,0">
+                            <Canvas.RenderTransform>
+                                <TransformGroup>
+                                    <ScaleTransform ScaleX="{Binding Viewport.Scale}" ScaleY="{Binding Viewport.Scale}"/>
+                                    <TranslateTransform X="{Binding Viewport.OffsetX}" Y="{Binding Viewport.OffsetY}"/>
+                                </TransformGroup>
+                            </Canvas.RenderTransform>
+                            <Image Source="{Binding ActiveRenderer.Image}" Stretch="None" RenderOptions.BitmapInterpolationMode="None"/>
+                        </Canvas>
+
+                        <Border IsVisible="{Binding IsLoadingPreview}" Background="#99000000" HorizontalAlignment="Stretch" VerticalAlignment="Stretch">
+                            <StackPanel VerticalAlignment="Center" Spacing="10">
+                                <ProgressBar IsIndeterminate="True" Width="150" HorizontalAlignment="Center"/>
+                                <TextBlock Text="Rendering anteprima..." HorizontalAlignment="Center" FontSize="12" Foreground="White"/>
+                            </StackPanel>
+                        </Border>
+
+                        <StackPanel Orientation="Horizontal" Spacing="4" Margin="10" 
+                                    HorizontalAlignment="Left" VerticalAlignment="Bottom" ZIndex="1" 
+                                    PointerPressed="OnControlsPointerPressed" 
+                                    IsVisible="{Binding ActiveRenderer, Converter={x:Static converters:ObjectConverters.IsNotNull}}">
+                            
+                            <Button Command="{Binding Navigator.MoveToFirstCommand}" ToolTip.Tip="Prima Immagine" Classes="ghostBtn" Padding="5">
+                                <avalonia:MaterialIcon Kind="ChevronDoubleLeft" Width="16" Height="16"/>
+                            </Button>
+                            <Button Command="{Binding Navigator.PreviousCommand}" ToolTip.Tip="Precedente" Classes="ghostBtn" Padding="5">
+                                <avalonia:MaterialIcon Kind="ChevronLeft" Width="16" Height="16"/>
+                            </Button>
+                            
+                            <Border Background="{DynamicResource OverlayTextBackgroundBrush}" CornerRadius="4" Padding="8,4" Margin="4,0">
+                                <TextBlock Text="{Binding CurrentImageText}" Foreground="White" FontWeight="Bold" FontSize="12" VerticalAlignment="Center"/>
+                            </Border>
+                            
+                            <Button Command="{Binding Navigator.NextCommand}" ToolTip.Tip="Successiva" Classes="ghostBtn" Padding="5">
+                                <avalonia:MaterialIcon Kind="ChevronRight" Width="16" Height="16"/>
+                            </Button>
+                            <Button Command="{Binding Navigator.MoveToLastCommand}" ToolTip.Tip="Ultima Immagine" Classes="ghostBtn" Padding="5">
+                                <avalonia:MaterialIcon Kind="ChevronDoubleRight" Width="16" Height="16"/>
+                            </Button>
+                        </StackPanel>
+                        
+                        <StackPanel Orientation="Horizontal" Spacing="4" Margin="10" 
+                                    HorizontalAlignment="Right" VerticalAlignment="Bottom" ZIndex="1" 
+                                    PointerPressed="OnControlsPointerPressed"
+                                    IsVisible="{Binding ActiveRenderer, Converter={x:Static converters:ObjectConverters.IsNotNull}}">
+                            
+                            <Button Click="OnZoomOutClicked" ToolTip.Tip="Zoom Out" Classes="ghostBtn" Padding="5">
+                                <avalonia:MaterialIcon Kind="Minus" Width="16" Height="16"/>
+                            </Button>
+                            <Button Click="OnZoomInClicked" ToolTip.Tip="Zoom In" Classes="ghostBtn" Padding="5">
+                                <avalonia:MaterialIcon Kind="Plus" Width="16" Height="16"/>
+                            </Button>
+                            <Button Click="OnFitViewClicked" ToolTip.Tip="Adatta allo Schermo" Classes="ghostBtn" Padding="5">
+                                <avalonia:MaterialIcon Kind="FitToScreen" Width="16" Height="16"/>
+                            </Button>
+
+                            <Path Data="M0,0 V18" Stroke="#666666" StrokeThickness="1" Margin="6,0" VerticalAlignment="Center"/>
+
+                            <Button Command="{Binding ResetThresholdsCommand}" ToolTip.Tip="Reset Soglie (Auto)" Classes="ghostBtn" Padding="5">
+                                <avalonia:MaterialIcon Kind="Contrast" Width="16" Height="16"/>
+                            </Button>
+                        </StackPanel>
+                        
+                        <Border HorizontalAlignment="Left" VerticalAlignment="Top" Margin="10" Padding="8,4" 
+                                Background="{DynamicResource OverlayTextBackgroundBrush}" CornerRadius="4"
+                                IsVisible="{Binding ActiveRenderer, Converter={x:Static converters:ObjectConverters.IsNotNull}}">
+                            <TextBlock Text="{Binding Viewport.Scale, StringFormat='{}{0:P0}'}" Foreground="White" FontSize="12" FontWeight="SemiBold"/>
+                        </Border>
+
+                    </Grid>
+                </Border>
+            </Border>
+            
+            <Border Grid.Column="2" Background="{DynamicResource ToolPanelBackgroundBrush}" BorderBrush="{DynamicResource Border.WhiteDimBrush}" BorderThickness="1,0,0,0" IsEnabled="{Binding IsInteractionEnabled}">
+                
+                <Grid RowDefinitions="Auto, *">
+                    
+                    <StackPanel Grid.Row="0" Margin="20,20,20,0" Spacing="6">
+                        <TextBlock Text="CONFIGURAZIONE" FontWeight="Bold" Foreground="White" FontSize="16"/>
+                        <Separator Margin="0,10,0,0"/>
+                    </StackPanel>
+
+                    <ScrollViewer Grid.Row="1" Padding="0,15,0,0" VerticalScrollBarVisibility="Auto">
+                        <StackPanel Margin="20,0,20,60" Spacing="0">
+
+                            <TextBlock Text="DESTINAZIONE" Classes="sectionHeader"/>
+                            <Grid ColumnDefinitions="*, Auto" ColumnSpacing="6" Margin="0,5,0,0">
+                                <TextBox Text="{Binding OutputDirectory}" IsReadOnly="True" FontSize="11" Height="30" VerticalContentAlignment="Center"/>
+                                <Button Grid.Column="1" Command="{Binding SelectFolderCommand}" Width="36" Height="30" Padding="0">
+                                    <avalonia:MaterialIcon Kind="FolderOpen" Width="16"/>
+                                </Button>
+                            </Grid>
+                            <TextBox Text="{Binding BaseFileName}" Watermark="Nome base (Opzionale)" FontSize="11" Height="30" Margin="0,8,0,0" VerticalContentAlignment="Center"/>
+
+                            <Separator/>
+
+                            <TextBlock Text="FORMATO OUTPUT" Classes="sectionHeader"/>
+                            <ComboBox ItemsSource="{Binding AvailableFormats}" SelectedItem="{Binding SelectedFormat}" HorizontalAlignment="Stretch" Margin="0,5,0,0"/>
+
+                            <Separator/>
+
+                            <TextBlock Text="OPZIONI DI SALVATAGGIO" Classes="sectionHeader" Margin="0,0,0,10"/>
+                            
+                            <Border Background="{DynamicResource ToolWindowBackgroundBrush}" CornerRadius="4" Padding="15" BorderBrush="{DynamicResource Border.WhiteDimBrush}" BorderThickness="1">
+                                <StackPanel Spacing="15">
+                                    
+                                    <StackPanel IsVisible="{Binding IsFitsOptionsVisible}" Spacing="5">
+                                        <TextBlock Text="Metodologia di compressione" FontSize="11" Opacity="0.6"/>
+                                        <ComboBox ItemsSource="{Binding AvailableCompressions}" 
+                                                  SelectedItem="{Binding SelectedCompression}" 
+                                                  HorizontalAlignment="Stretch"
+                                                  PointerWheelChanged="OnComboBoxPointerWheelChanged">
+                                            <ComboBox.ItemTemplate>
+                                                <DataTemplate>
+                                                    <TextBlock Text="{Binding Converter={StaticResource CompressionConverter}}"/>
+                                                </DataTemplate>
+                                            </ComboBox.ItemTemplate>
+                                        </ComboBox>
+                                    </StackPanel>
+
+                                    <StackPanel IsVisible="{Binding IsJpegOptionsVisible}" Spacing="5">
+                                        <Grid ColumnDefinitions="*, Auto">
+                                            <TextBlock Text="Qualità Compressione" FontSize="11" Opacity="0.6"/>
+                                            <TextBlock Text="{Binding JpegQuality, StringFormat='{}{0}%'}" FontSize="11" FontWeight="Bold" Grid.Column="1"/>
+                                        </Grid>
+                                        <Slider Value="{Binding JpegQuality}" Minimum="10" Maximum="100"/>
+                                    </StackPanel>
+
+                                    <Separator Background="{DynamicResource Border.WhiteDimBrush}" Opacity="0.2" Margin="0,-10,0,0"
+                                               IsVisible="{Binding IsJpegOptionsVisible}"/>
+
+                                    <StackPanel IsVisible="{Binding IsVisualProcessingVisible}" Spacing="10">
+                                        <StackPanel Spacing="5">
+                                            <TextBlock Text="Gestione Soglie (Stretch)" FontSize="11" Opacity="0.6"/>
+                                            <ComboBox SelectedItem="{Binding StretchMode}" HorizontalAlignment="Stretch" FontSize="11" Margin="0,0,0,8"
+                                                      PointerWheelChanged="OnComboBoxPointerWheelChanged">
+                                                <sys:String>Auto Stretch</sys:String>
+                                                <sys:String>Manuale</sys:String>
+                                            </ComboBox>
+                                        </StackPanel>
+                                        
+                                        <StackPanel IsVisible="{Binding IsManualStretch}" Spacing="8">
+                                            <StackPanel Spacing="2">
+                                                <Grid ColumnDefinitions="*, Auto">
+                                                    <TextBlock Text="Punto Nero" FontSize="10" Opacity="0.6"/>
+                                                    <TextBlock Text="{Binding CurrentBlackPoint, StringFormat='{}{0:N0}'}" FontSize="10" Grid.Column="1"/>
+                                                </Grid>
+                                                <Slider Value="{Binding CurrentBlackPoint}" Minimum="0" Maximum="65535"/>
+                                            </StackPanel>
+                                            <StackPanel Spacing="2">
+                                                <Grid ColumnDefinitions="*, Auto">
+                                                    <TextBlock Text="Punto Bianco" FontSize="10" Opacity="0.6"/>
+                                                    <TextBlock Text="{Binding CurrentWhitePoint, StringFormat='{}{0:N0}'}" FontSize="10" Grid.Column="1"/>
+                                                </Grid>
+                                                <Slider Value="{Binding CurrentWhitePoint}" Minimum="0" Maximum="65535"/>
+                                            </StackPanel>
+                                        </StackPanel>
+                                    </StackPanel>
+
+                                    <StackPanel IsVisible="{Binding CanMergeToMef}">
+                                        <Separator Background="{DynamicResource Border.WhiteDimBrush}" Opacity="0.2" Margin="0,0,0,10"/>
+                                        <TextBlock Text="Merge" FontSize="11" Opacity="0.6"/>
+                                        <CheckBox IsChecked="{Binding MergeIntoSingleFile}" 
+                                                  Content="Unisci in un unico file (MEF)" 
+                                                  FontSize="12" 
+                                                  VerticalContentAlignment="Center"/>
+                                    </StackPanel>
+
+                                </StackPanel>
+                            </Border>
+
+                        </StackPanel>
+                    </ScrollViewer>
+                </Grid>
+            </Border>
+        </Grid>
+
+        <Border Grid.Row="1" Background="{DynamicResource ToolPanelBackgroundBrush}" BorderBrush="{DynamicResource Border.WhiteDimBrush}" BorderThickness="0,1,0,0" Padding="20,15">
+            <Grid ColumnDefinitions="*, Auto">
+                <StackPanel Grid.Column="0" VerticalAlignment="Center" Margin="0,0,30,0">
+                    <StackPanel IsVisible="{Binding IsExporting}" Spacing="5">
+                        <TextBlock Text="{Binding StatusText}" FontSize="12" FontWeight="SemiBold" Foreground="White"/>
+                        <ProgressBar Value="{Binding ProgressValue}" Maximum="100" Height="6"/>
+                    </StackPanel>
+                    <TextBlock Text="{Binding StatusText}" IsVisible="{Binding !IsExporting}" Opacity="0.5" FontSize="12" FontStyle="Italic"/>
+                </StackPanel>
+
+                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="12">
+                    <Button Content="Annulla" Command="{Binding CancelCommand}" Width="100" 
+                            Classes="cancel" HorizontalContentAlignment="Center" VerticalContentAlignment="Center"/>
+                    
+                    <Button Content="Esporta" Command="{Binding ConfirmExportCommand}" Width="100"
+                            Classes="apply" IsEnabled="{Binding !IsExporting}" HorizontalContentAlignment="Center" VerticalContentAlignment="Center"/>
+                </StackPanel>
+            </Grid>
+        </Border>
+    </Grid>
+</Window>

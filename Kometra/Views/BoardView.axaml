@@ -1,0 +1,120 @@
+﻿<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             
+             xmlns:vm="clr-namespace:Kometra.ViewModels"
+             xmlns:nodes="clr-namespace:Kometra.ViewModels.Nodes"
+             xmlns:views="clr-namespace:Kometra.Views"
+             xmlns:controls="clr-namespace:Kometra.Controls"
+             
+             mc:Ignorable="d" d:DesignWidth="800" d:DesignHeight="450"
+             x:Class="Kometra.Views.BoardView"
+             x:DataType="vm:BoardViewModel"
+             
+             Focusable="True"
+             ClipToBounds="True"
+             
+             PointerPressed="OnPointerPressed"
+             PointerReleased="OnPointerReleased"
+             PointerMoved="OnPointerMoved"
+             PointerWheelChanged="OnPointerWheelChanged"
+             SizeChanged="OnBoardSizeChanged">
+
+    <UserControl.KeyBindings>
+        <KeyBinding Gesture="Ctrl+Z" Command="{Binding UndoCommand}" />
+        <KeyBinding Gesture="Ctrl+Y" Command="{Binding RedoCommand}" />
+
+        <KeyBinding Gesture="Left"  Command="{Binding PanBoardCommand}" CommandParameter="left" />
+        <KeyBinding Gesture="Right" Command="{Binding PanBoardCommand}" CommandParameter="right" />
+        <KeyBinding Gesture="Up"    Command="{Binding PanBoardCommand}" CommandParameter="up" />
+        <KeyBinding Gesture="Down"  Command="{Binding PanBoardCommand}" CommandParameter="down" />
+
+        <KeyBinding Gesture="Add"      Command="{Binding ZoomBoardCommand}" CommandParameter="in" />
+        <KeyBinding Gesture="Subtract" Command="{Binding ZoomBoardCommand}" CommandParameter="out" />
+        
+        <KeyBinding Gesture="Ctrl+Add"      Command="{Binding ZoomBoardCommand}" CommandParameter="in" />
+        <KeyBinding Gesture="Ctrl+Subtract" Command="{Binding ZoomBoardCommand}" CommandParameter="out" />
+    </UserControl.KeyBindings>
+
+    <Grid>
+        <controls:GridBackground x:Name="BackgroundGrid"
+                                 Background="{DynamicResource AppBackgroundBrush}"
+                                 GridLinesBrush="{DynamicResource GridLineBrush}"
+                                 OffsetX="{Binding Viewport.OffsetX}"
+                                 OffsetY="{Binding Viewport.OffsetY}"
+                                 Scale="{Binding Viewport.Scale}"
+                                 IsHitTestVisible="False" />
+
+        <Grid x:Name="ViewportContainer" 
+              Background="Transparent"
+              ClipToBounds="False">
+            
+            <Grid.RenderTransform>
+                <TranslateTransform X="0" Y="0" />
+            </Grid.RenderTransform>
+
+            <ItemsControl ItemsSource="{Binding Connections}"
+                          IsHitTestVisible="False"
+                          RenderTransformOrigin="0,0"
+                          ClipToBounds="False"> 
+                
+                <ItemsControl.RenderTransform>
+                    <TransformGroup>
+                        <ScaleTransform ScaleX="{Binding Viewport.Scale}" ScaleY="{Binding Viewport.Scale}" />
+                        <TranslateTransform X="{Binding Viewport.OffsetX}" Y="{Binding Viewport.OffsetY}" />
+                    </TransformGroup>
+                </ItemsControl.RenderTransform>
+
+                <ItemsControl.ItemsPanel>
+                    <ItemsPanelTemplate>
+                        <Canvas ClipToBounds="False" />
+                    </ItemsPanelTemplate>
+                </ItemsControl.ItemsPanel>
+
+                <ItemsControl.DataTemplates>
+                    <DataTemplate DataType="nodes:ConnectionViewModel">
+                        <controls:ConnectionControl IsHighlighted="{Binding IsHighlighted}" />
+                    </DataTemplate>
+                </ItemsControl.DataTemplates>
+            </ItemsControl>
+
+            <ItemsControl ItemsSource="{Binding Nodes}" 
+                          Background="Transparent"
+                          RenderTransformOrigin="0,0" 
+                          ClipToBounds="False">
+                
+                <ItemsControl.RenderTransform>
+                    <TransformGroup>
+                        <ScaleTransform ScaleX="{Binding Viewport.Scale}" ScaleY="{Binding Viewport.Scale}" />
+                        <TranslateTransform X="{Binding Viewport.OffsetX}" Y="{Binding Viewport.OffsetY}" />
+                    </TransformGroup>
+                </ItemsControl.RenderTransform>
+
+                <ItemsControl.DataTemplates>
+                    <DataTemplate DataType="nodes:SingleImageNodeViewModel">
+                        <views:SingleImageNodeView />
+                    </DataTemplate>
+                    <DataTemplate DataType="nodes:MultipleImagesNodeViewModel">
+                        <views:MultipleImagesNodeView />
+                    </DataTemplate>
+                </ItemsControl.DataTemplates>
+
+                <ItemsControl.ItemsPanel>
+                    <ItemsPanelTemplate>
+                        <Canvas Background="Transparent" />
+                    </ItemsPanelTemplate>
+                </ItemsControl.ItemsPanel>
+
+                <ItemsControl.ItemContainerTheme>
+                    <ControlTheme TargetType="ContentPresenter">
+                        <Setter Property="Canvas.Left" Value="{Binding X, DataType=nodes:BaseNodeViewModel}" />
+                        <Setter Property="Canvas.Top" Value="{Binding Y, DataType=nodes:BaseNodeViewModel}" />
+                        <Setter Property="Canvas.ZIndex" Value="{Binding ZIndex, DataType=nodes:BaseNodeViewModel}" />
+                    </ControlTheme>
+                </ItemsControl.ItemContainerTheme>
+
+            </ItemsControl>
+        </Grid>
+    </Grid>
+</UserControl>

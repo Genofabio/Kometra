@@ -1,0 +1,32 @@
+﻿<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        
+        xmlns:vm="clr-namespace:Kometra.ViewModels"
+        xmlns:views="clr-namespace:Kometra.Views"
+        xmlns:controls="clr-namespace:Kometra.Controls"
+        
+        mc:Ignorable="d" d:DesignWidth="800" d:DesignHeight="450"
+        x:Class="Kometra.Views.MainWindow"
+        x:DataType="vm:MainWindowViewModel"
+        
+        Icon="/Assets/avalonia-logo.ico"
+        Title="{Binding WindowTitle}" 
+        WindowState="Maximized">
+        
+    <Window.KeyBindings>
+        <KeyBinding Gesture="Ctrl+Z" Command="{Binding BoardVm.UndoCommand}" />
+        <KeyBinding Gesture="Ctrl+Y" Command="{Binding BoardVm.RedoCommand}" />
+        <KeyBinding Gesture="Ctrl+Shift+Z" Command="{Binding BoardVm.RedoCommand}" />
+    </Window.KeyBindings>
+
+    <Grid RowDefinitions="Auto, *">
+        
+        <controls:TopBarMenu Grid.Row="0" />
+
+        <views:BoardView Grid.Row="1" 
+                         DataContext="{Binding BoardVm}" />
+        
+    </Grid>
+</Window>
