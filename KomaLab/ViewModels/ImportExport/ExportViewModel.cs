@@ -108,7 +108,7 @@ public partial class ExportViewModel : ObservableObject, IDisposable
 
     // --- Computed Properties ---
     public bool IsInteractionEnabled => !IsExporting;
-    public bool IsJpegOptionsVisible => SelectedFormat == ExportFormat.Jpeg;
+    public bool IsJpegOptionsVisible => SelectedFormat == ExportFormat.JPEG;
     public bool IsFitsOptionsVisible => SelectedFormat == ExportFormat.Fits;
     public bool IsVisualProcessingVisible => !IsFitsOptionsVisible;
     public bool IsManualStretch => StretchMode == "Manuale" && IsVisualProcessingVisible;
@@ -307,8 +307,8 @@ public partial class ExportViewModel : ObservableObject, IDisposable
     {
         switch (SelectedFormat)
         {
-            case ExportFormat.Jpeg: return ".jpg";
-            case ExportFormat.Png: return ".png";
+            case ExportFormat.JPEG: return ".jpg";
+            case ExportFormat.PNG: return ".png";
             case ExportFormat.Fits:
                 return SelectedCompression != FitsCompressionMode.None ? ".fits.fz" : ".fits";
             default: return ".dat";

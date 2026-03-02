@@ -245,8 +245,8 @@ public class ExportCoordinator : IExportCoordinator
 
         return format switch
         {
-            ExportFormat.Png => ".png",
-            ExportFormat.Jpeg => ".jpg",
+            ExportFormat.PNG => ".png",
+            ExportFormat.JPEG => ".jpg",
             _ => ".dat"
         };
     }

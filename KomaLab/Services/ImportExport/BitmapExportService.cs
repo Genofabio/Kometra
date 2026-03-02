@@ -66,11 +66,11 @@ public class BitmapExportService : IBitmapExportService
 
         // 5. Parametri OpenCV
         int[] prms = null;
-        if (format == ExportFormat.Jpeg)
+        if (format == ExportFormat.JPEG)
         {
             prms = new[] { (int)ImwriteFlags.JpegQuality, quality };
         }
-        else if (format == ExportFormat.Png)
+        else if (format == ExportFormat.PNG)
         {
             prms = new[] { (int)ImwriteFlags.PngCompression, 3 }; 
         }

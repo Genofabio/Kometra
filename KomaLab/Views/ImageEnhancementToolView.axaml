@@ -91,7 +91,7 @@
                                 <StackPanel Spacing="2">
                                     <TextBlock Text="Angolo (gradi):" Classes="labelInfo" ToolTip.Tip="Angolo di rotazione per la sottrazione."/>
                                     <Grid ColumnDefinitions="*, Auto">
-                                        <Slider Minimum="-10" Maximum="10" Value="{Binding RotationAngle}"/>
+                                        <Slider Minimum="-45" Maximum="45" Value="{Binding RotationAngle}"/>
                                         <TextBox x:Name="RotationBox" Text="{Binding RotationAngle, Mode=OneWay, StringFormat={}{0:F1}}"
                                                  Grid.Column="1" Classes="compact" LostFocus="OnManualInputCommit" KeyDown="OnInputKeyDown"/>
                                     </Grid>

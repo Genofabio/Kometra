@@ -5,8 +5,8 @@ namespace KomaLab.Models.Export;
 public enum ExportFormat
 {
     Fits,
-    Png,
-    Jpeg
+    PNG,
+    JPEG
 }
 
 public enum FitsCompressionMode
