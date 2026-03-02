@@ -119,10 +119,36 @@ public class FitsReader
         Debug.WriteLine($"[FitsReader] --- INIZIO READ MATRIX (Pos: {pos}) ---");
 
         int bitpix = GetInternalInt(header, "BITPIX", 0);
+        int naxis = GetInternalInt(header, "NAXIS", 0);
         int width = GetInternalInt(header, "NAXIS1", 0);
         int height = GetInternalInt(header, "NAXIS2", 0);
+        int depth = GetInternalInt(header, "NAXIS3", 1); // Fallback a 1 se manca
         
-        Debug.WriteLine($"[FitsReader] Geometria Rilevata: {width} x {height}, Bitpix: {bitpix}");
+        // 1. FIX: Gestione spettri 1D (es. NAXIS=1) o dimensioni implicite
+        if (naxis >= 1 && height == 0 && width > 0)
+        {
+            height = 1;
+        }
+
+        // 2. FIX CRITICO: Cubi 3D (es. spettro W x 1 x 4 canali)
+        // Trasformiamo i canali Z (profondità) in nuove righe Y (altezza)
+        if (naxis >= 3 && depth > 1)
+        {
+            Debug.WriteLine($"[FitsReader] Rilevato Cubo 3D ({width}x{height}x{depth}). Appiattisco in 2D.");
+            height = height * depth; 
+            
+            // Aggiorniamo l'header per far credere al resto del software che sia sempre stata 2D
+            header.RemoveCard("NAXIS");
+            header.AddCard(new FitsCard("NAXIS", "2", "Flattened 3D to 2D", false));
+            
+            header.RemoveCard("NAXIS2");
+            header.AddCard(new FitsCard("NAXIS2", height.ToString(), "Height multiplied by depth", false));
+            
+            // Pulizia per sicurezza
+            header.RemoveCard("NAXIS3"); 
+        }
+
+        Debug.WriteLine($"[FitsReader] Geometria Rilevata (Finale): {width} x {height}, Bitpix: {bitpix}");
 
         double bzero = GetInternalDouble(header, "BZERO", 0.0);
         double bscale = GetInternalDouble(header, "BSCALE", 1.0);
@@ -130,7 +156,7 @@ public class FitsReader
         // Se dimensioni nulle (es. Primary Header vuoto), saltiamo i dati
         if (width <= 0 || height <= 0) 
         {
-            Debug.WriteLine("[FitsReader] Immagine vuota (NAXIS=0). Salto blocco dati/heap.");
+            Debug.WriteLine("[FitsReader] Immagine vuota (NAXIS=0 o dimensioni non valide). Salto blocco dati/heap.");
             SkipDataBlock(stream, header); 
             return Array.CreateInstance(typeof(byte), 0, 0);
         }

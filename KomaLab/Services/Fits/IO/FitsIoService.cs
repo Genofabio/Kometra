@@ -173,6 +173,8 @@ namespace KomaLab.Services.Fits.IO
                 {
                     var pixelData = FitsDecompression.DecompressImage(s, header, _reader);
                     var normalizedHeader = NormalizeCompressedHeader(header);
+                    
+                    pixelData = ExpandSpectrumToSquare(pixelData, normalizedHeader);
 
                     if (pixelData != null && pixelData.Length > 0) FlipArrayVertical(pixelData);
                     list.Add(new FitsHdu(normalizedHeader, pixelData, false));
@@ -188,9 +190,11 @@ namespace KomaLab.Services.Fits.IO
                 {
                     // Immagine Standard
                     var data = _reader.ReadMatrix(s, header);
-                    if (data != null && data.Length > 0) FlipArrayVertical(data);
-
                     var finalHeader = (hduCount == 0) ? header : PromoteToPrimaryHeader(header);
+                    
+                    data = ExpandSpectrumToSquare(data, finalHeader);
+                    if (data != null && data.Length > 0) FlipArrayVertical(data);
+                    
                     bool isEmpty = data == null || data.Length == 0;
                     
                     list.Add(new FitsHdu(finalHeader, data ?? Array.CreateInstance(typeof(byte), 0, 0), isEmpty));
@@ -362,6 +366,88 @@ namespace KomaLab.Services.Fits.IO
                 }
             }
         });
+        
+        private Array? ExpandSpectrumToSquare(Array? source, FitsHeader header)
+        {
+            if (source == null || source.Length == 0) return source;
+
+            int height = source.GetLength(0); // Righe
+            int width = source.GetLength(1);  // Colonne
+
+            // Se l'immagine è già un'immagine 2D "vera" (es. altezza > 20), non la tocchiamo.
+            // Usiamo 20 come soglia: difficilmente uno spettro ha più di 20 canali/ordini.
+            if (height >= 5 || width <= 1) return source;
+
+            int bandThickness = width / height; 
+    if (bandThickness < 1) bandThickness = 1;
+    int targetHeight = bandThickness * height;
+
+    Type elementType = source.GetType().GetElementType()!;
+    Array expanded = Array.CreateInstance(elementType, targetHeight, width);
+    int bytesPerRow = Buffer.ByteLength(source) / height;
+
+    // --- LOGICA DI NORMALIZZAZIONE (Opzionale ma utile per gli spettri) ---
+    // Se è un array di float o double, controlliamo i valori e li normalizziamo
+    // per evitare che valori come 1e-16 o NaN distruggano il visualizzatore.
+    if (source is float[,] fSource)
+    {
+        float min = float.MaxValue;
+        float max = float.MinValue;
+        
+        // 1. Troviamo il VERO minimo e massimo (ignorando i NaN)
+        foreach (float val in fSource)
+        {
+            if (!float.IsNaN(val) && !float.IsInfinity(val))
+            {
+                if (val < min) min = val;
+                if (val > max) max = val;
+            }
+        }
+        
+        Debug.WriteLine($"[Spettro Debug] Flusso Min: {min}, Max: {max}");
+
+        // Se l'escursione è microscopica o ci sono valori anomali, forziamo una normalizzazione a 65535
+        float range = max - min;
+        if (range > 0 && (max < 0.1f || max > 1000000f)) 
+        {
+            Debug.WriteLine("[Spettro Debug] Valori microscopici/enormi rilevati. Normalizzo per la visualizzazione...");
+            for (int y = 0; y < height; y++)
+            {
+                for (int x = 0; x < width; x++)
+                {
+                    float val = fSource[y, x];
+                    if (float.IsNaN(val) || float.IsInfinity(val)) fSource[y, x] = 0;
+                    else fSource[y, x] = ((val - min) / range) * 65535.0f; // Stira tra 0 e 65535
+                }
+            }
+        }
+    }
+
+    // --- COPIA ESPANSA (Schiaccia e spalma le righe) ---
+    for (int originalY = 0; originalY < height; originalY++)
+    {
+        int srcOffset = originalY * bytesPerRow;
+        for (int rep = 0; rep < bandThickness; rep++)
+        {
+            int destY = (originalY * bandThickness) + rep;
+            int destOffset = destY * bytesPerRow;
+            Buffer.BlockCopy(source, srcOffset, expanded, destOffset, bytesPerRow);
+        }
+    }
+
+    // --- AGGIORNAMENTO HEADER ---
+    header.RemoveCard("NAXIS");
+    header.AddCard(new FitsCard("NAXIS", "2", "Forced to 2D for visualization", false));
+
+    header.RemoveCard("NAXIS2");
+    header.AddCard(new FitsCard("NAXIS2", targetHeight.ToString(), "Expanded multi-channel spectrum", false));
+    
+    // Rimuoviamo DATAMIN/DATAMAX originali perché ora sono sballati e potrebbero confondere l'ActiveRenderer
+    header.RemoveCard("DATAMIN");
+    header.RemoveCard("DATAMAX");
+
+    return expanded;
+}
 
         // =======================================================================
         // HELPER & UTILS
