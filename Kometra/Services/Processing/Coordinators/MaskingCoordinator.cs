@@ -147,6 +147,6 @@ public class MaskingCoordinator : IMaskingCoordinator
         
         // InpaintStars usa le maschere per generare il risultato.
         // Alla fine di questo blocco, le maschere vengono distrutte liberando memoria.
-        return _inpaintingEngine.InpaintStars(src, starMask);
+        return _inpaintingEngine.InpaintStars(src, starMask, cometMask);
     }
 }

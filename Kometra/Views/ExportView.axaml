@@ -248,14 +248,14 @@
                                                     <TextBlock Text="Punto Nero" FontSize="10" Opacity="0.6"/>
                                                     <TextBlock Text="{Binding CurrentBlackPoint, StringFormat='{}{0:N0}'}" FontSize="10" Grid.Column="1"/>
                                                 </Grid>
-                                                <Slider Value="{Binding CurrentBlackPoint}" Minimum="0" Maximum="65535"/>
+                                                <Slider Value="{Binding CurrentBlackPoint}" Minimum="{Binding DataMin}" Maximum="{Binding DataMax}"/>
                                             </StackPanel>
                                             <StackPanel Spacing="2">
                                                 <Grid ColumnDefinitions="*, Auto">
                                                     <TextBlock Text="Punto Bianco" FontSize="10" Opacity="0.6"/>
                                                     <TextBlock Text="{Binding CurrentWhitePoint, StringFormat='{}{0:N0}'}" FontSize="10" Grid.Column="1"/>
                                                 </Grid>
-                                                <Slider Value="{Binding CurrentWhitePoint}" Minimum="0" Maximum="65535"/>
+                                                <Slider Value="{Binding CurrentWhitePoint}" Minimum="{Binding DataMin}" Maximum="{Binding DataMax}"/>
                                             </StackPanel>
                                         </StackPanel>
                                     </StackPanel>

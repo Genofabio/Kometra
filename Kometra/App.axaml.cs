@@ -1,13 +1,9 @@
 using System;
-using System.Collections.Generic;
 using System.IO;
 using Avalonia;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
 using Microsoft.Extensions.DependencyInjection;
-using Kometra.ViewModels.Astrometry;
-using Kometra.ViewModels.ImageProcessing;
-using Kometra.ViewModels.ImportExport;
 using Kometra.Infrastructure;
 using Kometra.Services.Astrometry;
 using Kometra.Services.Factories;

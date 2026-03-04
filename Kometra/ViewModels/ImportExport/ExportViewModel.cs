@@ -43,6 +43,9 @@ public partial class ExportViewModel : ObservableObject, IDisposable
     [NotifyPropertyChangedFor(nameof(CurrentBlackPoint))]
     [NotifyPropertyChangedFor(nameof(CurrentWhitePoint))]
     private FitsRenderer? _activeRenderer;
+    
+    [ObservableProperty] private double _dataMin = 0;
+    [ObservableProperty] private double _dataMax = 65535;
 
     [ObservableProperty] private ExportableItem? _selectedPreviewItem;
     [ObservableProperty] private bool _isLoadingPreview;
@@ -153,8 +156,15 @@ public partial class ExportViewModel : ObservableObject, IDisposable
     private async Task ResetThresholds()
     {
         if (_activeRenderer == null) return;
-        StretchMode = "Auto Stretch (Consigliato)";
+
+        // 1. Rimuoviamo l'assegnazione a StretchMode!
+        // Non tocchiamo più la ComboBox.
+    
+        // 2. Chiamiamo direttamente il reset delle soglie
         await _activeRenderer.ResetThresholdsAsync();
+    
+        // 3. Notifichiamo all'interfaccia che i valori sono cambiati
+        // in modo che gli slider si aggiornino visivamente
         OnPropertyChanged(nameof(CurrentBlackPoint));
         OnPropertyChanged(nameof(CurrentWhitePoint));
     }
@@ -250,6 +260,14 @@ public partial class ExportViewModel : ObservableObject, IDisposable
             if (imageHdu == null) return;
             if (token.IsCancellationRequested) return;
 
+            // --- NUOVO: Calcolo asincrono dei limiti minimi e massimi ---
+            var (min, max) = await Task.Run(() => CalculateMinMax(imageHdu.PixelData as Array), token);
+            if (token.IsCancellationRequested) return;
+
+            DataMin = min;
+            DataMax = max;
+            // -------------------------------------------------------------
+
             var newRenderer = await _rendererFactory.CreateAsync(imageHdu.PixelData, imageHdu.Header);
 
             if (token.IsCancellationRequested) { newRenderer.Dispose(); return; }
@@ -282,11 +300,72 @@ public partial class ExportViewModel : ObservableObject, IDisposable
         }
     }
 
-    async partial void OnStretchModeChanged(string value)
+    // --- Metodo di supporto per calcolare Min e Max velocemente ---
+    private static (double Min, double Max) CalculateMinMax(Array? pixelData)
     {
-        if (_activeRenderer == null) return;
+        if (pixelData == null || pixelData.Length == 0) return (0, 65535);
+
+        double min = double.MaxValue;
+        double max = double.MinValue;
+
+        // Ottimizzazione per i tipi FITS più comuni (evita conversioni lente)
+        if (pixelData is float[] floatArray)
+        {
+            for (int i = 0; i < floatArray.Length; i++) 
+            { 
+                if (floatArray[i] < min) min = floatArray[i]; 
+                if (floatArray[i] > max) max = floatArray[i]; 
+            }
+        }
+        else if (pixelData is ushort[] ushortArray) // FITS 16-bit unsigned
+        {
+            for (int i = 0; i < ushortArray.Length; i++) 
+            { 
+                if (ushortArray[i] < min) min = ushortArray[i]; 
+                if (ushortArray[i] > max) max = ushortArray[i]; 
+            }
+        }
+        else if (pixelData is short[] shortArray) // FITS 16-bit signed
+        {
+            for (int i = 0; i < shortArray.Length; i++) 
+            { 
+                if (shortArray[i] < min) min = shortArray[i]; 
+                if (shortArray[i] > max) max = shortArray[i]; 
+            }
+        }
+        else if (pixelData is double[] doubleArray)
+        {
+            for (int i = 0; i < doubleArray.Length; i++) 
+            { 
+                if (doubleArray[i] < min) min = doubleArray[i]; 
+                if (doubleArray[i] > max) max = doubleArray[i]; 
+            }
+        }
+        else
+        {
+            // Fallback per matrici multidimensionali o tipi non previsti
+            foreach (var p in pixelData)
+            {
+                double val = Convert.ToDouble(p);
+                if (val < min) min = val;
+                if (val > max) max = val;
+            }
+        }
+
+        // Protezione per immagini corrotte o completamente nere/bianche
+        if (min == double.MaxValue || max == double.MinValue) return (0, 65535);
+        if (min == max) max = min + 1.0; // Evita che lo slider abbia range zero
+
+        return (min, max);
+    }
+
+    async partial void OnStretchModeChanged(string? value) // Aggiungi il '?' per accettare null
+    {
+        // Esci se il valore è null
+        if (_activeRenderer == null || string.IsNullOrEmpty(value)) return; 
+    
         if (value.Contains("Auto")) await _activeRenderer.ResetThresholdsAsync();
-        
+    
         OnPropertyChanged(nameof(CurrentBlackPoint));
         OnPropertyChanged(nameof(CurrentWhitePoint));
     }

@@ -2,7 +2,7 @@
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
-using System.Runtime.InteropServices; // Necessario per Marshal.Copy
+using System.Runtime.InteropServices; 
 using System.Threading;
 using System.Threading.Tasks;
 using OpenCvSharp;
@@ -16,7 +16,7 @@ public class InpaintingEngine : IInpaintingEngine
     private readonly IFitsOpenCvConverter _converter;
 
     // Configurazione
-    private const int HaloDilationSize = 4;
+    private const int HaloDilationSize = 8;
     private const int InitialWindow = 15;
     private const int MaxWindow = 151;
     private const int StepWindow = 15;
@@ -27,10 +27,8 @@ public class InpaintingEngine : IInpaintingEngine
         _converter = converter ?? throw new ArgumentNullException(nameof(converter));
     }
 
-    public Mat InpaintStars(Mat image, Mat starMask)
+    public Mat InpaintStars(Mat image, Mat starMask, Mat cometMask = null)
     {
-        // Assicuriamoci che l'immagine sia continua in memoria per usare Marshal.Copy
-        // Se è una ROI (Region of Interest), Clone() la rende continua.
         if (!image.IsContinuous()) image = image.Clone();
 
         // 1. PREPARAZIONE MASCHERE (OpenCV)
@@ -49,14 +47,29 @@ public class InpaintingEngine : IInpaintingEngine
         
         Cv2.Dilate(fillMask, dilatedStars, kernel);
         Cv2.BitwiseOr(dilatedStars, nanMask, safeMask); 
+
+        // INTEGRAZIONE MASCHERA COMETA
+        if (cometMask != null)
+        {
+            using Mat comet8U = new Mat();
+            if (cometMask.Type() != MatType.CV_8UC1) cometMask.ConvertTo(comet8U, MatType.CV_8UC1);
+            else cometMask.CopyTo(comet8U);
+            
+            // Non campionare dalla cometa
+            Cv2.BitwiseOr(safeMask, comet8U, safeMask);
+
+            // Impediamo di modificare i pixel che appartengono alla cometa
+            using Mat notComet = new Mat();
+            Cv2.BitwiseNot(comet8U, notComet);
+            Cv2.BitwiseAnd(fillMask, notComet, fillMask); 
+        }
+
         Cv2.BitwiseNot(safeMask, safeMask); // 255 = Safe, 0 = Bad
 
-        // 2. CONVERSIONE FLAT (1D Arrays) - Safe & Veloce con Marshal.Copy
         int w = image.Cols;
         int h = image.Rows;
         int totalPixels = w * h;
 
-        // Copia Maschere (Byte)
         byte[] fillFlat = new byte[totalPixels];
         Marshal.Copy(fillMask.Data, fillFlat, 0, totalPixels);
 
@@ -64,44 +77,36 @@ public class InpaintingEngine : IInpaintingEngine
         Marshal.Copy(safeMask.Data, safeFlat, 0, totalPixels);
 
         // 3. ELABORAZIONE
-        // Usiamo Marshal.Copy per copiare IntPtr -> Array Managed
-        // E poi Array Managed -> IntPtr. Non serve 'unsafe'.
-        
         if (image.Type() == MatType.CV_32FC1)
         {
             float[] imgFlat = new float[totalPixels];
-            Marshal.Copy(image.Data, imgFlat, 0, totalPixels); // Leggi
+            Marshal.Copy(image.Data, imgFlat, 0, totalPixels);
             
             ProcessGridFloat(imgFlat, fillFlat, safeFlat, w, h);
             
-            // Scrivi risultato su una NUOVA matrice per evitare di modificare l'originale se è condivisa
             Mat result = new Mat(h, w, MatType.CV_32FC1);
-            Marshal.Copy(imgFlat, 0, result.Data, totalPixels); // Scrivi
+            Marshal.Copy(imgFlat, 0, result.Data, totalPixels);
             return result;
         }
         else if (image.Type() == MatType.CV_64FC1)
         {
             double[] imgFlat = new double[totalPixels];
-            Marshal.Copy(image.Data, imgFlat, 0, totalPixels); // Leggi
+            Marshal.Copy(image.Data, imgFlat, 0, totalPixels);
             
             ProcessGridDouble(imgFlat, fillFlat, safeFlat, w, h);
             
             Mat result = new Mat(h, w, MatType.CV_64FC1);
-            Marshal.Copy(imgFlat, 0, result.Data, totalPixels); // Scrivi
+            Marshal.Copy(imgFlat, 0, result.Data, totalPixels);
             return result;
         }
         else
         {
-            throw new NotSupportedException("Formato immagine non supportato (serve Float o Double).");
+            throw new NotSupportedException("Formato immagine non supportato.");
         }
     }
 
-    // -------------------------------------------------------------------------------
-    // IMPLEMENTAZIONE FLOAT (Array 1D)
-    // -------------------------------------------------------------------------------
     private void ProcessGridFloat(float[] img, byte[] fill, byte[] safe, int w, int h)
     {
-        // Lista indici 1D
         var pixelsToFill = new List<int>(img.Length / 20);
         for (int i = 0; i < fill.Length; i++)
         {
@@ -115,10 +120,8 @@ public class InpaintingEngine : IInpaintingEngine
         {
             int[] nextPixelsBuffer = new int[pixelsToFill.Count];
             int nextCount = 0;
-
             int rad = windowSize / 2;
-            const int TargetSamples = 15;
-            const int MaxProbes = 60;
+            int currentMaxProbes = 60 + (windowSize * 2);
 
             Parallel.ForEach(pixelsToFill, idx =>
             {
@@ -128,17 +131,28 @@ public class InpaintingEngine : IInpaintingEngine
                 int count = 0;
                 double mean = 0.0;
                 double M2 = 0.0;
-
-                int yMin = Math.Max(0, py - rad);
-                int yMax = Math.Min(h - 1, py + rad);
-                int xMin = Math.Max(0, px - rad);
-                int xMax = Math.Min(w - 1, px + rad);
+                float localMin = float.MaxValue;
+                float localMax = float.MinValue;
+                
+                int yMin = py - rad;
+                int yMax = py + rad;
+                int xMin = px - rad;
+                int xMax = px + rad;
+                
+                if (xMin < 0) { xMax += (0 - xMin); xMin = 0; } 
+                else if (xMax >= w) { xMin -= (xMax - (w - 1)); xMax = w - 1; }
+                
+                if (yMin < 0) { yMax += (0 - yMin); yMin = 0; } 
+                else if (yMax >= h) { yMin -= (yMax - (h - 1)); yMax = h - 1; }
+                
+                xMin = Math.Max(0, xMin); xMax = Math.Min(w - 1, xMax);
+                yMin = Math.Max(0, yMin); yMax = Math.Min(h - 1, yMax);
                 int widthRange = xMax - xMin + 1;
                 int heightRange = yMax - yMin + 1;
 
-                uint seed = (uint)(px * 31 + py * 17 + iteration * 13);
+                uint seed = (uint)(px * 73856093 ^ py * 19349663 ^ iteration * 83492791 + 2166136261);
 
-                for (int k = 0; k < MaxProbes && count < TargetSamples; k++)
+                for (int k = 0; k < currentMaxProbes && count < 15; k++)
                 {
                     seed ^= seed << 13; seed ^= seed >> 17; seed ^= seed << 5;
                     int ry = yMin + (int)(seed % (uint)heightRange);
@@ -155,8 +169,10 @@ public class InpaintingEngine : IInpaintingEngine
                             count++;
                             double delta = val - mean;
                             mean += delta / count;
-                            double delta2 = val - mean;
-                            M2 += delta * delta2;
+                            M2 += delta * (val - mean);
+                            
+                            if (val < localMin) localMin = val;
+                            if (val > localMax) localMax = val;
                         }
                     }
                 }
@@ -164,11 +180,13 @@ public class InpaintingEngine : IInpaintingEngine
                 if (count >= 8)
                 {
                     double variance = M2 / count;
-                    double stdDev = Math.Sqrt(variance);
-                    float noise = GenerateGaussianNoiseFloat((float)mean, (float)stdDev, ref seed);
+                    float noise = GenerateGaussianNoiseFloat((float)mean, (float)Math.Sqrt(variance), ref seed);
 
-                    if (float.IsNaN(noise) || float.IsInfinity(noise)) noise = 0.0f;
-                    if (noise < 0) noise = 0.0f;
+                    if (float.IsNaN(noise) || float.IsInfinity(noise)) noise = (float)mean;
+                    
+                    // Clamp Dinamico Locale per evitare pixel bianchi/neri
+                    if (noise < localMin) noise = localMin;
+                    if (noise > localMax) noise = localMax;
 
                     img[idx] = noise;
                 }
@@ -190,9 +208,6 @@ public class InpaintingEngine : IInpaintingEngine
         foreach(var idx in pixelsToFill) img[idx] = 0.0f;
     }
 
-    // -------------------------------------------------------------------------------
-    // IMPLEMENTAZIONE DOUBLE (Array 1D)
-    // -------------------------------------------------------------------------------
     private void ProcessGridDouble(double[] img, byte[] fill, byte[] safe, int w, int h)
     {
         var pixelsToFill = new List<int>(img.Length / 20);
@@ -208,10 +223,8 @@ public class InpaintingEngine : IInpaintingEngine
         {
             int[] nextPixelsBuffer = new int[pixelsToFill.Count];
             int nextCount = 0;
-
             int rad = windowSize / 2;
-            const int TargetSamples = 15;
-            const int MaxProbes = 60;
+            int currentMaxProbes = 60 + (windowSize * 2);
 
             Parallel.ForEach(pixelsToFill, idx =>
             {
@@ -221,17 +234,28 @@ public class InpaintingEngine : IInpaintingEngine
                 int count = 0;
                 double mean = 0.0;
                 double M2 = 0.0;
+                double localMin = double.MaxValue;
+                double localMax = double.MinValue;
 
-                int yMin = Math.Max(0, py - rad);
-                int yMax = Math.Min(h - 1, py + rad);
-                int xMin = Math.Max(0, px - rad);
-                int xMax = Math.Min(w - 1, px + rad);
+                int yMin = py - rad;
+                int yMax = py + rad;
+                int xMin = px - rad;
+                int xMax = px + rad;
+                
+                if (xMin < 0) { xMax += (0 - xMin); xMin = 0; } 
+                else if (xMax >= w) { xMin -= (xMax - (w - 1)); xMax = w - 1; }
+                
+                if (yMin < 0) { yMax += (0 - yMin); yMin = 0; } 
+                else if (yMax >= h) { yMin -= (yMax - (h - 1)); yMax = h - 1; }
+                
+                xMin = Math.Max(0, xMin); xMax = Math.Min(w - 1, xMax);
+                yMin = Math.Max(0, yMin); yMax = Math.Min(h - 1, yMax);
                 int widthRange = xMax - xMin + 1;
                 int heightRange = yMax - yMin + 1;
 
-                uint seed = (uint)(px * 31 + py * 17 + iteration * 13);
+                uint seed = (uint)(px * 73856093 ^ py * 19349663 ^ iteration * 83492791 + 2166136261);
 
-                for (int k = 0; k < MaxProbes && count < TargetSamples; k++)
+                for (int k = 0; k < currentMaxProbes && count < 15; k++)
                 {
                     seed ^= seed << 13; seed ^= seed >> 17; seed ^= seed << 5;
                     int ry = yMin + (int)(seed % (uint)heightRange);
@@ -248,8 +272,10 @@ public class InpaintingEngine : IInpaintingEngine
                             count++;
                             double delta = val - mean;
                             mean += delta / count;
-                            double delta2 = val - mean;
-                            M2 += delta * delta2;
+                            M2 += delta * (val - mean);
+                            
+                            if (val < localMin) localMin = val;
+                            if (val > localMax) localMax = val;
                         }
                     }
                 }
@@ -257,11 +283,12 @@ public class InpaintingEngine : IInpaintingEngine
                 if (count >= 8)
                 {
                     double variance = M2 / count;
-                    double stdDev = Math.Sqrt(variance);
-                    double noise = GenerateGaussianNoiseDouble(mean, stdDev, ref seed);
+                    double noise = GenerateGaussianNoiseDouble(mean, Math.Sqrt(variance), ref seed);
 
-                    if (double.IsNaN(noise) || double.IsInfinity(noise)) noise = 0.0;
-                    if (noise < 0) noise = 0.0;
+                    if (double.IsNaN(noise) || double.IsInfinity(noise)) noise = mean;
+                    
+                    if (noise < localMin) noise = localMin;
+                    if (noise > localMax) noise = localMax;
 
                     img[idx] = noise;
                 }
@@ -282,8 +309,6 @@ public class InpaintingEngine : IInpaintingEngine
 
         foreach(var idx in pixelsToFill) img[idx] = 0.0;
     }
-
-    // --- RNG VELOCE (Zero Lock) ---
 
     private float GenerateGaussianNoiseFloat(float mean, float stdDev, ref uint seed)
     {

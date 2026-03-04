@@ -165,11 +165,11 @@ public partial class ExportView : Window
             {
                 // Non superare il bianco, mantenendo un piccolo cuscinetto (10% dello step)
                 double maxAllowed = _vm.CurrentWhitePoint - (step * 0.1);
-                _vm.CurrentBlackPoint = Math.Clamp(Math.Min(newBlack, maxAllowed), 0, 65535);
+                _vm.CurrentBlackPoint = Math.Clamp(Math.Min(newBlack, maxAllowed), _vm.DataMin, _vm.DataMax);
             }
             else // Abbassando il nero
             {
-                _vm.CurrentBlackPoint = Math.Max(0, newBlack);
+                _vm.CurrentBlackPoint = Math.Max(_vm.DataMin, newBlack);
             }
         }
         else
@@ -181,11 +181,11 @@ public partial class ExportView : Window
             {
                 // Non scendere sotto il nero
                 double minAllowed = _vm.CurrentBlackPoint + (Math.Abs(step) * 0.1);
-                _vm.CurrentWhitePoint = Math.Clamp(Math.Max(newWhite, minAllowed), 0, 65535);
+                _vm.CurrentWhitePoint = Math.Clamp(Math.Max(newWhite, minAllowed), _vm.DataMin, _vm.DataMax);
             }
             else // Alzando il bianco
             {
-                _vm.CurrentWhitePoint = Math.Min(65535, newWhite);
+                _vm.CurrentWhitePoint = Math.Min(_vm.DataMax, newWhite);
             }
         }
 
