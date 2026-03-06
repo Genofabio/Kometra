@@ -9,7 +9,7 @@
         x:Class="Kometra.Views.PosterizationToolView"
         x:DataType="imageProcessing:PosterizationToolViewModel"
         Icon="/Assets/Icon/icon32.ico"
-        Title="Analisi Morfologica / Posterizzazione"
+        Title="Posterizzazione"
         Width="1000" Height="600"
         MinHeight="500" MinWidth="850"
         WindowStartupLocation="CenterScreen"

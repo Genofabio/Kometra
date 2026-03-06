@@ -102,63 +102,65 @@ public class StructureShapeEngine : IStructureShapeEngine
     // =========================================================
 
     public async Task ApplyAdaptiveLaplaceAsync(Mat src, Mat dst, IProgress<double> progress = null)
+{
+    await _memSemaphore.WaitAsync();
+    try
     {
-        await _memSemaphore.WaitAsync();
-        try
+        await Task.Run(() =>
         {
-            await Task.Run(() =>
-            {
-                // 1. GESTIONE TIPI E CONVERSIONE
-                // Il filtro di Laplace produce numeri negativi e decimali. 
-                // Se l'input è intero (es. 8UC1), dobbiamo lavorare in Float/Double.
-                bool isDouble = src.Depth() == MatType.CV_64F;
-                bool isFloat = src.Depth() == MatType.CV_32F;
-                
-                // Determina il tipo di lavoro. Se non è float/double, promuoviamo a Float.
-                MatType workType = isDouble ? MatType.CV_64F : MatType.CV_32F;
-                
-                // Creiamo una matrice di lavoro convertita (se necessario)
-                using Mat workSrc = new Mat();
-                if (!isDouble && !isFloat)
-                    src.ConvertTo(workSrc, workType);
-                else
-                    src.CopyTo(workSrc);
+            // 1. GESTIONE TIPI E CONVERSIONE
+            // Il filtro differenziale necessita di alta precisione (Float/Double) 
+            // per gestire l'escursione dinamica e preservare i valori negativi delle "valli" (ringing).
+            bool isDouble = src.Depth() == MatType.CV_64F;
+            bool isFloat = src.Depth() == MatType.CV_32F;
+            
+            MatType workType = isDouble ? MatType.CV_64F : MatType.CV_32F;
+            
+            using Mat workSrc = new Mat();
+            if (!isDouble && !isFloat)
+                src.ConvertTo(workSrc, workType);
+            else
+                src.CopyTo(workSrc);
 
-                dst.Create(src.Size(), workType);
+            dst.Create(src.Size(), workType);
 
-                // Matrice temporanea per il risultato dello smoothing SNN
-                using Mat smoothed = new Mat(src.Size(), workType);
+            using Mat smoothed = new Mat(src.Size(), workType);
 
-                // 2. FASE 1: SNN SMOOTHING (NaN Safe)
-                if (workType == MatType.CV_64F)
-                    RunSnnSmoothingSafe<double>(workSrc, smoothed, progress);
-                else
-                    RunSnnSmoothingSafe<float>(workSrc, smoothed, progress);
+            // 2. FASE 1: SNN SMOOTHING (NaN Safe)
+            // Abbattiamo il rumore termico preservando i bordi netti (Edge-Preserving)
+            if (workType == MatType.CV_64F)
+                RunSnnSmoothingSafe<double>(workSrc, smoothed, progress);
+            else
+                RunSnnSmoothingSafe<float>(workSrc, smoothed, progress);
 
-                // 3. FASE 2: LAPLACE KERNEL
-                // Maschera normalizzata 1/8:
-                // [ 1  1  1 ]
-                // [ 1 -8  1 ]
-                // [ 1  1  1 ]
-                double[] kernelData = {
-                     0.125,  0.125,  0.125,
-                     0.125, -1.0,    0.125,
-                     0.125,  0.125,  0.125
-                };
+            // 3. FASE 2: LAPLACE KERNEL (INVERTITO PER ASTROFISICA)
+            // Nella convenzione astrofisica, vogliamo che le emissioni (picchi luminosi)
+            // risultino come valori POSITIVI per non invalidare lo studio fotometrico. 
+            // Pertanto, ribaltiamo i segni del kernel Laplaciano standard:
+            // Maschera normalizzata 1/8:
+            // [ -0.125  -0.125  -0.125 ]
+            // [ -0.125   1.0    -0.125 ]
+            // [ -0.125  -0.125  -0.125 ]
+            double[] kernelData = {
+                 -0.125, -0.125, -0.125,
+                 -0.125,  1.0,   -0.125,
+                 -0.125, -0.125, -0.125
+            };
 
-                using Mat kernel = Mat.FromPixelData(3, 3, MatType.CV_64F, kernelData);
-                
-                // Usiamo Filter2D. Nota: Filter2D propaga i NaN.
-                // Poiché abbiamo già gestito i NaN in fase SNN (o li abbiamo lasciati dove devono stare),
-                // il comportamento qui è corretto.
-                Cv2.Filter2D(smoothed, dst, workType.Depth, kernel, new Point(-1, -1), 0, BorderTypes.Reflect101);
-            });
-        }
-        finally
-        {
-            _memSemaphore.Release();
-        }
+            using Mat kernel = Mat.FromPixelData(3, 3, MatType.CV_64F, kernelData);
+            
+            // Usiamo Filter2D. I getti saranno positivi, le valli di ringing saranno negative.
+            // La matrice Float preserverà tutta l'informazione senza fare clipping artificiale.
+            Cv2.Filter2D(smoothed, dst, workType.Depth, kernel, new Point(-1, -1), 0, BorderTypes.Reflect101);
+            
+            progress?.Report(100);
+        });
     }
+    finally
+    {
+        _memSemaphore.Release();
+    }
+}
 
     // =========================================================
     // PRIVATE HELPERS FOR ADAPTIVE LAPLACE

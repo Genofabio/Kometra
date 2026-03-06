@@ -17,6 +17,7 @@ public class GradientRadialEngine : IGradientRadialEngine
 
     public async Task ApplyLarsonSekaninaAsync(Mat src, Mat dst, double angleDeg, double radialShiftX, double radialShiftY, bool isSymmetric)
     {
+        Console.WriteLine("[DEBUG] Eseguito filtro: Larson-Sekanina");
         await Task.Run(() =>
         {
             dst.Create(src.Size(), src.Type());
@@ -69,6 +70,7 @@ public class GradientRadialEngine : IGradientRadialEngine
 
     public async Task ApplyAdaptiveRVSFAsync(Mat src, Mat dst, double paramA, double paramB, double paramN, bool useLog, IProgress<double> progress = null)
     {
+        Console.WriteLine("[DEBUG] Eseguito filtro: Adaptive RVSF");
         await _memSemaphore.WaitAsync();
         try
         {
@@ -88,6 +90,7 @@ public class GradientRadialEngine : IGradientRadialEngine
 
     public async Task ApplyRVSFMosaicAsync(Mat src, Mat dst, (double v1, double v2) paramA, (double v1, double v2) paramB, (double v1, double v2) paramN, bool useLog)
     {
+        Console.WriteLine("[DEBUG] Eseguito filtro: RVSF Mosaic");
         using Mat workImg = PrepareImageForRVSF(src, useLog);
         int w = src.Cols; int h = src.Rows;
         dst.Create(new Size(w * 4, h * 2), workImg.Type());
@@ -129,6 +132,7 @@ public class GradientRadialEngine : IGradientRadialEngine
 
     public void ApplyInverseRho(Mat src, Mat dst)
     {
+        Console.WriteLine("[DEBUG] Eseguito filtro: Inverse Rho (1/ρ)");
         dst.Create(src.Size(), src.Type());
         // Parametro subsampling rimosso: usa griglia 5x5 interna fissa
         if (src.Depth() == MatType.CV_64F) InverseRhoCoreDouble(src, dst);
@@ -203,18 +207,21 @@ public class GradientRadialEngine : IGradientRadialEngine
 
     public void ApplyAzimuthalAverage(Mat polar, double rejSig)
     {
+        Console.WriteLine("[DEBUG] Eseguito filtro: Azimuthal Average");
         if (polar.Depth() == MatType.CV_64F) AzimuthalAverageCoreDouble(polar, rejSig);
         else AzimuthalAverageCoreFloat(polar, rejSig);
     }
 
     public void ApplyAzimuthalMedian(Mat polar)
     {
+        Console.WriteLine("[DEBUG] Eseguito filtro: Azimuthal Median");
         if (polar.Depth() == MatType.CV_64F) AzimuthalMedianCoreDouble(polar);
         else AzimuthalMedianCoreFloat(polar);
     }
 
     public void ApplyAzimuthalRenormalization(Mat polar, double rejSig, double nSig)
     {
+        Console.WriteLine("[DEBUG] Eseguito filtro: Azimuthal Renormalization");
         if (polar.Depth() == MatType.CV_64F) AzimuthalRenormCoreDouble(polar, rejSig, nSig);
         else AzimuthalRenormCoreFloat(polar, rejSig, nSig);
     }
@@ -225,6 +232,7 @@ public class GradientRadialEngine : IGradientRadialEngine
 
     public void ApplyRadialWeightedModel(Mat src, Mat dst, double maxFilterRadius = 0.0)
     {
+        Console.WriteLine("[DEBUG] Eseguito filtro: Radial Weighted Model (R.W.M.)");
         bool isDouble = src.Depth() == MatType.CV_64F;
         MatType workType = isDouble ? MatType.CV_64F : MatType.CV_32F;
         
@@ -290,6 +298,7 @@ public class GradientRadialEngine : IGradientRadialEngine
 
     public void ApplyMedianComaModel(Mat src, Mat dst, double maxFilterRadius = 0.0, int angularQuality = 5)
     {
+        Console.WriteLine("[DEBUG] Eseguito filtro: Median Coma Model (M.C.M.)");
         int w = src.Cols; int h = src.Rows;
         Point2f center = new Point2f(w / 2.0f, h / 2.0f);
         
@@ -522,45 +531,93 @@ public class GradientRadialEngine : IGradientRadialEngine
     private void RunRVSFCoreDouble(Mat src, Mat dst, double A, double B, double N, IProgress<double> progress) {
         int rows = src.Rows; int cols = src.Cols; double xNuc = cols / 2.0; double yNuc = rows / 2.0;
         src.GetArray(out double[] sArr); double[] dArr = new double[sArr.Length]; int completed = 0;
+        
         Parallel.For(0, rows, (int y) => {
             int rowOffset = y * cols; 
-            // CORREZIONE SUB-PIXEL: (y + 0.5)
             double dy = (y + 0.5) - yNuc; double dySq = dy * dy;
+            
             for (int x = 0; x < cols; x++) {
-                // CORREZIONE SUB-PIXEL: (x + 0.5)
+                double valC = sArr[rowOffset + x];
+
+                // 1. Sicurezza: Se il pixel centrale è NaN o Infinito, lo azzeriamo e skippiamo
+                if (double.IsNaN(valC) || double.IsInfinity(valC)) {
+                    dArr[rowOffset + x] = 0.0;
+                    continue;
+                }
+
                 double dx = (x + 0.5) - xNuc; double rho = Math.Sqrt(dx * dx + dySq);
                 int r = (int)Math.Round(A + (B * Math.Pow(rho, N))); if (r < 1) r = 1;
-                int yMin = (y - r < 0) ? 0 : (y - r >= rows ? rows - 1 : y - r); int yMax = (y + r < 0) ? 0 : (y + r >= rows ? rows - 1 : y + r);
-                int xMin = (x - r < 0) ? 0 : (x - r >= cols ? cols - 1 : x - r); int xMax = (x + r < 0) ? 0 : (x + r >= cols ? cols - 1 : x + r);
-                double valC = sArr[rowOffset + x];
-                double sE = sArr[yMin * cols + x] + sArr[yMax * cols + x] + sArr[y * cols + xMin] + sArr[y * cols + xMax];
-                double sC = sArr[yMin * cols + xMin] + sArr[yMin * cols + xMax] + sArr[yMax * cols + xMin] + sArr[yMax * cols + xMax];
+                
+                int yMin = (y - r < 0) ? 0 : (y - r >= rows ? rows - 1 : y - r); 
+                int yMax = (y + r < 0) ? 0 : (y + r >= rows ? rows - 1 : y + r);
+                int xMin = (x - r < 0) ? 0 : (x - r >= cols ? cols - 1 : x - r); 
+                int xMax = (x + r < 0) ? 0 : (x + r >= cols ? cols - 1 : x + r);
+
+                // 2. Lettura sicura dei vicini: sostituiamo i NaN periferici col valore centrale
+                double GetSafe(int idx) {
+                    double v = sArr[idx];
+                    return (double.IsNaN(v) || double.IsInfinity(v)) ? valC : v;
+                }
+
+                double sE = GetSafe(yMin * cols + x) + GetSafe(yMax * cols + x) + 
+                            GetSafe(y * cols + xMin) + GetSafe(y * cols + xMax);
+                            
+                double sC = GetSafe(yMin * cols + xMin) + GetSafe(yMin * cols + xMax) + 
+                            GetSafe(yMax * cols + xMin) + GetSafe(yMax * cols + xMax);
+
+                // Calcolo originale del gradiente RVSF puro
                 dArr[rowOffset + x] = (1024.0 * valC) - (192.0 * sE) - (64.0 * sC);
             }
             if (progress != null) { var current = Interlocked.Increment(ref completed); if (current % 100 == 0) progress.Report((double)current / rows * 100); }
-        }); dst.SetArray(dArr);
+        }); 
+        
+        dst.SetArray(dArr);
     }
 
     private void RunRVSFCoreFloat(Mat src, Mat dst, double A, double B, double N, IProgress<double> progress) {
         int rows = src.Rows; int cols = src.Cols; double xNuc = cols / 2.0; double yNuc = rows / 2.0;
         src.GetArray(out float[] sArr); float[] dArr = new float[sArr.Length]; int completed = 0;
+        
         Parallel.For(0, rows, (int y) => {
             int rowOffset = y * cols; 
-            // CORREZIONE SUB-PIXEL: (y + 0.5)
             double dy = (y + 0.5) - yNuc; double dySq = dy * dy;
+            
             for (int x = 0; x < cols; x++) {
-                // CORREZIONE SUB-PIXEL: (x + 0.5)
+                float valC = sArr[rowOffset + x];
+
+                // 1. Sicurezza: Se il pixel centrale è NaN o Infinito, lo azzeriamo e skippiamo
+                if (float.IsNaN(valC) || float.IsInfinity(valC)) {
+                    dArr[rowOffset + x] = 0f;
+                    continue;
+                }
+
                 double dx = (x + 0.5) - xNuc; double rho = Math.Sqrt(dx * dx + dySq);
                 int r = (int)Math.Round(A + (B * Math.Pow(rho, N))); if (r < 1) r = 1;
-                int yMin = (y - r < 0) ? 0 : (y - r >= rows ? rows - 1 : y - r); int yMax = (y + r < 0) ? 0 : (y + r >= rows ? rows - 1 : y + r);
-                int xMin = (x - r < 0) ? 0 : (x - r >= cols ? cols - 1 : x - r); int xMax = (x + r < 0) ? 0 : (x + r >= cols ? cols - 1 : x + r);
-                float valC = sArr[rowOffset + x];
-                float sE = sArr[yMin * cols + x] + sArr[yMax * cols + x] + sArr[y * cols + xMin] + sArr[y * cols + xMax];
-                float sC = sArr[yMin * cols + xMin] + sArr[yMin * cols + xMax] + sArr[yMax * cols + xMin] + sArr[yMax * cols + xMax];
+                
+                int yMin = (y - r < 0) ? 0 : (y - r >= rows ? rows - 1 : y - r); 
+                int yMax = (y + r < 0) ? 0 : (y + r >= rows ? rows - 1 : y + r);
+                int xMin = (x - r < 0) ? 0 : (x - r >= cols ? cols - 1 : x - r); 
+                int xMax = (x + r < 0) ? 0 : (x + r >= cols ? cols - 1 : x + r);
+
+                // 2. Lettura sicura dei vicini: sostituiamo i NaN periferici col valore centrale
+                float GetSafe(int idx) {
+                    float v = sArr[idx];
+                    return (float.IsNaN(v) || float.IsInfinity(v)) ? valC : v;
+                }
+
+                float sE = GetSafe(yMin * cols + x) + GetSafe(yMax * cols + x) + 
+                           GetSafe(y * cols + xMin) + GetSafe(y * cols + xMax);
+                           
+                float sC = GetSafe(yMin * cols + xMin) + GetSafe(yMin * cols + xMax) + 
+                           GetSafe(yMax * cols + xMin) + GetSafe(yMax * cols + xMax);
+
+                // Calcolo originale del gradiente RVSF puro
                 dArr[rowOffset + x] = (float)((1024.0 * valC) - (192.0 * sE) - (64.0 * sC));
             }
             if (progress != null) { var current = Interlocked.Increment(ref completed); if (current % 100 == 0) progress.Report((double)current / rows * 100); }
-        }); dst.SetArray(dArr);
+        }); 
+        
+        dst.SetArray(dArr);
     }
     
     // =========================================================
@@ -584,6 +641,12 @@ public class GradientRadialEngine : IGradientRadialEngine
             double basePathY = y - yNuc;
 
             for (int x = 0; x < cols; x++) {
+                double valC = sArr[rowOffset + x];
+                if (double.IsNaN(valC) || double.IsInfinity(valC)) {
+                    dArr[rowOffset + x] = 0.0;
+                    continue;
+                }
+
                 double rhoSum = 0;
                 double basePathX = x - xNuc;
 
@@ -595,7 +658,7 @@ public class GradientRadialEngine : IGradientRadialEngine
                         rhoSum += Math.Sqrt(dx * dx + dySq);
                     }
                 }
-                dArr[rowOffset + x] = sArr[rowOffset + x] * (rhoSum * normFactor);
+                dArr[rowOffset + x] = valC * (rhoSum * normFactor);
             }
         }); dst.SetArray(dArr);
     }
@@ -614,6 +677,12 @@ public class GradientRadialEngine : IGradientRadialEngine
             double basePathY = y - yNuc;
             
             for (int x = 0; x < cols; x++) {
+                float valC = sArr[rowOffset + x];
+                if (float.IsNaN(valC) || float.IsInfinity(valC)) {
+                    dArr[rowOffset + x] = 0f;
+                    continue;
+                }
+
                 double rhoSum = 0;
                 double basePathX = x - xNuc;
 
@@ -625,60 +694,214 @@ public class GradientRadialEngine : IGradientRadialEngine
                         rhoSum += Math.Sqrt(dx * dx + dySq);
                     }
                 }
-                dArr[rowOffset + x] = (float)(sArr[rowOffset + x] * (rhoSum * normFactor));
+                dArr[rowOffset + x] = (float)(valC * (rhoSum * normFactor));
             }
         }); dst.SetArray(dArr);
     }
 
-    private void AzimuthalAverageCoreDouble(Mat polar, double rejSig) {
-        int nRad = polar.Rows; int nTheta = polar.Cols; polar.GetArray(out double[] arr);
-        Parallel.For(0, nRad, (int i) => {
-            int rowOffset = i * nTheta; double sum = 0, sumSq = 0; int count = 0;
-            for (int j = 0; j < nTheta; j++) { double v = arr[rowOffset + j]; if (!double.IsNaN(v) && v >= 0) { sum += v; sumSq += v * v; count++; } }
-            if (count < 2) return; double m1 = sum / count; double s1 = Math.Sqrt(Math.Max(0, (sumSq / count) - (m1 * m1))); double rMin = Math.Max(0, m1 - rejSig * s1), rMax = m1 + rejSig * s1;
-            double cSum = 0; int cCount = 0; for (int j = 0; j < nTheta; j++) { double v = arr[rowOffset + j]; if (v >= rMin && v <= rMax) { cSum += v; cCount++; } }
-            double finalMean = cCount > 0 ? cSum / cCount : m1; double div = finalMean + 1e-9; for (int j = 0; j < nTheta; j++) arr[rowOffset + j] /= div;
-        }); polar.SetArray(arr);
-    }
+private void AzimuthalAverageCoreDouble(Mat polar, double rejSig) {
+    int nRad = polar.Rows; int nTheta = polar.Cols; polar.GetArray(out double[] arr);
+    Parallel.For(0, nRad, (int i) => {
+        int rowOffset = i * nTheta; double sum = 0, sumSq = 0; int count = 0;
+        
+        // FIX: Rimosso v >= 0 per includere correttamente il fondo cielo negativo
+        for (int j = 0; j < nTheta; j++) { double v = arr[rowOffset + j]; if (!double.IsNaN(v) && !double.IsInfinity(v)) { sum += v; sumSq += v * v; count++; } }
+        if (count < 2) return; 
+        
+        double m1 = sum / count; double s1 = Math.Sqrt(Math.Max(0, (sumSq / count) - (m1 * m1))); double rMin = m1 - rejSig * s1, rMax = m1 + rejSig * s1;
+        double cSum = 0; int cCount = 0; 
+        
+        for (int j = 0; j < nTheta; j++) { double v = arr[rowOffset + j]; if (!double.IsNaN(v) && !double.IsInfinity(v) && v >= rMin && v <= rMax) { cSum += v; cCount++; } }
+        double finalMean = cCount > 0 ? cSum / cCount : m1; 
+        
+        // FIX: Protezione matematica assoluta sulla divisione
+        double div = finalMean;
+        if (Math.Abs(div) < 1e-9) div = div >= 0 ? 1e-9 : -1e-9;
+        
+        for (int j = 0; j < nTheta; j++) {
+            double v = arr[rowOffset + j];
+            if (double.IsNaN(v) || double.IsInfinity(v)) {
+                arr[rowOffset + j] = finalMean / div; 
+            } else {
+                arr[rowOffset + j] = v / div;
+            }
+        }
+    }); polar.SetArray(arr);
+}
 
-    private void AzimuthalMedianCoreDouble(Mat polar) {
-        int nRad = polar.Rows; int nTheta = polar.Cols; polar.GetArray(out double[] arr);
-        Parallel.For(0, nRad, (int i) => {
-            int rowOffset = i * nTheta; double[] buffer = ArrayPool<double>.Shared.Rent(nTheta); int vc = 0;
-            try { for (int j = 0; j < nTheta; j++) { double v = arr[rowOffset + j]; if (!double.IsNaN(v)) buffer[vc++] = v; }
-                if (vc > 0) { Array.Sort(buffer, 0, vc); double median = buffer[vc / 2]; double div = median + 1e-9; for (int j = 0; j < nTheta; j++) arr[rowOffset + j] /= div; }
-            } finally { ArrayPool<double>.Shared.Return(buffer); }
-        }); polar.SetArray(arr);
-    }
+private void AzimuthalMedianCoreDouble(Mat polar) {
+    int nRad = polar.Rows; int nTheta = polar.Cols; polar.GetArray(out double[] arr);
+    Parallel.For(0, nRad, (int i) => {
+        int rowOffset = i * nTheta; double[] buffer = ArrayPool<double>.Shared.Rent(nTheta); int vc = 0;
+        try { 
+            for (int j = 0; j < nTheta; j++) { double v = arr[rowOffset + j]; if (!double.IsNaN(v) && !double.IsInfinity(v)) buffer[vc++] = v; }
+            if (vc > 0) { 
+                Array.Sort(buffer, 0, vc); double median = buffer[vc / 2]; 
+                
+                // FIX: Protezione matematica assoluta sulla divisione
+                double div = median;
+                if (Math.Abs(div) < 1e-9) div = div >= 0 ? 1e-9 : -1e-9;
+                
+                for (int j = 0; j < nTheta; j++) {
+                    double v = arr[rowOffset + j];
+                    if (double.IsNaN(v) || double.IsInfinity(v)) {
+                        arr[rowOffset + j] = median / div;
+                    } else {
+                        arr[rowOffset + j] = v / div;
+                    }
+                }
+            } 
+        } finally { ArrayPool<double>.Shared.Return(buffer); }
+    }); polar.SetArray(arr);
+}
 
-    private void AzimuthalMedianCoreFloat(Mat polar) {
-        int nRad = polar.Rows; int nTheta = polar.Cols; polar.GetArray(out float[] arr);
-        Parallel.For(0, nRad, (int i) => {
-            int rowOffset = i * nTheta; double[] buffer = ArrayPool<double>.Shared.Rent(nTheta); int vc = 0;
-            try { for (int j = 0; j < nTheta; j++) { double v = arr[rowOffset + j]; if (!double.IsNaN(v)) buffer[vc++] = v; }
-                if (vc > 0) { Array.Sort(buffer, 0, vc); double median = buffer[vc / 2]; double div = median + 1e-9; for (int j = 0; j < nTheta; j++) arr[rowOffset + j] = (float)(arr[rowOffset + j] / div); }
-            } finally { ArrayPool<double>.Shared.Return(buffer); }
-        }); polar.SetArray(arr);
-    }
+private void AzimuthalMedianCoreFloat(Mat polar) {
+    int nRad = polar.Rows; int nTheta = polar.Cols; polar.GetArray(out float[] arr);
+    Parallel.For(0, nRad, (int i) => {
+        int rowOffset = i * nTheta; double[] buffer = ArrayPool<double>.Shared.Rent(nTheta); int vc = 0;
+        try { 
+            for (int j = 0; j < nTheta; j++) { float v = arr[rowOffset + j]; if (!float.IsNaN(v) && !float.IsInfinity(v)) buffer[vc++] = v; }
+            if (vc > 0) { 
+                Array.Sort(buffer, 0, vc); double median = buffer[vc / 2]; 
+                
+                // FIX: Protezione matematica assoluta sulla divisione
+                double div = median;
+                if (Math.Abs(div) < 1e-9) div = div >= 0 ? 1e-9 : -1e-9;
+                
+                for (int j = 0; j < nTheta; j++) {
+                    float v = arr[rowOffset + j];
+                    if (float.IsNaN(v) || float.IsInfinity(v)) {
+                        arr[rowOffset + j] = (float)(median / div);
+                    } else {
+                        arr[rowOffset + j] = (float)(v / div);
+                    }
+                }
+            } 
+        } finally { ArrayPool<double>.Shared.Return(buffer); }
+    }); polar.SetArray(arr);
+}
 
-    private void AzimuthalRenormCoreDouble(Mat polar, double rejSig, double nSig) {
-        int nRad = polar.Rows; int nTheta = polar.Cols; polar.GetArray(out double[] arr);
-        Parallel.For(0, nRad, (int i) => {
-            int rowOffset = i * nTheta; double sum = 0, sumSq = 0; int count = 0;
-            for (int j = 0; j < nTheta; j++) { double v = arr[rowOffset + j]; if (v >= 0) { sum += v; sumSq += v * v; count++; } }
-            if (count < 3) return; double m1 = sum / count; double s1 = Math.Sqrt(Math.Max(0, (sumSq / count) - (m1 * m1))); double rMin = m1 - rejSig * s1, rMax = m1 + rejSig * s1;
-            double cSum = 0, cSumSq = 0; int cc = 0; for (int j = 0; j < nTheta; j++) { double v = arr[rowOffset + j]; if (v >= rMin && v <= rMax) { cSum += v; cSumSq += v * v; cc++; } }
-            if (cc < 2) return; double fm = cSum / cc; double fs = Math.Sqrt(Math.Max(0, (cSumSq / cc) - (fm * fm))); double rowMin = fm - nSig * fs, rowMax = fm + nSig * fs; double diff = Math.Max(1e-9, rowMax - rowMin);
-            for (int j = 0; j < nTheta; j++) arr[rowOffset + j] = (arr[rowOffset + j] - rowMin) / diff;
-        }); polar.SetArray(arr);
-    }
+private void AzimuthalRenormCoreDouble(Mat polar, double rejSig, double nSig) {
+    int nRad = polar.Rows; int nTheta = polar.Cols; polar.GetArray(out double[] arr);
+    Parallel.For(0, nRad, (int i) => {
+        int rowOffset = i * nTheta; double sum = 0, sumSq = 0; int count = 0;
+        
+        // FIX: Rimosso v >= 0
+        for (int j = 0; j < nTheta; j++) { double v = arr[rowOffset + j]; if (!double.IsNaN(v) && !double.IsInfinity(v)) { sum += v; sumSq += v * v; count++; } }
+        if (count < 3) return; 
+        
+        double m1 = sum / count; double s1 = Math.Sqrt(Math.Max(0, (sumSq / count) - (m1 * m1))); double rMin = m1 - rejSig * s1, rMax = m1 + rejSig * s1;
+        double cSum = 0, cSumSq = 0; int cc = 0; 
+        
+        for (int j = 0; j < nTheta; j++) { double v = arr[rowOffset + j]; if (!double.IsNaN(v) && !double.IsInfinity(v) && v >= rMin && v <= rMax) { cSum += v; cSumSq += v * v; cc++; } }
+        if (cc < 2) return; 
+        
+        double fm = cSum / cc; double fs = Math.Sqrt(Math.Max(0, (cSumSq / cc) - (fm * fm))); double rowMin = fm - nSig * fs, rowMax = fm + nSig * fs; 
+        double diff = Math.Max(1e-9, rowMax - rowMin);
+        
+        for (int j = 0; j < nTheta; j++) {
+            double v = arr[rowOffset + j];
+            if (double.IsNaN(v) || double.IsInfinity(v)) {
+                arr[rowOffset + j] = (fm - rowMin) / diff;
+            } else {
+                arr[rowOffset + j] = (v - rowMin) / diff;
+            }
+        }
+    }); polar.SetArray(arr);
+}
 
-    private void AzimuthalAverageCoreFloat(Mat polar, double rejSig) { AzimuthalAverageCoreDouble(polar, rejSig); }
-    private void AzimuthalRenormCoreFloat(Mat polar, double rs, double ns) { AzimuthalRenormCoreDouble(polar, rs, ns); }
+private void AzimuthalAverageCoreFloat(Mat polar, double rejSig) { 
+    int nRad = polar.Rows; int nTheta = polar.Cols; polar.GetArray(out float[] arr);
+    Parallel.For(0, nRad, (int i) => {
+        int rowOffset = i * nTheta; double sum = 0, sumSq = 0; int count = 0;
+        
+        // FIX: Rimosso v >= 0
+        for (int j = 0; j < nTheta; j++) { float v = arr[rowOffset + j]; if (!float.IsNaN(v) && !float.IsInfinity(v)) { sum += v; sumSq += v * v; count++; } }
+        if (count < 2) return; 
+        
+        double m1 = sum / count; double s1 = Math.Sqrt(Math.Max(0, (sumSq / count) - (m1 * m1))); double rMin = m1 - rejSig * s1, rMax = m1 + rejSig * s1;
+        double cSum = 0; int cCount = 0; 
+        
+        for (int j = 0; j < nTheta; j++) { float v = arr[rowOffset + j]; if (!float.IsNaN(v) && !float.IsInfinity(v) && v >= rMin && v <= rMax) { cSum += v; cCount++; } }
+        double finalMean = cCount > 0 ? cSum / cCount : m1; 
+        
+        // FIX: Protezione matematica assoluta sulla divisione
+        double div = finalMean;
+        if (Math.Abs(div) < 1e-9) div = div >= 0 ? 1e-9 : -1e-9;
+        
+        for (int j = 0; j < nTheta; j++) {
+            float v = arr[rowOffset + j];
+            if (float.IsNaN(v) || float.IsInfinity(v)) {
+                arr[rowOffset + j] = (float)(finalMean / div);
+            } else {
+                arr[rowOffset + j] = (float)(v / div);
+            }
+        }
+    }); polar.SetArray(arr);
+}
+
+private void AzimuthalRenormCoreFloat(Mat polar, double rejSig, double nSig) { 
+    int nRad = polar.Rows; int nTheta = polar.Cols; polar.GetArray(out float[] arr);
+    Parallel.For(0, nRad, (int i) => {
+        int rowOffset = i * nTheta; double sum = 0, sumSq = 0; int count = 0;
+        
+        // FIX: Rimosso v >= 0
+        for (int j = 0; j < nTheta; j++) { float v = arr[rowOffset + j]; if (!float.IsNaN(v) && !float.IsInfinity(v)) { sum += v; sumSq += v * v; count++; } }
+        if (count < 3) return; 
+        
+        double m1 = sum / count; double s1 = Math.Sqrt(Math.Max(0, (sumSq / count) - (m1 * m1))); double rMin = m1 - rejSig * s1, rMax = m1 + rejSig * s1;
+        double cSum = 0, cSumSq = 0; int cc = 0; 
+        
+        for (int j = 0; j < nTheta; j++) { float v = arr[rowOffset + j]; if (!float.IsNaN(v) && !float.IsInfinity(v) && v >= rMin && v <= rMax) { cSum += v; cSumSq += v * v; cc++; } }
+        if (cc < 2) return; 
+        
+        double fm = cSum / cc; double fs = Math.Sqrt(Math.Max(0, (cSumSq / cc) - (fm * fm))); double rowMin = fm - nSig * fs, rowMax = fm + nSig * fs; 
+        double diff = Math.Max(1e-9, rowMax - rowMin);
+        
+        for (int j = 0; j < nTheta; j++) {
+            float v = arr[rowOffset + j];
+            if (float.IsNaN(v) || float.IsInfinity(v)) {
+                arr[rowOffset + j] = (float)((fm - rowMin) / diff);
+            } else {
+                arr[rowOffset + j] = (float)((v - rowMin) / diff);
+            }
+        }
+    }); polar.SetArray(arr);
+}
 
     private Mat PrepareImageForRVSF(Mat src, bool useLog) {
-        Mat w = new Mat(); if(!useLog) src.ConvertTo(w, MatType.CV_64F);
-        else { src.ConvertTo(w, MatType.CV_64F); Cv2.Add(w, Scalar.All(1.0), w); Cv2.Log(w, w); w.ConvertTo(w, -1, 1.0/Math.Log(10)); }
+        Mat w = new Mat();
+        src.ConvertTo(w, MatType.CV_64F);
+
+        // 1. Sanificazione preliminare: eliminiamo eventuali NaN ereditati dal FITS o dal pre-processing
+        w.GetArray(out double[] arr);
+        Parallel.For(0, arr.Length, i => { 
+            if (double.IsNaN(arr[i]) || double.IsInfinity(arr[i])) {
+                arr[i] = 0.0; 
+            }
+        });
+        w.SetArray(arr);
+
+        if (useLog) {
+            // 2. Trova il valore minimo dell'immagine
+            Cv2.MinMaxLoc(w, out double minVal, out _);
+
+            // 3. Shift (traslazione) sicura prima del logaritmo
+            // Il logaritmo di <= 0 genera NaN. Dobbiamo assicurarci che il minimo sia > 0.
+            if (minVal <= 0) {
+                // Trasliamo tutto in modo che il nuovo minimo assoluto sia 1.0
+                double shift = Math.Abs(minVal) + 1.0;
+                Cv2.Add(w, Scalar.All(shift), w);
+            } else {
+                // Se è già tutto positivo, aggiungiamo comunque 1.0 come nel tuo codice originale
+                Cv2.Add(w, Scalar.All(1.0), w);
+            }
+
+            // 4. Calcolo del Logaritmo in base 10
+            Cv2.Log(w, w);
+            w.ConvertTo(w, -1, 1.0 / Math.Log(10)); 
+        }
+
         return w;
     }
 }
