@@ -36,10 +36,16 @@
         </Style>
 
         <Style Selector="TextBox.valueInput">
-            <Setter Property="MinWidth" Value="60"/>       <Setter Property="Height" Value="28"/>         <Setter Property="MinHeight" Value="28"/>
-            <Setter Property="Margin" Value="10,0,0,0"/>   <Setter Property="VerticalContentAlignment" Value="Center"/>
+            <Setter Property="Width" Value="85"/>       
+            <Setter Property="Height" Value="28"/>         
+            <Setter Property="MinHeight" Value="28"/>
+            <Setter Property="Margin" Value="10,0,0,0"/>   
+            <Setter Property="VerticalContentAlignment" Value="Center"/>
             <Setter Property="HorizontalContentAlignment" Value="Center"/>
-            <Setter Property="Padding" Value="5,0"/>       <Setter Property="FontSize" Value="12"/>       </Style>
+            <Setter Property="Padding" Value="5,0"/>       
+            <Setter Property="FontSize" Value="12"/>       
+            <Setter Property="MaxLength" Value="9"/>
+        </Style>
     </Window.Styles>
     
     <Grid ColumnDefinitions="320, *">
@@ -85,15 +91,15 @@
                         <StackPanel Spacing="10">
                             <StackPanel Spacing="0">
                                 <TextBlock Classes="sectionTitle" Text="Range Dinamico (Clip)"/>
-                                <TextBlock Classes="description" Text="Definisce l'intervallo di segnale ADU (0-65535)."/>
+                                <TextBlock Classes="description" Text="Definisce l'intervallo di segnale effettivo."/>
                             </StackPanel>
                             
                             <StackPanel Spacing="2">
                                 <TextBlock Text="Soglia Nero" FontSize="11" Foreground="{DynamicResource Text.MediumGreyBrush}" FontWeight="SemiBold"/>
                                 <Grid ColumnDefinitions="*, Auto">
-                                    <Slider Grid.Column="0" Minimum="0" Maximum="65535" Value="{Binding BlackPoint}" VerticalAlignment="Center"/>
+                                    <Slider Grid.Column="0" Minimum="{Binding SliderMin}" Maximum="{Binding SliderMax}" Value="{Binding BlackPoint}" VerticalAlignment="Center"/>
                                     <TextBox Name="BlackInput" Grid.Column="1" Classes="valueInput"
-                                             Text="{Binding BlackPoint, Mode=OneWay, StringFormat={}{0:0.0}}" 
+                                             Text="{Binding BlackPoint, Mode=OneWay, StringFormat={}{0:0.####}}" 
                                              LostFocus="OnValueInputLostFocus" KeyDown="OnInputKeyDown"/>
                                 </Grid>
                             </StackPanel>
@@ -101,9 +107,9 @@
                             <StackPanel Spacing="2">
                                 <TextBlock Text="Soglia Bianco" FontSize="11" Foreground="{DynamicResource Text.MediumGreyBrush}" FontWeight="SemiBold"/>
                                 <Grid ColumnDefinitions="*, Auto">
-                                    <Slider Grid.Column="0" Minimum="0" Maximum="65535" Value="{Binding WhitePoint}" VerticalAlignment="Center"/>
+                                    <Slider Grid.Column="0" Minimum="{Binding SliderMin}" Maximum="{Binding SliderMax}" Value="{Binding WhitePoint}" VerticalAlignment="Center"/>
                                     <TextBox Name="WhiteInput" Grid.Column="1" Classes="valueInput"
-                                             Text="{Binding WhitePoint, Mode=OneWay, StringFormat={}{0:0.0}}" 
+                                             Text="{Binding WhitePoint, Mode=OneWay, StringFormat={}{0:0.####}}" 
                                              LostFocus="OnValueInputLostFocus" KeyDown="OnInputKeyDown"/>
                                 </Grid>
                             </StackPanel>

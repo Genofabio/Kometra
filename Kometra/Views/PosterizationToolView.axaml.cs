@@ -33,7 +33,6 @@ namespace Kometra.Views
             {
                 vm.Viewport.ViewportSize = e.NewSize;
 
-                // SE VUOI CHE SI ADATTI SEMPRE AL RESIZE (togli il check _isFirstLayout se vuoi comportamento tipo visualizzatore foto standard)
                 if (e.NewSize.Width > 0)
                 {
                     vm.Viewport.ResetView();
@@ -44,7 +43,8 @@ namespace Kometra.Views
 
         /// <summary>
         /// Validazione input manuale. 
-        /// Nota: BlackPoint e WhitePoint sono ora gestiti tramite l'ActiveRenderer del ViewModel.
+        /// Allarga dinamicamente i limiti della UI se l'utente digita intenzionalmente
+        /// un valore fuori scala.
         /// </summary>
         private void OnValueInputLostFocus(object? sender, RoutedEventArgs e)
         {
@@ -62,14 +62,24 @@ namespace Kometra.Views
             else if (textBox.Name == "BlackInput")
             {
                 if (double.TryParse(input, NumberStyles.Any, culture, out double black))
-                    vm.BlackPoint = black; // PASSA DAL VM, NON DAL RENDERER
-                textBox.Text = vm.BlackPoint.ToString("F1", culture);
+                {
+                    if (black < vm.SliderMin) vm.SliderMin = black - Math.Abs(black * 0.2);
+                    if (black > vm.SliderMax) vm.SliderMax = black + Math.Abs(black * 0.2);
+                    vm.BlackPoint = black;
+                }
+                
+                textBox.Text = vm.BlackPoint.ToString("F4", culture);
             }
             else if (textBox.Name == "WhiteInput")
             {
                 if (double.TryParse(input, NumberStyles.Any, culture, out double white))
-                    vm.WhitePoint = white; // PASSA DAL VM, NON DAL RENDERER
-                textBox.Text = vm.WhitePoint.ToString("F1", culture);
+                {
+                    if (white < vm.SliderMin) vm.SliderMin = white - Math.Abs(white * 0.2);
+                    if (white > vm.SliderMax) vm.SliderMax = white + Math.Abs(white * 0.2);
+                    vm.WhitePoint = white; 
+                }
+                
+                textBox.Text = vm.WhitePoint.ToString("F4", culture);
             }
         }
 
@@ -114,7 +124,6 @@ namespace Kometra.Views
             var currentPos = e.GetPosition(border);
             var delta = currentPos - _lastPointerPos.Value;
             
-            // Delega al Viewport Manager del ViewModel
             vm.Viewport.ApplyPan(delta.X, delta.Y);
             
             _lastPointerPos = currentPos;
@@ -134,15 +143,53 @@ namespace Kometra.Views
                 return;
             }
 
-            // Gestione Soglie con rotellina
-            double currentRange = Math.Max(100, vm.WhitePoint - vm.BlackPoint);
-            double step = currentRange * 0.05;
-            if (e.Delta.Y < 0) step = -step;
+            // Calcolo range e passo base (molto più sensibile: 0.5% del range totale)
+            double totalRange = Math.Abs(vm.SliderMax - vm.SliderMin);
+            if (totalRange < 1e-4) totalRange = 1.0; 
+            
+            double baseStep = totalRange * 0.005; 
+            bool isScrollingUp = e.Delta.Y > 0;
 
             if (e.KeyModifiers.HasFlag(KeyModifiers.Shift))
-                vm.BlackPoint += step; // USA IL VM
+            {
+                // Modifica Soglia NERO
+                if (isScrollingUp)
+                {
+                    // Aumentando il nero, ci si avvicina al bianco
+                    double remainingDistance = vm.WhitePoint - vm.BlackPoint;
+                    
+                    // Deceleratore: non supera mai il 20% della distanza rimanente
+                    double actualStep = Math.Min(baseStep, remainingDistance * 0.2);
+
+                    // Margine di sicurezza di 1e-5 per non innescare il push del ViewModel
+                    vm.BlackPoint = Math.Min(vm.BlackPoint + actualStep, vm.WhitePoint - 1e-5);
+                }
+                else
+                {
+                    // Diminuendo il nero, ci si allontana (nessun problema)
+                    vm.BlackPoint -= baseStep;
+                }
+            }
             else
-                vm.WhitePoint += step; // USA IL VM
+            {
+                // Modifica Soglia BIANCO
+                if (!isScrollingUp)
+                {
+                    // Diminuendo il bianco, ci si avvicina al nero
+                    double remainingDistance = vm.WhitePoint - vm.BlackPoint;
+                    
+                    // Deceleratore: non supera mai il 20% della distanza rimanente
+                    double actualStep = Math.Min(baseStep, remainingDistance * 0.2);
+
+                    // Margine di sicurezza di 1e-5 per non innescare il push del ViewModel
+                    vm.WhitePoint = Math.Max(vm.WhitePoint - actualStep, vm.BlackPoint + 1e-5);
+                }
+                else
+                {
+                    // Aumentando il bianco, ci si allontana (nessun problema)
+                    vm.WhitePoint += baseStep;
+                }
+            }
     
             e.Handled = true;
         }
@@ -151,13 +198,10 @@ namespace Kometra.Views
         // PULSANTI HUD (VIEWPORT COMMANDS)
         // =======================================================================
 
-        // --- GESTIONE CLICK PULSANTI HUD ---
-
         private void OnZoomInClicked(object? sender, RoutedEventArgs e) 
         {
             if (DataContext is ImageProcessing_PosterizationToolViewModel vm)
             {
-                // Calcoliamo il centro del viewport corrente per uno zoom bilanciato
                 var center = new Point(vm.Viewport.ViewportSize.Width / 2, vm.Viewport.ViewportSize.Height / 2);
                 vm.Viewport.ApplyZoomAtPoint(1.2, center);
             }
@@ -167,7 +211,6 @@ namespace Kometra.Views
         {
             if (DataContext is ImageProcessing_PosterizationToolViewModel vm)
             {
-                // Calcoliamo il centro del viewport corrente per uno zoom bilanciato
                 var center = new Point(vm.Viewport.ViewportSize.Width / 2, vm.Viewport.ViewportSize.Height / 2);
                 vm.Viewport.ApplyZoomAtPoint(0.8, center);
             }

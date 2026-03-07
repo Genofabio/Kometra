@@ -37,7 +37,12 @@ public partial class PosterizationToolViewModel : ObservableObject, IDisposable
 
     [ObservableProperty] 
     [NotifyCanExecuteChangedFor(nameof(ResetThresholdsCommand))]
+    [NotifyCanExecuteChangedFor(nameof(ApplyCommand))]
     private FitsRenderer? _activeRenderer; 
+
+    // --- LIMITI DINAMICI PER LA UI ---
+    [ObservableProperty] private double _sliderMin = 0;
+    [ObservableProperty] private double _sliderMax = 65535;
 
     // --- PROPRIETÀ PROXY: IL RENDERER COMANDA ---
 
@@ -46,16 +51,23 @@ public partial class PosterizationToolViewModel : ObservableObject, IDisposable
         get => ActiveRenderer?.BlackPoint ?? 0;
         set
         {
-            if (ActiveRenderer == null || Math.Abs(ActiveRenderer.BlackPoint - value) < 0.1) return;
+            // FIX BUG 2: Ignora gli aggiornamenti Two-Way dalla UI mentre l'immagine sta caricando
+            if (IsProcessing || ActiveRenderer == null || Math.Abs(ActiveRenderer.BlackPoint - value) < 1e-6) return;
             
-            // Logica Pushing: se il nero supera il bianco, sposta il bianco in avanti
-            if (value >= WhitePoint)
+            // FIX BUG 1: Clamp rigido per evitare espansioni continue e slider instabili
+            double safeValue = Math.Clamp(value, SliderMin, SliderMax);
+
+            // Logica Pushing dinamica: se il nero supera il bianco, sposta il bianco in avanti nei limiti
+            if (safeValue >= WhitePoint)
             {
-                ActiveRenderer.WhitePoint = Math.Clamp(value + 1.0, 0, 65535);
+                double delta = Math.Max(1e-4, Math.Abs(SliderMax - SliderMin) * 0.01);
+                if (safeValue + delta > SliderMax) safeValue = SliderMax - delta;
+                
+                ActiveRenderer.WhitePoint = safeValue + delta;
                 OnPropertyChanged(nameof(WhitePoint));
             }
 
-            ActiveRenderer.BlackPoint = Math.Clamp(value, 0, 65535);
+            ActiveRenderer.BlackPoint = safeValue;
             OnPropertyChanged();
         }
     }
@@ -65,16 +77,21 @@ public partial class PosterizationToolViewModel : ObservableObject, IDisposable
         get => ActiveRenderer?.WhitePoint ?? 65535;
         set
         {
-            if (ActiveRenderer == null || Math.Abs(ActiveRenderer.WhitePoint - value) < 0.1) return;
+            if (IsProcessing || ActiveRenderer == null || Math.Abs(ActiveRenderer.WhitePoint - value) < 1e-6) return;
 
-            // Logica Pushing: se il bianco scende sotto il nero, sposta il nero all'indietro
-            if (value <= BlackPoint)
+            double safeValue = Math.Clamp(value, SliderMin, SliderMax);
+
+            // Logica Pushing dinamica: se il bianco scende sotto il nero, sposta il nero all'indietro
+            if (safeValue <= BlackPoint)
             {
-                ActiveRenderer.BlackPoint = Math.Clamp(value - 1.0, 0, 65535);
+                double delta = Math.Max(1e-4, Math.Abs(SliderMax - SliderMin) * 0.01);
+                if (safeValue - delta < SliderMin) safeValue = SliderMin + delta;
+
+                ActiveRenderer.BlackPoint = safeValue - delta;
                 OnPropertyChanged(nameof(BlackPoint));
             }
 
-            ActiveRenderer.WhitePoint = Math.Clamp(value, 0, 65535);
+            ActiveRenderer.WhitePoint = safeValue;
             OnPropertyChanged();
         }
     }
@@ -95,8 +112,13 @@ public partial class PosterizationToolViewModel : ObservableObject, IDisposable
     [ObservableProperty] private int _levels = 64; 
     [ObservableProperty] private int _maxLevels = 64; 
     [ObservableProperty] private bool _autoAdaptThresholds = true; 
-    [ObservableProperty] private bool _isProcessing;
-    [ObservableProperty] private string _statusText = "Pronto";
+    
+    [ObservableProperty] 
+    [NotifyCanExecuteChangedFor(nameof(ApplyCommand))]
+    [NotifyCanExecuteChangedFor(nameof(ResetThresholdsCommand))] // FIX BUG 3: Notifica lo stato di abilitazione al Reset!
+    private bool _isProcessing;
+    
+    [ObservableProperty] private string _statusText = "Inizializzazione...";
 
     // Proprietà UI delegate al navigatore
     public VisualizationMode[] AvailableModes => Enum.GetValues<VisualizationMode>();
@@ -112,24 +134,64 @@ public partial class PosterizationToolViewModel : ObservableObject, IDisposable
         IFitsRendererFactory rendererFactory,
         IPosterizationCoordinator coordinator)
     {
-        _sourceFiles = files;
-        _dataManager = dataManager;
-        _rendererFactory = rendererFactory;
-        _coordinator = coordinator;
+        _sourceFiles = files ?? throw new ArgumentNullException(nameof(files));
+        _dataManager = dataManager ?? throw new ArgumentNullException(nameof(dataManager));
+        _rendererFactory = rendererFactory ?? throw new ArgumentNullException(nameof(rendererFactory));
+        _coordinator = coordinator ?? throw new ArgumentNullException(nameof(coordinator));
 
         Navigator.UpdateStatus(0, _sourceFiles.Count);
-        Navigator.IndexChanged += async (_, idx) => await LoadImageAtIndexAsync(idx);
+        Navigator.IndexChanged += OnNavigatorIndexChanged;
 
-        if (_sourceFiles.Count > 0) 
-            _ = LoadImageAtIndexAsync(0);
+        _ = InitializeAsync();
+    }
+
+    private async Task InitializeAsync()
+    {
+        IsProcessing = true;
+        try
+        {
+            if (_sourceFiles.Count > 0)
+            {
+                await LoadImageAtIndexAsync(0);
+            }
+            StatusText = "Pronto";
+        }
+        catch (Exception ex)
+        {
+            StatusText = $"Errore inizializzazione: {ex.Message}";
+        }
+        finally
+        {
+            IsProcessing = false;
+        }
+    }
+
+    private void CalculateSliderBounds(FitsRenderer renderer)
+    {
+        if (renderer == null) return;
+        
+        double currentRange = Math.Abs(renderer.WhitePoint - renderer.BlackPoint);
+        if (currentRange < 1e-4) currentRange = 1.0; // Fallback di sicurezza
+        
+        // Fissiamo lo slider attorno ai valori utili offrendo un margine stabile ai lati
+        SliderMin = renderer.BlackPoint - (currentRange * 2.0);
+        SliderMax = renderer.WhitePoint + (currentRange * 2.0);
     }
 
     // =======================================================================
     // 1. RENDERING PIPELINE (Flicker-Free & Adaptive)
     // =======================================================================
 
+    private async void OnNavigatorIndexChanged(object? sender, int index)
+    {
+        OnPropertyChanged(nameof(CurrentImageText));
+        await LoadImageAtIndexAsync(index);
+    }
+
     private async Task LoadImageAtIndexAsync(int index)
     {
+        if (index < 0 || index >= _sourceFiles.Count) return;
+
         _loadingCts?.Cancel();
         _loadingCts = new CancellationTokenSource();
         var token = _loadingCts.Token;
@@ -141,62 +203,63 @@ public partial class PosterizationToolViewModel : ObservableObject, IDisposable
             var data = await _dataManager.GetDataAsync(fileRef.FilePath);
             token.ThrowIfCancellationRequested();
 
-            // [MODIFICA MEF] Accesso sicuro all'HDU immagine
             var imageHdu = data.FirstImageHdu ?? data.PrimaryHdu;
             if (imageHdu == null) 
                 throw new InvalidOperationException("Nessuna immagine valida trovata nel file FITS.");
 
             var newRenderer = await _rendererFactory.CreateAsync(imageHdu.PixelData, fileRef.ModifiedHeader ?? imageHdu.Header);
             
-            // --- DEFAULT LIVELLI DINAMICO (Solo al primo avvio) ---
-            if (!_hasLoadedFirstImage)
-            {
-                // Se l'immagine è Float/Double, partiamo da 32 livelli, altrimenti 64
-                if (newRenderer.RenderBitDepth == FitsBitDepth.Float || 
-                    newRenderer.RenderBitDepth == FitsBitDepth.Double)
-                {
-                    Levels = 32;
-                    MaxLevels = 32;
-                }
-                else
-                {
-                    Levels = 64;
-                    MaxLevels = 64;
-                }
-            }
-
-            // Configurazione hook anteprima
-            newRenderer.PostProcessAction = _coordinator.GetPreviewEffect(Levels);
-
-            if (_hasLoadedFirstImage && ActiveRenderer != null)
+            // --- GESTIONE SOGLIE E COERENZA VISIVA ---
+            if (ActiveRenderer != null)
             {
                 newRenderer.VisualizationMode = ActiveRenderer.VisualizationMode;
 
                 if (AutoAdaptThresholds)
                 {
-                    // Adattamento statistico dinamico (K-Sigma)
                     newRenderer.ApplyRelativeProfile(ActiveRenderer.CaptureSigmaProfile());
                 }
                 else
                 {
-                    // Mantenimento valori ADU fissi
                     newRenderer.BlackPoint = ActiveRenderer.BlackPoint;
                     newRenderer.WhitePoint = ActiveRenderer.WhitePoint;
                 }
+            }
+            else
+            {
+                // PRIMO AVVIO
+                await newRenderer.ResetThresholdsAsync();
+            }
+
+            if (newRenderer.RenderBitDepth == FitsBitDepth.Float || 
+                newRenderer.RenderBitDepth == FitsBitDepth.Double)
+            {
+                MaxLevels = 32;
+                if (Levels > 32) Levels = 32;
+            }
+            else
+            {
+                MaxLevels = 64;
+                if (!_hasLoadedFirstImage) Levels = 64; 
+            }
+
+            newRenderer.PostProcessAction = _coordinator.GetPreviewEffect(Levels);
+
+            // FIX BUG 2: Calcoliamo e impostiamo i limiti PRIMA di assegnare ActiveRenderer.
+            // Questo impedisce alla UI di Avalonia di tagliare valori appena applichiamo il binding.
+            if (!_hasLoadedFirstImage)
+            {
+                CalculateSliderBounds(newRenderer);
             }
 
             var old = ActiveRenderer;
             ActiveRenderer = newRenderer;
             
-            // Sincronizzazione UI
             OnPropertyChanged(nameof(BlackPoint));
             OnPropertyChanged(nameof(WhitePoint));
             OnPropertyChanged(nameof(SelectedMode));
-            OnPropertyChanged(nameof(CurrentImageText));
 
             Viewport.ImageSize = ActiveRenderer.ImageSize;
             
-            // Gestione dimensioni iniziali finestra e prima attivazione
             if (!_hasLoadedFirstImage) 
             { 
                 _hasLoadedFirstImage = true;
@@ -231,6 +294,7 @@ public partial class PosterizationToolViewModel : ObservableObject, IDisposable
         if (ActiveRenderer != null)
         {
             await ActiveRenderer.ResetThresholdsAsync();
+            CalculateSliderBounds(ActiveRenderer); // Ricalcola limiti fissi sul nuovo range
             OnPropertyChanged(nameof(BlackPoint));
             OnPropertyChanged(nameof(WhitePoint));
         }
@@ -238,7 +302,7 @@ public partial class PosterizationToolViewModel : ObservableObject, IDisposable
 
     private bool CanInteract() => ActiveRenderer != null && !IsProcessing;
 
-    [RelayCommand]
+    [RelayCommand(CanExecute = nameof(CanInteract))]
     private async Task Apply()
     {
         if (IsProcessing || ActiveRenderer == null) return;
@@ -246,13 +310,11 @@ public partial class PosterizationToolViewModel : ObservableObject, IDisposable
         IsProcessing = true;
         try
         {
-            // Catturiamo il profilo sigma corrente per l'adattamento batch
             var currentProfile = ActiveRenderer.CaptureSigmaProfile();
 
             var progress = new Progress<BatchProgressReport>(p => 
                 StatusText = $"Elaborazione: {p.CurrentFileIndex}/{p.TotalFiles}");
 
-            // Esecuzione batch con parametri di adattamento definitivi
             ResultPaths = await _coordinator.ExecuteBatchAsync(
                 _sourceFiles, 
                 Levels, 
@@ -269,6 +331,9 @@ public partial class PosterizationToolViewModel : ObservableObject, IDisposable
         catch (Exception ex) 
         { 
             StatusText = $"Errore: {ex.Message}";
+        }
+        finally
+        {
             IsProcessing = false; 
         }
     }
@@ -279,6 +344,8 @@ public partial class PosterizationToolViewModel : ObservableObject, IDisposable
     {
         _loadingCts?.Cancel();
         _loadingCts?.Dispose();
+        Navigator.IndexChanged -= OnNavigatorIndexChanged;
         ActiveRenderer?.Dispose();
+        GC.SuppressFinalize(this);
     }
 }
