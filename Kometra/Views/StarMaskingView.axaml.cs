@@ -5,6 +5,7 @@ using Avalonia.Interactivity;
 using Avalonia.Threading;
 using System;
 using System.ComponentModel;
+using System.Globalization;
 using Kometra.ViewModels.ImageProcessing;
 
 namespace Kometra.Views;
@@ -20,13 +21,11 @@ public partial class StarMaskingView : Window
     {
         InitializeComponent();
 
-        // Cattura click globale per togliere focus dalle TextBox (commit valori)
         this.AddHandler(PointerPressedEvent, OnWindowPointerPressed_Global, RoutingStrategies.Tunnel, handledEventsToo: true);
 
         this.Loaded += OnWindowLoaded;
         this.Unloaded += OnWindowUnloaded;
         
-        // Collega i pulsanti di zoom manuali (definiti nello XAML tramite Name)
         var zoomInBtn = this.FindControl<Button>("ZoomInButton");
         var zoomOutBtn = this.FindControl<Button>("ZoomOutButton");
         if (zoomInBtn != null) zoomInBtn.Click += OnZoomInClicked;
@@ -41,15 +40,11 @@ public partial class StarMaskingView : Window
         {
             _vm = vm;
             
-            // Sottoscrizione eventi ViewModel
             _vm.PropertyChanged += OnViewModelPropertyChanged;
             _vm.RequestFitToScreen += OnRequestFitToScreen;
-            _vm.RequestClose += Close; // Gestisce la chiusura richiesta dal ViewModel
+            _vm.RequestClose += Close; 
             
-            // Inizializza valori UI (TextBox) dai dati attuali
             UpdateUiValues();
-            
-            // Tenta il centraggio iniziale
             CenterImage();
         }
     }
@@ -61,12 +56,11 @@ public partial class StarMaskingView : Window
             _vm.PropertyChanged -= OnViewModelPropertyChanged;
             _vm.RequestFitToScreen -= OnRequestFitToScreen;
             _vm.RequestClose -= Close;
-            _vm.Dispose(); // Importante per fermare i calcoli in corso
+            _vm.Dispose(); 
             _vm = null;
         }
     }
 
-    // Risponde alla richiesta del ViewModel di centrare la vista (es. nuova immagine caricata)
     private void OnRequestFitToScreen()
     {
         Dispatcher.UIThread.InvokeAsync(CenterImage, DispatcherPriority.Background);
@@ -85,11 +79,8 @@ public partial class StarMaskingView : Window
             {
                 case nameof(StarMaskingViewModel.CometThreshold): UpdateBox("CometThresholdBox", _vm.CometThreshold.ToString("N1")); break;
                 case nameof(StarMaskingViewModel.CometDilation): UpdateBox("CometDilationBox", _vm.CometDilation.ToString()); break;
-                
                 case nameof(StarMaskingViewModel.StarThreshold): UpdateBox("StarThresholdBox", _vm.StarThreshold.ToString("N1")); break;
                 case nameof(StarMaskingViewModel.StarDilation): UpdateBox("StarDilationBox", _vm.StarDilation.ToString()); break;
-                
-                // [AGGIUNTO] Aggiornamento Diametro Minimo
                 case nameof(StarMaskingViewModel.MinStarDiameter): UpdateBox("MinStarDiameterBox", _vm.MinStarDiameter.ToString()); break;
             }
         });
@@ -108,8 +99,6 @@ public partial class StarMaskingView : Window
         UpdateBox("CometDilationBox", _vm.CometDilation.ToString());
         UpdateBox("StarThresholdBox", _vm.StarThreshold.ToString("N1"));
         UpdateBox("StarDilationBox", _vm.StarDilation.ToString());
-        
-        // [AGGIUNTO] Inizializzazione Diametro Minimo
         UpdateBox("MinStarDiameterBox", _vm.MinStarDiameter.ToString());
     }
 
@@ -121,34 +110,30 @@ public partial class StarMaskingView : Window
     {
         if (_vm == null || sender is not TextBox box) return;
 
-        bool isD = double.TryParse(box.Text, out double d);
-        bool isI = int.TryParse(box.Text, out int i);
+        // Validazione stringa (accetta virgola e punto per i decimali in modo robusto)
+        string input = (box.Text ?? "").Replace(',', '.');
+        var culture = CultureInfo.InvariantCulture;
 
-        if (isD || isI)
-        {
-            switch (box.Name)
-            {
-                case "CometThresholdBox": _vm.CometThreshold = d; break;
-                case "CometDilationBox": _vm.CometDilation = i; break;
-                
-                case "StarThresholdBox": _vm.StarThreshold = d; break;
-                case "StarDilationBox": _vm.StarDilation = i; break;
+        if (box.Name == "CometThresholdBox" && double.TryParse(input, NumberStyles.Any, culture, out double ct))
+            _vm.CometThreshold = ct;
+        else if (box.Name == "CometDilationBox" && int.TryParse(input, out int cd))
+            _vm.CometDilation = cd;
+        else if (box.Name == "StarThresholdBox" && double.TryParse(input, NumberStyles.Any, culture, out double st))
+            _vm.StarThreshold = st;
+        else if (box.Name == "StarDilationBox" && int.TryParse(input, out int sd))
+            _vm.StarDilation = sd;
+        else if (box.Name == "MinStarDiameterBox" && int.TryParse(input, out int md))
+            _vm.MinStarDiameter = md;
 
-                // [AGGIUNTO] Commit Diametro Minimo
-                case "MinStarDiameterBox": _vm.MinStarDiameter = i; break;
-            }
-        }
-        else
-        {
-            UpdateUiValues(); // Revert se input non valido
-        }
+        // In tutti i casi (anche errori di digitazione o reset), forza il refresh UI
+        UpdateUiValues();
     }
 
     private void OnInputKeyDown(object? sender, KeyEventArgs e)
     {
         if (e.Key == Key.Enter)
         {
-            this.Focus(); // Toglie il focus per forzare il LostFocus/Commit
+            this.Focus(); 
             e.Handled = true;
         }
     }
@@ -219,7 +204,6 @@ public partial class StarMaskingView : Window
         var previewBorder = this.FindControl<Border>("PreviewBorder");
         if (DataContext is not StarMaskingViewModel vm || previewBorder == null || vm.ActiveRenderer == null) return;
         
-        // CTRL + Wheel = Zoom
         if (e.KeyModifiers.HasFlag(KeyModifiers.Control))
         {
             var mousePos = e.GetPosition(previewBorder);
@@ -229,14 +213,12 @@ public partial class StarMaskingView : Window
             return;
         }
 
-        // Wheel = Stretch (Livelli)
         double currentRange = Math.Abs(vm.ActiveRenderer.WhitePoint - vm.ActiveRenderer.BlackPoint);
         double step = Math.Max(0.0001, (currentRange > 0.00001) ? currentRange * 0.05 : 1.0);
         if (e.Delta.Y < 0) step = -step;
 
         if (e.KeyModifiers.HasFlag(KeyModifiers.Shift))
         {
-            // Shift = Black Point
             double newBlack = vm.ActiveRenderer.BlackPoint + step;
             if (step > 0)
             {
@@ -247,7 +229,6 @@ public partial class StarMaskingView : Window
         }
         else
         {
-            // Normal = White Point
             double newWhite = vm.ActiveRenderer.WhitePoint + step;
             if (step < 0)
             {

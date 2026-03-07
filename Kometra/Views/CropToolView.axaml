@@ -125,7 +125,9 @@
                                 <Grid ColumnDefinitions="*, 75"> 
                                     <Slider Grid.Column="0" Minimum="10" Maximum="{Binding MaxAllowedWidth}" Value="{Binding CropWidth}" 
                                             IsSnapToTickEnabled="True" TickFrequency="2" VerticalAlignment="Center" Margin="0,0,10,0"/>
-                                    <TextBox Grid.Column="1" Classes="valueInput" Text="{Binding CropWidth}"/>
+                                    <TextBox Name="CropWidthBox" Grid.Column="1" Classes="valueInput" 
+                                             Text="{Binding CropWidth, Mode=OneWay}" 
+                                             LostFocus="OnValueInputLostFocus" KeyDown="OnInputKeyDown"/>
                                 </Grid>
                             </StackPanel>
 
@@ -134,7 +136,9 @@
                                 <Grid ColumnDefinitions="*, 75">
                                     <Slider Grid.Column="0" Minimum="10" Maximum="{Binding MaxAllowedHeight}" Value="{Binding CropHeight}" 
                                             IsSnapToTickEnabled="True" TickFrequency="2" VerticalAlignment="Center" Margin="0,0,10,0"/>
-                                    <TextBox Grid.Column="1" Classes="valueInput" Text="{Binding CropHeight}"/>
+                                    <TextBox Name="CropHeightBox" Grid.Column="1" Classes="valueInput" 
+                                             Text="{Binding CropHeight, Mode=OneWay}" 
+                                             LostFocus="OnValueInputLostFocus" KeyDown="OnInputKeyDown"/>
                                 </Grid>
                             </StackPanel>
                             

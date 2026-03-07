@@ -98,7 +98,7 @@
             <Setter Property="Padding" Value="4,0"/> 
             <Setter Property="FontSize" Value="12"/>
             <Setter Property="VerticalContentAlignment" Value="Center"/>
-            <Setter Property="HorizontalContentAlignment" Value="Right"/>
+            <Setter Property="HorizontalContentAlignment" Value="Center"/>
             <Setter Property="VerticalAlignment" Value="Center"/>
             <Setter Property="CornerRadius" Value="3"/>
         </Style>
@@ -136,7 +136,7 @@
                                     <TextBlock Text="Soglia (Sigma)" Classes="paramLabel"/>
                                     <Grid ColumnDefinitions="Auto, 10, *">
                                         <TextBox Grid.Column="0" Name="CometThresholdBox" Classes="valueBox"
-                                                 Text="{Binding CometThreshold, StringFormat=N1}" 
+                                                 Text="{Binding CometThreshold, Mode=OneWay, StringFormat=N1}" 
                                                  LostFocus="OnManualInputCommit" KeyDown="OnInputKeyDown"/>
                                         <Slider Grid.Column="2" Classes="comet" 
                                                 Minimum="0.1" Maximum="10.0" Value="{Binding CometThreshold}" 
@@ -148,7 +148,7 @@
                                     <TextBlock Text="Dilatazione (px)" Classes="paramLabel"/>
                                     <Grid ColumnDefinitions="Auto, 10, *">
                                         <TextBox Grid.Column="0" Name="CometDilationBox" Classes="valueBox"
-                                                 Text="{Binding CometDilation}" 
+                                                 Text="{Binding CometDilation, Mode=OneWay}" 
                                                  LostFocus="OnManualInputCommit" KeyDown="OnInputKeyDown"/>
                                         <Slider Grid.Column="2" Classes="comet" 
                                                 Minimum="0" Maximum="20" Value="{Binding CometDilation}" 
@@ -171,7 +171,7 @@
                                     <TextBlock Text="Soglia (Sigma)" Classes="paramLabel"/>
                                     <Grid ColumnDefinitions="Auto, 10, *">
                                         <TextBox Grid.Column="0" Name="StarThresholdBox" Classes="valueBox"
-                                                 Text="{Binding StarThreshold, StringFormat=N1}" 
+                                                 Text="{Binding StarThreshold, Mode=OneWay, StringFormat=N1}" 
                                                  LostFocus="OnManualInputCommit" KeyDown="OnInputKeyDown"/>
                                         <Slider Grid.Column="2" Classes="star" 
                                                 Minimum="0.1" Maximum="20.0" Value="{Binding StarThreshold}" 
@@ -184,7 +184,7 @@
                                                ToolTip.Tip="Ignora stelle/rumore più piccoli di questo diametro."/>
                                     <Grid ColumnDefinitions="Auto, 10, *">
                                         <TextBox Grid.Column="0" Name="MinStarDiameterBox" Classes="valueBox"
-                                                 Text="{Binding MinStarDiameter}" 
+                                                 Text="{Binding MinStarDiameter, Mode=OneWay}" 
                                                  LostFocus="OnManualInputCommit" KeyDown="OnInputKeyDown"/>
                                         <Slider Grid.Column="2" Classes="star" 
                                                 Minimum="1" Maximum="10" Value="{Binding MinStarDiameter}" 
@@ -196,7 +196,7 @@
                                     <TextBlock Text="Dilatazione (px)" Classes="paramLabel"/>
                                     <Grid ColumnDefinitions="Auto, 10, *">
                                         <TextBox Grid.Column="0" Name="StarDilationBox" Classes="valueBox"
-                                                 Text="{Binding StarDilation}" 
+                                                 Text="{Binding StarDilation, Mode=OneWay}" 
                                                  LostFocus="OnManualInputCommit" KeyDown="OnInputKeyDown"/>
                                         <Slider Grid.Column="2" Classes="star" 
                                                 Minimum="0" Maximum="20" Value="{Binding StarDilation}" 

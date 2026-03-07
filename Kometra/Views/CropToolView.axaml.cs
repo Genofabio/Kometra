@@ -22,14 +22,12 @@ public partial class CropToolView : Window
         this.Loaded += OnWindowLoaded;
         this.Closing += OnWindowClosing;
         
-        // Risoluzione riferimenti controlli
         var previewBorder = this.FindControl<Border>("PreviewBorder");
         if (previewBorder != null)
         {
             previewBorder.SizeChanged += OnPreviewSizeChanged;
         }
 
-        // Hook manuale pulsanti
         var zoomInButton = this.FindControl<Button>("ZoomInButton");
         var zoomOutButton = this.FindControl<Button>("ZoomOutButton");
         var resetViewButton = this.FindControl<Button>("ResetViewButton");
@@ -49,7 +47,6 @@ public partial class CropToolView : Window
         {
             vm.RequestClose += Close;
             
-            // LOGICA DI CENTRATURA INIZIALE ROBUSTA
             var border = this.FindControl<Border>("PreviewBorder");
             if (border != null)
             {
@@ -87,7 +84,7 @@ public partial class CropToolView : Window
         if (DataContext is CropToolViewModel vm)
         {
             vm.Viewport.ViewportSize = e.NewSize;
-            vm.ResetView(); // Adatta l'immagine quando si ridimensiona la finestra
+            vm.ResetView(); 
         }
     }
 
@@ -101,19 +98,17 @@ public partial class CropToolView : Window
     }
 
     // =======================================================================
-    // GESTIONE TASTIERA (NOVITÀ)
+    // GESTIONE TASTIERA 
     // =======================================================================
 
     protected override void OnKeyDown(KeyEventArgs e)
     {
-        // Se l'utente sta scrivendo in una TextBox (es. dimensioni), non intercettare Invio
         if (e.Source is TextBox)
         {
             base.OnKeyDown(e);
             return;
         }
 
-        // Gestione Tasto INVIO -> Immagine Successiva
         if (e.Key == Key.Enter)
         {
             if (DataContext is CropToolViewModel vm && vm.Navigator.CanMoveNext)
@@ -140,7 +135,6 @@ public partial class CropToolView : Window
 
         var props = e.GetCurrentPoint(previewBorder).Properties;
 
-        // --- PANNING (Middle Click) ---
         if (props.IsMiddleButtonPressed)
         {
             _lastPointerPosForPanning = e.GetPosition(previewBorder);
@@ -148,24 +142,20 @@ public partial class CropToolView : Window
             e.Pointer.Capture(previewBorder);
             this.Cursor = new Cursor(StandardCursorType.SizeAll);
         }
-        // --- CLICK DESTRO (Rimuovi Centro) ---
         else if (props.IsRightButtonPressed)
         {
             vm.ClearCenter();
             e.Handled = true;
         }
-        // --- CLICK SINISTRO (Imposta Centro) ---
         else if (props.IsLeftButtonPressed)
         {
             if (vm.ActiveRenderer?.Image == null) return;
 
             var viewportPos = e.GetPosition(previewBorder);
 
-            // Calcolo coordinata immagine reale
             double imageX = (viewportPos.X - vm.Viewport.OffsetX) / vm.Viewport.Scale;
             double imageY = (viewportPos.Y - vm.Viewport.OffsetY) / vm.Viewport.Scale;
 
-            // Clamp coordinate
             if (vm.Viewport.ImageSize.Width > 0 && vm.Viewport.ImageSize.Height > 0)
             {
                 imageX = Math.Clamp(imageX, 0, vm.Viewport.ImageSize.Width);
@@ -220,7 +210,6 @@ public partial class CropToolView : Window
         if (_isPanning) return;
         if (vm.ActiveRenderer == null) return;
 
-        // ZOOM (CTRL + WHEEL)
         if (e.KeyModifiers.HasFlag(KeyModifiers.Control))
         {
             var mousePos = e.GetPosition(previewBorder);
@@ -231,7 +220,6 @@ public partial class CropToolView : Window
             return;
         }
 
-        // SOGLIE RADIOMETRICHE
         double currentRange = Math.Abs(vm.ActiveRenderer.WhitePoint - vm.ActiveRenderer.BlackPoint);
         double baseStep = (currentRange > 0.00001) ? currentRange * 0.05 : 1.0;
         double step = Math.Max(0.0001, baseStep);
@@ -240,7 +228,6 @@ public partial class CropToolView : Window
 
         if (e.KeyModifiers.HasFlag(KeyModifiers.Shift))
         {
-            // Modifica BLACK POINT
             double newBlack = vm.ActiveRenderer.BlackPoint + step;
             if (step > 0)
             {
@@ -254,7 +241,6 @@ public partial class CropToolView : Window
         }
         else
         {
-            // Modifica WHITE POINT
             double newWhite = vm.ActiveRenderer.WhitePoint + step;
             if (step < 0)
             {
@@ -271,7 +257,7 @@ public partial class CropToolView : Window
     }
 
     // =======================================================================
-    // HANDLERS BOTTONI
+    // HANDLERS BOTTONI E INPUT
     // =======================================================================
 
     private void OnZoomInClicked(object? sender, RoutedEventArgs e)
@@ -303,5 +289,33 @@ public partial class CropToolView : Window
     private void OnControlsPointerPressed(object? sender, PointerPressedEventArgs e)
     {
         e.Handled = true;
+    }
+
+    // Aggiunti Handlers per Input sicuro
+    private void OnValueInputLostFocus(object? sender, RoutedEventArgs e)
+    {
+        if (sender is not TextBox textBox || DataContext is not CropToolViewModel vm) return;
+        
+        string input = textBox.Text ?? "";
+
+        if (textBox.Name == "CropWidthBox")
+        {
+            if (int.TryParse(input, out int w))
+                vm.CropWidth = w;
+            
+            textBox.Text = vm.CropWidth.ToString();
+        }
+        else if (textBox.Name == "CropHeightBox")
+        {
+            if (int.TryParse(input, out int h))
+                vm.CropHeight = h;
+            
+            textBox.Text = vm.CropHeight.ToString();
+        }
+    }
+
+    private void OnInputKeyDown(object? sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.Enter) this.Focus(); 
     }
 }
