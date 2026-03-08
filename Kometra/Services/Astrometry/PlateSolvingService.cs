@@ -6,6 +6,7 @@ using System.Linq;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using System.Runtime.InteropServices;
 using Kometra.Infrastructure; // Localizzazione
 using Kometra.Models.Astrometry;
 using Kometra.Models.Astrometry.Solving;
@@ -13,6 +14,7 @@ using Kometra.Models.Fits;
 using Kometra.Models.Fits.Structure;
 using Kometra.Services.Fits;
 using Kometra.Services.Fits.Metadata;
+using Kometra.Services; // Namespace per IConfigurationService
 
 namespace Kometra.Services.Astrometry;
 
@@ -20,13 +22,16 @@ public class PlateSolvingService : IPlateSolvingService
 {
     private readonly IFitsDataManager _dataManager; 
     private readonly IFitsMetadataService _metadataService;
-    private readonly Lazy<string?> _executablePath;
+    private readonly IConfigurationService _configService;
 
-    public PlateSolvingService(IFitsDataManager dataManager, IFitsMetadataService metadataService)
+    public PlateSolvingService(
+        IFitsDataManager dataManager, 
+        IFitsMetadataService metadataService,
+        IConfigurationService configService)
     {
         _dataManager = dataManager ?? throw new ArgumentNullException(nameof(dataManager));
         _metadataService = metadataService ?? throw new ArgumentNullException(nameof(metadataService));
-        _executablePath = new Lazy<string?>(FindBestExecutable);
+        _configService = configService ?? throw new ArgumentNullException(nameof(configService));
     }
 
     public async Task<AstrometryDiagnosis> DiagnoseIssuesAsync(FitsFileReference fileRef)
@@ -46,24 +51,28 @@ public class PlateSolvingService : IPlateSolvingService
         IProgress<string>? liveLog = null)
     {
         var result = new PlateSolvingResult();
-        string? exePath = _executablePath.Value;
+        
+        // 1. Recupero l'eseguibile esclusivamente dalle impostazioni
+        string? exePath = GetConfiguredExecutablePath();
 
         if (string.IsNullOrEmpty(exePath)) 
         {
+            // Restituisce l'errore se il path non è impostato o il file non esiste
             result.Message = LocalizationManager.Instance["PlateErrorExeNotFound"];
+            result.Success = false;
             return result;
         }
 
         string? tempFilePath = null;
         try
         {
-            // 1. Preparazione Ambiente
+            // 2. Preparazione Ambiente
             var currentHeader = fileRef.ModifiedHeader ?? await _dataManager.GetHeaderOnlyAsync(fileRef.FilePath);
             
             // Creiamo il file temporaneo per ASTAP
             tempFilePath = await PrepareSandboxFile(fileRef);
 
-            // 2. Preparazione Parametri
+            // 3. Preparazione Parametri
             string hints = PrepareAstapHints(currentHeader);
             string radius = hints.Contains("-ra") ? "30" : "180"; 
             
@@ -79,7 +88,7 @@ public class PlateSolvingService : IPlateSolvingService
             var logBuilder = new StringBuilder();
             bool solutionFound = false;
 
-            // 3. Esecuzione Processo (ASTAP)
+            // 4. Esecuzione Processo (ASTAP)
             await RunProcessInternalAsync(exePath, args, line => 
             {
                 logBuilder.AppendLine(line);
@@ -96,7 +105,7 @@ public class PlateSolvingService : IPlateSolvingService
                 }
             }, token);
 
-            // 4. Verifica e Arricchimento (Logica Chirurgica)
+            // 5. Verifica e Arricchimento (Logica Chirurgica)
             _dataManager.Invalidate(tempFilePath); 
             
             // Leggiamo l'header prodotto da ASTAP
@@ -181,6 +190,27 @@ public class PlateSolvingService : IPlateSolvingService
         return result;
     }
 
+    private string? GetConfiguredExecutablePath()
+    {
+        string folder = _configService.Current.AstapFolder;
+        
+        if (string.IsNullOrWhiteSpace(folder) || !Directory.Exists(folder))
+            return null;
+
+        // Gestione estensione per Windows
+        string[] exeNames = RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
+            ? new[] { "astap_cli.exe", "astap.exe" }
+            : new[] { "astap_cli", "astap" };
+
+        foreach (var name in exeNames)
+        {
+            string fullPath = Path.Combine(folder, name);
+            if (File.Exists(fullPath)) return fullPath;
+        }
+
+        return null;
+    }
+
     private bool IsSignificantLogLine(string line)
     {
         if (string.IsNullOrWhiteSpace(line)) return false;
@@ -216,7 +246,6 @@ public class PlateSolvingService : IPlateSolvingService
         try 
         {
             process.Start();
-            Debug.WriteLine($"[ASTAP-STATUS] Processo avviato. PID: {process.Id}");
         }
         catch (Exception ex)
         {
@@ -235,18 +264,12 @@ public class PlateSolvingService : IPlateSolvingService
 
         process.OutputDataReceived += (s, e) => {
             if (e.Data == null) outputDone.TrySetResult(true);
-            else {
-                Debug.WriteLine($"[ASTAP-STDOUT] {e.Data}");
-                onLineReceived(e.Data);
-            }
+            else onLineReceived(e.Data);
         };
         
         process.ErrorDataReceived += (s, e) => {
             if (e.Data == null) errorDone.TrySetResult(true);
-            else {
-                Debug.WriteLine($"[ASTAP-STDERR] {e.Data}");
-                onLineReceived($"[STDERR] {e.Data}");
-            }
+            else onLineReceived($"[STDERR] {e.Data}");
         };
 
         process.BeginOutputReadLine();
@@ -255,11 +278,9 @@ public class PlateSolvingService : IPlateSolvingService
         try
         {
             await Task.WhenAll(process.WaitForExitAsync(token), outputDone.Task, errorDone.Task);
-            Debug.WriteLine($"[ASTAP-EXIT] Codice uscita: {process.ExitCode}");
         }
         catch (OperationCanceledException)
         {
-            Debug.WriteLine("[ASTAP-CANCEL] Operazione annullata dall'utente.");
             onLineReceived(LocalizationManager.Instance["PlateProcessInterrupted"]);
             throw;
         }
@@ -301,12 +322,5 @@ public class PlateSolvingService : IPlateSolvingService
         if (_metadataService.GetPixelSize(header) is double p) sb.AppendFormat(CultureInfo.InvariantCulture, " -pixsize {0:F2}", p);
     
         return sb.ToString();
-    }
-
-    private string? FindBestExecutable()
-    {
-        var paths = new[] { @"C:\Program Files\astap\astap_cli.exe", @"D:\astap\astap_cli.exe", @"C:\astap\astap.exe" };
-        foreach (var p in paths) if (File.Exists(p)) return p;
-        return null;
     }
 }

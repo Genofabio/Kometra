@@ -1,6 +1,6 @@
 ﻿using Avalonia.Controls;
 using Avalonia.Interactivity;
-using Kometra.ViewModels.Settings;
+using Kometra.ViewModels;
 
 namespace Kometra.Views;
 
@@ -16,6 +16,7 @@ public partial class SettingsView : Window
     {
         if (DataContext is SettingsViewModel vm)
         {
+            // Sottoscrizione all'evento di chiusura richiesto dal ViewModel
             vm.RequestClose += Close;
         }
     }
@@ -25,6 +26,7 @@ public partial class SettingsView : Window
         base.OnUnloaded(e);
         if (DataContext is SettingsViewModel vm)
         {
+            // Pulizia del riferimento per evitare memory leak
             vm.RequestClose -= Close;
         }
     }

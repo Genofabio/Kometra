@@ -5,6 +5,7 @@ using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
 using Microsoft.Extensions.DependencyInjection;
 using Kometra.Infrastructure;
+using Kometra.Services;
 using Kometra.Services.Astrometry;
 using Kometra.Services.Factories;
 using Kometra.Services.Fits;
@@ -40,6 +41,12 @@ public class App : Application
     {
         Services = ConfigureServices();
         
+        // --- INIZIALIZZAZIONE IMPOSTAZIONI ---
+        // Recuperiamo il servizio di configurazione e applichiamo la lingua salvata
+        var configService = Services.GetRequiredService<IConfigurationService>();
+        LocalizationManager.Instance.SetLanguage(configService.Current.Language);
+        ThemeService.ApplyPrimaryColor(configService.Current.PrimarySelectionColor);
+
         var mainViewModel = Services.GetRequiredService<MainWindowViewModel>();
 
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
@@ -64,6 +71,7 @@ public class App : Application
         services.AddHttpClient(); 
 
         // --- 1. Infrastruttura & I/O di Base ---
+        services.AddSingleton<IConfigurationService, ConfigurationService>();
         services.AddSingleton<LocalFileStreamProvider>();
         services.AddSingleton<AvaloniaAssetStreamProvider>();
         services.AddSingleton<IFileStreamProvider, FileStreamResolver>();
@@ -128,9 +136,7 @@ public class App : Application
         services.AddSingleton<BoardViewModel>();
 
         // --- 8. Tool ViewModels ---
-        // NOTA: I ViewModel dei Tool (Export, Alignment, HeaderEditor, ecc.) 
-        // NON sono registrati qui perché il WindowService li istanzia manualmente 
-        // tramite 'new' per iniettare i dati di runtime (es. filePaths).
+        // I ViewModel dei Tool vengono istanziati manualmente nel WindowService
         
         return services.BuildServiceProvider();
     }

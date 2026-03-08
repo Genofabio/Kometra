@@ -16,6 +16,7 @@
     <ItemGroup>
         <PackageReference Include="alglib.net" Version="3.19.0" />
         <PackageReference Include="Avalonia" Version="11.3.10" />
+        <PackageReference Include="Avalonia.Controls.ColorPicker" Version="11.3.10" />
         <PackageReference Include="Avalonia.Controls.DataGrid" Version="11.3.10" />
         <PackageReference Include="Avalonia.Desktop" Version="11.3.10" />
         <PackageReference Include="Avalonia.Themes.Fluent" Version="11.3.10" />

@@ -4,6 +4,7 @@ using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.Linq;
 using System.Threading.Tasks;
+using System.ComponentModel; // Per PropertyChangedEventArgs
 using Avalonia;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -13,6 +14,7 @@ using Kometra.Models.Processing;
 using Kometra.Models.Processing.Enhancement;
 using Kometra.Models.Processing.Stacking;
 using Kometra.Models.Visualization;
+using Kometra.Services;
 using Kometra.Services.Factories;
 using Kometra.Services.Fits;
 using Kometra.Services.Fits.Metadata;
@@ -22,7 +24,6 @@ using Kometra.Services.UI;
 using Kometra.Services.Undo;
 using Kometra.ViewModels.Nodes;
 using Kometra.ViewModels.Visualization;
-using SequenceNavigator = Kometra.ViewModels.Shared.SequenceNavigator;
 
 namespace Kometra.ViewModels;
 
@@ -38,6 +39,7 @@ public partial class BoardViewModel : ObservableObject
     private readonly IFitsDataManager _dataManager; 
     private readonly IStackingCoordinator _stackingCoordinator;
     private readonly IVideoExportCoordinator _videoCoordinator;
+    private readonly IConfigurationService _configService; // Nuova dipendenza
 
     // --- Stato Navigazione ---
     public BoardViewport Viewport { get; } = new();
@@ -47,6 +49,11 @@ public partial class BoardViewModel : ObservableObject
     
     private ImageNodeViewModel? SelectedImageNode => SelectedNode as ImageNodeViewModel;
 
+    // --- PROPRIETÀ DINAMICHE PER L'INTERFACCIA ---
+    // Queste proprietà permettono allo XAML di leggere i colori salvati nelle opzioni
+    public string BoardBackgroundColor => _configService.Current.BoardBackgroundColor;
+    public string PrimarySelectionColor => _configService.Current.PrimarySelectionColor;
+
     partial void OnSelectedNodeChanged(BaseNodeViewModel? value)
     {
         ResetNormalizationCommand.NotifyCanExecuteChanged();
@@ -54,7 +61,6 @@ public partial class BoardViewModel : ObservableObject
         ShowAlignmentWindowCommand.NotifyCanExecuteChanged();
         StackImagesCommand.NotifyCanExecuteChanged();
         
-        // RIMOSSO: SaveSelectedNodeCommand
         ExportSelectedNodeCommand.NotifyCanExecuteChanged(); 
         SaveVideoCommand.NotifyCanExecuteChanged();
         
@@ -67,7 +73,7 @@ public partial class BoardViewModel : ObservableObject
         ShowStructureExtractionWindowCommand.NotifyCanExecuteChanged();
         ShowLocalContrastWindowCommand.NotifyCanExecuteChanged();
         ShowStarMaskingWindowCommand.NotifyCanExecuteChanged();
-        ShowCropWindowCommand.NotifyCanExecuteChanged(); // <--- AGGIUNTO
+        ShowCropWindowCommand.NotifyCanExecuteChanged();
     }
     
     public bool IsGlobalAnimationRunning => 
@@ -87,7 +93,8 @@ public partial class BoardViewModel : ObservableObject
         IUndoService undoService,
         IFitsDataManager dataManager,
         IStackingCoordinator stackingCoordinator,
-        IVideoExportCoordinator videoCoordinator)
+        IVideoExportCoordinator videoCoordinator,
+        IConfigurationService configService) // Iniettato qui
     {
         _nodeFactory = nodeFactory ?? throw new ArgumentNullException(nameof(nodeFactory));
         _windowService = windowService ?? throw new ArgumentNullException(nameof(windowService));
@@ -96,9 +103,29 @@ public partial class BoardViewModel : ObservableObject
         _dataManager = dataManager ?? throw new ArgumentNullException(nameof(dataManager));
         _stackingCoordinator = stackingCoordinator ?? throw new ArgumentNullException(nameof(stackingCoordinator));
         _videoCoordinator = videoCoordinator ?? throw new ArgumentNullException(nameof(videoCoordinator));
+        _configService = configService ?? throw new ArgumentNullException(nameof(configService));
+
+        // Ascoltiamo i cambiamenti nel servizio di configurazione
+        if (_configService is ConfigurationService cs)
+        {
+            cs.PropertyChanged += OnSettingsChanged;
+        }
     }
 
-    // [GRAFO: Add/Remove/Register] - Codice invariato
+    /// <summary>
+    /// Reagisce al salvataggio delle nuove impostazioni aggiornando la UI della Board.
+    /// </summary>
+    private void OnSettingsChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(IConfigurationService.Current))
+        {
+            // Notifichiamo alla View che i colori sono cambiati
+            OnPropertyChanged(nameof(BoardBackgroundColor));
+            OnPropertyChanged(nameof(PrimarySelectionColor));
+        }
+    }
+
+    // [GRAFO: Add/Remove/Register] 
     private void AddNodeToGraph(BaseNodeViewModel node, string undoLabel)
     {
         var action = new DelegateAction(undoLabel,
@@ -326,9 +353,6 @@ public partial class BoardViewModel : ObservableObject
     [RelayCommand] private void ZoomBoard(string direction) { double f = direction.ToLower()=="in"?1.2:0.8; Viewport.ApplyZoomAtPoint(f, new Point(Viewport.ViewportSize.Width/2, Viewport.ViewportSize.Height/2)); }
     [RelayCommand(CanExecute = nameof(CanStackImages))] private async Task StackImages(StackingMode mode) { if(SelectedNode is not ImageNodeViewModel s) return; try { var r = await _stackingCoordinator.ExecuteStackingAsync(s.CurrentFiles, mode); double x=s.X+1.5*s.EstimatedTotalSize.Width; double y=s.Y+s.EstimatedTotalSize.Height/2.0; var n = await _nodeFactory.CreateSingleImageNodeAsync(r.FilePath, x+400, y); n.Title=$"{s.Title} ({mode})"; if(n is ImageNodeViewModel res) res.VisualizationMode=s.VisualizationMode; RegisterProcessingResult(n, s, r.FilePath, "Stacking"); } catch(Exception ex) { Debug.WriteLine($"Stacking failed: {ex.Message}"); } }
     
-    // --- RIMOSSO IL VECCHIO COMANDO SAVE AS ---
-
-    // --- NUOVO COMANDO: ESPORTAZIONE BATCH (Unico metodo di salvataggio) ---
     [RelayCommand(CanExecute = nameof(CanExecuteOnImageNode))]
     private async Task ExportSelectedNode()
     {
@@ -354,7 +378,6 @@ public partial class BoardViewModel : ObservableObject
     [RelayCommand]
     private async Task ShowSettingsWindow()
     {
-        // La Board chiama il servizio per mostrare le impostazioni
         await _windowService.ShowSettingsWindowAsync();
     }
     
@@ -380,6 +403,4 @@ public partial class BoardViewModel : ObservableObject
     private bool CanSaveVideo() => SelectedImageNode?.Navigator.TotalCount > 1;
     private bool CanToggleAnimation() => SelectedNode is ImageNodeViewModel n && n.Navigator.CanMove;
     private bool CanStackImages(StackingMode mode) => SelectedNode is ImageNodeViewModel n && n.Navigator.TotalCount > 1;
-    
-    // Rimosso CanSaveNode poiché non più utilizzato
 }

@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading.Tasks;
 using Avalonia.Controls;
 using Kometra.Infrastructure;
@@ -14,12 +15,12 @@ using Kometra.Services.Fits;
 using Kometra.Services.Fits.Metadata;
 using Kometra.Services.ImportExport;
 using Kometra.Services.Processing.Coordinators;
+using Kometra.ViewModels;
 using Kometra.ViewModels.Astrometry;
 using Kometra.ViewModels.Fits;
 using Kometra.ViewModels.ImageProcessing;
 using Kometra.ViewModels.ImportExport;
 using Kometra.ViewModels.Nodes;
-using Kometra.ViewModels.Settings;
 using Kometra.Views;
 using Microsoft.Extensions.DependencyInjection;
 using ImportViewModel = Kometra.ViewModels.ImportExport.ImportViewModel;
@@ -221,19 +222,17 @@ public class WindowService : IWindowService
     }
 
     // =======================================================================
-    // 11. ESPORTAZIONE BATCH (FITS Multi-HDU, PNG, JPG) [AGGIORNATO]
+    // 11. ESPORTAZIONE BATCH (FITS Multi-HDU, PNG, JPG)
     // =======================================================================
     public async Task ShowExportWindowAsync(IEnumerable<string> filePaths)
     {
         if (_mainWindow == null) throw new InvalidOperationException("Finestra principale non registrata.");
 
-        // Risoluzione manuale delle dipendenze (Uniforme agli altri metodi)
         var coordinator = _serviceProvider.GetRequiredService<IExportCoordinator>();
         var dialogService = _serviceProvider.GetRequiredService<IDialogService>();
         var dataManager = _serviceProvider.GetRequiredService<IFitsDataManager>();
         var rendererFactory = _serviceProvider.GetRequiredService<IFitsRendererFactory>();
 
-        // Istanziazione manuale del ViewModel con passaggio dei dati a runtime
         using var viewModel = new ExportViewModel(
             coordinator, 
             dialogService, 
@@ -251,34 +250,47 @@ public class WindowService : IWindowService
     // =======================================================================
     public async Task<List<string>?> ShowCropToolWindowAsync(List<FitsFileReference> sourceFiles, VisualizationMode initialMode)
     {
-        // 1. Controllo finestra principale
         if (_mainWindow == null) 
             throw new InvalidOperationException("Finestra principale non registrata nel WindowService.");
 
-        // 2. Risoluzione dipendenze (Assicurati di aver registrato ICropCoordinator in App.cs!)
         var coordinator = _serviceProvider.GetRequiredService<ICropCoordinator>();
         var dataManager = _serviceProvider.GetRequiredService<IFitsDataManager>();
         var rendererFactory = _serviceProvider.GetRequiredService<IFitsRendererFactory>();
 
-        // 3. Creazione ViewModel
         using var viewModel = new CropToolViewModel(sourceFiles, coordinator, dataManager, rendererFactory);
-    
-        // IMPORTANTE: Passiamo la modalità di visualizzazione (Logaritmica, ecc.)
         viewModel.VisualizationMode = initialMode;
 
-        // 4. Creazione View e assegnazione DataContext
         var view = new CropToolView 
         { 
             DataContext = viewModel 
         };
 
-        // 5. Apertura Finestra Modale
         await view.ShowDialog(_mainWindow);
 
-        // 6. RECUPERO DEL RISULTATO
-        // Questo è il punto critico: quando ShowDialog ritorna (finestra chiusa),
-        // dobbiamo leggere cosa ha prodotto il ViewModel.
         return viewModel.ResultPaths;
+    }
+
+    // =======================================================================
+    // 13. FINESTRA OPZIONI (SETTINGS) [AGGIORNATA]
+    // =======================================================================
+    public async Task ShowSettingsWindowAsync()
+    {
+        if (_mainWindow == null) throw new InvalidOperationException("Finestra principale non registrata.");
+
+        // Risoluzione delle dipendenze necessarie per il nuovo costruttore di SettingsViewModel
+        var configService = _serviceProvider.GetRequiredService<IConfigurationService>();
+        var dialogService = _serviceProvider.GetRequiredService<IDialogService>();
+
+        // Istanziazione del ViewModel con l'architettura a tre livelli (Model/Service/ViewModel)
+        var viewModel = new SettingsViewModel(configService, dialogService);
+    
+        var view = new SettingsView 
+        { 
+            DataContext = viewModel 
+        };
+
+        // Gestione dell'evento RequestClose e apertura modale
+        await ShowDialogAsync(view, viewModel);
     }
 
     // =======================================================================
@@ -302,22 +314,5 @@ public class WindowService : IWindowService
         var propInfo = typeof(TVm).GetProperty("DialogResult");
         bool success = (bool)(propInfo?.GetValue(viewModel) ?? false);
         return success ? resultSelector(viewModel) : default;
-    }
-    
-    // Aggiungi questo metodo all'interno della classe WindowService
-    public async Task ShowSettingsWindowAsync()
-    {
-        if (_mainWindow == null) throw new InvalidOperationException("Finestra principale non registrata.");
-
-        // Istanziamo il ViewModel (attualmente non ha dipendenze da iniettare via costruttore)
-        var viewModel = new SettingsViewModel();
-    
-        var view = new SettingsView 
-        { 
-            DataContext = viewModel 
-        };
-
-        // Usiamo il tuo helper privato per gestire l'evento RequestClose e l'apertura modale
-        await ShowDialogAsync(view, viewModel);
     }
 }

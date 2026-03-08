@@ -1,102 +1,150 @@
 ﻿<Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
-        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:avalonia="clr-namespace:Material.Icons.Avalonia;assembly=Material.Icons.Avalonia"
-        xmlns:vm="clr-namespace:Kometra.ViewModels.Settings"
         xmlns:infrastructure="clr-namespace:Kometra.Infrastructure"
-        mc:Ignorable="d" d:DesignWidth="600" d:DesignHeight="500"
+        xmlns:viewModels="clr-namespace:Kometra.ViewModels"
         x:Class="Kometra.Views.SettingsView"
-        x:DataType="vm:SettingsViewModel"
+        x:DataType="viewModels:SettingsViewModel"
         Icon="/Assets/Icon/icon32.ico"
         Title="{Binding [SettingsTitle], Source={x:Static infrastructure:LocalizationManager.Instance}}"
-        Width="600" Height="500"
-        MinHeight="400" MinWidth="500"
+        Width="450" Height="500"
         WindowStartupLocation="CenterOwner"
-        Background="{DynamicResource ToolWindowBackgroundBrush}"
+        Background="#2D2D2D"
+        CanResize="True"
         Focusable="True">
 
     <Window.Styles>
-        <Style Selector="TextBlock.sectionTitle">
+        <Style Selector="TextBlock.sectionHeader">
             <Setter Property="FontSize" Value="14"/>
-            <Setter Property="FontWeight" Value="SemiBold"/>
-            <Setter Property="Margin" Value="0,15,0,5"/>
+            <Setter Property="FontWeight" Value="Bold"/>
             <Setter Property="Foreground" Value="White"/>
+            <Setter Property="Margin" Value="0,0,0,12"/>
         </Style>
+
+        <Style Selector="Border.settingsGroup">
+            <Setter Property="Background" Value="#353535"/>
+            <Setter Property="BorderBrush" Value="#454545"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="CornerRadius" Value="8"/>
+            <Setter Property="Padding" Value="20"/>
+            <Setter Property="Margin" Value="0,0,0,20"/>
+        </Style>
+
         <Style Selector="TextBlock.label">
             <Setter Property="FontSize" Value="12"/>
-            <Setter Property="Foreground" Value="{DynamicResource Text.MediumGreyBrush}"/>
             <Setter Property="VerticalAlignment" Value="Center"/>
+            <Setter Property="Foreground" Value="#CCCCCC"/>
+        </Style>
+
+        <Style Selector="Button">
+            <Setter Property="HorizontalContentAlignment" Value="Center"/>
+            <Setter Property="VerticalContentAlignment" Value="Center"/>
+            <Setter Property="FontWeight" Value="Normal"/>
+            <Setter Property="Height" Value="40"/>
         </Style>
     </Window.Styles>
 
-    <Grid RowDefinitions="Auto, *, Auto">
+    <Grid RowDefinitions="Auto, *, Auto" Margin="0">
         
-        <StackPanel Grid.Row="0" Spacing="5" Margin="0,0,0,15">
+        <StackPanel Grid.Row="0" Margin="30,15,30,0">
             <TextBlock Text="{Binding [SettingsTitle], Source={x:Static infrastructure:LocalizationManager.Instance}}" 
-                       FontSize="22" FontWeight="Bold" Foreground="White"/>
-            <Separator Background="{DynamicResource Border.WhiteDimBrush}" Opacity="0.3" Margin="0,5"/>
+                       FontSize="26" FontWeight="ExtraBold" Foreground="White"/>
+            <Separator Background="White" Opacity="0.1" Margin="0,12,0,0"/>
         </StackPanel>
 
-        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
-            <StackPanel Spacing="10">
-
-                <TextBlock Classes="sectionTitle" Text="{Binding [GeneralSettings], Source={x:Static infrastructure:LocalizationManager.Instance}}" Margin="0,0,0,5"/>
+        <ScrollViewer Grid.Row="1" Margin="30,0,22,0" VerticalScrollBarVisibility="Auto">
+            <StackPanel Margin="0,20,8,0">
                 
-                <Grid ColumnDefinitions="200, *" Margin="10,0,0,0">
-                    <TextBlock Grid.Column="0" Classes="label" Text="{Binding [Language], Source={x:Static infrastructure:LocalizationManager.Instance}}"/>
-                    <ComboBox Grid.Column="1" HorizontalAlignment="Stretch"
-                              ItemsSource="{Binding AvailableLanguages}"
-                              SelectedItem="{Binding SelectedLanguage}">
-                        <ComboBox.ItemTemplate>
-                            <DataTemplate>
-                                <TextBlock Text="{Binding DisplayName}"/>
-                            </DataTemplate>
-                        </ComboBox.ItemTemplate>
-                    </ComboBox>
-                </Grid>
-
-                <Separator Background="{DynamicResource Border.WhiteDimBrush}" Opacity="0.1" Margin="0,10"/>
-
-                <TextBlock Classes="sectionTitle" Text="{Binding [InterfaceSettings], Source={x:Static infrastructure:LocalizationManager.Instance}}"/>
-                
-                <Grid ColumnDefinitions="200, *" RowDefinitions="Auto, 10, Auto" Margin="10,0,0,0">
-                    
-                    <TextBlock Grid.Row="0" Grid.Column="0" Classes="label" Text="Board Background Color (Hex)"/>
-                    <TextBox Grid.Row="0" Grid.Column="1" Text="{Binding BoardBackgroundColor}" Height="30"/>
-
-                    <TextBlock Grid.Row="2" Grid.Column="0" Classes="label" Text="Primary Selection Color (Hex)"/>
-                    <TextBox Grid.Row="2" Grid.Column="1" Text="{Binding PrimarySelectionColor}" Height="30"/>
-                </Grid>
-
-                <Separator Background="{DynamicResource Border.WhiteDimBrush}" Opacity="0.1" Margin="0,10"/>
-
-                <TextBlock Classes="sectionTitle" Text="External Engines"/>
-                
-                <Grid ColumnDefinitions="200, *" Margin="10,0,0,0">
-                    <TextBlock Grid.Column="0" Classes="label" Text="ASTAP Executable Path"/>
-                    <Grid Grid.Column="1" ColumnDefinitions="*, Auto">
-                        <TextBox Grid.Column="0" Text="{Binding AstapPath}" Height="30" Margin="0,0,5,0"/>
-                        <Button Grid.Column="1" ToolTip.Tip="Browse...">
-                            <avalonia:MaterialIcon Kind="FolderOpen" Width="18" Height="18"/>
-                        </Button>
+                <TextBlock Text="{Binding [GeneralSettings], Source={x:Static infrastructure:LocalizationManager.Instance}}" Classes="sectionHeader"/>
+                <Border Classes="settingsGroup">
+                    <Grid ColumnDefinitions="*, *">
+                        <TextBlock Grid.Column="0" Classes="label" Text="{Binding [Language], Source={x:Static infrastructure:LocalizationManager.Instance}}"/>
+                        <ComboBox Grid.Column="1" HorizontalAlignment="Stretch" Height="36"
+                                  ItemsSource="{Binding AvailableLanguages}"
+                                  SelectedItem="{Binding SelectedLanguage}">
+                            <ComboBox.ItemTemplate>
+                                <DataTemplate>
+                                    <TextBlock Text="{Binding DisplayName}"/>
+                                </DataTemplate>
+                            </ComboBox.ItemTemplate>
+                        </ComboBox>
                     </Grid>
-                </Grid>
+                </Border>
 
+                <TextBlock Text="{Binding [InterfaceSettings], Source={x:Static infrastructure:LocalizationManager.Instance}}" Classes="sectionHeader"/>
+                <Border Classes="settingsGroup">
+                    <StackPanel Spacing="20">
+                        <Grid ColumnDefinitions="*, Auto">
+                            <TextBlock Grid.Column="0" Classes="label" Text="{Binding [SettingsBoardBackground], Source={x:Static infrastructure:LocalizationManager.Instance}}"/>
+                            <ColorPicker Grid.Column="1" Color="{Binding BoardColor}" 
+                                         IsAlphaEnabled="False" HorizontalAlignment="Right"
+                                         Margin="0,0,10,0"/>
+                        </Grid>
+                        
+                        <Grid ColumnDefinitions="*, Auto">
+                            <TextBlock Grid.Column="0" Classes="label" Text="{Binding [SettingsSelectionColor], Source={x:Static infrastructure:LocalizationManager.Instance}}"/>
+                            <ColorPicker Grid.Column="1" Color="{Binding SelectionColor}" 
+                                         IsAlphaEnabled="False" HorizontalAlignment="Right"
+                                         Margin="0,0,10,0"/>
+                        </Grid>
+                    </StackPanel>
+                </Border>
+
+                <TextBlock Text="{Binding [SettingsExternalEngines], Source={x:Static infrastructure:LocalizationManager.Instance}}" Classes="sectionHeader"/>
+                <Border Classes="settingsGroup">
+                    <Grid ColumnDefinitions="*, *" RowDefinitions="Auto, Auto">
+                        
+                        <TextBlock Grid.Row="0" Grid.Column="0" Classes="label" 
+                                   Text="{Binding [SettingsAstapFolderLabel], Source={x:Static infrastructure:LocalizationManager.Instance}}"/>
+                        
+                        <Grid Grid.Row="0" Grid.Column="1" ColumnDefinitions="*, Auto" ColumnSpacing="8">
+                            <TextBox Text="{Binding AstapFolderPath}" 
+                                     IsReadOnly="True" 
+                                     Watermark="{Binding [SettingsAstapFolderWatermark], Source={x:Static infrastructure:LocalizationManager.Instance}}" 
+                                     Height="36"
+                                     VerticalContentAlignment="Center"
+                                     Background="#2A2A2A"
+                                     FontSize="11"
+                                     BorderThickness="1" BorderBrush="#454545"/>
+                            
+                            <Button Grid.Column="1" Command="{Binding BrowseAstapFolderCommand}" 
+                                    Width="40" Height="36" Padding="0"
+                                    Margin="0,0,10,0"
+                                    ToolTip.Tip="{Binding [SettingsAstapFolderTooltip], Source={x:Static infrastructure:LocalizationManager.Instance}}">
+                                <avalonia:MaterialIcon Kind="FolderOpen" Width="20" Height="20"/>
+                            </Button>
+                        </Grid>
+                        
+                        <TextBlock Grid.Row="1" 
+                                   Grid.Column="0" 
+                                   Grid.ColumnSpan="2"
+                                   Text="{Binding AstapErrorMessage}" 
+                                   Foreground="#E6606A" 
+                                   FontSize="10" 
+                                   Margin="0,5,0,0"
+                                   HorizontalAlignment="Stretch"
+                                   IsVisible="{Binding AstapErrorMessage, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" 
+                                   TextWrapping="Wrap"/>
+                    </Grid>
+                </Border>
+                
+                <Rectangle Height="15" />
             </StackPanel>
         </ScrollViewer>
 
-        <StackPanel Grid.Row="2" Margin="0,15,0,0">
-            <Separator Background="{DynamicResource Border.WhiteDimBrush}" Opacity="0.3" Margin="0,0,0,15"/>
-            <Grid ColumnDefinitions="*, 10, *">
+        <StackPanel Grid.Row="2" Margin="30,0,30,15">
+            <Separator Background="White" Opacity="0.1" Margin="0,0,0,12"/>
+            <Grid ColumnDefinitions="*, 15, *">
                 <Button Grid.Column="0" Content="{Binding [Cancel], Source={x:Static infrastructure:LocalizationManager.Instance}}" 
                         Command="{Binding CancelCommand}" 
-                        HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"/>
+                        Classes="cancel" 
+                        HorizontalAlignment="Stretch"/>
                 
                 <Button Grid.Column="2" Content="{Binding [Save], Source={x:Static infrastructure:LocalizationManager.Instance}}" 
                         Command="{Binding SaveCommand}" 
-                        Background="{DynamicResource ActionPrimaryBackgroundBrush}" Foreground="White"
-                        HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"/>
+                        Classes="apply" 
+                        HorizontalAlignment="Stretch"
+                        Background="{DynamicResource ActionSuccessBackgroundBrush}"/>
             </Grid>
         </StackPanel>
     </Grid>

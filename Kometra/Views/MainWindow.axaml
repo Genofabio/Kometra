@@ -11,6 +11,8 @@
         x:Class="Kometra.Views.MainWindow"
         x:DataType="vm:MainWindowViewModel"
         
+        Background="{Binding BoardVm.BoardBackgroundColor}"
+        
         Icon="/Assets/Icon/icon32.ico"
         Title="{Binding WindowTitle}" 
         WindowState="Maximized">

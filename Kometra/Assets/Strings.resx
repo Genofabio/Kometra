@@ -683,4 +683,31 @@
     <data name="PlateErrorNoSolution" xml:space="preserve"><value>Solution not found</value></data>
     <data name="PlateProcessInterrupted" xml:space="preserve"><value>!!! PROCESS INTERRUPTED BY USER !!!</value></data>
     <data name="PlateErrorNoImages" xml:space="preserve"><value>Cannot perform plate solving: FITS file contains no images.</value></data>
+    <data name="SettingsBoardBackground" xml:space="preserve">
+        <value>Board Background</value>
+    </data>
+    <data name="SettingsSelectionColor" xml:space="preserve">
+        <value>Selection Highlight</value>
+    </data>
+    <data name="SettingsExternalEngines" xml:space="preserve">
+        <value>External Engines</value>
+    </data>
+    <data name="SettingsAstapFolderLabel" xml:space="preserve">
+        <value>ASTAP Installation Folder</value>
+    </data>
+    <data name="SettingsAstapFolderWatermark" xml:space="preserve">
+        <value>Select folder...</value>
+    </data>
+    <data name="SettingsAstapFolderTooltip" xml:space="preserve">
+        <value>Browse for ASTAP folder</value>
+    </data>
+    <data name="SettingsSelectAstapFolder" xml:space="preserve">
+        <value>Select ASTAP Folder</value>
+    </data>
+    <data name="SettingsAstapInvalidFolder" xml:space="preserve">
+    <value>The selected folder does not contain the ASTAP executable (astap_cli or astap). Please select the correct installation folder.</value>
+</data>
+    <data name="PlateErrorExeNotFound" xml:space="preserve">
+    <value>ASTAP executable not found in the configured folder. Please check your settings.</value>
+</data>
 </root>

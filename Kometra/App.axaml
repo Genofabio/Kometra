@@ -28,6 +28,7 @@
         </FluentTheme>
         
         <avalonia:MaterialIconStyles />
+        <StyleInclude Source="avares://Avalonia.Controls.ColorPicker/Themes/Fluent/Fluent.xaml" />
 
         <StyleInclude Source="avares://Kometra/Styles/NodeStyles.axaml" />
         <StyleInclude Source="avares://Kometra/Styles/ConnectionStyles.axaml" />

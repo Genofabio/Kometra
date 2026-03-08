@@ -14,6 +14,7 @@
              
              Focusable="True"
              ClipToBounds="True"
+             Background="{Binding BoardBackgroundColor}"
              
              PointerPressed="OnPointerPressed"
              PointerReleased="OnPointerReleased"
@@ -39,7 +40,7 @@
 
     <Grid>
         <controls:GridBackground x:Name="BackgroundGrid"
-                                 Background="{DynamicResource AppBackgroundBrush}"
+                                 Background="{Binding BoardBackgroundColor}"
                                  GridLinesBrush="{DynamicResource GridLineBrush}"
                                  OffsetX="{Binding Viewport.OffsetX}"
                                  OffsetY="{Binding Viewport.OffsetY}"

@@ -581,4 +581,31 @@
     <data name="PlateErrorNoSolution" xml:space="preserve"><value>Soluzione non trovata</value></data>
     <data name="PlateProcessInterrupted" xml:space="preserve"><value>!!! PROCESSO INTERROTTO DALL'UTENTE !!!</value></data>
     <data name="PlateErrorNoImages" xml:space="preserve"><value>Impossibile eseguire il plate solving: Il file FITS non contiene immagini.</value></data>
+    <data name="SettingsBoardBackground" xml:space="preserve">
+        <value>Sfondo Board</value>
+    </data>
+    <data name="SettingsSelectionColor" xml:space="preserve">
+        <value>Colore Selezione</value>
+    </data>
+    <data name="SettingsExternalEngines" xml:space="preserve">
+        <value>Motori Esterni</value>
+    </data>
+    <data name="SettingsAstapFolderLabel" xml:space="preserve">
+        <value>Cartella Installazione ASTAP</value>
+    </data>
+    <data name="SettingsAstapFolderWatermark" xml:space="preserve">
+        <value>Seleziona cartella...</value>
+    </data>
+    <data name="SettingsAstapFolderTooltip" xml:space="preserve">
+        <value>Sfoglia per cercare la cartella ASTAP</value>
+    </data>
+    <data name="SettingsSelectAstapFolder" xml:space="preserve">
+        <value>Seleziona Cartella ASTAP</value>
+    </data>
+    <data name="SettingsAstapInvalidFolder" xml:space="preserve">
+    <value>La cartella selezionata non contiene l'eseguibile di ASTAP (astap_cli o astap). Per favore, seleziona la cartella di installazione corretta.</value>
+</data>
+    <data name="PlateErrorExeNotFound" xml:space="preserve">
+    <value>Eseguibile ASTAP non trovato nella cartella configurata. Per favore, controlla le impostazioni.</value>
+</data>
 </root>
