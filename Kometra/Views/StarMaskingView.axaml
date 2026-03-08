@@ -4,12 +4,13 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:avalonia="clr-namespace:Material.Icons.Avalonia;assembly=Material.Icons.Avalonia"
         xmlns:converters="clr-namespace:Kometra.Converters"
+        xmlns:infrastructure="clr-namespace:Kometra.Infrastructure"
         xmlns:imageProcessing="clr-namespace:Kometra.ViewModels.ImageProcessing"
         mc:Ignorable="d" d:DesignWidth="1000" d:DesignHeight="700"
         x:Class="Kometra.Views.StarMaskingView"
         x:DataType="imageProcessing:StarMaskingViewModel"
         Icon="/Assets/Icon/icon32.ico"
-        Title="Rimozione Stelle"
+        Title="{Binding [StarMaskTitle], Source={x:Static infrastructure:LocalizationManager.Instance}}"
         Width="1000" Height="700"
         MinHeight="600" MinWidth="850"
         WindowStartupLocation="CenterScreen"
@@ -116,8 +117,8 @@
             <Grid RowDefinitions="Auto, *, Auto">
                 
                 <StackPanel Grid.Row="0" Spacing="5" Margin="0,0,0,10">
-                    <TextBlock Text="Rimozione Stelle" FontSize="18" FontWeight="Bold"/>
-                    <TextBlock Text="Definisci i parametri e calcola l'anteprima." 
+                    <TextBlock Text="{Binding [StarMaskHeader], Source={x:Static infrastructure:LocalizationManager.Instance}}" FontSize="18" FontWeight="Bold"/>
+                    <TextBlock Text="{Binding [StarMaskDesc], Source={x:Static infrastructure:LocalizationManager.Instance}}" 
                                FontSize="12" Opacity="0.7" TextWrapping="Wrap"/>
                     <Separator Background="{DynamicResource Border.WhiteDimBrush}" Opacity="0.3" Margin="0,10"/>
                 </StackPanel>
@@ -127,13 +128,13 @@
 
                         <StackPanel Spacing="8">
                             <StackPanel Orientation="Horizontal" Spacing="10">
-                                <CheckBox Classes="comet" IsChecked="{Binding ShowCometMask}" ToolTip.Tip="Mostra maschera cometa" VerticalAlignment="Center"/>
-                                <TextBlock Text="Mascheramento Cometa" FontWeight="SemiBold" VerticalAlignment="Center" FontSize="15" Foreground="White"/>
+                                <CheckBox Classes="comet" IsChecked="{Binding ShowCometMask}" ToolTip.Tip="{Binding [TooltipShowCometMask], Source={x:Static infrastructure:LocalizationManager.Instance}}" VerticalAlignment="Center"/>
+                                <TextBlock Text="{Binding [StarMaskCometHeader], Source={x:Static infrastructure:LocalizationManager.Instance}}" FontWeight="SemiBold" VerticalAlignment="Center" FontSize="15" Foreground="White"/>
                             </StackPanel>
                             
                             <StackPanel Spacing="8" IsVisible="{Binding ShowCometMask}">
                                 <StackPanel>
-                                    <TextBlock Text="Soglia (Sigma)" Classes="paramLabel"/>
+                                    <TextBlock Text="{Binding [StarMaskThreshold], Source={x:Static infrastructure:LocalizationManager.Instance}}" Classes="paramLabel"/>
                                     <Grid ColumnDefinitions="Auto, 10, *">
                                         <TextBox Grid.Column="0" Name="CometThresholdBox" Classes="valueBox"
                                                  Text="{Binding CometThreshold, Mode=OneWay, StringFormat=N1}" 
@@ -145,7 +146,7 @@
                                 </StackPanel>
 
                                 <StackPanel>
-                                    <TextBlock Text="Dilatazione (px)" Classes="paramLabel"/>
+                                    <TextBlock Text="{Binding [StarMaskDilation], Source={x:Static infrastructure:LocalizationManager.Instance}}" Classes="paramLabel"/>
                                     <Grid ColumnDefinitions="Auto, 10, *">
                                         <TextBox Grid.Column="0" Name="CometDilationBox" Classes="valueBox"
                                                  Text="{Binding CometDilation, Mode=OneWay}" 
@@ -162,13 +163,13 @@
 
                         <StackPanel Spacing="8">
                             <StackPanel Orientation="Horizontal" Spacing="10">
-                                <CheckBox Classes="star" IsChecked="{Binding ShowStarMask}" ToolTip.Tip="Mostra maschera stelle" VerticalAlignment="Center"/>
-                                <TextBlock Text="Mascheramento Stelle" FontWeight="SemiBold" VerticalAlignment="Center" FontSize="15" Foreground="White"/>
+                                <CheckBox Classes="star" IsChecked="{Binding ShowStarMask}" ToolTip.Tip="{Binding [TooltipShowStarMask], Source={x:Static infrastructure:LocalizationManager.Instance}}" VerticalAlignment="Center"/>
+                                <TextBlock Text="{Binding [StarMaskStarHeader], Source={x:Static infrastructure:LocalizationManager.Instance}}" FontWeight="SemiBold" VerticalAlignment="Center" FontSize="15" Foreground="White"/>
                             </StackPanel>
                             
                             <StackPanel Spacing="8" IsVisible="{Binding ShowStarMask}">
                                 <StackPanel>
-                                    <TextBlock Text="Soglia (Sigma)" Classes="paramLabel"/>
+                                    <TextBlock Text="{Binding [StarMaskThreshold], Source={x:Static infrastructure:LocalizationManager.Instance}}" Classes="paramLabel"/>
                                     <Grid ColumnDefinitions="Auto, 10, *">
                                         <TextBox Grid.Column="0" Name="StarThresholdBox" Classes="valueBox"
                                                  Text="{Binding StarThreshold, Mode=OneWay, StringFormat=N1}" 
@@ -180,8 +181,8 @@
                                 </StackPanel>
                                 
                                 <StackPanel>
-                                    <TextBlock Text="Diametro Minimo (px)" Classes="paramLabel" 
-                                               ToolTip.Tip="Ignora stelle/rumore più piccoli di questo diametro."/>
+                                    <TextBlock Text="{Binding [StarMaskMinDiameter], Source={x:Static infrastructure:LocalizationManager.Instance}}" Classes="paramLabel" 
+                                               ToolTip.Tip="{Binding [TooltipMinDiameter], Source={x:Static infrastructure:LocalizationManager.Instance}}"/>
                                     <Grid ColumnDefinitions="Auto, 10, *">
                                         <TextBox Grid.Column="0" Name="MinStarDiameterBox" Classes="valueBox"
                                                  Text="{Binding MinStarDiameter, Mode=OneWay}" 
@@ -193,7 +194,7 @@
                                 </StackPanel>
 
                                 <StackPanel>
-                                    <TextBlock Text="Dilatazione (px)" Classes="paramLabel"/>
+                                    <TextBlock Text="{Binding [StarMaskDilation], Source={x:Static infrastructure:LocalizationManager.Instance}}" Classes="paramLabel"/>
                                     <Grid ColumnDefinitions="Auto, 10, *">
                                         <TextBox Grid.Column="0" Name="StarDilationBox" Classes="valueBox"
                                                  Text="{Binding StarDilation, Mode=OneWay}" 
@@ -221,14 +222,14 @@
                         </StackPanel>
 
                         <Panel IsVisible="{Binding !IsBusy}">
-                            <Button Content="Calcola Anteprima" Command="{Binding CalculateCommand}" 
+                            <Button Content="{Binding [StarMaskCalcPreview], Source={x:Static infrastructure:LocalizationManager.Instance}}" Command="{Binding CalculateCommand}" 
                                     Classes="calculate" 
                                     IsVisible="{Binding IsSetupVisible}"
                                     HorizontalAlignment="Stretch"/>
 
                             <Grid ColumnDefinitions="*,10,*" IsVisible="{Binding IsResultActionsVisible}">
-                                <Button Grid.Column="0" Content="Annulla" Command="{Binding CancelCommand}" Classes="cancel" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"/>
-                                <Button Grid.Column="2" Content="Applica" Command="{Binding ApplyBatchCommand}" Classes="apply" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"/>
+                                <Button Grid.Column="0" Content="{Binding [Cancel], Source={x:Static infrastructure:LocalizationManager.Instance}}" Command="{Binding CancelCommand}" Classes="cancel" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"/>
+                                <Button Grid.Column="2" Content="{Binding [Save], Source={x:Static infrastructure:LocalizationManager.Instance}}" Command="{Binding ApplyBatchCommand}" Classes="apply" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"/>
                             </Grid>
                         </Panel>
                     </Panel>
@@ -271,21 +272,21 @@
                     </Border>
 
                     <StackPanel Orientation="Horizontal" Spacing="4" Margin="10" HorizontalAlignment="Left" VerticalAlignment="Bottom" ZIndex="1" PointerPressed="OnControlsPointerPressed" IsEnabled="{Binding IsInteractionEnabled}">
-                        <Button Command="{Binding Navigator.MoveToFirstCommand}" ToolTip.Tip="Prima"><avalonia:MaterialIcon Kind="ChevronDoubleLeft" Width="16" Height="16"/></Button>
-                        <Button Command="{Binding Navigator.PreviousCommand}" ToolTip.Tip="Precedente"><avalonia:MaterialIcon Kind="ChevronLeft" Width="16" Height="16"/></Button>
+                        <Button Command="{Binding Navigator.MoveToFirstCommand}" ToolTip.Tip="{Binding [TooltipFirstImage], Source={x:Static infrastructure:LocalizationManager.Instance}}"><avalonia:MaterialIcon Kind="ChevronDoubleLeft" Width="16" Height="16"/></Button>
+                        <Button Command="{Binding Navigator.PreviousCommand}" ToolTip.Tip="{Binding [TooltipPrevImage], Source={x:Static infrastructure:LocalizationManager.Instance}}"><avalonia:MaterialIcon Kind="ChevronLeft" Width="16" Height="16"/></Button>
                         <Border Background="#66000000" CornerRadius="4" Padding="8,0" VerticalAlignment="Stretch">
                             <TextBlock Text="{Binding CurrentImageText}" VerticalAlignment="Center" Foreground="White" FontWeight="Bold" FontSize="12"/>
                         </Border>
-                        <Button Command="{Binding Navigator.NextCommand}" ToolTip.Tip="Successiva"><avalonia:MaterialIcon Kind="ChevronRight" Width="16" Height="16"/></Button>
-                        <Button Command="{Binding Navigator.MoveToLastCommand}" ToolTip.Tip="Ultima"><avalonia:MaterialIcon Kind="ChevronDoubleRight" Width="16" Height="16"/></Button>
+                        <Button Command="{Binding Navigator.NextCommand}" ToolTip.Tip="{Binding [TooltipNextImage], Source={x:Static infrastructure:LocalizationManager.Instance}}"><avalonia:MaterialIcon Kind="ChevronRight" Width="16" Height="16"/></Button>
+                        <Button Command="{Binding Navigator.MoveToLastCommand}" ToolTip.Tip="{Binding [TooltipLastImage], Source={x:Static infrastructure:LocalizationManager.Instance}}"><avalonia:MaterialIcon Kind="ChevronDoubleRight" Width="16" Height="16"/></Button>
                     </StackPanel>
                     
                     <StackPanel Orientation="Horizontal" Spacing="4" Margin="10" HorizontalAlignment="Right" VerticalAlignment="Bottom" ZIndex="1" PointerPressed="OnControlsPointerPressed">
-                        <Button Click="OnZoomOutClicked" ToolTip.Tip="Zoom Out"><avalonia:MaterialIcon Kind="Minus" Width="16" Height="16"/></Button>
-                        <Button Click="OnZoomInClicked" ToolTip.Tip="Zoom In"><avalonia:MaterialIcon Kind="Plus" Width="16" Height="16"/></Button>
-                        <Button Command="{Binding ResetViewCommand}" ToolTip.Tip="Adatta alla finestra"><avalonia:MaterialIcon Kind="FitToScreen" Width="16" Height="16"/></Button>
+                        <Button Click="OnZoomOutClicked" ToolTip.Tip="{Binding [TooltipZoomOut], Source={x:Static infrastructure:LocalizationManager.Instance}}"><avalonia:MaterialIcon Kind="Minus" Width="16" Height="16"/></Button>
+                        <Button Click="OnZoomInClicked" ToolTip.Tip="{Binding [TooltipZoomIn], Source={x:Static infrastructure:LocalizationManager.Instance}}"><avalonia:MaterialIcon Kind="Plus" Width="16" Height="16"/></Button>
+                        <Button Command="{Binding ResetViewCommand}" ToolTip.Tip="{Binding [TooltipFitView], Source={x:Static infrastructure:LocalizationManager.Instance}}"><avalonia:MaterialIcon Kind="FitToScreen" Width="16" Height="16"/></Button>
                         <Path Data="M0,0 V18" Stroke="#666666" StrokeThickness="1" Margin="8,4,8,4" VerticalAlignment="Center" />
-                        <Button Command="{Binding ResetThresholdsCommand}" ToolTip.Tip="Reset Stretch"><avalonia:MaterialIcon Kind="Contrast" Width="16" Height="16"/></Button>
+                        <Button Command="{Binding ResetThresholdsCommand}" ToolTip.Tip="{Binding [TooltipResetStretch], Source={x:Static infrastructure:LocalizationManager.Instance}}"><avalonia:MaterialIcon Kind="Contrast" Width="16" Height="16"/></Button>
                     </StackPanel>
                 </Grid>
             </Border>

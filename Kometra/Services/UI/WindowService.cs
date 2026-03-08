@@ -19,6 +19,7 @@ using Kometra.ViewModels.Fits;
 using Kometra.ViewModels.ImageProcessing;
 using Kometra.ViewModels.ImportExport;
 using Kometra.ViewModels.Nodes;
+using Kometra.ViewModels.Settings;
 using Kometra.Views;
 using Microsoft.Extensions.DependencyInjection;
 using ImportViewModel = Kometra.ViewModels.ImportExport.ImportViewModel;
@@ -301,5 +302,22 @@ public class WindowService : IWindowService
         var propInfo = typeof(TVm).GetProperty("DialogResult");
         bool success = (bool)(propInfo?.GetValue(viewModel) ?? false);
         return success ? resultSelector(viewModel) : default;
+    }
+    
+    // Aggiungi questo metodo all'interno della classe WindowService
+    public async Task ShowSettingsWindowAsync()
+    {
+        if (_mainWindow == null) throw new InvalidOperationException("Finestra principale non registrata.");
+
+        // Istanziamo il ViewModel (attualmente non ha dipendenze da iniettare via costruttore)
+        var viewModel = new SettingsViewModel();
+    
+        var view = new SettingsView 
+        { 
+            DataContext = viewModel 
+        };
+
+        // Usiamo il tuo helper privato per gestire l'evento RequestClose e l'apertura modale
+        await ShowDialogAsync(view, viewModel);
     }
 }

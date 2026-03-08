@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Globalization;
 using Avalonia.Data.Converters;
+using Kometra.Infrastructure; // Aggiunto per l'accesso al LocalizationManager
 using Kometra.Models.Processing.Enhancement;
 
 namespace Kometra.Converters;
@@ -14,38 +15,38 @@ public class ImageEnhancementModeConverter : IValueConverter
             return mode switch
             {
                 // --- Radial & Rotational ---
-                ImageEnhancementMode.LarsonSekaninaStandard => "Larson-Sekanina (Standard)",
-                ImageEnhancementMode.LarsonSekaninaSymmetric => "Larson-Sekanina (Simmetrico)",
-                ImageEnhancementMode.AdaptiveLaplacianRVSF => "RVSF Adattivo (Singolo)",
-                ImageEnhancementMode.AdaptiveLaplacianMosaic => "RVSF Adattivo (Mosaico)",
+                ImageEnhancementMode.LarsonSekaninaStandard => LocalizationManager.Instance["EnhanceModeLarsonStd"],
+                ImageEnhancementMode.LarsonSekaninaSymmetric => LocalizationManager.Instance["EnhanceModeLarsonSym"],
+                ImageEnhancementMode.AdaptiveLaplacianRVSF => LocalizationManager.Instance["EnhanceModeRvsf"],
+                ImageEnhancementMode.AdaptiveLaplacianMosaic => LocalizationManager.Instance["EnhanceModeMosaic"],
                 
                 // --- Geometric Models (Filtri Fisici) ---
-                ImageEnhancementMode.InverseRho => "Correzione Fisica (1/Rho)",
-                ImageEnhancementMode.RadialWeightedModel => "Radial Weighted Model (R.W.M.)",
-                ImageEnhancementMode.MedianComaModel => "Median Coma Model (M.C.M.)",
+                ImageEnhancementMode.InverseRho => LocalizationManager.Instance["EnhanceModeInvRho"],
+                ImageEnhancementMode.RadialWeightedModel => LocalizationManager.Instance["EnhanceModeRwm"],
+                ImageEnhancementMode.MedianComaModel => LocalizationManager.Instance["EnhanceModeMcm"],
 
                 // --- Azimuthal ---
-                ImageEnhancementMode.AzimuthalAverage => "Media Azimutale",
-                ImageEnhancementMode.AzimuthalMedian => "Mediana Azimutale",
-                ImageEnhancementMode.AzimuthalRenormalization => "Rinormalizzazione Azimutale",
+                ImageEnhancementMode.AzimuthalAverage => LocalizationManager.Instance["EnhanceModeAziAvg"],
+                ImageEnhancementMode.AzimuthalMedian => LocalizationManager.Instance["EnhanceModeAziMed"],
+                ImageEnhancementMode.AzimuthalRenormalization => LocalizationManager.Instance["EnhanceModeAziRenorm"],
 
                 // --- Feature Extraction ---
-                ImageEnhancementMode.FrangiVesselnessFilter => "Filtro di Frangi (Getti Curvi)",
-                ImageEnhancementMode.StructureTensorCoherence => "Esaltazione Coerenza (Tensore)",
-                ImageEnhancementMode.WhiteTopHatExtraction => "White Top-Hat (Morfologico)",
+                ImageEnhancementMode.FrangiVesselnessFilter => LocalizationManager.Instance["EnhanceModeFrangi"],
+                ImageEnhancementMode.StructureTensorCoherence => LocalizationManager.Instance["EnhanceModeCoherence"],
+                ImageEnhancementMode.WhiteTopHatExtraction => LocalizationManager.Instance["EnhanceModeWhiteTopHat"],
                 
                 // --- NUOVO: Adaptive Laplace ---
-                ImageEnhancementMode.AdaptiveLaplaceFilter => "Laplace Adattivo (SNN)",
+                ImageEnhancementMode.AdaptiveLaplaceFilter => LocalizationManager.Instance["EnhanceModeAdaptiveLaplace"],
 
                 // --- Local Contrast ---
-                ImageEnhancementMode.UnsharpMaskingMedian => "Unsharp Masking (Mediana)",
-                ImageEnhancementMode.ClaheLocalContrast => "CLAHE (Contrasto Adattivo)",
-                ImageEnhancementMode.AdaptiveLocalNormalization => "Normalizzazione Locale (LSN)",
+                ImageEnhancementMode.UnsharpMaskingMedian => LocalizationManager.Instance["EnhanceModeUnsharp"],
+                ImageEnhancementMode.ClaheLocalContrast => LocalizationManager.Instance["EnhanceModeClahe"],
+                ImageEnhancementMode.AdaptiveLocalNormalization => LocalizationManager.Instance["EnhanceModeZScore"],
 
-                _ => value.ToString() ?? "Sconosciuto"
+                _ => value.ToString() ?? LocalizationManager.Instance["CommonUnknown"]
             };
         }
-        return "Sconosciuto";
+        return LocalizationManager.Instance["CommonUnknown"];
     }
 
     public object? ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture)

@@ -8,6 +8,7 @@ using Avalonia;
 using Avalonia.Media.Imaging;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using Kometra.Infrastructure;
 using Kometra.Models.Fits;
 using Kometra.Models.Primitives;
 using Kometra.Models.Processing;
@@ -175,15 +176,15 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
         }
     }
 
-    public string ResultsSectionTitle => "Rifinitura Manuale";
+    public string ResultsSectionTitle => LocalizationManager.Instance["AlignResultsTitle"];
 
     public string ResultsSectionDescription => SelectedTarget == AlignmentTarget.Stars
-        ? "Il punto indica il centro calcolato in base al campo stellare. Spostalo per correggere l'allineamento dell'intera immagine."
-        : "Il punto indica il nucleo della cometa rilevato. Spostalo per correggere la centratura.";
+        ? LocalizationManager.Instance["AlignResultsDescStars"]
+        : LocalizationManager.Instance["AlignResultsDescComet"];
 
     public string CoordinateListHeader => SelectedTarget == AlignmentTarget.Stars
-        ? "Centri Allineamento (Shift)"
-        : "Nuclei Rilevati";
+        ? LocalizationManager.Instance["AlignCoordHeaderStars"]
+        : LocalizationManager.Instance["AlignCoordHeaderComet"];
 
     public bool IsNavigationVisible => 
         _files.Count > 1 && 
@@ -199,21 +200,26 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
     public bool IsTargetNameInputVisible => SelectedTarget == AlignmentTarget.Comet;
     public bool IsVerifyButtonVisible => SelectedTarget == AlignmentTarget.Comet;
     
-    public string AstrometryOptionLabel => SelectedTarget == AlignmentTarget.Stars ? "Usa WCS Header" : "Usa NASA/JPL e WCS Header";
-    public string CalculateButtonText => SelectedTarget == AlignmentTarget.Stars ? "Allinea Stelle" : "Calcola Centri";
+    public string AstrometryOptionLabel => SelectedTarget == AlignmentTarget.Stars 
+        ? LocalizationManager.Instance["AlignAstroLabelStars"] 
+        : LocalizationManager.Instance["AlignAstroLabelComet"];
+
+    public string CalculateButtonText => SelectedTarget == AlignmentTarget.Stars 
+        ? LocalizationManager.Instance["AlignCalcStars"] 
+        : LocalizationManager.Instance["AlignCalcCenters"];
 
     public string ProcessingStatusText 
     {
         get
         {
-            if (CurrentState == AlignmentState.Processing) return "Salvataggio immagini...";
+            if (CurrentState == AlignmentState.Processing) return LocalizationManager.Instance["StatusSavingImages"];
             if (CurrentState == AlignmentState.Calculating)
             {
                 return UseJplAstrometry 
-                    ? (SelectedTarget == AlignmentTarget.Stars ? "Risoluzione WCS..." : "Dati JPL/NASA...") 
-                    : "Analisi centratura...";
+                    ? (SelectedTarget == AlignmentTarget.Stars ? LocalizationManager.Instance["StatusSolvingWcs"] : LocalizationManager.Instance["StatusJplData"]) 
+                    : LocalizationManager.Instance["StatusAnalyzing"];
             }
-            return "Elaborazione in corso...";
+            return LocalizationManager.Instance["StatusProcessing"];
         }
     }
 
@@ -281,7 +287,7 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
         }
         catch (Exception ex)
         { 
-            StatusMessage = $"Errore inizializzazione: {ex.Message}";
+            StatusMessage = string.Format(LocalizationManager.Instance["ErrorInit"], ex.Message);
             ImageLoadedTcs.TrySetException(ex);
         }
         finally { IsBusy = false; }
@@ -358,7 +364,7 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
 
         IsVerifyingJpl = true;
         AstrometryStatus = JplStatus.Verifying;
-        AstrometryStatusMessage = "Verifica integrità sequenza...";
+        AstrometryStatusMessage = LocalizationManager.Instance["StatusVerifyingInteg"];
         
         // Reset preventivo cache in fase di verifica manuale
         _cachedVerifiedPoints = null;
@@ -382,21 +388,21 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
                     ClearUiCoordinates(); // Puliamo la UI (i dati sono in cache)
 
                 AstrometryStatusMessage = SelectedTarget == AlignmentTarget.Stars 
-                    ? "WCS verificato su tutta la sequenza." 
-                    : "Dati JPL/WCS validi per tutti i file.";
+                    ? LocalizationManager.Instance["StatusWcsVerified"] 
+                    : LocalizationManager.Instance["StatusJplValid"];
                 AstrometryStatus = JplStatus.Success;
             }
             else
             {
                 int failedCount = totalFiles - validFiles;
-                AstrometryStatusMessage = $"Dati mancanti in {failedCount} immagini su {totalFiles}. Risolvi (Plate Solve) prima di procedere.";
+                AstrometryStatusMessage = string.Format(LocalizationManager.Instance["StatusDataMissing"], failedCount, totalFiles);
                 AstrometryStatus = JplStatus.Error;
                 ClearUiCoordinates();
             }
         }
         catch (Exception ex)
         {
-            AstrometryStatusMessage = $"Errore critico: {ex.Message}";
+            AstrometryStatusMessage = string.Format(LocalizationManager.Instance["ErrorCritical"], ex.Message);
             AstrometryStatus = JplStatus.Error;
         }
         finally
@@ -432,7 +438,7 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
     {
         CurrentState = AlignmentState.Calculating;
         IsBusy = true;
-        StatusMessage = "Avvio analisi...";
+        StatusMessage = LocalizationManager.Instance["StatusAnalysisStarted"];
 
         try
         {
@@ -481,7 +487,7 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
             ApplyCoordinatesToUi(resultMap.Centers);
             
             CurrentState = AlignmentState.ResultsReady;
-            StatusMessage = "Analisi completata. Verifica i risultati.";
+            StatusMessage = LocalizationManager.Instance["StatusAnalysisComplete"];
             
             UpdateNavigationStatus(); 
             ApplyAlignmentCommand.NotifyCanExecuteChanged();
@@ -489,7 +495,7 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
         }
         catch (Exception ex) 
         { 
-            StatusMessage = $"Errore: {ex.Message}"; 
+            StatusMessage = string.Format(LocalizationManager.Instance["ErrorGeneric"], ex.Message);
             CurrentState = AlignmentState.Initial; 
         }
         finally { IsBusy = false; }
@@ -539,7 +545,7 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
         }
         catch (Exception ex) 
         { 
-            StatusMessage = $"Errore durante il salvataggio: {ex.Message}"; 
+            StatusMessage = string.Format(LocalizationManager.Instance["ErrorSaving"], ex.Message);
             CurrentState = AlignmentState.Initial; 
         }
         finally { IsBusy = false; }
@@ -657,7 +663,7 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
             var imageHdu = data.FirstImageHdu ?? data.PrimaryHdu;
             if (imageHdu == null)
             {
-                StatusMessage = "Nessuna immagine valida trovata.";
+                StatusMessage = LocalizationManager.Instance["ErrorNoValidImage"];
                 return;
             }
 
@@ -696,7 +702,7 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
         catch (Exception ex) 
         { 
             System.Diagnostics.Debug.WriteLine($"[AlignmentTool] Load Error: {ex.Message}");
-            StatusMessage = "Errore rendering immagine."; 
+            StatusMessage = LocalizationManager.Instance["ErrorRendering"]; 
         }
     }
 

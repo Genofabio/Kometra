@@ -6,7 +6,7 @@ namespace Kometra.Services.Fits.IO;
 
 /// <summary>
 /// Codec per la compressione GZIP utilizzata nello standard FITS (GZIP_1).
-/// Include un fallback per la decompressione Deflate nel caso di header Gzip mancanti.
+/// Include un fallback per la decompressione Deflate nel caso di header GZIP mancanti.
 /// </summary>
 public static class GzipCodec
 {
@@ -29,7 +29,7 @@ public static class GzipCodec
         catch
         {
             // Fallback: Alcuni software (es. vecchie versioni di fpack o software legacy) 
-            // producono flussi deflate senza il magic number Gzip standard (1F 8B).
+            // producono flussi deflate senza il magic number GZIP standard (1F 8B).
             try
             {
                 using var msInput = new MemoryStream(input);

@@ -1,12 +1,12 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
-using System.Diagnostics;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using Kometra.Infrastructure; // Aggiunto per localizzazione
 using Kometra.Models.Fits.Structure;
 using Kometra.Models.Processing;
 using Kometra.Models.Processing.Batch;
@@ -36,7 +36,7 @@ public partial class ImportViewModel : ObservableObject
     private bool _isProcessing;
     
     [ObservableProperty] private double _progressValue;
-    [ObservableProperty] private string _statusText = "Pronto";
+    [ObservableProperty] private string _statusText = string.Empty;
     [ObservableProperty] private bool _isInteractionEnabled = true;
 
     // [NUOVO] Opzione per creare nodi separati sulla Board
@@ -55,8 +55,8 @@ public partial class ImportViewModel : ObservableObject
         _dialogService = dialogService ?? throw new ArgumentNullException(nameof(dialogService));
         _calibrationCoordinator = calibrationCoordinator ?? throw new ArgumentNullException(nameof(calibrationCoordinator));
         _dataManager = dataManager ?? throw new ArgumentNullException(nameof(dataManager));
-        
-        Debug.WriteLine("[ImportVM] Inizializzato.");
+
+        _statusText = LocalizationManager.Instance["StatusReady"];
     }
     
     // =======================================================================
@@ -114,7 +114,7 @@ public partial class ImportViewModel : ObservableObject
 
                     if (imageHdus.Count > 1)
                     {
-                        StatusText = $"Estrazione estensioni da {System.IO.Path.GetFileName(path)}...";
+                        StatusText = string.Format(LocalizationManager.Instance["ImportExtractingMef"], System.IO.Path.GetFileName(path));
                         for (int i = 0; i < imageHdus.Count; i++)
                         {
                             var hdu = imageHdus[i];
@@ -133,13 +133,12 @@ public partial class ImportViewModel : ObservableObject
                         collection.Add(path);
                     }
                 }
-                catch (Exception ex)
+                catch (Exception)
                 {
-                    Debug.WriteLine($"[ImportVM] Errore analisi file {path}: {ex.Message}");
                     collection.Add(path);
                 }
             }
-            StatusText = "Pronto";
+            StatusText = LocalizationManager.Instance["StatusReady"];
         } 
         finally 
         {
@@ -189,7 +188,7 @@ public partial class ImportViewModel : ObservableObject
     private async Task Confirm()
     {
         IsProcessing = true;
-        StatusText = "Avvio calibrazione...";
+        StatusText = LocalizationManager.Instance["ImportStatusStarting"];
         ProgressValue = 0;
         
         _processingCts?.Cancel();
@@ -200,7 +199,8 @@ public partial class ImportViewModel : ObservableObject
             var progress = new Progress<BatchProgressReport>(report =>
             {
                 ProgressValue = report.Percentage;
-                StatusText = $"Processamento: {report.CurrentFileIndex}/{report.TotalFiles} ({report.CurrentFileName})";
+                StatusText = string.Format(LocalizationManager.Instance["ImportStatusProcessing"], 
+                    report.CurrentFileIndex, report.TotalFiles, report.CurrentFileName);
             });
 
             CalibratedResultPaths = await _calibrationCoordinator.ExecuteCalibrationAsync(
@@ -214,18 +214,18 @@ public partial class ImportViewModel : ObservableObject
             }
             else
             {
-                StatusText = "Nessun file generato.";
+                StatusText = LocalizationManager.Instance["ImportErrorNoFilesGenerated"];
                 IsProcessing = false;
             }
         }
         catch (OperationCanceledException)
         {
-            StatusText = "Operazione annullata.";
+            StatusText = LocalizationManager.Instance["StatusCancelled"];
             IsProcessing = false;
         }
         catch (Exception ex)
         {
-            StatusText = $"Errore: {ex.Message}";
+            StatusText = string.Format(LocalizationManager.Instance["ErrorGeneric"], ex.Message);
             IsProcessing = false;
         }
     }

@@ -4,6 +4,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using Kometra.Infrastructure; // Aggiunto per localizzazione
 using Kometra.Models.Fits;
 using Kometra.Models.Fits.Structure;
 using Kometra.Models.Processing;
@@ -118,7 +119,7 @@ public partial class PosterizationToolViewModel : ObservableObject, IDisposable
     [NotifyCanExecuteChangedFor(nameof(ResetThresholdsCommand))] // FIX BUG 3: Notifica lo stato di abilitazione al Reset!
     private bool _isProcessing;
     
-    [ObservableProperty] private string _statusText = "Inizializzazione...";
+    [ObservableProperty] private string _statusText = string.Empty;
 
     // Proprietà UI delegate al navigatore
     public VisualizationMode[] AvailableModes => Enum.GetValues<VisualizationMode>();
@@ -139,6 +140,8 @@ public partial class PosterizationToolViewModel : ObservableObject, IDisposable
         _rendererFactory = rendererFactory ?? throw new ArgumentNullException(nameof(rendererFactory));
         _coordinator = coordinator ?? throw new ArgumentNullException(nameof(coordinator));
 
+        _statusText = LocalizationManager.Instance["StatusInit"];
+
         Navigator.UpdateStatus(0, _sourceFiles.Count);
         Navigator.IndexChanged += OnNavigatorIndexChanged;
 
@@ -154,11 +157,11 @@ public partial class PosterizationToolViewModel : ObservableObject, IDisposable
             {
                 await LoadImageAtIndexAsync(0);
             }
-            StatusText = "Pronto";
+            StatusText = LocalizationManager.Instance["StatusReady"];
         }
         catch (Exception ex)
         {
-            StatusText = $"Errore inizializzazione: {ex.Message}";
+            StatusText = string.Format(LocalizationManager.Instance["ErrorInit"], ex.Message);
         }
         finally
         {
@@ -198,14 +201,14 @@ public partial class PosterizationToolViewModel : ObservableObject, IDisposable
 
         try
         {
-            StatusText = "Caricamento...";
+            StatusText = LocalizationManager.Instance["StatusLoading"];
             var fileRef = _sourceFiles[index];
             var data = await _dataManager.GetDataAsync(fileRef.FilePath);
             token.ThrowIfCancellationRequested();
 
             var imageHdu = data.FirstImageHdu ?? data.PrimaryHdu;
             if (imageHdu == null) 
-                throw new InvalidOperationException("Nessuna immagine valida trovata nel file FITS.");
+                throw new InvalidOperationException(LocalizationManager.Instance["ErrorNoValidImageFound"]);
 
             var newRenderer = await _rendererFactory.CreateAsync(imageHdu.PixelData, fileRef.ModifiedHeader ?? imageHdu.Header);
             
@@ -267,13 +270,13 @@ public partial class PosterizationToolViewModel : ObservableObject, IDisposable
                 Viewport.ResetView(); 
             }
 
-            StatusText = "Pronto";
+            StatusText = LocalizationManager.Instance["StatusReady"];
             old?.Dispose();
         }
         catch (OperationCanceledException) { }
         catch (Exception ex) 
         { 
-            StatusText = $"Errore: {ex.Message}"; 
+            StatusText = string.Format(LocalizationManager.Instance["ErrorGeneric"], ex.Message); 
         }
     }
 
@@ -313,7 +316,7 @@ public partial class PosterizationToolViewModel : ObservableObject, IDisposable
             var currentProfile = ActiveRenderer.CaptureSigmaProfile();
 
             var progress = new Progress<BatchProgressReport>(p => 
-                StatusText = $"Elaborazione: {p.CurrentFileIndex}/{p.TotalFiles}");
+                StatusText = string.Format(LocalizationManager.Instance["StatusProcessingProgress"], p.CurrentFileIndex, p.TotalFiles));
 
             ResultPaths = await _coordinator.ExecuteBatchAsync(
                 _sourceFiles, 
@@ -330,7 +333,7 @@ public partial class PosterizationToolViewModel : ObservableObject, IDisposable
         }
         catch (Exception ex) 
         { 
-            StatusText = $"Errore: {ex.Message}";
+            StatusText = string.Format(LocalizationManager.Instance["ErrorGeneric"], ex.Message);
         }
         finally
         {

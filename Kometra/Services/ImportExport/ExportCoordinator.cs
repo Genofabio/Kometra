@@ -48,7 +48,7 @@ public class ExportCoordinator : IExportCoordinator
             Directory.CreateDirectory(settings.OutputDirectory);
 
         // Se Merge è attivo, usiamo la logica MEF (Multi-Extension FITS)
-        if (settings.Format == ExportFormat.Fits && settings.MergeIntoSingleFile && queue.Count > 1)
+        if (settings.Format == ExportFormat.FITS && settings.MergeIntoSingleFile && queue.Count > 1)
         {
             await ExportMergedFitsAsync(queue, settings, progress, token);
         }
@@ -169,7 +169,7 @@ public class ExportCoordinator : IExportCoordinator
 
                 if (pixels == null || originalHeader == null) throw new InvalidDataException("Dati mancanti o corrotti.");
 
-                if (settings.Format == ExportFormat.Fits)
+                if (settings.Format == ExportFormat.FITS)
                 {
                     var exportHeader = _metadataService.CloneHeader(originalHeader);
                     _metadataService.AddValue(exportHeader, "HISTORY", $"Kometra - Compression Mode: {settings.Compression}");
@@ -186,7 +186,7 @@ public class ExportCoordinator : IExportCoordinator
                     }, token);
                 }
 
-                item.Status = settings.Compression != FitsCompressionMode.None && settings.Format == ExportFormat.Fits 
+                item.Status = settings.Compression != FitsCompressionMode.None && settings.Format == ExportFormat.FITS 
                     ? "Salvato (Compresso)" : "Salvato";
                 item.IsSuccess = true;
             }
@@ -237,7 +237,7 @@ public class ExportCoordinator : IExportCoordinator
     // =======================================================================
     private string GetExtension(ExportFormat format, FitsCompressionMode compression = FitsCompressionMode.None)
     {
-        if (format == ExportFormat.Fits)
+        if (format == ExportFormat.FITS)
         {
             // Se c'è compressione attiva, l'estensione standard è .fits.fz
             if (compression != FitsCompressionMode.None) return ".fits.fz";

@@ -1,0 +1,566 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<root>
+    <xsd:schema id="root" xmlns="" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:msdata="urn:schemas-microsoft-com:xml-msdata">
+        <xsd:element name="root" msdata:IsDataSet="true">
+            <xsd:complexType>
+                <xsd:choice maxOccurs="unbounded">
+                    <xsd:element name="data">
+                        <xsd:complexType>
+                            <xsd:sequence>
+                                <xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+                            </xsd:sequence>
+                            <xsd:attribute name="name" type="xsd:string" use="required" msdata:Ordinal="1" />
+                        </xsd:complexType>
+                    </xsd:element>
+                    <xsd:element name="resheader">
+                        <xsd:complexType>
+                            <xsd:sequence>
+                                <xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+                            </xsd:sequence>
+                            <xsd:attribute name="name" type="xsd:string" use="required" />
+                        </xsd:complexType>
+                    </xsd:element>
+                </xsd:choice>
+            </xsd:complexType>
+        </xsd:element>
+    </xsd:schema>
+    <resheader name="resmimetype"><value>text/microsoft-resx</value></resheader>
+    <resheader name="version"><value>2.0</value></resheader>
+    <resheader name="reader"><value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value></resheader>
+    <resheader name="writer"><value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value></resheader>
+
+    <data name="SettingsTitle" xml:space="preserve"><value>Impostazioni</value></data>
+    <data name="Language" xml:space="preserve"><value>Lingua</value></data>
+    <data name="GeneralSettings" xml:space="preserve"><value>Generale</value></data>
+    <data name="InterfaceSettings" xml:space="preserve"><value>Interfaccia</value></data>
+    <data name="Save" xml:space="preserve"><value>Salva</value></data>
+    <data name="Cancel" xml:space="preserve"><value>Annulla</value></data>
+
+    <data name="MenuAddNode" xml:space="preserve"><value>Aggiungi Nodo</value></data>
+    <data name="MenuSaveImage" xml:space="preserve"><value>Salva Immagine</value></data>
+    <data name="MenuSaveVideo" xml:space="preserve"><value>Salva Video</value></data>
+    <data name="MenuExit" xml:space="preserve"><value>Esci</value></data>
+
+    <data name="MenuModify" xml:space="preserve"><value>Modifica</value></data>
+    <data name="MenuAlignCenter" xml:space="preserve"><value>Allinea e centra</value></data>
+    <data name="MenuCrop" xml:space="preserve"><value>Ritaglia</value></data>
+    <data name="MenuMorphAnalysis" xml:space="preserve"><value>Analisi Morfologica</value></data>
+    <data name="MenuRadialModels" xml:space="preserve"><value>Modelli Radiali</value></data>
+    <data name="MenuStructureExtraction" xml:space="preserve"><value>Estrazione Strutture</value></data>
+    <data name="MenuLocalContrast" xml:space="preserve"><value>Contrasto Locale</value></data>
+    <data name="MenuStarMask" xml:space="preserve"><value>Maschera Stelle</value></data>
+    <data name="MenuPosterization" xml:space="preserve"><value>Posterizzazione</value></data>
+    <data name="MenuHeaderEditor" xml:space="preserve"><value>Editor Header / Metadati</value></data>
+    <data name="MenuPlateSolving" xml:space="preserve"><value>Risoluzione Astrometrica (ASTAP)</value></data>
+
+    <data name="MenuStackOps" xml:space="preserve"><value>Operazioni Stack</value></data>
+    <data name="MenuStackSum" xml:space="preserve"><value>Somma</value></data>
+    <data name="MenuStackAverage" xml:space="preserve"><value>Media</value></data>
+    <data name="MenuStackMedian" xml:space="preserve"><value>Mediana</value></data>
+
+    <data name="MenuView" xml:space="preserve"><value>Visualizza</value></data>
+    <data name="MenuViewMode" xml:space="preserve"><value>Modalità Visualizzazione</value></data>
+    <data name="MenuLinear" xml:space="preserve"><value>Lineare</value></data>
+    <data name="MenuSquareRoot" xml:space="preserve"><value>Radice Quadrata</value></data>
+    <data name="MenuLogarithmic" xml:space="preserve"><value>Logaritmica</value></data>
+    <data name="MenuResetBoard" xml:space="preserve"><value>Reset Vista Board</value></data>
+    <data name="MenuResetNodePos" xml:space="preserve"><value>Reset Posizione Immagine</value></data>
+    <data name="MenuResetNormalization" xml:space="preserve"><value>Reset Soglie Immagine</value></data>
+
+    <data name="MenuHelp" xml:space="preserve"><value>Aiuto</value></data>
+    <data name="MenuAbout" xml:space="preserve"><value>Informazioni su...</value></data>
+    <data name="MenuStartAnimation" xml:space="preserve">
+        <value>Avvia Animazione</value>
+    </data>
+        <data name="MenuStopAnimation" xml:space="preserve">
+        <value>Ferma Animazione</value>
+    </data>
+    <data name="AlignTitle" xml:space="preserve">
+    <value>Allineamento</value>
+</data>
+    <data name="AlignTargetObject" xml:space="preserve">
+    <value>Oggetto dell'allineamento</value>
+</data>
+    <data name="AlignTargetComet" xml:space="preserve">
+    <value>Cometa</value>
+</data>
+    <data name="AlignTargetStars" xml:space="preserve">
+    <value>Stelle</value>
+</data>
+    <data name="AlignMethodology" xml:space="preserve">
+    <value>Metodologia</value>
+</data>
+    <data name="AlignDescAuto" xml:space="preserve">
+    <value>Rilevamento automatico del nucleo della cometa.</value>
+</data>
+    <data name="AlignDescGuided" xml:space="preserve">
+    <value>Indica il nucleo sulla prima e sull'ultima immagine.</value>
+</data>
+    <data name="AlignDescManual" xml:space="preserve">
+    <value>Ispeziona e imposta manualmente il centro per ogni immagine.</value>
+</data>
+    <data name="AlignSearchOptions" xml:space="preserve">
+    <value>Opzioni di Ricerca</value>
+</data>
+    <data name="AlignTargetNameWatermark" xml:space="preserve">
+    <value>Nome (es. 67P)</value>
+</data>
+    <data name="AlignVerify" xml:space="preserve">
+    <value>Verifica</value>
+</data>
+    <data name="AlignVerifyTooltip" xml:space="preserve">
+    <value>Verifica disponibilità dati</value>
+</data>
+    <data name="AlignSearchRadius" xml:space="preserve">
+    <value>Raggio di Ricerca (px):</value>
+</data>
+    <data name="AlignSaveOptions" xml:space="preserve">
+    <value>Opzioni di Salvataggio</value>
+</data>
+    <data name="AlignCropCommon" xml:space="preserve">
+    <value>Ritaglia all'area comune</value>
+</data>
+    <data name="AlignCropCommonTooltip" xml:space="preserve">
+    <value>Se attivo, ritaglia l'immagine finale sull'area comune a tutti i frame, eliminando i bordi neri ma mantenendo il centro e le proporzioni.</value>
+</data>
+
+    <data name="TooltipResetView" xml:space="preserve">
+    <value>Ripristina Vista</value>
+</data>
+    <data name="TooltipFirstImage" xml:space="preserve">
+    <value>Prima Immagine</value>
+</data>
+    <data name="TooltipLastImage" xml:space="preserve">
+    <value>Ultima Immagine</value>
+</data>
+    <data name="TooltipPrevImage" xml:space="preserve">
+    <value>Immagine Precedente</value>
+</data>
+    <data name="TooltipNextImage" xml:space="preserve">
+    <value>Immagine Successiva</value>
+</data>
+    <data name="TooltipZoomIn" xml:space="preserve">
+    <value>Ingrandisci</value>
+</data>
+    <data name="TooltipZoomOut" xml:space="preserve">
+    <value>Rimpicciolisci</value>
+</data>
+    <data name="TooltipResetStretch" xml:space="preserve">
+    <value>Ripristina Stretch</value>
+</data>
+    <data name="AlignModeAuto" xml:space="preserve">
+    <value>Automatica</value>
+</data>
+    <data name="AlignModeGuided" xml:space="preserve">
+    <value>Guidata</value>
+</data>
+    <data name="AlignModeManual" xml:space="preserve">
+    <value>Manuale</value>
+</data>
+    <data name="AlignResultsTitle" xml:space="preserve"><value>Rifinitura Manuale</value></data>
+    <data name="AlignResultsDescStars" xml:space="preserve"><value>Il punto indica il centro calcolato in base al campo stellare. Spostalo per correggere l'allineamento dell'intera immagine.</value></data>
+    <data name="AlignResultsDescComet" xml:space="preserve"><value>Il punto indica il nucleo della cometa rilevato. Spostalo per correggere la centratura.</value></data>
+    <data name="AlignCoordHeaderStars" xml:space="preserve"><value>Centri Allineamento (Shift)</value></data>
+    <data name="AlignCoordHeaderComet" xml:space="preserve"><value>Nuclei Rilevati</value></data>
+    <data name="AlignAstroLabelStars" xml:space="preserve"><value>Usa WCS Header</value></data>
+    <data name="AlignAstroLabelComet" xml:space="preserve"><value>Usa NASA/JPL e WCS Header</value></data>
+    <data name="AlignCalcStars" xml:space="preserve"><value>Allinea Stelle</value></data>
+    <data name="AlignCalcCenters" xml:space="preserve"><value>Calcola Centri</value></data>
+    <data name="StatusSavingImages" xml:space="preserve"><value>Salvataggio immagini...</value></data>
+    <data name="StatusSolvingWcs" xml:space="preserve"><value>Risoluzione WCS...</value></data>
+    <data name="StatusJplData" xml:space="preserve"><value>Dati JPL/NASA...</value></data>
+    <data name="StatusAnalyzing" xml:space="preserve"><value>Analisi centratura...</value></data>
+    <data name="StatusProcessing" xml:space="preserve"><value>Elaborazione in corso...</value></data>
+    <data name="StatusVerifyingInteg" xml:space="preserve"><value>Verifica integrità sequenza...</value></data>
+    <data name="StatusWcsVerified" xml:space="preserve"><value>WCS verificato su tutta la sequenza.</value></data>
+    <data name="StatusJplValid" xml:space="preserve"><value>Dati JPL/WCS validi per tutti i file.</value></data>
+    <data name="StatusDataMissing" xml:space="preserve"><value>Dati mancanti in {0} immagini su {1}. Risolvi (Plate Solve) prima di procedere.</value></data>
+    <data name="StatusAnalysisStarted" xml:space="preserve"><value>Avvio analisi...</value></data>
+    <data name="StatusAnalysisComplete" xml:space="preserve"><value>Analisi completata. Verifica i risultati.</value></data>
+    <data name="ErrorInit" xml:space="preserve"><value>Errore inizializzazione: {0}</value></data>
+    <data name="ErrorCritical" xml:space="preserve"><value>Errore critico: {0}</value></data>
+    <data name="ErrorGeneric" xml:space="preserve"><value>Errore: {0}</value></data>
+    <data name="ErrorSaving" xml:space="preserve"><value>Errore durante il salvataggio: {0}</value></data>
+    <data name="ErrorNoValidImage" xml:space="preserve"><value>Nessuna immagine valida trovata.</value></data>
+    <data name="ErrorRendering" xml:space="preserve"><value>Errore rendering immagine.</value></data>
+    <data name="CropTitle" xml:space="preserve">
+    <value>Ritaglio e Centratura</value>
+</data>
+    <data name="CropHeader" xml:space="preserve">
+    <value>RITAGLIO IMMAGINI</value>
+</data>
+    <data name="CropModeTitle" xml:space="preserve">
+    <value>Modalità Ritaglio</value>
+</data>
+    <data name="CropModeDesc" xml:space="preserve">
+    <value>Come viene applicato il centro del ritaglio.</value>
+</data>
+    <data name="CropModeStatic" xml:space="preserve">
+    <value>Statica</value>
+</data>
+    <data name="CropModeStaticTooltip" xml:space="preserve">
+    <value>Usa lo stesso centro per tutte le immagini.</value>
+</data>
+    <data name="CropModeDynamic" xml:space="preserve">
+    <value>Dinamica</value>
+</data>
+    <data name="CropModeDynamicTooltip" xml:space="preserve">
+    <value>Definisci un centro diverso per ogni immagine.</value>
+</data>
+    <data name="CropSizeTitle" xml:space="preserve">
+    <value>Dimensioni Ritaglio</value>
+</data>
+    <data name="CropSizeDesc" xml:space="preserve">
+    <value>Dimensione finale dell'immagine (in pixel).</value>
+</data>
+    <data name="CropWidth" xml:space="preserve">
+    <value>Larghezza (Width)</value>
+</data>
+    <data name="CropHeight" xml:space="preserve">
+    <value>Altezza (Height)</value>
+</data>
+    <data name="CropMaxAllowed" xml:space="preserve">
+    <value>Max consentito:</value>
+</data>
+    <data name="CropFromSmallestFile" xml:space="preserve">
+    <value>px (dal file più piccolo)</value>
+</data>
+    <data name="CropApply" xml:space="preserve">
+    <value>Applica</value>
+</data>
+    <data name="CropClickHint" xml:space="preserve">
+    <value>Clicca sull'immagine per definire il centro</value>
+</data>
+    <data name="TooltipCenterInterest" xml:space="preserve">
+    <value>Centra area di interesse nell'immagine</value>
+</data>
+    <data name="StatusInit" xml:space="preserve"><value>Inizializzazione...</value></data>
+    <data name="StatusReadyCenterInit" xml:space="preserve"><value>Pronto. Centro inizializzato al centro del frame.</value></data>
+    <data name="ErrorLoading" xml:space="preserve"><value>Errore caricamento: {0}</value></data>
+    <data name="StatusStaticCenterSet" xml:space="preserve"><value>Centro statico impostato: {0:F0}, {1:F0}</value></data>
+    <data name="StatusDynamicCenterSet" xml:space="preserve"><value>Centro impostato per immagine {0}</value></data>
+    <data name="StatusStaticCenterRemoved" xml:space="preserve"><value>Centro statico rimosso.</value></data>
+    <data name="StatusDynamicCenterRemoved" xml:space="preserve"><value>Centro rimosso per immagine {0}</value></data>
+    <data name="StatusMissingCenter" xml:space="preserve"><value>Manca il centro per l'immagine {0}</value></data>
+    <data name="StatusDone" xml:space="preserve"><value>Fatto!</value></data>
+    <data name="StatusCenterGeometricInit" xml:space="preserve"><value>Centro impostato al centro geometrico dell'immagine.</value></data>
+    <data name="CropStaticInstructions" xml:space="preserve"><value>Clicca sull'immagine per definire il centro (uguale per tutte).</value></data>
+    <data name="CropDynamicInstructions" xml:space="preserve"><value>Clicca su OGNI immagine per definire il centro specifico.</value></data>
+    <data name="ExportTitle" xml:space="preserve"><value>Esportazione immagine</value></data>
+    <data name="ExportHeader" xml:space="preserve"><value>ESPORTAZIONE</value></data>
+    <data name="ExportFilesToSave" xml:space="preserve"><value>FILE DA SALVARE</value></data>
+    <data name="ExportSelectFilesDesc" xml:space="preserve"><value>Seleziona i file da elaborare.</value></data>
+    <data name="ExportSelectAll" xml:space="preserve"><value>Seleziona tutto</value></data>
+    <data name="ExportDeselectAll" xml:space="preserve"><value>Deseleziona tutto</value></data>
+    <data name="ExportPreviewLoading" xml:space="preserve"><value>Rendering anteprima...</value></data>
+    <data name="ExportConfiguration" xml:space="preserve"><value>CONFIGURAZIONE</value></data>
+    <data name="ExportDestination" xml:space="preserve"><value>DESTINAZIONE</value></data>
+    <data name="ExportBaseNameWatermark" xml:space="preserve"><value>Nome base (Opzionale)</value></data>
+    <data name="ExportOutputFormat" xml:space="preserve"><value>FORMATO OUTPUT</value></data>
+    <data name="ExportSaveOptions" xml:space="preserve"><value>OPZIONI DI SALVATAGGIO</value></data>
+    <data name="ExportCompressionMethod" xml:space="preserve"><value>Metodologia di compressione</value></data>
+    <data name="ExportJpegQuality" xml:space="preserve"><value>Qualità Compressione</value></data>
+    <data name="ExportStretchManagement" xml:space="preserve"><value>Gestione Soglie (Stretch)</value></data>
+    <data name="ExportStretchAuto" xml:space="preserve"><value>Auto Stretch</value></data>
+    <data name="ExportStretchManual" xml:space="preserve"><value>Manuale</value></data>
+    <data name="ExportBlackPoint" xml:space="preserve"><value>Punto Nero</value></data>
+    <data name="ExportWhitePoint" xml:space="preserve"><value>Punto Bianco</value></data>
+    <data name="ExportMerge" xml:space="preserve"><value>Merge</value></data>
+    <data name="ExportMergeMef" xml:space="preserve"><value>Unisci in un unico file (MEF)</value></data>
+    <data name="ExportExecute" xml:space="preserve"><value>Esporta</value></data>
+    <data name="ExportCompressionNone" xml:space="preserve">
+    <value>Nessuna</value>
+</data>
+    <data name="MenuStartAnimation" xml:space="preserve">
+    <value>Avvia Animazione</value>
+</data>
+    <data name="MenuStopAnimation" xml:space="preserve">
+    <value>Ferma Animazione</value>
+</data>
+    <data name="EnhancementCategoryRadial" xml:space="preserve">
+    <value>Analisi Morfologica (Radiale &amp; Rotazionale)</value>
+</data>
+    <data name="EnhancementCategoryFeatures" xml:space="preserve">
+    <value>Estrazione Strutture e Forme</value>
+</data>
+    <data name="EnhancementCategoryContrast" xml:space="preserve">
+    <value>Miglioramento Contrasto Locale</value>
+</data>
+    <data name="EnhancementCategoryDefault" xml:space="preserve">
+    <value>Strumenti di Elaborazione</value>
+</data>
+    <data name="EnhancementToolDefault" xml:space="preserve">
+    <value>Strumento Kometra</value>
+</data>
+    <data name="EnhanceDescLarsonStd" xml:space="preserve"><value>Metodo sottrattivo classico. Ruota l'immagine di un piccolo angolo e la sottrae dall'originale. Ideale per evidenziare bordi netti e strutture a spirale (girandola) nei getti della chioma.</value></data>
+    <data name="EnhanceDescLarsonSym" xml:space="preserve"><value>Evoluzione del metodo standard che somma una rotazione positiva e una negativa. Riduce drasticamente gli artefatti scuri ('buchi') tipici del metodo standard, preservando meglio il contrasto naturale.</value></data>
+    <data name="EnhanceDescRvsf" xml:space="preserve"><value>Filtro a pendenza variabile (Radial Variable Slope). Modifica l'intensità del filtraggio in base alla distanza dal nucleo. Ottimizzato per seguire il naturale decadimento della luminosità della cometa.</value></data>
+    <data name="EnhanceDescMosaic" xml:space="preserve"><value>Genera un mosaico 4x2 applicando l'RVSF con diverse combinazioni di parametri simultaneamente. Utile per confrontare rapidamente diverse intensità di filtro e trovare quella ottimale.</value></data>
+    <data name="EnhanceDescInvRho" xml:space="preserve"><value>Filtro geometrico puro. Compensa la naturale caduta di luce (1/raggio) tipica delle comete. Appiattisce il forte bagliore centrale permettendo di vedere i dettagli deboli della polvere esterna.</value></data>
+    <data name="EnhanceDescRwm" xml:space="preserve"><value>Modello Radiale Pesato (R.W.M.). Sottrae il fondo cielo e moltiplica ogni pixel per la sua distanza dal centro. Simile all'Inverse Rho ma spesso offre un contrasto migliore nelle zone periferiche.</value></data>
+    <data name="EnhanceDescMcm" xml:space="preserve"><value>Modello della Chioma Mediana (M.C.M.). Costruisce un modello sintetico della cometa analizzando la mediana degli anelli concentrici e lo sottrae. È il metodo più robusto per isolare getti e shell senza creare artefatti geometrici.</value></data>
+    <data name="EnhanceDescAziAvg" xml:space="preserve"><value>Calcola la luminosità media di ogni anello concentrico e divide l'immagine per questo modello. Rimuove la simmetria radiale perfetta, lasciando visibili solo le asimmetrie (getti, code).</value></data>
+    <data name="EnhanceDescAziMed" xml:space="preserve"><value>Simile alla media azimutale, ma utilizza la mediana. È molto più efficace nel gestire campi stellari densi, impedendo alle stelle di influenzare il calcolo del modello di fondo.</value></data>
+    <data name="EnhanceDescAziRenorm" xml:space="preserve"><value>Normalizza il contrasto locale anello per anello. Invece di mostrare la luminosità assoluta, mostra quanto un dettaglio è 'anomalo' rispetto ai suoi vicini sullo stesso raggio. Estremamente potente per dettagli elusivi.</value></data>
+    <data name="EnhanceDescFrangi" xml:space="preserve"><value>Analisi basata sulla curvatura (Hessiana). Progettato per identificare strutture tubolari o filamentose. Eccellente per isolare getti sottili e code ioniche ignorando le stelle puntiformi.</value></data>
+    <data name="EnhanceDescCoherence" xml:space="preserve"><value>Analizza la coerenza del flusso locale. Evidenzia le regioni dove la texture segue una direzione precisa (come flussi di gas e code), sopprimendo il rumore di fondo caotico.</value></data>
+    <data name="EnhanceDescWhiteTopHat" xml:space="preserve"><value>Filtro morfologico che estrae dettagli luminosi più piccoli della dimensione del kernel specificato, rimuovendo completamente il gradiente di fondo a bassa frequenza.</value></data>
+    <data name="EnhanceDescAdaptiveLaplace" xml:space="preserve"><value>Calcola la derivata seconda dell'immagine per isolare le variazioni fini (bordi) rimuovendo i gradienti graduali. Utilizza uno smoothing 'Symmetric Nearest Neighbour' preliminare per ridurre il rumore senza sfocare i bordi delle strutture.</value></data>
+    <data name="EnhanceDescUnsharp" xml:space="preserve"><value>Tecnica di maschera di contrasto che utilizza una mediana per sfocare il fondo. Sottrae le basse frequenze per aumentare drasticamente la nitidezza dei bordi e delle strutture fini.</value></data>
+    <data name="EnhanceDescClahe" xml:space="preserve"><value>Equalizzazione adattiva dell'istogramma (CLAHE). Massimizza il contrasto locale lavorando su piccole sezioni dell'immagine. Utile per visualizzare dettagli sia nel nucleo luminoso che nella coda scura.</value></data>
+    <data name="EnhanceDescZScore" xml:space="preserve"><value>Normalizzazione statistica locale (Local Z-Score). Ricalcola ogni pixel basandosi sulla media e deviazione standard dei vicini. Metodo scientifico ideale per massimizzare la visibilità di strutture nascoste nel rumore.</value></data>
+    <data name="EnhanceDescDefault" xml:space="preserve"><value>Seleziona una modalità per visualizzare la descrizione e i parametri.</value></data>
+    <data name="EnhanceModeLarsonStd" xml:space="preserve"><value>Larson-Sekanina (Standard)</value></data>
+    <data name="EnhanceModeLarsonSym" xml:space="preserve"><value>Larson-Sekanina (Simmetrico)</value></data>
+    <data name="EnhanceModeRvsf" xml:space="preserve"><value>RVSF Adattivo (Singolo)</value></data>
+    <data name="EnhanceModeMosaic" xml:space="preserve"><value>RVSF Adattivo (Mosaico)</value></data>
+    <data name="EnhanceModeInvRho" xml:space="preserve"><value>Correzione Fisica (1/Rho)</value></data>
+    <data name="EnhanceModeRwm" xml:space="preserve"><value>Radial Weighted Model (R.W.M.)</value></data>
+    <data name="EnhanceModeMcm" xml:space="preserve"><value>Median Coma Model (M.C.M.)</value></data>
+    <data name="EnhanceModeAziAvg" xml:space="preserve"><value>Media Azimutale</value></data>
+    <data name="EnhanceModeAziMed" xml:space="preserve"><value>Mediana Azimutale</value></data>
+    <data name="EnhanceModeAziRenorm" xml:space="preserve"><value>Rinormalizzazione Azimutale</value></data>
+    <data name="EnhanceModeFrangi" xml:space="preserve"><value>Filtro di Frangi (Getti Curvi)</value></data>
+    <data name="EnhanceModeCoherence" xml:space="preserve"><value>Esaltazione Coerenza (Tensore)</value></data>
+    <data name="EnhanceModeWhiteTopHat" xml:space="preserve"><value>White Top-Hat (Morfologico)</value></data>
+    <data name="EnhanceModeAdaptiveLaplace" xml:space="preserve"><value>Laplace Adattivo (SNN)</value></data>
+    <data name="EnhanceModeUnsharp" xml:space="preserve"><value>Unsharp Masking (Mediana)</value></data>
+    <data name="EnhanceModeClahe" xml:space="preserve"><value>CLAHE (Contrasto Adattivo)</value></data>
+    <data name="EnhanceModeZScore" xml:space="preserve"><value>Normalizzazione Locale (LSN)</value></data>
+    <data name="CommonUnknown" xml:space="preserve"><value>Sconosciuto</value></data>
+    <data name="ViewModeLinear" xml:space="preserve">
+    <value>Lineare</value>
+</data>
+    <data name="ViewModeLogarithmic" xml:space="preserve">
+    <value>Logaritmico</value>
+</data>
+    <data name="ViewModeSquareRoot" xml:space="preserve">
+    <value>Radice Quadrata</value>
+</data>
+    <data name="HeaderEditorTitle" xml:space="preserve"><value>Editor Metadati FITS</value></data>
+    <data name="HeaderCurrentFile" xml:space="preserve"><value>File Attuale</value></data>
+    <data name="HeaderMetadataIntegrity" xml:space="preserve"><value>Integrità Metadati</value></data>
+    <data name="HeaderSearchWatermark" xml:space="preserve"><value>Cerca chiave, valore o commento...</value></data>
+    <data name="HeaderAddNewRow" xml:space="preserve"><value>Nuova Riga</value></data>
+    <data name="HeaderDeleteRow" xml:space="preserve"><value>Elimina Riga</value></data>
+    <data name="HeaderColKeyword" xml:space="preserve"><value>KEYWORD</value></data>
+    <data name="HeaderColValue" xml:space="preserve"><value>VALORE</value></data>
+    <data name="HeaderColComment" xml:space="preserve"><value>COMMENTO</value></data>
+    <data name="HeaderSessionInfo" xml:space="preserve"><value>Modifiche applicate solo alla sessione. Salva il file per renderle permanenti.</value></data>
+    <data name="TooltipPrevImage" xml:space="preserve"><value>Immagine Precedente</value></data>
+    <data name="TooltipNextImage" xml:space="preserve"><value>Immagine Successiva</value></data>
+    <data name="HealthTitleTime" xml:space="preserve"><value>Riferimento Temporale</value></data>
+    <data name="HealthTitleLocation" xml:space="preserve"><value>Geolocalizzazione Sito</value></data>
+    <data name="HealthTitleOptics" xml:space="preserve"><value>Configurazione Ottica</value></data>
+    <data name="HealthTitlePointers" xml:space="preserve"><value>Puntamento Target</value></data>
+    <data name="HealthTitleAstrometry" xml:space="preserve"><value>Soluzione Astrometrica</value></data>
+    <data name="HealthTitleUnknown" xml:space="preserve"><value>Controllo Sconosciuto</value></data>
+
+    <data name="HealthTooltipTime" xml:space="preserve"><value>Verifica le chiavi DATE-OBS o DATE. Indica il momento esatto dell'acquisizione (UT), indispensabile per il calcolo del tempo siderale e delle effemeridi.</value></data>
+    <data name="HealthTooltipLocation" xml:space="preserve"><value>Verifica le coordinate geografiche (SITELAT/LONG). Necessario per correggere la parallasse e calcolare le coordinate locali (Alt/Az).</value></data>
+    <data name="HealthTooltipOptics" xml:space="preserve"><value>Verifica FOCALLEN e PIXSIZE. Questi dati definiscono la scala dell'immagine (arcsec/pixel), parametro critico per qualsiasi analisi astrometrica.</value></data>
+    <data name="HealthTooltipPointers" xml:space="preserve"><value>Verifica le coordinate RA/DEC inviate dalla montatura. Agiscono come suggerimento (hints) per velocizzare drasticamente il Plate Solving.</value></data>
+    <data name="HealthTooltipAstrometry" xml:space="preserve"><value>Verifica la presenza di una soluzione WCS valida (CRVAL/CD Matrix). Indica se l'immagine è già stata mappata correttamente sulla sfera celeste.</value></data>
+    <data name="HealthTooltipNone" xml:space="preserve"><value>Nessuna informazione aggiuntiva disponibile.</value></data>
+    <data name="CommonNotAvailable" xml:space="preserve">
+    <value>N/D</value>
+</data>
+    <data name="StatusAnalyzing" xml:space="preserve">
+    <value>Analisi...</value>
+</data>
+    <data name="HeaderNewKeyPlaceholder" xml:space="preserve">
+    <value>NUOVA_CHIAVE</value>
+</data>
+    <data name="EnhanceSelectedAlgorithm" xml:space="preserve"><value>Algoritmo Selezionato</value></data>
+    <data name="EnhanceDescription" xml:space="preserve"><value>Descrizione</value></data>
+    <data name="EnhanceRotationParams" xml:space="preserve"><value>Parametri Rotazione</value></data>
+    <data name="EnhanceAngle" xml:space="preserve"><value>Angolo (gradi):</value></data>
+    <data name="EnhanceShiftX" xml:space="preserve"><value>Spostamento X (px):</value></data>
+    <data name="EnhanceShiftY" xml:space="preserve"><value>Spostamento Y (px):</value></data>
+    <data name="EnhancePolarGeometry" xml:space="preserve"><value>Geometria Polare &amp; Modelli</value></data>
+    <data name="EnhanceAngularQuality" xml:space="preserve"><value>Qualità Angolare:</value></data>
+    <data name="EnhanceMaskRadius" xml:space="preserve"><value>Raggio Maschera (px):</value></data>
+    <data name="EnhanceSigmaRejection" xml:space="preserve"><value>Sigma Reiezione:</value></data>
+    <data name="EnhanceNormScale" xml:space="preserve"><value>Scala Normalizzazione:</value></data>
+    <data name="EnhanceRvsfSingleParams" xml:space="preserve"><value>Parametri RVSF (Singolo)</value></data>
+    <data name="EnhanceParamA" xml:space="preserve"><value>Parametro A (Offset):</value></data>
+    <data name="EnhanceParamB" xml:space="preserve"><value>Parametro B (Scala):</value></data>
+    <data name="EnhanceParamN" xml:space="preserve"><value>Parametro N (Potenza):</value></data>
+    <data name="EnhanceLogScale" xml:space="preserve"><value>Scala Logaritmica</value></data>
+    <data name="EnhanceRvsfMosaicParams" xml:space="preserve"><value>RVSF Mosaico (Range Parametri)</value></data>
+    <data name="EnhanceIntervalA" xml:space="preserve"><value>Intervallo A:</value></data>
+    <data name="EnhanceIntervalB" xml:space="preserve"><value>Intervallo B:</value></data>
+    <data name="EnhanceIntervalN" xml:space="preserve"><value>Intervallo N:</value></data>
+    <data name="EnhanceFrangiHeader" xml:space="preserve"><value>Filtro Hessiana (Vesselness)</value></data>
+    <data name="EnhanceSigmaScale" xml:space="preserve"><value>Sigma (Scala):</value></data>
+    <data name="EnhanceBetaShape" xml:space="preserve"><value>Beta (Forma):</value></data>
+    <data name="EnhanceConstantC" xml:space="preserve"><value>Costante C (Rumore):</value></data>
+    <data name="EnhanceTensorHeader" xml:space="preserve"><value>Coerenza Tensore</value></data>
+    <data name="EnhanceSigmaGradient" xml:space="preserve"><value>Sigma (Gradiente):</value></data>
+    <data name="EnhanceRhoIntegration" xml:space="preserve"><value>Rho (Integrazione):</value></data>
+    <data name="EnhanceMorphologyHeader" xml:space="preserve"><value>Morfologia (Top-Hat)</value></data>
+    <data name="EnhanceKernelSize" xml:space="preserve"><value>Dimensione Kernel:</value></data>
+    <data name="EnhanceClaheHeader" xml:space="preserve"><value>CLAHE (16-bit)</value></data>
+    <data name="EnhanceClipLimit" xml:space="preserve"><value>Limite Clipping:</value></data>
+    <data name="EnhanceGridSize" xml:space="preserve"><value>Dimensione Griglia:</value></data>
+    <data name="EnhanceLocalStatsHeader" xml:space="preserve"><value>Statistica Locale</value></data>
+    <data name="EnhanceWindowSize" xml:space="preserve"><value>Dimensione Finestra:</value></data>
+    <data name="EnhanceIntensity" xml:space="preserve"><value>Intensità:</value></data>
+    <data name="EnhanceUnsharpHeader" xml:space="preserve"><value>Unsharp Masking</value></data>
+    <data name="EnhanceCalcPreview" xml:space="preserve"><value>Calcola Anteprima</value></data>
+    <data name="EnhanceBack" xml:space="preserve"><value>Indietro</value></data>
+    <data name="EnhanceApplyBatch" xml:space="preserve"><value>Applica Batch</value></data>
+
+    <data name="TooltipEnhanceAngle" xml:space="preserve"><value>Angolo di rotazione per la sottrazione.</value></data>
+    <data name="TooltipEnhanceShiftX" xml:space="preserve"><value>Sposta il centro di rotazione orizzontalmente (sub-pixel).</value></data>
+    <data name="TooltipEnhanceShiftY" xml:space="preserve"><value>Sposta il centro di rotazione verticalmente (sub-pixel).</value></data>
+    <data name="TooltipEnhanceAngularQuality" xml:space="preserve"><value>Numero di settori angolari usati per calcolare la mediana.</value></data>
+    <data name="TooltipEnhanceMaskRadius" xml:space="preserve"><value>Raggio massimo di applicazione del filtro. 0 = Tutta l'immagine.</value></data>
+    <data name="TooltipEnhanceSigmaRejection" xml:space="preserve"><value>Soglia statistica per escludere le stelle durante il calcolo.</value></data>
+    <data name="TooltipEnhanceNormScale" xml:space="preserve"><value>Fattore moltiplicativo per il contrasto dopo la rinormalizzazione.</value></data>
+    <data name="TooltipEnhanceParamA" xml:space="preserve"><value>Offset radiale. Sposta l'inizio dell'effetto lontano dal nucleo.</value></data>
+    <data name="TooltipEnhanceParamB" xml:space="preserve"><value>Fattore di scala per la pendenza radiale.</value></data>
+    <data name="TooltipEnhanceParamN" xml:space="preserve"><value>Esponente della funzione. Valori &gt; 1 concentrano l'effetto all'esterno, &lt; 1 all'interno.</value></data>
+    <data name="TooltipEnhanceLogScale" xml:space="preserve"><value>Applica il filtro nello spazio logaritmico. Consigliato per immagini con alta dinamica.</value></data>
+    <data name="TooltipEnhanceIntervalA" xml:space="preserve"><value>Valore Minimo e Massimo per il Parametro A</value></data>
+    <data name="TooltipEnhanceIntervalB" xml:space="preserve"><value>Valore Minimo e Massimo per il Parametro B</value></data>
+    <data name="TooltipEnhanceIntervalN" xml:space="preserve"><value>Valore Minimo e Massimo per il Parametro N</value></data>
+    <data name="TooltipEnhanceLogScaleSimple" xml:space="preserve"><value>Applica il filtro nello spazio logaritmico.</value></data>
+    <data name="TooltipEnhanceSigmaScale" xml:space="preserve"><value>Scala delle strutture da rilevare. Aumenta per rilevare getti più spessi.</value></data>
+    <data name="TooltipEnhanceBetaShape" xml:space="preserve"><value>Sensibilità alla forma. Valori bassi selezionano solo linee molto sottili, valori alti includono blob.</value></data>
+    <data name="TooltipEnhanceConstantC" xml:space="preserve"><value>Costante di soppressione del rumore di fondo.</value></data>
+    <data name="TooltipEnhanceSigmaGradient" xml:space="preserve"><value>Smoothing gaussiano applicato prima del calcolo dei gradienti.</value></data>
+    <data name="TooltipEnhanceRhoIntegration" xml:space="preserve"><value>Finestra di integrazione per calcolare la coerenza direzionale locale.</value></data>
+    <data name="TooltipEnhanceTopHatKernel" xml:space="preserve"><value>Dimensione dell'elemento strutturante. Strutture più grandi di questo valore verranno rimosse.</value></data>
+    <data name="TooltipEnhanceClipLimit" xml:space="preserve"><value>Soglia massima di amplificazione del contrasto. Valori alti aumentano dettagli ma anche il rumore.</value></data>
+    <data name="TooltipEnhanceClaheGrid" xml:space="preserve"><value>Dimensione della griglia locale per il calcolo dell'istogramma.</value></data>
+    <data name="TooltipEnhanceLocalStatsWindow" xml:space="preserve"><value>Dimensione dell'area locale per il calcolo di media e deviazione standard.</value></data>
+    <data name="TooltipEnhanceLocalIntensity" xml:space="preserve"><value>Forza del blending dell'effetto.</value></data>
+    <data name="TooltipEnhanceKernelSize" xml:space="preserve"><value>Dimensione del filtro (es. mediana per Unsharp Masking).</value></data>
+    <data name="TooltipFitView" xml:space="preserve"><value>Adatta allo Schermo</value></data>
+    <data name="ImportTitle" xml:space="preserve"><value>Importazione e Calibrazione Scientifica</value></data>
+    <data name="ImportSourceImages" xml:space="preserve"><value>1. IMMAGINI SORGENTE (LIGHTS)</value></data>
+    <data name="ImportCalibration" xml:space="preserve"><value>2. CALIBRAZIONE</value></data>
+    <data name="ImportSubjectImages" xml:space="preserve"><value>Immagini del Soggetto</value></data>
+    <data name="ImportAddLight" xml:space="preserve"><value>Aggiungi immagine</value></data>
+    <data name="ImportClear" xml:space="preserve"><value>Svuota</value></data>
+    <data name="ImportOptions" xml:space="preserve"><value>Opzioni di Importazione</value></data>
+    <data name="ImportSeparateNodes" xml:space="preserve"><value>Importa come immagini separate</value></data>
+    <data name="ImportTooltipSeparateNodes" xml:space="preserve"><value>Se attivo, crea un nodo indipendente per ogni immagine invece di raggrupparle in una sequenza.</value></data>
+    <data name="ImportSeparateNodesDesc" xml:space="preserve"><value>Utile per analizzare singolarmente le estensioni di file mosaico o immagini indipendenti.</value></data>
+    <data name="ImportBiasFrames" xml:space="preserve"><value>Bias Frames</value></data>
+    <data name="ImportAddBias" xml:space="preserve"><value>Aggiungi Bias</value></data>
+    <data name="ImportDarkFrames" xml:space="preserve"><value>Dark Frames</value></data>
+    <data name="ImportAddDark" xml:space="preserve"><value>Aggiungi Dark</value></data>
+    <data name="ImportFlatFields" xml:space="preserve"><value>Flat Fields</value></data>
+    <data name="ImportAddFlat" xml:space="preserve"><value>Aggiungi Flat</value></data>
+    <data name="ImportApply" xml:space="preserve"><value>Applica e Importa</value></data>
+    <data name="PlateTitle" xml:space="preserve"><value>Risoluzione Astrometrica</value></data>
+    <data name="PlateDesc" xml:space="preserve"><value>Analizza la disposizione delle stelle per calcolare le coordinate celesti reali (WCS).</value></data>
+    <data name="PlateTargetLabel" xml:space="preserve"><value>Target:</value></data>
+    <data name="PlateProcessedLabel" xml:space="preserve"><value>Processati:</value></data>
+    <data name="PlateWarningLabel" xml:space="preserve"><value>Attenzione:</value></data>
+    <data name="PlateWarningBody" xml:space="preserve"><value>salva i risultati per rendere le modifiche all'header permanenti.</value></data>
+    <data name="PlateStart" xml:space="preserve"><value>Avvia risoluzione</value></data>
+    <data name="PlateStop" xml:space="preserve"><value>Interrompi</value></data>
+    <data name="PlateRestart" xml:space="preserve"><value>Riavvia risoluzione</value></data>
+    <data name="PosterizationTitle" xml:space="preserve"><value>Posterizzazione</value></data>
+    <data name="PosterizationParamsHeader" xml:space="preserve"><value>Parametri Quantizzazione</value></data>
+    <data name="PosterizationLevelsTitle" xml:space="preserve"><value>Numero Livelli</value></data>
+    <data name="PosterizationLevelsDesc" xml:space="preserve"><value>Divide l'immagine in toni discreti per isolare le isofote.</value></data>
+    <data name="PosterizationMethodTitle" xml:space="preserve"><value>Metodo Distribuzione</value></data>
+    <data name="PosterizationMethodDesc" xml:space="preserve"><value>Scegli come ripartire i toni per enfatizzare dettagli deboli.</value></data>
+    <data name="PosterizationRangeTitle" xml:space="preserve"><value>Range Dinamico (Clip)</value></data>
+    <data name="PosterizationRangeDesc" xml:space="preserve"><value>Definisce l'intervallo di segnale effettivo.</value></data>
+    <data name="PosterizationBlackThreshold" xml:space="preserve"><value>Soglia Nero</value></data>
+    <data name="PosterizationWhiteThreshold" xml:space="preserve"><value>Soglia Bianco</value></data>
+    <data name="PosterizationOptionsTitle" xml:space="preserve"><value>Opzioni aggiuntive</value></data>
+    <data name="PosterizationAutoAdapt" xml:space="preserve"><value>Adatta luminosità al cambio immagine</value></data>
+    <data name="StarMaskTitle" xml:space="preserve"><value>Rimozione Stelle</value></data>
+    <data name="StarMaskHeader" xml:space="preserve"><value>Rimozione Stelle</value></data>
+    <data name="StarMaskDesc" xml:space="preserve"><value>Definisci i parametri e calcola l'anteprima.</value></data>
+    <data name="StarMaskCometHeader" xml:space="preserve"><value>Mascheramento Cometa</value></data>
+    <data name="StarMaskStarHeader" xml:space="preserve"><value>Mascheramento Stelle</value></data>
+    <data name="StarMaskThreshold" xml:space="preserve"><value>Soglia (Sigma)</value></data>
+    <data name="StarMaskDilation" xml:space="preserve"><value>Dilatazione (px)</value></data>
+    <data name="StarMaskMinDiameter" xml:space="preserve"><value>Diametro Minimo (px)</value></data>
+    <data name="TooltipShowCometMask" xml:space="preserve"><value>Mostra maschera cometa</value></data>
+    <data name="TooltipShowStarMask" xml:space="preserve"><value>Mostra maschera stelle</value></data>
+    <data name="TooltipMinDiameter" xml:space="preserve"><value>Ignora stelle/rumore più piccoli di questo diametro.</value></data>
+    <data name="StarMaskCalcPreview" xml:space="preserve"><value>Calcola Anteprima</value></data>
+    <data name="VideoExportTitle" xml:space="preserve"><value>Configurazione Esportazione Video</value></data>
+    <data name="VideoExportHeader" xml:space="preserve"><value>ESPORTAZIONE VIDEO</value></data>
+    <data name="VideoExportDesc" xml:space="preserve"><value>Configura il formato e la qualità</value></data>
+    <data name="VideoExportDestFolder" xml:space="preserve"><value>Cartella di destinazione</value></data>
+    <data name="VideoExportSelectFolderWatermark" xml:space="preserve"><value>Seleziona cartella...</value></data>
+    <data name="VideoExportFileNameLabel" xml:space="preserve"><value>Nome del file (opzionale)</value></data>
+    <data name="VideoExportFileNameWatermark" xml:space="preserve"><value>Nome file (senza estensione)</value></data>
+    <data name="VideoExportContainerFormat" xml:space="preserve"><value>Formato Contenitore</value></data>
+    <data name="VideoExportCodec" xml:space="preserve"><value>Compressione (Codec)</value></data>
+    <data name="VideoExportFps" xml:space="preserve"><value>Frame Rate (FPS)</value></data>
+    <data name="VideoExportScaling" xml:space="preserve"><value>Fattore di Riscalamento</value></data>
+    <data name="VideoExportSummaryHeader" xml:space="preserve"><value>RIEPILOGO OUTPUT</value></data>
+    <data name="VideoExportSummaryDesc" xml:space="preserve"><value>Parametri tecnici e soglie di contrasto.</value></data>
+    <data name="VideoExportEstDuration" xml:space="preserve"><value>Durata stimata</value></data>
+    <data name="VideoExportWarning" xml:space="preserve"><value>* Le soglie regolate nell'anteprima verranno applicate a tutta la sequenza esportata.</value></data>
+    <data name="VideoExportExecute" xml:space="preserve"><value>Esporta Video</value></data>
+    <data name="PlateStatusReady" xml:space="preserve"><value>Pronto.</value></data>
+    <data name="ErrorNoFilesSelected" xml:space="preserve"><value>Nessun file selezionato.</value></data>
+    <data name="PlateLogStartSession" xml:space="preserve"><value>=== INIZIO SESSIONE DI RISOLUZIONE ===</value></data>
+    <data name="PlateLogErrorFatal" xml:space="preserve"><value>\n!!! ERRORE FATALE: {0}</value></data>
+    <data name="PlateStatusCriticalError" xml:space="preserve"><value>Errore critico durante il processo.</value></data>
+    <data name="PlateStatusProcessing" xml:space="preserve"><value>Elaborazione: {0} ({1}/{2})</value></data>
+    <data name="PlateLogFileHeader" xml:space="preserve"><value>\n------------------------------------------------------------\n[FILE {0}/{1}] {2}</value></data>
+    <data name="PlateLogCancelled" xml:space="preserve"><value>\n[!] Operazione interrotta dall'utente.</value></data>
+    <data name="PlateLogConfig" xml:space="preserve"><value>   &gt; Config: {0}</value></data>
+    <data name="PlateLogTool" xml:space="preserve"><value>     | {0}</value></data>
+    <data name="PlateLogSkipped" xml:space="preserve"><value>   [!] SALTATO: Dati mancanti ({0})</value></data>
+    <data name="PlateLogSuccess" xml:space="preserve"><value>   &gt;&gt;&gt; RISOLTO CON SUCCESSO</value></data>
+    <data name="PlateLogFailed" xml:space="preserve"><value>   &gt;&gt;&gt; FALLITO: {0}</value></data>
+    <data name="PlateLogSummaryHeader" xml:space="preserve"><value>\n============================================================\nSESSIONE COMPLETATA</value></data>
+    <data name="PlateLogSummaryStats" xml:space="preserve"><value>Successi: {0} su {1} files.\n============================================================</value></data>
+    <data name="PlateLogWcsData" xml:space="preserve"><value>     [NUOVI DATI WCS]</value></data>
+    <data name="PlateStatusFinished" xml:space="preserve"><value>Sessione conclusa ({0}/{1} risolti).</value></data>
+    <data name="PlateStatusAllFailed" xml:space="preserve"><value>Risoluzione fallita (nessun file risolto).</value></data>
+    <data name="EnhanceStatusReady" xml:space="preserve"><value>Pronto</value></data>
+    <data name="EnhanceStatusLoading" xml:space="preserve"><value>Caricamento...</value></data>
+    <data name="EnhanceStatusProcessingPreview" xml:space="preserve"><value>Elaborazione anteprima...</value></data>
+    <data name="EnhanceStatusPreviewActive" xml:space="preserve"><value>Anteprima attiva</value></data>
+    <data name="EnhanceStatusLoadingCancelled" xml:space="preserve"><value>Caricamento interrotto</value></data>
+    <data name="EnhanceStatusError" xml:space="preserve"><value>Errore: {0}</value></data>
+    <data name="EnhanceStatusCalcError" xml:space="preserve"><value>Errore Calcolo: {0}</value></data>
+    <data name="EnhanceStatusBatchProgress" xml:space="preserve"><value>File {0} / {1}...</value></data>
+    <data name="EnhanceStatusBatchCancelled" xml:space="preserve"><value>Elaborazione batch annullata.</value></data>
+    <data name="EnhanceStatusBatchError" xml:space="preserve"><value>Errore Batch: {0}</value></data>
+    <data name="EnhanceStatusInterrupted" xml:space="preserve"><value>Operazione interrotta</value></data>
+    <data name="ErrorSourceFileEmpty" xml:space="preserve"><value>File sorgente privo di immagini.</value></data>
+    <data name="ErrorNoValidImageFound" xml:space="preserve"><value>Nessuna immagine valida trovata.</value></data>
+    <data name="StatusProcessingProgress" xml:space="preserve"><value>Elaborazione: {0}/{1}</value></data>
+    <data name="StarStatusReady" xml:space="preserve"><value>Pronto.</value></data>
+    <data name="StarStatusCalculating" xml:space="preserve"><value>Calcolo rimozione stelle...</value></data>
+    <data name="StarStatusResultReady" xml:space="preserve"><value>Risultato calcolato.</value></data>
+    <data name="StarStatusLoading" xml:space="preserve"><value>Caricamento...</value></data>
+    <data name="StarStatusBatchInit" xml:space="preserve"><value>Inizializzazione batch...</value></data>
+    <data name="StarStatusBatchProgress" xml:space="preserve"><value>Elaborazione: {0}/{1} ({2:F0}%)</value></data>
+    <data name="StarErrorInvalidImage" xml:space="preserve"><value>Immagine non valida.</value></data>
+    <data name="StarErrorProcessing" xml:space="preserve"><value>Errore Elaborazione: {0}</value></data>
+    <data name="ExportSelectFolderTitle" xml:space="preserve"><value>Seleziona destinazione</value></data>
+    <data name="ExportStatusQueued" xml:space="preserve"><value>In coda</value></data>
+    <data name="ExportStatusDone" xml:space="preserve"><value>Esportazione completata.</value></data>
+    <data name="ExportStretchAuto" xml:space="preserve"><value>Auto Stretch</value></data>
+    <data name="ExportStretchManual" xml:space="preserve"><value>Manuale</value></data>
+    <data name="ExportSelectFolderTitle" xml:space="preserve"><value>Seleziona destinazione</value></data>
+    <data name="ExportStatusQueued" xml:space="preserve"><value>In coda</value></data>
+    <data name="ExportStatusDone" xml:space="preserve"><value>Esportazione completata.</value></data>
+    <data name="ExportStretchAuto" xml:space="preserve"><value>Auto Stretch</value></data>
+    <data name="ExportStretchManual" xml:space="preserve"><value>Manuale</value></data>
+    <data name="ImportExtractingMef" xml:space="preserve"><value>Estrazione estensioni da {0}...</value></data>
+    <data name="ImportStatusStarting" xml:space="preserve"><value>Avvio calibrazione...</value></data>
+    <data name="ImportStatusProcessing" xml:space="preserve"><value>Processamento: {0}/{1} ({2})</value></data>
+    <data name="ImportErrorNoFilesGenerated" xml:space="preserve"><value>Nessun file generato.</value></data>
+    <data name="VideoExportSelectFolderTitle" xml:space="preserve"><value>Seleziona cartella di destinazione</value></data>
+    <data name="VideoExportStatusFinalizing" xml:space="preserve"><value>Finalizzazione e scrittura indici... Non chiudere.</value></data>
+    <data name="VideoExportStatusProcessingFrame" xml:space="preserve"><value>Elaborazione frame... {0:N0}%</value></data>
+    <data name="VideoExportStatusSuccess" xml:space="preserve"><value>Video Salvato!</value></data>
+    <data name="VideoExportStatusError" xml:space="preserve"><value>Errore durante l'esportazione.</value></data>
+</root>

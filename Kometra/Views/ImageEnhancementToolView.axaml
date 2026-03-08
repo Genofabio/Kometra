@@ -4,6 +4,7 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:avalonia="clr-namespace:Material.Icons.Avalonia;assembly=Material.Icons.Avalonia"
         xmlns:converters="clr-namespace:Kometra.Converters"
+        xmlns:infrastructure="clr-namespace:Kometra.Infrastructure"
         xmlns:vm="clr-namespace:Kometra.ViewModels.ImageProcessing"
         mc:Ignorable="d" d:DesignWidth="1100" d:DesignHeight="750"
         x:Class="Kometra.Views.ImageEnhancementToolView"
@@ -62,7 +63,7 @@
                            TextWrapping="Wrap" Margin="0,0,0,20"/>
 
                 <StackPanel Grid.Row="1" Spacing="8" IsEnabled="{Binding IsSetupControlsEnabled}">
-                    <TextBlock Text="Algoritmo Selezionato" FontWeight="SemiBold"/>
+                    <TextBlock Text="{Binding [EnhanceSelectedAlgorithm], Source={x:Static infrastructure:LocalizationManager.Instance}}" FontWeight="SemiBold"/>
                     <ComboBox ItemsSource="{Binding AvailableModes}" 
                               SelectedItem="{Binding SelectedMode}" 
                               HorizontalAlignment="Stretch">
@@ -80,16 +81,16 @@
                     <StackPanel Spacing="25">
                         
                         <StackPanel Spacing="5">
-                            <TextBlock Text="Descrizione" FontSize="11" Opacity="0.5" FontWeight="Bold"/>
+                            <TextBlock Text="{Binding [EnhanceDescription], Source={x:Static infrastructure:LocalizationManager.Instance}}" FontSize="11" Opacity="0.5" FontWeight="Bold"/>
                             <TextBlock Text="{Binding SelectedMode, Converter={StaticResource DescConverter}}" 
                                        FontStyle="Italic" Opacity="0.8" TextWrapping="Wrap" FontSize="12"/>
                         </StackPanel>
 
                         <StackPanel IsVisible="{Binding IsLarsonSekaninaVisible}">
-                            <TextBlock Text="Parametri Rotazione" FontWeight="SemiBold" Margin="0,0,0,8"/>
+                            <TextBlock Text="{Binding [EnhanceRotationParams], Source={x:Static infrastructure:LocalizationManager.Instance}}" FontWeight="SemiBold" Margin="0,0,0,8"/>
                             <StackPanel Spacing="12">
                                 <StackPanel Spacing="2">
-                                    <TextBlock Text="Angolo (gradi):" Classes="labelInfo" ToolTip.Tip="Angolo di rotazione per la sottrazione."/>
+                                    <TextBlock Text="{Binding [EnhanceAngle], Source={x:Static infrastructure:LocalizationManager.Instance}}" Classes="labelInfo" ToolTip.Tip="{Binding [TooltipEnhanceAngle], Source={x:Static infrastructure:LocalizationManager.Instance}}"/>
                                     <Grid ColumnDefinitions="*, Auto">
                                         <Slider Minimum="-45" Maximum="45" Value="{Binding RotationAngle}"/>
                                         <TextBox x:Name="RotationBox" Text="{Binding RotationAngle, Mode=OneWay, StringFormat={}{0:F1}}"
@@ -97,7 +98,7 @@
                                     </Grid>
                                 </StackPanel>
                                 <StackPanel Spacing="2">
-                                    <TextBlock Text="Spostamento X (px):" Classes="labelInfo" ToolTip.Tip="Sposta il centro di rotazione orizzontalmente (sub-pixel)."/>
+                                    <TextBlock Text="{Binding [EnhanceShiftX], Source={x:Static infrastructure:LocalizationManager.Instance}}" Classes="labelInfo" ToolTip.Tip="{Binding [TooltipEnhanceShiftX], Source={x:Static infrastructure:LocalizationManager.Instance}}"/>
                                     <Grid ColumnDefinitions="*, Auto">
                                         <Slider Minimum="-50" Maximum="50" Value="{Binding ShiftX}"/>
                                         <TextBox x:Name="ShiftXBox" Text="{Binding ShiftX, Mode=OneWay, StringFormat={}{0:F1}}"
@@ -105,7 +106,7 @@
                                     </Grid>
                                 </StackPanel>
                                 <StackPanel Spacing="2">
-                                    <TextBlock Text="Spostamento Y (px):" Classes="labelInfo" ToolTip.Tip="Sposta il centro di rotazione verticalmente (sub-pixel)."/>
+                                    <TextBlock Text="{Binding [EnhanceShiftY], Source={x:Static infrastructure:LocalizationManager.Instance}}" Classes="labelInfo" ToolTip.Tip="{Binding [TooltipEnhanceShiftY], Source={x:Static infrastructure:LocalizationManager.Instance}}"/>
                                     <Grid ColumnDefinitions="*, Auto">
                                         <Slider Minimum="-50" Maximum="50" Value="{Binding ShiftY}"/>
                                         <TextBox x:Name="ShiftYBox" Text="{Binding ShiftY, Mode=OneWay, StringFormat={}{0:F1}}"
@@ -116,11 +117,11 @@
                         </StackPanel>
 
                         <StackPanel IsVisible="{Binding IsAzimuthalContainerVisible}">
-                            <TextBlock Text="Geometria Polare &amp; Modelli" FontWeight="SemiBold" Margin="0,0,0,8"/>
+                            <TextBlock Text="{Binding [EnhancePolarGeometry], Source={x:Static infrastructure:LocalizationManager.Instance}}" FontWeight="SemiBold" Margin="0,0,0,8"/>
                             <StackPanel Spacing="12">
                                 
                                 <StackPanel Spacing="2" IsVisible="{Binding IsAngularQualityVisible}">
-                                    <TextBlock Text="Qualità Angolare:" Classes="labelInfo" ToolTip.Tip="Numero di settori angolari usati per calcolare la mediana."/>
+                                    <TextBlock Text="{Binding [EnhanceAngularQuality], Source={x:Static infrastructure:LocalizationManager.Instance}}" Classes="labelInfo" ToolTip.Tip="{Binding [TooltipEnhanceAngularQuality], Source={x:Static infrastructure:LocalizationManager.Instance}}"/>
                                     <Grid ColumnDefinitions="*, Auto">
                                         <Slider Minimum="1" Maximum="20" Value="{Binding RadialSubsampling}" IsSnapToTickEnabled="True" TickFrequency="1"/>
                                         <TextBox x:Name="SubsamplingBox" Text="{Binding RadialSubsampling, Mode=OneWay}"
@@ -129,7 +130,7 @@
                                 </StackPanel>
 
                                 <StackPanel Spacing="2" IsVisible="{Binding IsMaskRadiusVisible}">
-                                    <TextBlock Text="Raggio Maschera (px):" Classes="labelInfo" ToolTip.Tip="Raggio massimo di applicazione del filtro. 0 = Tutta l'immagine."/>
+                                    <TextBlock Text="{Binding [EnhanceMaskRadius], Source={x:Static infrastructure:LocalizationManager.Instance}}" Classes="labelInfo" ToolTip.Tip="{Binding [TooltipEnhanceMaskRadius], Source={x:Static infrastructure:LocalizationManager.Instance}}"/>
                                     <Grid ColumnDefinitions="*, Auto">
                                         <Slider Minimum="0" Maximum="2500" Value="{Binding RadialMaxRadius}"/>
                                         <TextBox x:Name="McmRadiusBox" Text="{Binding RadialMaxRadius, Mode=OneWay, StringFormat={}{0:F1}}"
@@ -138,7 +139,7 @@
                                 </StackPanel>
 
                                 <StackPanel Spacing="2" IsVisible="{Binding IsAzimuthalRejectionVisible}">
-                                    <TextBlock Text="Sigma Reiezione:" Classes="labelInfo" ToolTip.Tip="Soglia statistica per escludere le stelle durante il calcolo."/>
+                                    <TextBlock Text="{Binding [EnhanceSigmaRejection], Source={x:Static infrastructure:LocalizationManager.Instance}}" Classes="labelInfo" ToolTip.Tip="{Binding [TooltipEnhanceSigmaRejection], Source={x:Static infrastructure:LocalizationManager.Instance}}"/>
                                     <Grid ColumnDefinitions="*, Auto">
                                         <Slider Minimum="0.5" Maximum="10" Value="{Binding AzimuthalRejSigma}"/>
                                         <TextBox x:Name="AzimuthalRejBox" Text="{Binding AzimuthalRejSigma, Mode=OneWay, StringFormat={}{0:F1}}"
@@ -147,7 +148,7 @@
                                 </StackPanel>
                                 
                                 <StackPanel Spacing="2" IsVisible="{Binding IsAzimuthalNormVisible}">
-                                    <TextBlock Text="Scala Normalizzazione:" Classes="labelInfo" ToolTip.Tip="Fattore moltiplicativo per il contrasto dopo la rinormalizzazione."/>
+                                    <TextBlock Text="{Binding [EnhanceNormScale], Source={x:Static infrastructure:LocalizationManager.Instance}}" Classes="labelInfo" ToolTip.Tip="{Binding [TooltipEnhanceNormScale], Source={x:Static infrastructure:LocalizationManager.Instance}}"/>
                                     <Grid ColumnDefinitions="*, Auto">
                                         <Slider Minimum="0.1" Maximum="20" Value="{Binding AzimuthalNormSigma}"/>
                                         <TextBox x:Name="AzimuthalNormBox" Text="{Binding AzimuthalNormSigma, Mode=OneWay, StringFormat={}{0:F1}}"
@@ -158,10 +159,10 @@
                         </StackPanel>
 
                         <StackPanel IsVisible="{Binding IsRvsfSingleVisible}">
-                            <TextBlock Text="Parametri RVSF (Singolo)" FontWeight="SemiBold" Margin="0,0,0,8"/>
+                            <TextBlock Text="{Binding [EnhanceRvsfSingleParams], Source={x:Static infrastructure:LocalizationManager.Instance}}" FontWeight="SemiBold" Margin="0,0,0,8"/>
                             <StackPanel Spacing="12">
                                 <StackPanel Spacing="2">
-                                    <TextBlock Text="Parametro A (Offset):" Classes="labelInfo" ToolTip.Tip="Offset radiale. Sposta l'inizio dell'effetto lontano dal nucleo."/>
+                                    <TextBlock Text="{Binding [EnhanceParamA], Source={x:Static infrastructure:LocalizationManager.Instance}}" Classes="labelInfo" ToolTip.Tip="{Binding [TooltipEnhanceParamA], Source={x:Static infrastructure:LocalizationManager.Instance}}"/>
                                     <Grid ColumnDefinitions="*, Auto">
                                         <Slider Minimum="0" Maximum="1000" Value="{Binding RvsfA_1}"/>
                                         <TextBox x:Name="RvsfA1Box" Text="{Binding RvsfA_1, Mode=OneWay, StringFormat={}{0:F2}}"
@@ -169,7 +170,7 @@
                                     </Grid>
                                 </StackPanel>
                                 <StackPanel Spacing="2">
-                                    <TextBlock Text="Parametro B (Scala):" Classes="labelInfo" ToolTip.Tip="Fattore di scala per la pendenza radiale."/>
+                                    <TextBlock Text="{Binding [EnhanceParamB], Source={x:Static infrastructure:LocalizationManager.Instance}}" Classes="labelInfo" ToolTip.Tip="{Binding [TooltipEnhanceParamB], Source={x:Static infrastructure:LocalizationManager.Instance}}"/>
                                     <Grid ColumnDefinitions="*, Auto">
                                         <Slider Minimum="0" Maximum="10" Value="{Binding RvsfB_1}"/>
                                         <TextBox x:Name="RvsfB1Box" Text="{Binding RvsfB_1, Mode=OneWay, StringFormat={}{0:F2}}"
@@ -177,23 +178,23 @@
                                     </Grid>
                                 </StackPanel>
                                 <StackPanel Spacing="2">
-                                    <TextBlock Text="Parametro N (Potenza):" Classes="labelInfo" ToolTip.Tip="Esponente della funzione. Valori &gt; 1 concentrano l'effetto all'esterno, &lt; 1 all'interno."/>
+                                    <TextBlock Text="{Binding [EnhanceParamN], Source={x:Static infrastructure:LocalizationManager.Instance}}" Classes="labelInfo" ToolTip.Tip="{Binding [TooltipEnhanceParamN], Source={x:Static infrastructure:LocalizationManager.Instance}}"/>
                                     <Grid ColumnDefinitions="*, Auto">
                                         <Slider Minimum="0.1" Maximum="5" Value="{Binding RvsfN_1}"/>
                                         <TextBox x:Name="RvsfN1Box" Text="{Binding RvsfN_1, Mode=OneWay, StringFormat={}{0:F2}}"
                                                  Grid.Column="1" Classes="compact" LostFocus="OnManualInputCommit" KeyDown="OnInputKeyDown"/>
                                     </Grid>
                                 </StackPanel>
-                                <CheckBox Content="Scala Logaritmica" IsChecked="{Binding UseLogScale}" Margin="0,0,0,0"
-                                          ToolTip.Tip="Applica il filtro nello spazio logaritmico. Consigliato per immagini con alta dinamica."/>
+                                <CheckBox Content="{Binding [EnhanceLogScale], Source={x:Static infrastructure:LocalizationManager.Instance}}" IsChecked="{Binding UseLogScale}" Margin="0,0,0,0"
+                                          ToolTip.Tip="{Binding [TooltipEnhanceLogScale], Source={x:Static infrastructure:LocalizationManager.Instance}}"/>
                             </StackPanel>
                         </StackPanel>
 
                         <StackPanel IsVisible="{Binding IsRvsfMosaicVisible}">
-                             <TextBlock Text="RVSF Mosaico (Range Parametri)" FontWeight="SemiBold" Margin="0,0,0,8"/>
+                             <TextBlock Text="{Binding [EnhanceRvsfMosaicParams], Source={x:Static infrastructure:LocalizationManager.Instance}}" FontWeight="SemiBold" Margin="0,0,0,8"/>
                              <StackPanel Spacing="8">
                                  <Grid ColumnDefinitions="*, 65, 30, 65">
-                                    <TextBlock Text="Intervallo A:" Classes="labelInfo" VerticalAlignment="Center" ToolTip.Tip="Valore Minimo e Massimo per il Parametro A"/>
+                                    <TextBlock Text="{Binding [EnhanceIntervalA], Source={x:Static infrastructure:LocalizationManager.Instance}}" Classes="labelInfo" VerticalAlignment="Center" ToolTip.Tip="{Binding [TooltipEnhanceIntervalA], Source={x:Static infrastructure:LocalizationManager.Instance}}"/>
                                     <TextBox x:Name="RvsfAMinBox" Grid.Column="1" Text="{Binding RvsfA_1, Mode=OneWay, StringFormat={}{0:F2}}"
                                              Classes="compact" HorizontalContentAlignment="Center" LostFocus="OnManualInputCommit" KeyDown="OnInputKeyDown"/>
                                     <TextBlock Grid.Column="2" Text="-" HorizontalAlignment="Center" VerticalAlignment="Center"/>
@@ -202,7 +203,7 @@
                                 </Grid>
 
                                 <Grid ColumnDefinitions="*, 65, 30, 65">
-                                    <TextBlock Text="Intervallo B:" Classes="labelInfo" VerticalAlignment="Center" ToolTip.Tip="Valore Minimo e Massimo per il Parametro B"/>
+                                    <TextBlock Text="{Binding [EnhanceIntervalB], Source={x:Static infrastructure:LocalizationManager.Instance}}" Classes="labelInfo" VerticalAlignment="Center" ToolTip.Tip="{Binding [TooltipEnhanceIntervalB], Source={x:Static infrastructure:LocalizationManager.Instance}}"/>
                                     <TextBox x:Name="RvsfBMinBox" Grid.Column="1" Text="{Binding RvsfB_1, Mode=OneWay, StringFormat={}{0:F2}}"
                                              Classes="compact" HorizontalContentAlignment="Center" LostFocus="OnManualInputCommit" KeyDown="OnInputKeyDown"/>
                                     <TextBlock Grid.Column="2" Text="-" HorizontalAlignment="Center" VerticalAlignment="Center"/>
@@ -211,7 +212,7 @@
                                 </Grid>
 
                                 <Grid ColumnDefinitions="*, 65, 30, 65">
-                                    <TextBlock Text="Intervallo N:" Classes="labelInfo" VerticalAlignment="Center" ToolTip.Tip="Valore Minimo e Massimo per il Parametro N"/>
+                                    <TextBlock Text="{Binding [EnhanceIntervalN], Source={x:Static infrastructure:LocalizationManager.Instance}}" Classes="labelInfo" VerticalAlignment="Center" ToolTip.Tip="{Binding [TooltipEnhanceIntervalN], Source={x:Static infrastructure:LocalizationManager.Instance}}"/>
                                     <TextBox x:Name="RvsfNMinBox" Grid.Column="1" Text="{Binding RvsfN_1, Mode=OneWay, StringFormat={}{0:F2}}"
                                              Classes="compact" HorizontalContentAlignment="Center" LostFocus="OnManualInputCommit" KeyDown="OnInputKeyDown"/>
                                     <TextBlock Grid.Column="2" Text="-" HorizontalAlignment="Center" VerticalAlignment="Center"/>
@@ -219,16 +220,16 @@
                                              Classes="compact" HorizontalContentAlignment="Center" LostFocus="OnManualInputCommit" KeyDown="OnInputKeyDown"/>
                                 </Grid>
 
-                                <CheckBox Content="Scala Logaritmica" IsChecked="{Binding UseLogScale}" Margin="0,0,0,0"
-                                          ToolTip.Tip="Applica il filtro nello spazio logaritmico."/>
+                                <CheckBox Content="{Binding [EnhanceLogScale], Source={x:Static infrastructure:LocalizationManager.Instance}}" IsChecked="{Binding UseLogScale}" Margin="0,0,0,0"
+                                          ToolTip.Tip="{Binding [TooltipEnhanceLogScaleSimple], Source={x:Static infrastructure:LocalizationManager.Instance}}"/>
                             </StackPanel>
                         </StackPanel>
 
                         <StackPanel IsVisible="{Binding IsFrangiVisible}">
-                            <TextBlock Text="Filtro Hessiana (Vesselness)" FontWeight="SemiBold" Margin="0,0,0,8"/>
+                            <TextBlock Text="{Binding [EnhanceFrangiHeader], Source={x:Static infrastructure:LocalizationManager.Instance}}" FontWeight="SemiBold" Margin="0,0,0,8"/>
                             <StackPanel Spacing="12">
                                 <StackPanel Spacing="2">
-                                    <TextBlock Text="Sigma (Scala):" Classes="labelInfo" ToolTip.Tip="Scala delle strutture da rilevare. Aumenta per rilevare getti più spessi."/>
+                                    <TextBlock Text="{Binding [EnhanceSigmaScale], Source={x:Static infrastructure:LocalizationManager.Instance}}" Classes="labelInfo" ToolTip.Tip="{Binding [TooltipEnhanceSigmaScale], Source={x:Static infrastructure:LocalizationManager.Instance}}"/>
                                     <Grid ColumnDefinitions="*, Auto">
                                         <Slider Minimum="0.5" Maximum="20" Value="{Binding FrangiSigma}"/>
                                         <TextBox x:Name="FrangiSigmaBox" Text="{Binding FrangiSigma, Mode=OneWay, StringFormat={}{0:F2}}"
@@ -236,7 +237,7 @@
                                     </Grid>
                                 </StackPanel>
                                 <StackPanel Spacing="2">
-                                    <TextBlock Text="Beta (Forma):" Classes="labelInfo" ToolTip.Tip="Sensibilità alla forma. Valori bassi selezionano solo linee molto sottili, valori alti includono blob."/>
+                                    <TextBlock Text="{Binding [EnhanceBetaShape], Source={x:Static infrastructure:LocalizationManager.Instance}}" Classes="labelInfo" ToolTip.Tip="{Binding [TooltipEnhanceBetaShape], Source={x:Static infrastructure:LocalizationManager.Instance}}"/>
                                     <Grid ColumnDefinitions="*, Auto">
                                         <Slider Minimum="0.1" Maximum="2.0" Value="{Binding FrangiBeta}"/>
                                         <TextBox x:Name="FrangiBetaBox" Text="{Binding FrangiBeta, Mode=OneWay, StringFormat={}{0:F2}}"
@@ -244,7 +245,7 @@
                                     </Grid>
                                 </StackPanel>
                                 <StackPanel Spacing="2">
-                                    <TextBlock Text="Costante C (Rumore):" Classes="labelInfo" ToolTip.Tip="Costante di soppressione del rumore di fondo."/>
+                                    <TextBlock Text="{Binding [EnhanceConstantC], Source={x:Static infrastructure:LocalizationManager.Instance}}" Classes="labelInfo" ToolTip.Tip="{Binding [TooltipEnhanceConstantC], Source={x:Static infrastructure:LocalizationManager.Instance}}"/>
                                     <Grid ColumnDefinitions="*, Auto">
                                         <Slider Minimum="0.0001" Maximum="1.0" Value="{Binding FrangiC}"/>
                                         <TextBox x:Name="FrangiCBox" Text="{Binding FrangiC, Mode=OneWay, StringFormat={}{0:F4}}"
@@ -255,10 +256,10 @@
                         </StackPanel>
 
                         <StackPanel IsVisible="{Binding IsTensorVisible}">
-                            <TextBlock Text="Coerenza Tensore" FontWeight="SemiBold" Margin="0,0,0,8"/>
+                            <TextBlock Text="{Binding [EnhanceTensorHeader], Source={x:Static infrastructure:LocalizationManager.Instance}}" FontWeight="SemiBold" Margin="0,0,0,8"/>
                             <StackPanel Spacing="12">
                                 <StackPanel Spacing="2">
-                                    <TextBlock Text="Sigma (Gradiente):" Classes="labelInfo" ToolTip.Tip="Smoothing gaussiano applicato prima del calcolo dei gradienti."/>
+                                    <TextBlock Text="{Binding [EnhanceSigmaGradient], Source={x:Static infrastructure:LocalizationManager.Instance}}" Classes="labelInfo" ToolTip.Tip="{Binding [TooltipEnhanceSigmaGradient], Source={x:Static infrastructure:LocalizationManager.Instance}}"/>
                                     <Grid ColumnDefinitions="*, Auto">
                                         <Slider Minimum="1" Maximum="15" Value="{Binding TensorSigma}" IsSnapToTickEnabled="True" TickFrequency="1"/>
                                         <TextBox x:Name="TensorSigmaBox" Text="{Binding TensorSigma, Mode=OneWay}"
@@ -266,7 +267,7 @@
                                     </Grid>
                                 </StackPanel>
                                 <StackPanel Spacing="2">
-                                    <TextBlock Text="Rho (Integrazione):" Classes="labelInfo" ToolTip.Tip="Finestra di integrazione per calcolare la coerenza direzionale locale."/>
+                                    <TextBlock Text="{Binding [EnhanceRhoIntegration], Source={x:Static infrastructure:LocalizationManager.Instance}}" Classes="labelInfo" ToolTip.Tip="{Binding [TooltipEnhanceRhoIntegration], Source={x:Static infrastructure:LocalizationManager.Instance}}"/>
                                     <Grid ColumnDefinitions="*, Auto">
                                         <Slider Minimum="1" Maximum="30" Value="{Binding TensorRho}" IsSnapToTickEnabled="True" TickFrequency="1"/>
                                         <TextBox x:Name="TensorRhoBox" Text="{Binding TensorRho, Mode=OneWay}"
@@ -277,10 +278,10 @@
                         </StackPanel>
 
                         <StackPanel IsVisible="{Binding IsTopHatVisible}">
-                            <TextBlock Text="Morfologia (Top-Hat)" FontWeight="SemiBold" Margin="0,0,0,8"/>
+                            <TextBlock Text="{Binding [EnhanceMorphologyHeader], Source={x:Static infrastructure:LocalizationManager.Instance}}" FontWeight="SemiBold" Margin="0,0,0,8"/>
                             <StackPanel Spacing="12">
                                 <StackPanel Spacing="2">
-                                    <TextBlock Text="Dimensione Kernel:" Classes="labelInfo" ToolTip.Tip="Dimensione dell'elemento strutturante. Strutture più grandi di questo valore verranno rimosse."/>
+                                    <TextBlock Text="{Binding [EnhanceKernelSize], Source={x:Static infrastructure:LocalizationManager.Instance}}" Classes="labelInfo" ToolTip.Tip="{Binding [TooltipEnhanceTopHatKernel], Source={x:Static infrastructure:LocalizationManager.Instance}}"/>
                                     <Grid ColumnDefinitions="*, Auto">
                                         <Slider Minimum="3" Maximum="101" Value="{Binding TopHatKernelSize}" IsSnapToTickEnabled="True" TickFrequency="2"/>
                                         <TextBox x:Name="TopHatBox" Text="{Binding TopHatKernelSize, Mode=OneWay}"
@@ -291,10 +292,10 @@
                         </StackPanel>
 
                         <StackPanel IsVisible="{Binding IsClaheVisible}">
-                            <TextBlock Text="CLAHE (16-bit)" FontWeight="SemiBold" Margin="0,0,0,8"/>
+                            <TextBlock Text="{Binding [EnhanceClaheHeader], Source={x:Static infrastructure:LocalizationManager.Instance}}" FontWeight="SemiBold" Margin="0,0,0,8"/>
                             <StackPanel Spacing="12">
                                 <StackPanel Spacing="2">
-                                    <TextBlock Text="Limite Clipping:" Classes="labelInfo" ToolTip.Tip="Soglia massima di amplificazione del contrasto. Valori alti aumentano dettagli ma anche il rumore."/>
+                                    <TextBlock Text="{Binding [EnhanceClipLimit], Source={x:Static infrastructure:LocalizationManager.Instance}}" Classes="labelInfo" ToolTip.Tip="{Binding [TooltipEnhanceClipLimit], Source={x:Static infrastructure:LocalizationManager.Instance}}"/>
                                     <Grid ColumnDefinitions="*, Auto">
                                         <Slider Minimum="0.1" Maximum="40" Value="{Binding ClaheClipLimit}"/>
                                         <TextBox x:Name="ClaheClipBox" Text="{Binding ClaheClipLimit, Mode=OneWay, StringFormat={}{0:F1}}"
@@ -302,7 +303,7 @@
                                     </Grid>
                                 </StackPanel>
                                 <StackPanel Spacing="2">
-                                    <TextBlock Text="Dimensione Griglia:" Classes="labelInfo" ToolTip.Tip="Dimensione della griglia locale per il calcolo dell'istogramma."/>
+                                    <TextBlock Text="{Binding [EnhanceGridSize], Source={x:Static infrastructure:LocalizationManager.Instance}}" Classes="labelInfo" ToolTip.Tip="{Binding [TooltipEnhanceClaheGrid], Source={x:Static infrastructure:LocalizationManager.Instance}}"/>
                                     <Grid ColumnDefinitions="*, Auto">
                                         <Slider Minimum="2" Maximum="64" Value="{Binding ClaheTileSize}" IsSnapToTickEnabled="True" TickFrequency="1"/>
                                         <TextBox x:Name="ClaheTileBox" Text="{Binding ClaheTileSize, Mode=OneWay}"
@@ -313,10 +314,10 @@
                         </StackPanel>
 
                         <StackPanel IsVisible="{Binding IsLocalNormVisible}">
-                            <TextBlock Text="Statistica Locale" FontWeight="SemiBold" Margin="0,0,0,8"/>
+                            <TextBlock Text="{Binding [EnhanceLocalStatsHeader], Source={x:Static infrastructure:LocalizationManager.Instance}}" FontWeight="SemiBold" Margin="0,0,0,8"/>
                             <StackPanel Spacing="12">
                                 <StackPanel Spacing="2">
-                                    <TextBlock Text="Dimensione Finestra:" Classes="labelInfo" ToolTip.Tip="Dimensione dell'area locale per il calcolo di media e deviazione standard."/>
+                                    <TextBlock Text="{Binding [EnhanceWindowSize], Source={x:Static infrastructure:LocalizationManager.Instance}}" Classes="labelInfo" ToolTip.Tip="{Binding [TooltipEnhanceLocalStatsWindow], Source={x:Static infrastructure:LocalizationManager.Instance}}"/>
                                     <Grid ColumnDefinitions="*, Auto">
                                         <Slider Minimum="3" Maximum="201" Value="{Binding LocalNormWindowSize}" IsSnapToTickEnabled="True" TickFrequency="2"/>
                                         <TextBox x:Name="LocalNormWindowBox" Text="{Binding LocalNormWindowSize, Mode=OneWay}"
@@ -324,7 +325,7 @@
                                     </Grid>
                                 </StackPanel>
                                 <StackPanel Spacing="2">
-                                    <TextBlock Text="Intensità:" Classes="labelInfo" ToolTip.Tip="Forza del blending dell'effetto."/>
+                                    <TextBlock Text="{Binding [EnhanceIntensity], Source={x:Static infrastructure:LocalizationManager.Instance}}" Classes="labelInfo" ToolTip.Tip="{Binding [TooltipEnhanceLocalIntensity], Source={x:Static infrastructure:LocalizationManager.Instance}}"/>
                                     <Grid ColumnDefinitions="*, Auto">
                                         <Slider Minimum="0.1" Maximum="10" Value="{Binding LocalNormIntensity}"/>
                                         <TextBox x:Name="LocalNormIntensityBox" Text="{Binding LocalNormIntensity, Mode=OneWay, StringFormat={}{0:F1}}"
@@ -335,10 +336,10 @@
                         </StackPanel>
 
                         <StackPanel IsVisible="{Binding IsKernelVisible}">
-                            <TextBlock Text="Unsharp Masking" FontWeight="SemiBold" Margin="0,0,0,8"/>
+                            <TextBlock Text="{Binding [EnhanceUnsharpHeader], Source={x:Static infrastructure:LocalizationManager.Instance}}" FontWeight="SemiBold" Margin="0,0,0,8"/>
                             <StackPanel Spacing="12">
                                 <StackPanel Spacing="2">
-                                    <TextBlock Text="Dimensione Kernel:" Classes="labelInfo" ToolTip.Tip="Dimensione del filtro (es. mediana per Unsharp Masking)."/>
+                                    <TextBlock Text="{Binding [EnhanceKernelSize], Source={x:Static infrastructure:LocalizationManager.Instance}}" Classes="labelInfo" ToolTip.Tip="{Binding [TooltipEnhanceKernelSize], Source={x:Static infrastructure:LocalizationManager.Instance}}"/>
                                     <Grid ColumnDefinitions="*, Auto">
                                         <Slider Minimum="3" Maximum="101" Value="{Binding KernelSize}" IsSnapToTickEnabled="True" TickFrequency="2"/>
                                         <TextBox x:Name="KernelSizeBox" Text="{Binding KernelSize, Mode=OneWay}"
@@ -362,14 +363,14 @@
                                      Foreground="{DynamicResource ActionPrimaryBackgroundBrush}"/>
                     </StackPanel>
 
-                    <Button Content="Calcola Anteprima" Command="{Binding CalculatePreviewCommand}" 
+                    <Button Content="{Binding [EnhanceCalcPreview], Source={x:Static infrastructure:LocalizationManager.Instance}}" Command="{Binding CalculatePreviewCommand}" 
                             HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
                             Classes="actionBtn calculate" IsVisible="{Binding IsCalculateButtonVisible}"/>
 
                     <Grid ColumnDefinitions="*, *" ColumnSpacing="10" IsVisible="{Binding IsApplyCancelButtonsVisible}">
-                        <Button Grid.Column="0" Content="Indietro" Command="{Binding CancelCommand}" 
+                        <Button Grid.Column="0" Content="{Binding [EnhanceBack], Source={x:Static infrastructure:LocalizationManager.Instance}}" Command="{Binding CancelCommand}" 
                                 HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" Classes="actionBtn cancel"/>
-                        <Button Grid.Column="1" Content="Applica Batch" Command="{Binding ApplyBatchCommand}" 
+                        <Button Grid.Column="1" Content="{Binding [EnhanceApplyBatch], Source={x:Static infrastructure:LocalizationManager.Instance}}" Command="{Binding ApplyBatchCommand}" 
                                 HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" Classes="actionBtn apply"/>
                     </Grid>
                 </Panel>
@@ -394,19 +395,19 @@
                     <StackPanel Orientation="Horizontal" Spacing="4" Margin="10" 
                                 HorizontalAlignment="Left" VerticalAlignment="Bottom" ZIndex="1" 
                                 PointerPressed="OnControlsPointerPressed" IsEnabled="{Binding !IsBusy}">
-                        <Button Command="{Binding Navigator.MoveToFirstCommand}" ToolTip.Tip="Prima Immagine"><avalonia:MaterialIcon Kind="ChevronDoubleLeft" Width="16" Height="16"/></Button>
-                        <Button Command="{Binding Navigator.PreviousCommand}" ToolTip.Tip="Precedente"><avalonia:MaterialIcon Kind="ChevronLeft" Width="16" Height="16"/></Button>
+                        <Button Command="{Binding Navigator.MoveToFirstCommand}" ToolTip.Tip="{Binding [TooltipFirstImage], Source={x:Static infrastructure:LocalizationManager.Instance}}"><avalonia:MaterialIcon Kind="ChevronDoubleLeft" Width="16" Height="16"/></Button>
+                        <Button Command="{Binding Navigator.PreviousCommand}" ToolTip.Tip="{Binding [TooltipPrevImage], Source={x:Static infrastructure:LocalizationManager.Instance}}"><avalonia:MaterialIcon Kind="ChevronLeft" Width="16" Height="16"/></Button>
                         <TextBlock Text="{Binding CurrentImageText}" VerticalAlignment="Center" Margin="10,0" Foreground="White" FontWeight="Bold"/>
-                        <Button Command="{Binding Navigator.NextCommand}" ToolTip.Tip="Successiva"><avalonia:MaterialIcon Kind="ChevronRight" Width="16" Height="16"/></Button>
-                        <Button Command="{Binding Navigator.MoveToLastCommand}" ToolTip.Tip="Ultima Immagine"><avalonia:MaterialIcon Kind="ChevronDoubleRight" Width="16" Height="16"/></Button>
+                        <Button Command="{Binding Navigator.NextCommand}" ToolTip.Tip="{Binding [TooltipNextImage], Source={x:Static infrastructure:LocalizationManager.Instance}}"><avalonia:MaterialIcon Kind="ChevronRight" Width="16" Height="16"/></Button>
+                        <Button Command="{Binding Navigator.MoveToLastCommand}" ToolTip.Tip="{Binding [TooltipLastImage], Source={x:Static infrastructure:LocalizationManager.Instance}}"><avalonia:MaterialIcon Kind="ChevronDoubleRight" Width="16" Height="16"/></Button>
                     </StackPanel>
                     
                     <StackPanel Orientation="Horizontal" Spacing="4" Margin="10" HorizontalAlignment="Right" VerticalAlignment="Bottom" ZIndex="1" PointerPressed="OnControlsPointerPressed">
-                        <Button Click="OnZoomOutClicked" ToolTip.Tip="Zoom Out"><avalonia:MaterialIcon Kind="Minus" Width="16" Height="16"/></Button>
-                        <Button Click="OnZoomInClicked" ToolTip.Tip="Zoom In"><avalonia:MaterialIcon Kind="Plus" Width="16" Height="16"/></Button>
-                        <Button Click="OnResetViewClicked" ToolTip.Tip="Adatta allo Schermo"><avalonia:MaterialIcon Kind="FitToScreen" Width="16" Height="16"/></Button>
+                        <Button Click="OnZoomOutClicked" ToolTip.Tip="{Binding [TooltipZoomOut], Source={x:Static infrastructure:LocalizationManager.Instance}}"><avalonia:MaterialIcon Kind="Minus" Width="16" Height="16"/></Button>
+                        <Button Click="OnZoomInClicked" ToolTip.Tip="{Binding [TooltipZoomIn], Source={x:Static infrastructure:LocalizationManager.Instance}}"><avalonia:MaterialIcon Kind="Plus" Width="16" Height="16"/></Button>
+                        <Button Click="OnResetViewClicked" ToolTip.Tip="{Binding [TooltipFitView], Source={x:Static infrastructure:LocalizationManager.Instance}}"><avalonia:MaterialIcon Kind="FitToScreen" Width="16" Height="16"/></Button>
                         <Path Data="M0,0 V18" Stroke="#666666" StrokeThickness="1" Margin="8,4,8,4" VerticalAlignment="Center" />
-                        <Button Command="{Binding ResetThresholdsCommand}" ToolTip.Tip="Resetta Visualizzazione"><avalonia:MaterialIcon Kind="Contrast" Width="16" Height="16"/></Button>
+                        <Button Command="{Binding ResetThresholdsCommand}" ToolTip.Tip="{Binding [TooltipResetStretch], Source={x:Static infrastructure:LocalizationManager.Instance}}"><avalonia:MaterialIcon Kind="Contrast" Width="16" Height="16"/></Button>
                     </StackPanel>
                     
                     <Border HorizontalAlignment="Left" VerticalAlignment="Top" Margin="10" Padding="8,4" 

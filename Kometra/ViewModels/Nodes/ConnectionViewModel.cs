@@ -31,7 +31,7 @@ public partial class ConnectionViewModel : ObservableObject, IDisposable
         // Validazione ID (fondamentale per evitare errori di mappatura caricando da disco)
         if (source.Id != model.SourceNodeId || target.Id != model.TargetNodeId)
         {
-            throw new ArgumentException("I nodi forniti non corrispondono agli ID nel ConnectionModel.");
+            throw new ArgumentException("The provided nodes do not match the IDs in the ConnectionModel.");
         }
 
         // Sottoscrizione per l'estetica della selezione

@@ -10,7 +10,7 @@ namespace Kometra.Services.Fits.IO;
 
 /// <summary>
 /// Servizio per la compressione di immagini FITS secondo lo standard "Tile Compression".
-/// Integra la logica nativa di fpack (Quantizzazione statistica + Dithering) e codifica Rice/Gzip.
+/// Integra la logica nativa di fpack (Quantizzazione statistica + Dithering) e codifica RICE/GZIP.
 /// </summary>
 public static class FitsCompression
 {
@@ -24,9 +24,9 @@ public static class FitsCompression
         int height = pixels.GetLength(0);
         int bitpix = GetBitpix(pixels);
         
-        // Determiniamo se serve la Quantizzazione (Solo per Rice su Float/Double)
+        // Determiniamo se serve la Quantizzazione (Solo per RICE su Float/Double)
         bool isFloat = bitpix < 0;
-        bool useQuantization = (mode == FitsCompressionMode.Rice && isFloat);
+        bool useQuantization = (mode == FitsCompressionMode.RICE && isFloat);
 
         // 1. Definiamo il Tiling (Default fpack: riga per riga)
         // Questo è lo standard più compatibile per immagini astronomiche
@@ -56,7 +56,7 @@ public static class FitsCompression
             double scale = 1.0;
             double zero = 0.0;
 
-            if (mode == FitsCompressionMode.Gzip)
+            if (mode == FitsCompressionMode.GZIP)
             {
                 // GZIP LOSSLESS
                 byte[] rawBytes = GetRawBytesRow(pixels, r, width, bitpix);
@@ -308,10 +308,10 @@ public static class FitsCompression
         hC.AddCard(new FitsCard("ZTILE1", zt1.ToString(), "Tile Width", false));
         hC.AddCard(new FitsCard("ZTILE2", zt2.ToString(), "Tile Height", false));
 
-        string algo = mode == FitsCompressionMode.Rice ? "RICE_1" : "GZIP_1";
+        string algo = mode == FitsCompressionMode.RICE ? "RICE_1" : "GZIP_1";
         hC.AddCard(new FitsCard("ZCMPTYPE", algo, "Compression algorithm", false));
 
-        if (mode == FitsCompressionMode.Rice)
+        if (mode == FitsCompressionMode.RICE)
         {
             hC.AddCard(new FitsCard("ZNAME1", "BLOCKSIZE", "Compression block size", false));
             hC.AddCard(new FitsCard("ZVAL1", "32", "Pixels per block", false));

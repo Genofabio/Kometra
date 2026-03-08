@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Globalization;
 using Avalonia.Data.Converters;
+using Kometra.Infrastructure; // Aggiunto per l'accesso al LocalizationManager
 using Kometra.Models.Processing.Enhancement;
 
 namespace Kometra.Converters;
@@ -13,13 +14,13 @@ public class EnhancementCategoryTitleConverter : IValueConverter
         {
             return category switch
             {
-                EnhancementCategory.RadialRotational => "Analisi Morfologica (Radiale & Rotazionale)",
-                EnhancementCategory.FeatureExtraction => "Estrazione Strutture e Forme",
-                EnhancementCategory.LocalContrast => "Miglioramento Contrasto Locale",
-                _ => "Strumenti di Elaborazione"
+                EnhancementCategory.RadialRotational => LocalizationManager.Instance["EnhancementCategoryRadial"],
+                EnhancementCategory.FeatureExtraction => LocalizationManager.Instance["EnhancementCategoryFeatures"],
+                EnhancementCategory.LocalContrast => LocalizationManager.Instance["EnhancementCategoryContrast"],
+                _ => LocalizationManager.Instance["EnhancementCategoryDefault"]
             };
         }
-        return "Strumento Kometra";
+        return LocalizationManager.Instance["EnhancementToolDefault"];
     }
 
     public object? ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture)

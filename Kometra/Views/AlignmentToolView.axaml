@@ -4,6 +4,7 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:avalonia="clr-namespace:Material.Icons.Avalonia;assembly=Material.Icons.Avalonia"
         xmlns:converters="clr-namespace:Kometra.Converters"
+        xmlns:infrastructure="clr-namespace:Kometra.Infrastructure"
         xmlns:processing="clr-namespace:Kometra.Models.Processing"
         xmlns:imageProcessing="clr-namespace:Kometra.ViewModels.ImageProcessing"
         xmlns:shared="clr-namespace:Kometra.ViewModels.Shared"
@@ -12,7 +13,7 @@
         x:Class="Kometra.Views.AlignmentToolView"
         x:DataType="imageProcessing:AlignmentToolViewModel"
         Icon="/Assets/Icon/icon32.ico"
-        Title="Allineamento"
+        Title="{Binding [AlignTitle], Source={x:Static infrastructure:LocalizationManager.Instance}}"
         Width="800" Height="600"
         MinHeight="500" MinWidth="710"
         WindowStartupLocation="CenterScreen"
@@ -75,11 +76,11 @@
                                 IsEnabled="{Binding IsSetupControlsEnabled}">
                         
                         <StackPanel Spacing="12">
-                            <TextBlock Text="Oggetto dell'allineamento" FontSize="16" FontWeight="Bold" />
+                            <TextBlock Text="{Binding [AlignTargetObject], Source={x:Static infrastructure:LocalizationManager.Instance}}" FontSize="16" FontWeight="Bold" />
                             <Grid ColumnDefinitions="*,*">
                                 <RadioButton Grid.Column="0" 
                                              GroupName="TargetGroup" 
-                                             Content="Cometa" 
+                                             Content="{Binding [AlignTargetComet], Source={x:Static infrastructure:LocalizationManager.Instance}}" 
                                              Classes="segmented"
                                              IsChecked="{Binding SelectedTarget, Converter={StaticResource EnumToBool}, ConverterParameter={x:Static alignment:AlignmentTarget.Comet}}"
                                              Classes.solo="{Binding !IsMultipleImages}">
@@ -99,7 +100,7 @@
 
                                 <RadioButton Grid.Column="1" 
                                              GroupName="TargetGroup" 
-                                             Content="Stelle" 
+                                             Content="{Binding [AlignTargetStars], Source={x:Static infrastructure:LocalizationManager.Instance}}" 
                                              Classes="segmented" 
                                              CornerRadius="0,4,4,0" 
                                              BorderThickness="1" 
@@ -111,7 +112,7 @@
                         </StackPanel>
 
                         <StackPanel Spacing="12" IsVisible="{Binding SelectedTarget, Converter={StaticResource EnumToBool}, ConverterParameter={x:Static alignment:AlignmentTarget.Comet}}">
-                            <TextBlock Text="Metodologia" FontSize="16" FontWeight="Bold" />
+                            <TextBlock Text="{Binding [AlignMethodology], Source={x:Static infrastructure:LocalizationManager.Instance}}" FontSize="16" FontWeight="Bold" />
                             <ComboBox ItemsSource="{Binding AvailableModes}" SelectedItem="{Binding SelectedMode}" HorizontalAlignment="Stretch">
                                 <ComboBox.ItemTemplate>
                                     <DataTemplate><TextBlock Text="{Binding ., Converter={StaticResource AlignmentModeNameConverter}}" /></DataTemplate>
@@ -119,56 +120,53 @@
                             </ComboBox>
                             
                             <Panel MinHeight="40">
-                                <TextBlock TextWrapping="Wrap" Opacity="0.7" IsVisible="{Binding SelectedMode, Converter={StaticResource EqualityConverter}, ConverterParameter=Automatic}">Rilevamento automatico del nucleo della cometa.</TextBlock>
-                                <TextBlock TextWrapping="Wrap" Opacity="0.7" IsVisible="{Binding SelectedMode, Converter={StaticResource EqualityConverter}, ConverterParameter=Guided}">Indica il nucleo sulla prima e ultima immagine.</TextBlock>
-                                <TextBlock TextWrapping="Wrap" Opacity="0.7" IsVisible="{Binding SelectedMode, Converter={StaticResource EqualityConverter}, ConverterParameter=Manual}">Ispeziona e imposta manualmente il centro per ogni immagine.</TextBlock>
+                                <TextBlock TextWrapping="Wrap" Opacity="0.7" 
+                                           Text="{Binding [AlignDescAuto], Source={x:Static infrastructure:LocalizationManager.Instance}}"
+                                           IsVisible="{Binding SelectedMode, Converter={StaticResource EqualityConverter}, ConverterParameter=Automatic}"/>
+                                <TextBlock TextWrapping="Wrap" Opacity="0.7" 
+                                           Text="{Binding [AlignDescGuided], Source={x:Static infrastructure:LocalizationManager.Instance}}"
+                                           IsVisible="{Binding SelectedMode, Converter={StaticResource EqualityConverter}, ConverterParameter=Guided}"/>
+                                <TextBlock TextWrapping="Wrap" Opacity="0.7" 
+                                           Text="{Binding [AlignDescManual], Source={x:Static infrastructure:LocalizationManager.Instance}}"
+                                           IsVisible="{Binding SelectedMode, Converter={StaticResource EqualityConverter}, ConverterParameter=Manual}"/>
                             </Panel>
                             <Separator Margin="0"/> 
                         </StackPanel>
 
                         <StackPanel Spacing="10">
-                            <TextBlock Text="Opzioni di Ricerca" FontSize="14" FontWeight="Bold" Margin="0, 8, 0, 0" />
+                            <TextBlock Text="{Binding [AlignSearchOptions], Source={x:Static infrastructure:LocalizationManager.Instance}}" FontSize="14" FontWeight="Bold" Margin="0, 8, 0, 0" />
                             
                             <StackPanel Spacing="2" IsVisible="{Binding IsJplOptionVisible}">
                                 <CheckBox IsChecked="{Binding UseJplAstrometry}" Content="{Binding AstrometryOptionLabel}" Margin="0"/>
                                 <StackPanel IsVisible="{Binding UseJplAstrometry}">
                                     <Grid ColumnDefinitions="*, Auto" Margin="0,5,0,5" IsVisible="{Binding IsTargetNameInputVisible}">
-                                        <TextBox Grid.Column="0" Text="{Binding TargetName}" Watermark="Nome (es. 67P)" Margin="0,0,5,0"/>
-                                        <Button Grid.Column="1" Command="{Binding VerifyJplCommand}" ToolTip.Tip="Verifica disponibilità dati" IsVisible="{Binding IsVerifyButtonVisible}">
-                                            <StackPanel Orientation="Horizontal" Spacing="5"><avalonia:MaterialIcon Kind="LinkVariant" Width="16" Height="16"/><TextBlock Text="Verifica"/></StackPanel>
+                                        <TextBox Grid.Column="0" Text="{Binding TargetName}" 
+                                                 Watermark="{Binding [AlignTargetNameWatermark], Source={x:Static infrastructure:LocalizationManager.Instance}}" Margin="0,0,5,0"/>
+                                        <Button Grid.Column="1" Command="{Binding VerifyJplCommand}" 
+                                                ToolTip.Tip="{Binding [AlignVerifyTooltip], Source={x:Static infrastructure:LocalizationManager.Instance}}" 
+                                                IsVisible="{Binding IsVerifyButtonVisible}">
+                                            <StackPanel Orientation="Horizontal" Spacing="5">
+                                                <avalonia:MaterialIcon Kind="LinkVariant" Width="16" Height="16"/>
+                                                <TextBlock Text="{Binding [AlignVerify], Source={x:Static infrastructure:LocalizationManager.Instance}}"/>
+                                            </StackPanel>
                                         </Button>
                                     </Grid>
                                     <ProgressBar IsIndeterminate="True" Height="2" IsVisible="{Binding IsVerifyingJpl}" 
                                                  Foreground="{DynamicResource ActionPrimaryBackgroundBrush}"/>
     
-                                    <TextBlock Text="{Binding AstrometryStatusMessage}" 
-                                               FontSize="11" 
-                                               TextWrapping="Wrap" 
-                                               Margin="2,4,0,0">
-        
-                                        <TextBlock.Tag>
-                                            <Binding Path="AstrometryStatus" />
-                                        </TextBlock.Tag>
-
+                                    <TextBlock Text="{Binding AstrometryStatusMessage}" FontSize="11" TextWrapping="Wrap" Margin="2,4,0,0">
+                                        <TextBlock.Tag><Binding Path="AstrometryStatus" /></TextBlock.Tag>
                                         <TextBlock.Styles>
-                                            <Style Selector="TextBlock">
-                                                <Setter Property="Foreground" Value="{DynamicResource Text.MediumGreyBrush}"/>
-                                            </Style>
-            
-                                            <Style Selector="TextBlock[Tag=Success]">
-                                                <Setter Property="Foreground" Value="{DynamicResource ActionSuccessBackgroundBrush}"/>
-                                            </Style>
-            
-                                            <Style Selector="TextBlock[Tag=Error]">
-                                                <Setter Property="Foreground" Value="{DynamicResource ActionDestructiveBackgroundBrush}"/>
-                                            </Style>
+                                            <Style Selector="TextBlock"><Setter Property="Foreground" Value="{DynamicResource Text.MediumGreyBrush}"/></Style>
+                                            <Style Selector="TextBlock[Tag=Success]"><Setter Property="Foreground" Value="{DynamicResource ActionSuccessBackgroundBrush}"/></Style>
+                                            <Style Selector="TextBlock[Tag=Error]"><Setter Property="Foreground" Value="{DynamicResource ActionDestructiveBackgroundBrush}"/></Style>
                                         </TextBlock.Styles>
                                     </TextBlock>
                                 </StackPanel>
                             </StackPanel>
 
                             <StackPanel Spacing="5" Margin="0" IsVisible="{Binding IsSearchRadiusVisible}">
-                                <TextBlock Text="Raggio di Ricerca (px):"/> 
+                                <TextBlock Text="{Binding [AlignSearchRadius], Source={x:Static infrastructure:LocalizationManager.Instance}}"/> 
                                 <Grid ColumnDefinitions="Auto, *" ColumnSpacing="10">
                                     <TextBox Grid.Column="0" Name="SearchRadiusTextBox" Text="{Binding SearchRadius, Mode=OneWay}" MinWidth="45" VerticalAlignment="Center" HorizontalContentAlignment="Right" GotFocus="OnSearchRadiusTextBoxGotFocus" LostFocus="OnSearchRadiusTextBoxLostFocus"/>
                                     <Slider Grid.Column="1" Minimum="{Binding MinSearchRadius}" Maximum="{Binding MaxSearchRadius}" Value="{Binding SearchRadius}" VerticalAlignment="Center"/>
@@ -190,18 +188,16 @@
                 </ScrollViewer>
                 
                 <StackPanel Grid.Row="2" Spacing="10" Margin="0,15,0,0">
-                    
                     <Separator Margin="0,0,0,5" IsVisible="{Binding IsResultsListVisible}"/>
 
                     <StackPanel Spacing="6" 
                                 IsEnabled="{Binding IsInteractionEnabled}"
                                 IsVisible="{Binding IsResultsListVisible}">
-                        <TextBlock Text="Opzioni di Salvataggio" FontSize="14" FontWeight="Bold"/>
-                        <CheckBox IsChecked="{Binding CropToCommonArea}" 
-                                  Margin="0,0,0,5"
-                                  Content="Ritaglia all'area comune">
+                        <TextBlock Text="{Binding [AlignSaveOptions], Source={x:Static infrastructure:LocalizationManager.Instance}}" FontSize="14" FontWeight="Bold"/>
+                        <CheckBox IsChecked="{Binding CropToCommonArea}" Margin="0,0,0,5"
+                                  Content="{Binding [AlignCropCommon], Source={x:Static infrastructure:LocalizationManager.Instance}}">
                             <ToolTip.Tip>
-                                <TextBlock Text="Se attivo, ritaglia l'immagine finale sull'area comune a tutti i frame, eliminando i bordi neri, ma mantenendo il centro e le proporzioni."/>
+                                <TextBlock Text="{Binding [AlignCropCommonTooltip], Source={x:Static infrastructure:LocalizationManager.Instance}}"/>
                             </ToolTip.Tip>
                         </CheckBox>
                     </StackPanel>
@@ -211,8 +207,10 @@
                     <Button Content="{Binding CalculateButtonText}" Command="{Binding CalculateCentersCommand}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" IsVisible="{Binding IsCalculateButtonVisible}" Classes="calculate"/> 
                     
                     <Grid ColumnDefinitions="*, *" ColumnSpacing="10" IsVisible="{Binding IsApplyCancelButtonsVisible}">
-                        <Button Grid.Column="0" Content="Annulla" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" Command="{Binding CancelCommand}" Classes="cancel"/> 
-                        <Button Grid.Column="1" Content="Applica" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" Command="{Binding ApplyAlignmentCommand}" Classes="apply"/> 
+                        <Button Grid.Column="0" Content="{Binding [Cancel], Source={x:Static infrastructure:LocalizationManager.Instance}}" 
+                                HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" Command="{Binding CancelCommand}" Classes="cancel"/> 
+                        <Button Grid.Column="1" Content="{Binding [Save], Source={x:Static infrastructure:LocalizationManager.Instance}}" 
+                                HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" Command="{Binding ApplyAlignmentCommand}" Classes="apply"/> 
                     </Grid>
 
                     <StackPanel Spacing="10" IsVisible="{Binding IsProcessingVisible}">
@@ -261,11 +259,19 @@
                     </Border>
 
                     <StackPanel Orientation="Horizontal" Spacing="4" Margin="10" HorizontalAlignment="Right" VerticalAlignment="Bottom" ZIndex="1" Background="Transparent" PointerPressed="OnControlsPointerPressed"> 
-                        <Button Name="ZoomOutButton" ToolTip.Tip="Zoom Out"><avalonia:MaterialIcon Kind="Minus" Width="16" Height="16" /></Button>
-                        <Button Name="ZoomInButton" ToolTip.Tip="Zoom In"><avalonia:MaterialIcon Kind="Plus" Width="16" Height="16" /></Button>
-                        <Button Name="ResetViewButton" Margin="8,0,0,0" ToolTip.Tip="Reset Vista"><avalonia:MaterialIcon Kind="FitToScreen" Width="16" Height="16" /></Button>
+                        <Button Name="ZoomOutButton" ToolTip.Tip="{Binding [TooltipZoomOut], Source={x:Static infrastructure:LocalizationManager.Instance}}">
+                            <avalonia:MaterialIcon Kind="Minus" Width="16" Height="16" />
+                        </Button>
+                        <Button Name="ZoomInButton" ToolTip.Tip="{Binding [TooltipZoomIn], Source={x:Static infrastructure:LocalizationManager.Instance}}">
+                            <avalonia:MaterialIcon Kind="Plus" Width="16" Height="16" />
+                        </Button>
+                        <Button Name="ResetViewButton" Margin="8,0,0,0" ToolTip.Tip="{Binding [TooltipResetView], Source={x:Static infrastructure:LocalizationManager.Instance}}">
+                            <avalonia:MaterialIcon Kind="FitToScreen" Width="16" Height="16" />
+                        </Button>
                         <Path Data="M0,0 V18" Stroke="#666666" StrokeThickness="1" Margin="8,4,8,4" VerticalAlignment="Center" />
-                        <Button Name="ResetThresholdsButton" ToolTip.Tip="Reset Stretch" Command="{Binding ResetThresholdsCommand}"><avalonia:MaterialIcon Kind="Contrast" Width="16" Height="16" /></Button>
+                        <Button Name="ResetThresholdsButton" ToolTip.Tip="{Binding [TooltipResetStretch], Source={x:Static infrastructure:LocalizationManager.Instance}}" Command="{Binding ResetThresholdsCommand}">
+                            <avalonia:MaterialIcon Kind="Contrast" Width="16" Height="16" />
+                        </Button>
                     </StackPanel>
 
                     <StackPanel Orientation="Horizontal" Spacing="4" Margin="10" 
@@ -274,21 +280,25 @@
                                 PointerPressed="OnControlsPointerPressed" 
                                 IsVisible="{Binding IsNavigationVisible}">
     
-                        <Button Name="GoToFirstImageButton" Command="{Binding Navigator.MoveToFirstCommand}" ToolTip.Tip="Prima Immagine">
+                        <Button Name="GoToFirstImageButton" Command="{Binding Navigator.MoveToFirstCommand}" 
+                                ToolTip.Tip="{Binding [TooltipFirstImage], Source={x:Static infrastructure:LocalizationManager.Instance}}">
                             <avalonia:MaterialIcon Kind="ChevronDoubleLeft" Width="16" Height="16" />
                         </Button>
 
-                        <Button Name="PreviousImageButton" Command="{Binding Navigator.PreviousCommand}" ToolTip.Tip="Precedente">
+                        <Button Name="PreviousImageButton" Command="{Binding Navigator.PreviousCommand}" 
+                                ToolTip.Tip="{Binding [TooltipPrevImage], Source={x:Static infrastructure:LocalizationManager.Instance}}">
                             <avalonia:MaterialIcon Kind="ChevronLeft" Width="16" Height="16" />
                         </Button>
     
                         <TextBlock Text="{Binding CurrentImageText}" VerticalAlignment="Center" Margin="8,0" Foreground="White" FontWeight="Bold"/>
     
-                        <Button Name="NextImageButton" Command="{Binding Navigator.NextCommand}" ToolTip.Tip="Successiva">
+                        <Button Name="NextImageButton" Command="{Binding Navigator.NextCommand}" 
+                                ToolTip.Tip="{Binding [TooltipNextImage], Source={x:Static infrastructure:LocalizationManager.Instance}}">
                             <avalonia:MaterialIcon Kind="ChevronRight" Width="16" Height="16" />
                         </Button>
 
-                        <Button Name="GoToLastImageButton" Command="{Binding Navigator.MoveToLastCommand}" ToolTip.Tip="Ultima Immagine">
+                        <Button Name="GoToLastImageButton" Command="{Binding Navigator.MoveToLastCommand}" 
+                                ToolTip.Tip="{Binding [TooltipLastImage], Source={x:Static infrastructure:LocalizationManager.Instance}}">
                             <avalonia:MaterialIcon Kind="ChevronDoubleRight" Width="16" Height="16" />
                         </Button>
     

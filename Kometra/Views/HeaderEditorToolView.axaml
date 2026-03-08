@@ -5,12 +5,13 @@
         xmlns:avalonia="clr-namespace:Material.Icons.Avalonia;assembly=Material.Icons.Avalonia"
         xmlns:fits="clr-namespace:Kometra.ViewModels.Fits"
         xmlns:converters="clr-namespace:Kometra.Converters"
+        xmlns:infrastructure="clr-namespace:Kometra.Infrastructure"
         xmlns:metadata="clr-namespace:Kometra.Services.Fits.Metadata"
         mc:Ignorable="d" d:DesignWidth="1000" d:DesignHeight="650"
         x:Class="Kometra.Views.HeaderEditorToolView"
         x:DataType="fits:HeaderEditorToolViewModel"
         Icon="/Assets/Icon/icon32.ico"
-        Title="Editor Metadati FITS"
+        Title="{Binding [HeaderEditorTitle], Source={x:Static infrastructure:LocalizationManager.Instance}}"
         Width="1000" Height="590"
         MinWidth="920" MinHeight="570"
         WindowStartupLocation="CenterOwner"
@@ -39,7 +40,7 @@
                     <StackPanel Grid.Row="0" Spacing="8" Margin="0,0,0,25">
                         <StackPanel Orientation="Horizontal" Spacing="6" Margin="0,0,0,8">
                             <avalonia:MaterialIcon Kind="FileImage" Foreground="{DynamicResource Text.StaticWhiteBrush}" Width="16" Height="16"/>
-                            <TextBlock Text="File Attuale" FontSize="16" Foreground="{DynamicResource Text.StaticWhiteBrush}" FontWeight="Bold" LetterSpacing="1" VerticalAlignment="Center"/>
+                            <TextBlock Text="{Binding [HeaderCurrentFile], Source={x:Static infrastructure:LocalizationManager.Instance}}" FontSize="16" Foreground="{DynamicResource Text.StaticWhiteBrush}" FontWeight="Bold" LetterSpacing="1" VerticalAlignment="Center"/>
                         </StackPanel>
                         
                         <TextBlock Text="{Binding CurrentFileName}" 
@@ -52,7 +53,7 @@
                     <Grid Grid.Row="2" RowDefinitions="Auto, *">
                         <StackPanel Grid.Row="0" Spacing="12" Margin="0,0,0,12">
                             <Separator Background="{DynamicResource SystemControlForegroundBaseLowBrush}" Height="1" Margin="0,-8,0,4" Opacity="0.5"/>
-                            <TextBlock Text="Integrità Metadati" 
+                            <TextBlock Text="{Binding [HeaderMetadataIntegrity], Source={x:Static infrastructure:LocalizationManager.Instance}}" 
                                        FontSize="14" 
                                        Foreground="{DynamicResource Text.StaticWhiteBrush}" 
                                        FontWeight="Bold"/>
@@ -96,7 +97,8 @@
                         <Separator Background="{DynamicResource SystemControlForegroundBaseLowBrush}" Height="1" Margin="0,0,0,8" Opacity="0.5"/>
                         
                         <Grid ColumnDefinitions="Auto, *, Auto" Margin="5,0">
-                            <Button Grid.Column="0" Classes="navBtn" Command="{Binding PreviousImageCommand}" ToolTip.Tip="Immagine Precedente">
+                            <Button Grid.Column="0" Classes="navBtn" Command="{Binding PreviousImageCommand}" 
+                                    ToolTip.Tip="{Binding [TooltipPrevImage], Source={x:Static infrastructure:LocalizationManager.Instance}}">
                                 <avalonia:MaterialIcon Kind="ChevronLeft" Width="20" Height="20"/>
                             </Button>
                             
@@ -106,7 +108,8 @@
                                            FontWeight="Bold" Foreground="{DynamicResource Text.StaticWhiteBrush}" FontSize="14"/>
                             </Border>
                             
-                            <Button Grid.Column="2" Classes="navBtn" Command="{Binding NextImageCommand}" ToolTip.Tip="Immagine Successiva">
+                            <Button Grid.Column="2" Classes="navBtn" Command="{Binding NextImageCommand}" 
+                                    ToolTip.Tip="{Binding [TooltipNextImage], Source={x:Static infrastructure:LocalizationManager.Instance}}">
                                 <avalonia:MaterialIcon Kind="ChevronRight" Width="20" Height="20"/>
                             </Button>
                         </Grid>
@@ -118,7 +121,7 @@
                 <Grid Grid.Row="0" ColumnDefinitions="*, Auto" Margin="20">
                     <TextBox Grid.Column="0" 
                              Text="{Binding SearchText}" 
-                             Watermark="Cerca chiave, valore o commento..." 
+                             Watermark="{Binding [HeaderSearchWatermark], Source={x:Static infrastructure:LocalizationManager.Instance}}" 
                              Classes="clearButton" 
                              Height="36"
                              VerticalContentAlignment="Center"/>
@@ -126,7 +129,7 @@
                     <Button Grid.Column="1" Command="{Binding AddNewKeyCommand}" Margin="15,0,0,0" Height="36" Classes="toolBtn">
                         <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
                             <avalonia:MaterialIcon Kind="PlusCircleOutline" Width="18" Height="18"/>
-                            <TextBlock Text="Nuova Riga" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                            <TextBlock Text="{Binding [HeaderAddNewRow], Source={x:Static infrastructure:LocalizationManager.Instance}}" FontWeight="SemiBold" VerticalAlignment="Center"/>
                         </StackPanel>
                     </Button>
                 </Grid>
@@ -143,7 +146,7 @@
 
                     <DataGrid.ContextMenu>
                         <ContextMenu>
-                            <MenuItem Header="Elimina Riga" Command="{Binding DeleteRowCommand}">
+                            <MenuItem Header="{Binding [HeaderDeleteRow], Source={x:Static infrastructure:LocalizationManager.Instance}}" Command="{Binding DeleteRowCommand}">
                                 <MenuItem.Icon><avalonia:MaterialIcon Kind="Delete"/></MenuItem.Icon>
                             </MenuItem>
                         </ContextMenu>
@@ -156,7 +159,7 @@
                     </DataGrid.Styles>
                     
                     <DataGrid.Columns>
-                        <DataGridTemplateColumn Header="KEYWORD" Width="1.2*" MinWidth="130">
+                        <DataGridTemplateColumn Header="{Binding [HeaderColKeyword], Source={x:Static infrastructure:LocalizationManager.Instance}}" Width="1.2*" MinWidth="130">
                             <DataGridTemplateColumn.CellTemplate>
                                 <DataTemplate DataType="fits:FitsHeaderEditorRow">
                                     <TextBlock Text="{Binding Key}" VerticalAlignment="Center" Margin="10,0" FontWeight="SemiBold" FontFamily="Consolas, Monospace"/>
@@ -169,7 +172,7 @@
                             </DataGridTemplateColumn.CellEditingTemplate>
                         </DataGridTemplateColumn>
                         
-                        <DataGridTemplateColumn Header="VALORE" Width="1.5*">
+                        <DataGridTemplateColumn Header="{Binding [HeaderColValue], Source={x:Static infrastructure:LocalizationManager.Instance}}" Width="1.5*">
                             <DataGridTemplateColumn.CellTemplate>
                                 <DataTemplate DataType="fits:FitsHeaderEditorRow">
                                     <TextBlock Text="{Binding Value}" VerticalAlignment="Center" Margin="10,0" TextTrimming="CharacterEllipsis"/>
@@ -182,7 +185,7 @@
                             </DataGridTemplateColumn.CellEditingTemplate>
                         </DataGridTemplateColumn>
                         
-                        <DataGridTemplateColumn Header="COMMENTO" Width="2*">
+                        <DataGridTemplateColumn Header="{Binding [HeaderColComment], Source={x:Static infrastructure:LocalizationManager.Instance}}" Width="2*">
                             <DataGridTemplateColumn.CellTemplate>
                                 <DataTemplate DataType="fits:FitsHeaderEditorRow">
                                     <TextBlock Text="{Binding Comment}" VerticalAlignment="Center" Margin="10,0" Opacity="0.6" FontStyle="Italic" TextTrimming="CharacterEllipsis"/>
@@ -207,13 +210,13 @@
             <Grid ColumnDefinitions="*, Auto">
                 <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center" Margin="5,0">
                     <avalonia:MaterialIcon Kind="InformationOutline" Width="18" Height="18" Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}"/>
-                    <TextBlock Text="Modifiche applicate solo alla sessione. Salva il file per renderle permanenti." 
+                    <TextBlock Text="{Binding [HeaderSessionInfo], Source={x:Static infrastructure:LocalizationManager.Instance}}" 
                                FontSize="12" VerticalAlignment="Center" Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}" FontStyle="Italic"/>
                 </StackPanel>
 
                 <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="15">
-                    <Button Content="Annulla" Click="OnCancelClick" Classes="cancel"/>
-                    <Button Content="Applica" Click="OnSaveClick" Classes="apply"/>
+                    <Button Content="{Binding [Cancel], Source={x:Static infrastructure:LocalizationManager.Instance}}" Click="OnCancelClick" Classes="cancel"/>
+                    <Button Content="{Binding [Save], Source={x:Static infrastructure:LocalizationManager.Instance}}" Click="OnSaveClick" Classes="apply"/>
                 </StackPanel>
             </Grid>
         </Border>

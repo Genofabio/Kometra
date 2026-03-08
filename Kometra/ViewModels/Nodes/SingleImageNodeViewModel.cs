@@ -105,7 +105,7 @@ public partial class SingleImageNodeViewModel : ImageNodeViewModel
             var imageHdu = data.FirstImageHdu ?? data.PrimaryHdu;
 
             if (imageHdu == null)
-                throw new InvalidOperationException("Il file FITS non contiene estensioni immagine valide.");
+                throw new InvalidOperationException("The FITS file does not contain valid image extensions.");
 
             // 2. CREAZIONE & INIZIALIZZAZIONE ATOMICA
             // Se esiste un ModifiedHeader in RAM (es. dall'editor), usiamo quello.
@@ -121,8 +121,7 @@ public partial class SingleImageNodeViewModel : ImageNodeViewModel
         catch (OperationCanceledException) { }
         catch (Exception ex) 
         { 
-            ErrorMessage = $"Errore caricamento: {ex.Message}";
-            System.Diagnostics.Debug.WriteLine($"[SingleImageNode] Load Error: {ex}");
+            ErrorMessage = $"Load Error: {ex.Message}";
         }
         finally { IsLoading = false; }
     }

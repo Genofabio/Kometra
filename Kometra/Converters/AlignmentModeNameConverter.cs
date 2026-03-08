@@ -2,8 +2,7 @@
 using Avalonia.Data.Converters;
 using System;
 using System.Globalization;
-using Kometra.Models;
-using Kometra.Models.Processing;
+using Kometra.Infrastructure; // Aggiunto per accedere al LocalizationManager
 using Kometra.Models.Processing.Alignment;
 
 namespace Kometra.Converters;
@@ -14,11 +13,12 @@ public class AlignmentModeNameConverter : IValueConverter
     {
         if (value is AlignmentMode mode)
         {
+            // Usiamo l'indexer del LocalizationManager per recuperare la traduzione corrente
             return mode switch
             {
-                AlignmentMode.Automatic => "Automatica",
-                AlignmentMode.Guided    => "Guidata",
-                AlignmentMode.Manual    => "Manuale",
+                AlignmentMode.Automatic => LocalizationManager.Instance["AlignModeAuto"],
+                AlignmentMode.Guided    => LocalizationManager.Instance["AlignModeGuided"],
+                AlignmentMode.Manual    => LocalizationManager.Instance["AlignModeManual"],
                 _ => mode.ToString()
             };
         }

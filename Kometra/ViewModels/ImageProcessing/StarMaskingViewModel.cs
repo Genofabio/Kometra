@@ -12,6 +12,7 @@ using Avalonia.Platform;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using Kometra.Infrastructure; // Aggiunto per localizzazione
 using Kometra.Services.Processing.Batch;
 using Kometra.Models.Fits;
 using Kometra.Models.Fits.Structure;
@@ -63,7 +64,7 @@ public partial class StarMaskingViewModel : ObservableObject, IDisposable
     private StarRemovalState _currentState = StarRemovalState.Setup;
 
     [ObservableProperty] private FitsRenderer? _activeRenderer;
-    [ObservableProperty] private string _statusMessage = "Pronto.";
+    [ObservableProperty] private string _statusMessage = string.Empty;
 
     [ObservableProperty] private Bitmap? _starMaskOverlay;
     [ObservableProperty] private Bitmap? _cometMaskOverlay;
@@ -135,6 +136,8 @@ public partial class StarMaskingViewModel : ObservableObject, IDisposable
         _dataManager = dataManager ?? throw new ArgumentNullException(nameof(dataManager));
         _rendererFactory = rendererFactory ?? throw new ArgumentNullException(nameof(rendererFactory));
 
+        _statusMessage = LocalizationManager.Instance["StarStatusReady"];
+
         Navigator.UpdateStatus(0, _files.Count);
         Navigator.IndexChanged += async (s, i) => await LoadImageAsync(i, autoFit: false);
 
@@ -157,7 +160,7 @@ public partial class StarMaskingViewModel : ObservableObject, IDisposable
             {
                 StarMaskOverlay = null;
                 CometMaskOverlay = null;
-                StatusMessage = "Calcolo rimozione stelle...";
+                StatusMessage = LocalizationManager.Instance["StarStatusCalculating"];
                 
                 var starlessPixels = await _coordinator.ProcessPreviewAsync(file, _params, token);
                 
@@ -165,19 +168,19 @@ public partial class StarMaskingViewModel : ObservableObject, IDisposable
                 var originalHeader = (originalData.FirstImageHdu ?? originalData.PrimaryHdu)?.Header;
 
                 await UpdateRendererAsync(starlessPixels, originalHeader, autoFit);
-                StatusMessage = "Risultato calcolato.";
+                StatusMessage = LocalizationManager.Instance["StarStatusResultReady"];
             }
             else
             {
-                StatusMessage = "Caricamento...";
+                StatusMessage = LocalizationManager.Instance["StarStatusLoading"];
                 var data = await _dataManager.GetDataAsync(file.FilePath);
                 var hdu = data.FirstImageHdu ?? data.PrimaryHdu;
-                if (hdu == null) throw new InvalidOperationException("Immagine non valida.");
+                if (hdu == null) throw new InvalidOperationException(LocalizationManager.Instance["StarErrorInvalidImage"]);
 
                 await UpdateRendererAsync(hdu.PixelData, hdu.Header, autoFit);
                 
                 TriggerMaskPreview();
-                StatusMessage = "Pronto.";
+                StatusMessage = LocalizationManager.Instance["StarStatusReady"];
             }
         }
         catch (OperationCanceledException) { }
@@ -185,7 +188,7 @@ public partial class StarMaskingViewModel : ObservableObject, IDisposable
         {
             if (!_isDisposed)
             {
-                StatusMessage = $"Errore: {ex.Message}";
+                StatusMessage = string.Format(LocalizationManager.Instance["EnhanceStatusError"], ex.Message);
                 if (CurrentState == StarRemovalState.ResultsReady) CurrentState = StarRemovalState.Setup;
             }
         }
@@ -273,7 +276,7 @@ public partial class StarMaskingViewModel : ObservableObject, IDisposable
     private async Task ApplyBatch()
     {
         CurrentState = StarRemovalState.ProcessingBatch;
-        StatusMessage = "Inizializzazione batch...";
+        StatusMessage = LocalizationManager.Instance["StarStatusBatchInit"];
         
         _cts?.Cancel();
         _cts = new CancellationTokenSource();
@@ -281,7 +284,7 @@ public partial class StarMaskingViewModel : ObservableObject, IDisposable
         try
         {
             var progress = new Progress<BatchProgressReport>(p => 
-                StatusMessage = $"Elaborazione: {p.CurrentFileIndex}/{p.TotalFiles} ({p.Percentage:F0}%)");
+                StatusMessage = string.Format(LocalizationManager.Instance["StarStatusBatchProgress"], p.CurrentFileIndex, p.TotalFiles, p.Percentage));
 
             // Questo metodo è sequenziale e attende la fine di tutto
             ResultPaths = await _coordinator.ExecuteBatchAsync(_files, _params, progress, _cts.Token);
@@ -292,7 +295,7 @@ public partial class StarMaskingViewModel : ObservableObject, IDisposable
         }
         catch (Exception ex)
         {
-            StatusMessage = $"Errore Elaborazione: {ex.Message}";
+            StatusMessage = string.Format(LocalizationManager.Instance["StarErrorProcessing"], ex.Message);
             CurrentState = StarRemovalState.ResultsReady;
         }
     }

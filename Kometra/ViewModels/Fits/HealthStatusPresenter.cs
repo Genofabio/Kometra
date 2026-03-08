@@ -1,5 +1,6 @@
 ﻿using CommunityToolkit.Mvvm.ComponentModel;
 using Kometra.Models.Fits.Health;
+using Kometra.Infrastructure; // Aggiunto per localizzazione
 
 namespace Kometra.ViewModels.Fits;
 
@@ -26,12 +27,12 @@ public class HealthStatusPresenter : ObservableObject
     /// </summary>
     public string Title => _model.Type switch
     {
-        HealthCheckType.TimeReference => "Riferimento Temporale",
-        HealthCheckType.ObservatoryLocation => "Geolocalizzazione Sito",
-        HealthCheckType.OpticalConfiguration => "Configurazione Ottica",
-        HealthCheckType.TargetPointers => "Puntamento Target",
-        HealthCheckType.AstrometricSolution => "Soluzione Astrometrica",
-        _ => "Controllo Sconosciuto"
+        HealthCheckType.TimeReference => LocalizationManager.Instance["HealthTitleTime"],
+        HealthCheckType.ObservatoryLocation => LocalizationManager.Instance["HealthTitleLocation"],
+        HealthCheckType.OpticalConfiguration => LocalizationManager.Instance["HealthTitleOptics"],
+        HealthCheckType.TargetPointers => LocalizationManager.Instance["HealthTitlePointers"],
+        HealthCheckType.AstrometricSolution => LocalizationManager.Instance["HealthTitleAstrometry"],
+        _ => LocalizationManager.Instance["HealthTitleUnknown"]
     };
 
     /// <summary>
@@ -39,22 +40,12 @@ public class HealthStatusPresenter : ObservableObject
     /// </summary>
     public string Tooltip => _model.Type switch
     {
-        HealthCheckType.TimeReference => 
-            "Verifica le chiavi DATE-OBS o DATE. Indica il momento esatto dell'acquisizione (UT), indispensabile per il calcolo del tempo siderale e delle effemeridi.",
-        
-        HealthCheckType.ObservatoryLocation => 
-            "Verifica le coordinate geografiche (SITELAT/LONG). Necessario per correggere la parallasse e calcolare le coordinate locali (Alt/Az).",
-        
-        HealthCheckType.OpticalConfiguration => 
-            "Verifica FOCALLEN e PIXSIZE. Questi dati definiscono la scala dell'immagine (arcsec/pixel), parametro critico per qualsiasi analisi astrometrica.",
-        
-        HealthCheckType.TargetPointers => 
-            "Verifica le coordinate RA/DEC inviate dalla montatura. Agiscono come suggerimento (hints) per velocizzare drasticamente il Plate Solving.",
-        
-        HealthCheckType.AstrometricSolution => 
-            "Verifica la presenza di una soluzione WCS valida (CRVAL/CD Matrix). Indica se l'immagine è già stata mappata correttamente sulla sfera celeste.",
-        
-        _ => "Nessuna informazione aggiuntiva disponibile."
+        HealthCheckType.TimeReference => LocalizationManager.Instance["HealthTooltipTime"],
+        HealthCheckType.ObservatoryLocation => LocalizationManager.Instance["HealthTooltipLocation"],
+        HealthCheckType.OpticalConfiguration => LocalizationManager.Instance["HealthTooltipOptics"],
+        HealthCheckType.TargetPointers => LocalizationManager.Instance["HealthTooltipPointers"],
+        HealthCheckType.AstrometricSolution => LocalizationManager.Instance["HealthTooltipAstrometry"],
+        _ => LocalizationManager.Instance["HealthTooltipNone"]
     };
 
     /// <summary>

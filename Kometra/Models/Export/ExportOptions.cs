@@ -4,7 +4,7 @@ namespace Kometra.Models.Export;
 
 public enum ExportFormat
 {
-    Fits,
+    FITS,
     PNG,
     JPEG
 }
@@ -12,8 +12,8 @@ public enum ExportFormat
 public enum FitsCompressionMode
 {
     None,
-    Rice,
-    Gzip // Aggiunto per supportare il codec Gzip implementato
+    RICE,
+    GZIP // Aggiunto per supportare il codec GZIP implementato
 }
 
 /// <summary>

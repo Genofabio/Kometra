@@ -1,7 +1,8 @@
 ﻿using System;
 using System.Globalization;
 using Avalonia.Data.Converters;
-using Kometra.Models.Visualization; // Assicurati che il namespace del tuo Enum sia corretto
+using Kometra.Infrastructure; // Aggiunto per l'accesso al LocalizationManager
+using Kometra.Models.Visualization;
 
 namespace Kometra.Converters
 {
@@ -13,9 +14,10 @@ namespace Kometra.Converters
             {
                 return mode switch
                 {
-                    VisualizationMode.Linear => "Lineare",
-                    VisualizationMode.Logarithmic => "Logaritmico",
-                    VisualizationMode.SquareRoot => "Radice Quadrata",
+                    // Recuperiamo le traduzioni dal LocalizationManager
+                    VisualizationMode.Linear => LocalizationManager.Instance["ViewModeLinear"],
+                    VisualizationMode.Logarithmic => LocalizationManager.Instance["ViewModeLogarithmic"],
+                    VisualizationMode.SquareRoot => LocalizationManager.Instance["ViewModeSquareRoot"],
                     _ => value.ToString()
                 };
             }

@@ -7,6 +7,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using Kometra.Infrastructure; // Aggiunto per l'accesso al LocalizationManager
 using Kometra.Models.Fits;
 using Kometra.Models.Fits.Health;
 using Kometra.Models.Fits.Structure;
@@ -40,7 +41,7 @@ public partial class HeaderEditorToolViewModel : ObservableObject, IDisposable
     [ObservableProperty] private bool _isChecking = false;
     [ObservableProperty] private ObservableCollection<HealthStatusPresenter> _healthChecks = new();
 
-    public string CurrentFileName => ActiveFile?.FileName ?? "N/A";
+    public string CurrentFileName => ActiveFile?.FileName ?? LocalizationManager.Instance["CommonNotAvailable"];
     public string ImageCounterText => $"{Navigator.CurrentIndex + 1} / {Navigator.TotalCount}";
     public bool IsMultipleImages => Navigator.CanMove;
     
@@ -152,8 +153,6 @@ public partial class HeaderEditorToolViewModel : ObservableObject, IDisposable
         RequestClose?.Invoke();
     }
 
-    // ... Resto dei comandi (NextImage, PreviousImage, ApplyFilter, AddNewKey, DeleteRow) rimangono uguali ...
-
     [RelayCommand(CanExecute = nameof(CanGoNext))]
     private async Task NextImage() => await Navigator.MoveNextAsync();
 
@@ -194,7 +193,7 @@ public partial class HeaderEditorToolViewModel : ObservableObject, IDisposable
     private void ResetHealthToWaiting()
     {
         var pending = Enum.GetValues<HealthCheckType>()
-            .Select(t => new HealthStatusPresenter(new HealthStatusItem(t, HeaderHealthStatus.Pending, "Analisi...")))
+            .Select(t => new HealthStatusPresenter(new HealthStatusItem(t, HeaderHealthStatus.Pending, LocalizationManager.Instance["StatusAnalyzing"])))
             .ToList();
         HealthChecks = new ObservableCollection<HealthStatusPresenter>(pending);
     }
@@ -251,7 +250,7 @@ public partial class HeaderEditorToolViewModel : ObservableObject, IDisposable
     [RelayCommand]
     private void AddNewKey()
     {
-        string newKeyName = !string.IsNullOrWhiteSpace(SearchText) ? SearchText.Trim().ToUpper() : "NEW_KEY";
+        string newKeyName = !string.IsNullOrWhiteSpace(SearchText) ? SearchText.Trim().ToUpper() : LocalizationManager.Instance["HeaderNewKeyPlaceholder"];
         var newItem = new FitsHeaderEditorRow(newKeyName, "", "", false) { IsModified = true };
 
         int endIndex = _allItems.FindIndex(x => x.Key.Trim().ToUpper() == "END");

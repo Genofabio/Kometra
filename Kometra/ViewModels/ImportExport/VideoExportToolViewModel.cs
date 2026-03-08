@@ -54,7 +54,7 @@ public partial class VideoExportToolViewModel : ObservableObject, IDisposable
     private bool _isExporting;
 
     [ObservableProperty] private double _exportProgress;
-    [ObservableProperty] private string _statusText = "Pronto";
+    [ObservableProperty] private string _statusText = string.Empty;
     
     // --- GESTIONE PERCORSO E NOME FILE ---
     
@@ -65,7 +65,7 @@ public partial class VideoExportToolViewModel : ObservableObject, IDisposable
 
     [ObservableProperty] 
     [NotifyPropertyChangedFor(nameof(OutputPath))] // Notifica cambiamenti alla proprietà legacy
-    private string _outputFileName = "VideoExport"; 
+    private string _outputFileName = string.Empty; 
 
     // Proprietà calcolata per mostrare l'estensione nella UI (es. ".mp4")
     public string CurrentExtension => _formatProvider.GetExtension(SelectedContainer);
@@ -78,7 +78,7 @@ public partial class VideoExportToolViewModel : ObservableObject, IDisposable
         get 
         {
             if (string.IsNullOrWhiteSpace(OutputFolder)) return string.Empty;
-            string finalName = string.IsNullOrWhiteSpace(OutputFileName) ? "VideoExport" : OutputFileName;
+            string finalName = string.IsNullOrWhiteSpace(OutputFileName) ? LocalizationManager.Instance["VideoExportDefaultName"] : OutputFileName;
             return Path.Combine(OutputFolder, finalName + CurrentExtension);
         }
         set 
@@ -147,6 +147,8 @@ public partial class VideoExportToolViewModel : ObservableObject, IDisposable
         _originalWidth = (int)originalSize.Width;
         _originalHeight = (int)originalSize.Height;
 
+        _statusText = LocalizationManager.Instance["StatusReady"];
+
         // Imposta una cartella di default (Documenti)
         OutputFolder = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
 
@@ -155,6 +157,10 @@ public partial class VideoExportToolViewModel : ObservableObject, IDisposable
         {
             var rawName = _sourceFiles[0].FileName;
             OutputFileName = Path.GetFileNameWithoutExtension(rawName);
+        }
+        else
+        {
+            OutputFileName = LocalizationManager.Instance["VideoExportDefaultName"];
         }
 
         // Inizializza Contenitori e Codec
@@ -228,7 +234,7 @@ public partial class VideoExportToolViewModel : ObservableObject, IDisposable
     private async Task SelectFolder()
     {
         // Selettore cartella
-        var path = await _dialogService.ShowOpenFolderDialogAsync("Seleziona cartella di destinazione");
+        var path = await _dialogService.ShowOpenFolderDialogAsync(LocalizationManager.Instance["VideoExportSelectFolderTitle"]);
         if (!string.IsNullOrWhiteSpace(path)) OutputFolder = path;
     }
 
@@ -246,9 +252,9 @@ public partial class VideoExportToolViewModel : ObservableObject, IDisposable
             var progress = new Progress<double>(p => {
                 ExportProgress = p;
                 if (p >= 99) 
-                    StatusText = "Finalizzazione e scrittura indici... Non chiudere.";
+                    StatusText = LocalizationManager.Instance["VideoExportStatusFinalizing"];
                 else 
-                    StatusText = $"Elaborazione frame... {p:N0}%";
+                    StatusText = string.Format(LocalizationManager.Instance["VideoExportStatusProcessing"], p);
             });
 
             await _videoCoordinator.ExportVideoAsync(
@@ -258,15 +264,15 @@ public partial class VideoExportToolViewModel : ObservableObject, IDisposable
                 progress, 
                 _exportCts.Token);
 
-            StatusText = "Video Salvato!";
+            StatusText = LocalizationManager.Instance["VideoExportStatusSuccess"];
             ExportProgress = 100;
             await Task.Delay(1000); 
 
             DialogResult = true; 
             RequestClose?.Invoke(); 
         }
-        catch (OperationCanceledException) { StatusText = "Annullato."; }
-        catch (Exception) { StatusText = "Errore durante l'esportazione.";  }
+        catch (OperationCanceledException) { StatusText = LocalizationManager.Instance["StatusCancelled"]; }
+        catch (Exception) { StatusText = LocalizationManager.Instance["VideoExportStatusError"];  }
         finally 
         { 
             IsExporting = false;
@@ -283,7 +289,7 @@ public partial class VideoExportToolViewModel : ObservableObject, IDisposable
         if (IsExporting) 
         {
             _exportCts?.Cancel();
-            StatusText = "Annullamento in corso...";
+            StatusText = LocalizationManager.Instance["VideoExportStatusCancelling"];
         }
         else 
         {

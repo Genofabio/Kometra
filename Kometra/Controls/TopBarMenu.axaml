@@ -4,6 +4,7 @@
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
              xmlns:avalonia="clr-namespace:Material.Icons.Avalonia;assembly=Material.Icons.Avalonia"
              xmlns:vm="clr-namespace:Kometra.ViewModels"
+             xmlns:infrastructure="clr-namespace:Kometra.Infrastructure"
              xmlns:conv="clr-namespace:Kometra.Converters"
              xmlns:processing="clr-namespace:Kometra.Models.Processing"
              xmlns:visualization="clr-namespace:Kometra.Models.Visualization"
@@ -24,7 +25,7 @@
     <Menu VerticalAlignment="Top">
         
         <MenuItem Header="_File">
-            <MenuItem Header="Aggiungi Nodo" 
+            <MenuItem Header="{Binding [MenuAddNode], Source={x:Static infrastructure:LocalizationManager.Instance}}" 
                       Classes="innerMenuItem"
                       Command="{Binding BoardVm.AddNodeCommand}">
                 <MenuItem.Icon>
@@ -34,7 +35,7 @@
 
             <Separator />
 
-            <MenuItem Header="Salva Immagine" 
+            <MenuItem Header="{Binding [MenuSaveImage], Source={x:Static infrastructure:LocalizationManager.Instance}}" 
                       Classes="innerMenuItem"
                       Command="{Binding BoardVm.ExportSelectedNodeCommand}">
                 <MenuItem.Icon>
@@ -42,7 +43,7 @@
                 </MenuItem.Icon>
             </MenuItem>
 
-            <MenuItem Header="Salva Video" 
+            <MenuItem Header="{Binding [MenuSaveVideo], Source={x:Static infrastructure:LocalizationManager.Instance}}" 
                       Classes="innerMenuItem"
                       Command="{Binding BoardVm.SaveVideoCommand}">
                 <MenuItem.Icon>
@@ -51,8 +52,18 @@
             </MenuItem>
             
             <Separator />
+
+            <MenuItem Header="{Binding [SettingsTitle], Source={x:Static infrastructure:LocalizationManager.Instance}}" 
+                      Classes="innerMenuItem"
+                      Command="{Binding BoardVm.ShowSettingsWindowCommand}">
+                <MenuItem.Icon>
+                    <avalonia:MaterialIcon Kind="Cog" />
+                </MenuItem.Icon>
+            </MenuItem>
+
+            <Separator />
             
-            <MenuItem Header="Exit" 
+            <MenuItem Header="{Binding [MenuExit], Source={x:Static infrastructure:LocalizationManager.Instance}}" 
                       Classes="innerMenuItem"
                       Command="{Binding ExitAppCommand}">
                 <MenuItem.Icon>
@@ -61,9 +72,9 @@
             </MenuItem>
         </MenuItem>
         
-        <MenuItem Header="_Modifica">
+        <MenuItem Header="{Binding [MenuModify], Source={x:Static infrastructure:LocalizationManager.Instance}}">
             
-            <MenuItem Header="Allinea e centra"
+            <MenuItem Header="{Binding [MenuAlignCenter], Source={x:Static infrastructure:LocalizationManager.Instance}}"
                       Classes="innerMenuItem"
                       Command="{Binding BoardVm.ShowAlignmentWindowCommand}">
                 <MenuItem.Icon>
@@ -71,7 +82,7 @@
                 </MenuItem.Icon>
             </MenuItem>
 
-            <MenuItem Header="Ritaglia"
+            <MenuItem Header="{Binding [MenuCrop], Source={x:Static infrastructure:LocalizationManager.Instance}}"
                       Classes="innerMenuItem"
                       Command="{Binding BoardVm.ShowCropWindowCommand}">
                 <MenuItem.Icon>
@@ -81,12 +92,12 @@
             
             <Separator />
 
-            <MenuItem Header="Analisi Morfologica" Classes="innerMenuItem">
+            <MenuItem Header="{Binding [MenuMorphAnalysis], Source={x:Static infrastructure:LocalizationManager.Instance}}" Classes="innerMenuItem">
                 <MenuItem.Icon>
                     <avalonia:MaterialIcon Kind="Creation" />
                 </MenuItem.Icon>
 
-                <MenuItem Header="Modelli Radiali"
+                <MenuItem Header="{Binding [MenuRadialModels], Source={x:Static infrastructure:LocalizationManager.Instance}}"
                           Classes="innerMenuItem"
                           Command="{Binding BoardVm.ShowRadialEnhancementWindowCommand}">
                     <MenuItem.Icon>
@@ -94,7 +105,7 @@
                     </MenuItem.Icon>
                 </MenuItem>
 
-                <MenuItem Header="Estrazione Strutture"
+                <MenuItem Header="{Binding [MenuStructureExtraction], Source={x:Static infrastructure:LocalizationManager.Instance}}"
                           Classes="innerMenuItem"
                           Command="{Binding BoardVm.ShowStructureExtractionWindowCommand}">
                     <MenuItem.Icon>
@@ -102,7 +113,7 @@
                     </MenuItem.Icon>
                 </MenuItem>
 
-                <MenuItem Header="Contrasto Locale"
+                <MenuItem Header="{Binding [MenuLocalContrast], Source={x:Static infrastructure:LocalizationManager.Instance}}"
                           Classes="innerMenuItem"
                           Command="{Binding BoardVm.ShowLocalContrastWindowCommand}">
                     <MenuItem.Icon>
@@ -111,7 +122,7 @@
                 </MenuItem>
             </MenuItem>
             
-            <MenuItem Header="Maschera Stelle"
+            <MenuItem Header="{Binding [MenuStarMask], Source={x:Static infrastructure:LocalizationManager.Instance}}"
                       Classes="innerMenuItem"
                       Command="{Binding BoardVm.ShowStarMaskingWindowCommand}">
                 <MenuItem.Icon>
@@ -119,7 +130,7 @@
                 </MenuItem.Icon>
             </MenuItem>
 
-            <MenuItem Header="Posterizzazione"
+            <MenuItem Header="{Binding [MenuPosterization], Source={x:Static infrastructure:LocalizationManager.Instance}}"
                       Classes="innerMenuItem"
                       Command="{Binding BoardVm.ShowPosterizationWindowCommand}">
                 <MenuItem.Icon>
@@ -129,7 +140,7 @@
             
             <Separator />
             
-            <MenuItem Header="Editor Header / Metadati"
+            <MenuItem Header="{Binding [MenuHeaderEditor], Source={x:Static infrastructure:LocalizationManager.Instance}}"
                       Classes="innerMenuItem"
                       Command="{Binding BoardVm.EditSelectedNodeHeaderCommand}">
                 <MenuItem.Icon>
@@ -137,7 +148,7 @@
                 </MenuItem.Icon>
             </MenuItem>
             
-            <MenuItem Header="Risoluzione Astrometrica (ASTAP)"
+            <MenuItem Header="{Binding [MenuPlateSolving], Source={x:Static infrastructure:LocalizationManager.Instance}}"
                       Classes="innerMenuItem"
                       Command="{Binding BoardVm.ShowPlateSolvingWindowCommand}">
                 <MenuItem.Icon>
@@ -147,12 +158,12 @@
             
             <Separator />
 
-            <MenuItem Header="Operazioni Stack" Classes="innerMenuItem">
+            <MenuItem Header="{Binding [MenuStackOps], Source={x:Static infrastructure:LocalizationManager.Instance}}" Classes="innerMenuItem">
                 <MenuItem.Icon>
                     <avalonia:MaterialIcon Kind="Layers" />
                 </MenuItem.Icon>
 
-                <MenuItem Header="Somma"
+                <MenuItem Header="{Binding [MenuStackSum], Source={x:Static infrastructure:LocalizationManager.Instance}}"
                           Classes="innerMenuItem"
                           Command="{Binding BoardVm.StackImagesCommand}"
                           CommandParameter="{x:Static stacking:StackingMode.Sum}">
@@ -161,7 +172,7 @@
                     </MenuItem.Icon>
                 </MenuItem>
 
-                <MenuItem Header="Media"
+                <MenuItem Header="{Binding [MenuStackAverage], Source={x:Static infrastructure:LocalizationManager.Instance}}"
                           Classes="innerMenuItem"
                           Command="{Binding BoardVm.StackImagesCommand}"
                           CommandParameter="{x:Static stacking:StackingMode.Average}">
@@ -170,7 +181,7 @@
                     </MenuItem.Icon>
                 </MenuItem>
         
-                <MenuItem Header="Mediana"
+                <MenuItem Header="{Binding [MenuStackMedian], Source={x:Static infrastructure:LocalizationManager.Instance}}"
                           Classes="innerMenuItem"
                           Command="{Binding BoardVm.StackImagesCommand}"
                           CommandParameter="{x:Static stacking:StackingMode.Median}">
@@ -181,13 +192,13 @@
             </MenuItem>
         </MenuItem>
 
-        <MenuItem Header="_View">
-            <MenuItem Header="Modalità Visualizzazione" Classes="innerMenuItem">
+        <MenuItem Header="{Binding [MenuView], Source={x:Static infrastructure:LocalizationManager.Instance}}">
+            <MenuItem Header="{Binding [MenuViewMode], Source={x:Static infrastructure:LocalizationManager.Instance}}" Classes="innerMenuItem">
                 <MenuItem.Icon>
                     <avalonia:MaterialIcon Kind="EyeSettings" />
                 </MenuItem.Icon>
 
-                <MenuItem Header="Lineare"
+                <MenuItem Header="{Binding [MenuLinear], Source={x:Static infrastructure:LocalizationManager.Instance}}"
                           Classes="innerMenuItem"
                           Command="{Binding BoardVm.SetVisualizationModeCommand}"
                           CommandParameter="{x:Static visualization:VisualizationMode.Linear}">
@@ -196,7 +207,7 @@
                     </MenuItem.Icon>
                 </MenuItem>
 
-                <MenuItem Header="Radice Quadrata"
+                <MenuItem Header="{Binding [MenuSquareRoot], Source={x:Static infrastructure:LocalizationManager.Instance}}"
                           Classes="innerMenuItem"
                           Command="{Binding BoardVm.SetVisualizationModeCommand}"
                           CommandParameter="{x:Static visualization:VisualizationMode.SquareRoot}">
@@ -205,7 +216,7 @@
                     </MenuItem.Icon>
                 </MenuItem>
 
-                <MenuItem Header="Logaritmica"
+                <MenuItem Header="{Binding [MenuLogarithmic], Source={x:Static infrastructure:LocalizationManager.Instance}}"
                           Classes="innerMenuItem"
                           Command="{Binding BoardVm.SetVisualizationModeCommand}"
                           CommandParameter="{x:Static visualization:VisualizationMode.Logarithmic}">
@@ -217,7 +228,7 @@
 
             <Separator />
             
-            <MenuItem Header="Reset Board" 
+            <MenuItem Header="{Binding [MenuResetBoard], Source={x:Static infrastructure:LocalizationManager.Instance}}" 
                       Classes="innerMenuItem"
                       Command="{Binding BoardVm.ResetBoardCommand}">
                 <MenuItem.Icon>
@@ -227,7 +238,7 @@
 
             <Separator />
             
-            <MenuItem Header="Reset Posizione Immagine"
+            <MenuItem Header="{Binding [MenuResetNodePos], Source={x:Static infrastructure:LocalizationManager.Instance}}"
                       Classes="innerMenuItem"
                       Command="{Binding BoardVm.ResetNodeViewCommand}">
                 <MenuItem.Icon>
@@ -235,7 +246,7 @@
                 </MenuItem.Icon>
             </MenuItem>
 
-            <MenuItem Header="Reset Soglie Immagine"
+            <MenuItem Header="{Binding [MenuResetNormalization], Source={x:Static infrastructure:LocalizationManager.Instance}}"
                       Classes="innerMenuItem"
                       Command="{Binding BoardVm.ResetNormalizationCommand}">
                 <MenuItem.Icon>
@@ -252,11 +263,10 @@
                     <avalonia:MaterialIcon Kind="{Binding BoardVm.IsGlobalAnimationRunning, Converter={StaticResource AnimIconConv}}" />
                 </MenuItem.Icon>
             </MenuItem>
-
         </MenuItem>
 
-        <MenuItem Header="_Help">
-            <MenuItem Header="About" Classes="innerMenuItem">
+        <MenuItem Header="{Binding [MenuHelp], Source={x:Static infrastructure:LocalizationManager.Instance}}">
+            <MenuItem Header="{Binding [MenuAbout], Source={x:Static infrastructure:LocalizationManager.Instance}}" Classes="innerMenuItem">
                 <MenuItem.Icon>
                     <avalonia:MaterialIcon Kind="InformationOutline" />
                 </MenuItem.Icon>

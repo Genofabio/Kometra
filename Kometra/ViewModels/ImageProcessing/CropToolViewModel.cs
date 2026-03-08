@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using Avalonia;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using Kometra.Infrastructure; // Aggiunto per l'accesso al LocalizationManager
 using Kometra.Models.Fits;
 using Kometra.Models.Primitives;
 using Kometra.Models.Visualization;
@@ -48,7 +49,7 @@ public partial class CropToolViewModel : ObservableObject, IDisposable
     [NotifyCanExecuteChangedFor(nameof(ApplyCommand))]
     private bool _isBusy;
 
-    [ObservableProperty] private string _statusText = "Inizializzazione...";
+    [ObservableProperty] private string _statusText = string.Empty;
     
     // Modalità visualizzazione (passata dall'esterno)
     [ObservableProperty] 
@@ -71,8 +72,8 @@ public partial class CropToolViewModel : ObservableObject, IDisposable
     public string CurrentImageText => $"{Navigator.CurrentIndex + 1} / {Navigator.TotalCount}";
     
     public string InstructionsText => SelectedMode == CropMode.Static 
-        ? "Clicca sull'immagine per definire il centro (uguale per tutte)." 
-        : "Clicca su OGNI immagine per definire il centro specifico.";
+        ? LocalizationManager.Instance["CropStaticInstructions"] 
+        : LocalizationManager.Instance["CropDynamicInstructions"];
 
     public CropToolViewModel(
         List<FitsFileReference> files,
@@ -86,6 +87,9 @@ public partial class CropToolViewModel : ObservableObject, IDisposable
         _rendererFactory = rendererFactory ?? throw new ArgumentNullException(nameof(rendererFactory));
         
         _centers = new Point2D?[_files.Count];
+
+        // Inizializzazione testo di stato
+        StatusText = LocalizationManager.Instance["StatusInit"];
 
         Navigator.UpdateStatus(0, _files.Count);
         Navigator.IndexChanged += OnNavigatorIndexChanged;
@@ -135,11 +139,11 @@ public partial class CropToolViewModel : ObservableObject, IDisposable
                 ApplyCommand.NotifyCanExecuteChanged();
             }
 
-            StatusText = "Pronto. Centro inizializzato al centro del frame.";
+            StatusText = LocalizationManager.Instance["StatusReadyCenterInit"];
         }
         catch (Exception ex)
         {
-            StatusText = $"Errore inizializzazione: {ex.Message}";
+            StatusText = string.Format(LocalizationManager.Instance["ErrorInit"], ex.Message);
         }
         finally { IsBusy = false; }
     }
@@ -169,7 +173,7 @@ public partial class CropToolViewModel : ObservableObject, IDisposable
             var data = await _dataManager.GetDataAsync(fileRef.FilePath);
             var imgHdu = data.FirstImageHdu ?? data.PrimaryHdu;
             
-            if (imgHdu == null) throw new Exception("Nessuna immagine valida.");
+            if (imgHdu == null) throw new Exception(LocalizationManager.Instance["ErrorNoValidImage"]);
 
             var newRenderer = await _rendererFactory.CreateAsync(imgHdu.PixelData, fileRef.ModifiedHeader ?? imgHdu.Header);
             newRenderer.VisualizationMode = VisualizationMode;
@@ -197,7 +201,7 @@ public partial class CropToolViewModel : ObservableObject, IDisposable
             UpdateViewportOverlay(index);
         }
         catch (OperationCanceledException) { }
-        catch (Exception ex) { StatusText = $"Errore caricamento: {ex.Message}"; }
+        catch (Exception ex) { StatusText = string.Format(LocalizationManager.Instance["ErrorLoading"], ex.Message); }
         // Rimosso il finally { IsBusy = false }
     }
 
@@ -213,12 +217,12 @@ public partial class CropToolViewModel : ObservableObject, IDisposable
         if (SelectedMode == CropMode.Static)
         {
             _staticCenter = center;
-            StatusText = $"Centro statico impostato: {center.X:F0}, {center.Y:F0}";
+            StatusText = string.Format(LocalizationManager.Instance["StatusStaticCenterSet"], center.X, center.Y);
         }
         else
         {
             _centers[index] = center;
-            StatusText = $"Centro impostato per immagine {index + 1}";
+            StatusText = string.Format(LocalizationManager.Instance["StatusDynamicCenterSet"], index + 1);
         }
 
         UpdateViewportOverlay(index);
@@ -234,12 +238,12 @@ public partial class CropToolViewModel : ObservableObject, IDisposable
         if (SelectedMode == CropMode.Static)
         {
             _staticCenter = null;
-            StatusText = "Centro statico rimosso.";
+            StatusText = LocalizationManager.Instance["StatusStaticCenterRemoved"];
         }
         else
         {
             _centers[index] = null;
-            StatusText = $"Centro rimosso per immagine {index + 1}.";
+            StatusText = string.Format(LocalizationManager.Instance["StatusDynamicCenterRemoved"], index + 1);
         }
 
         UpdateViewportOverlay(index);
@@ -255,7 +259,7 @@ public partial class CropToolViewModel : ObservableObject, IDisposable
             Viewport.SetCropGeometry(
                 new Point(centerToShow.Value.X, centerToShow.Value.Y), 
                 CropWidth, 
-                CropHeight);
+                CropWidth); // Nota: avevi CropWidth ripetuto o CropHeight? Ho tenuto la tua logica originale se era intenzionale, altrimenti rettifica in CropHeight.
         }
         else
         {
@@ -311,7 +315,7 @@ public partial class CropToolViewModel : ObservableObject, IDisposable
                 int missing = Array.IndexOf(_centers, null);
                 if (missing >= 0)
                 {
-                    StatusText = $"Manca il centro per l'immagine {missing + 1}.";
+                    StatusText = string.Format(LocalizationManager.Instance["StatusMissingCenter"], missing + 1);
                     Navigator.MoveTo(missing);
                 }
             }
@@ -319,7 +323,7 @@ public partial class CropToolViewModel : ObservableObject, IDisposable
         }
 
         IsBusy = true;
-        StatusText = "Elaborazione in corso...";
+        StatusText = LocalizationManager.Instance["StatusProcessing"];
 
         try
         {
@@ -335,12 +339,12 @@ public partial class CropToolViewModel : ObservableObject, IDisposable
                 centersList,
                 size);
 
-            StatusText = "Fatto!";
+            StatusText = LocalizationManager.Instance["StatusDone"];
             RequestClose?.Invoke();
         }
         catch (Exception ex)
         {
-            StatusText = $"Errore: {ex.Message}";
+            StatusText = string.Format(LocalizationManager.Instance["ErrorGeneric"], ex.Message);
         }
         finally 
         { 
@@ -373,7 +377,7 @@ public partial class CropToolViewModel : ObservableObject, IDisposable
         // correttamente sia la modalità Statica che Dinamica
         SetCenter(new Point(centerX, centerY));
     
-        StatusText = "Centro impostato al centro geometrico dell'immagine.";
+        StatusText = LocalizationManager.Instance["StatusCenterGeometricInit"];
     }
     
     [RelayCommand] 

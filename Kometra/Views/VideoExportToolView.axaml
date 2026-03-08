@@ -2,10 +2,11 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:avalonia="clr-namespace:Material.Icons.Avalonia;assembly=Material.Icons.Avalonia"
         xmlns:importExport="clr-namespace:Kometra.ViewModels.ImportExport"
+        xmlns:infrastructure="clr-namespace:Kometra.Infrastructure"
         x:Class="Kometra.Views.VideoExportToolView"
         x:DataType="importExport:VideoExportToolViewModel"
         Icon="/Assets/Icon/icon32.ico"
-        Title="Configurazione Esportazione Video"
+        Title="{Binding [VideoExportTitle], Source={x:Static infrastructure:LocalizationManager.Instance}}"
         Width="1020" Height="620"
         MinWidth="1010" MinHeight="620"
         WindowStartupLocation="CenterOwner"
@@ -26,17 +27,17 @@
                 <StackPanel Spacing="18">
                     
                     <StackPanel Spacing="6">
-                        <TextBlock Text="ESPORTAZIONE VIDEO" FontWeight="Bold" Foreground="White" FontSize="18"/>
-                        <TextBlock Text="Configura il formato e la qualità" FontSize="11" Opacity="0.6" FontStyle="Italic"/>
+                        <TextBlock Text="{Binding [VideoExportHeader], Source={x:Static infrastructure:LocalizationManager.Instance}}" FontWeight="Bold" Foreground="White" FontSize="18"/>
+                        <TextBlock Text="{Binding [VideoExportDesc], Source={x:Static infrastructure:LocalizationManager.Instance}}" FontSize="11" Opacity="0.6" FontStyle="Italic"/>
                     </StackPanel>
 
                     <Separator Background="{DynamicResource Border.WhiteDimBrush}" Opacity="0.4" Margin="-5,0"/>
 
                     <StackPanel Spacing="12">
                         <StackPanel Spacing="4">
-                            <TextBlock Text="Cartella di destinazione" FontSize="11" FontWeight="SemiBold" Opacity="0.7" Foreground="White"/>
+                            <TextBlock Text="{Binding [VideoExportDestFolder], Source={x:Static infrastructure:LocalizationManager.Instance}}" FontSize="11" FontWeight="SemiBold" Opacity="0.7" Foreground="White"/>
                             <Grid ColumnDefinitions="*, Auto" ColumnSpacing="6">
-                                <TextBox Grid.Column="0" Watermark="Seleziona cartella..." 
+                                <TextBox Grid.Column="0" Watermark="{Binding [VideoExportSelectFolderWatermark], Source={x:Static infrastructure:LocalizationManager.Instance}}" 
                                          Text="{Binding OutputFolder}" IsReadOnly="True" 
                                          FontSize="11" Height="34" VerticalContentAlignment="Center"
                                          Background="{DynamicResource ToolWindowBackgroundBrush}"
@@ -52,9 +53,9 @@
                         </StackPanel>
 
                         <StackPanel Spacing="4">
-                            <TextBlock Text="Nome del file (opzionale)" FontSize="11" FontWeight="SemiBold" Opacity="0.7" Foreground="White"/>
+                            <TextBlock Text="{Binding [VideoExportFileNameLabel], Source={x:Static infrastructure:LocalizationManager.Instance}}" FontSize="11" FontWeight="SemiBold" Opacity="0.7" Foreground="White"/>
                             <Grid ColumnDefinitions="*, Auto" ColumnSpacing="6">
-                                <TextBox Grid.Column="0" Watermark="Nome file (senza estensione)" 
+                                <TextBox Grid.Column="0" Watermark="{Binding [VideoExportFileNameWatermark], Source={x:Static infrastructure:LocalizationManager.Instance}}" 
                                          Text="{Binding OutputFileName}"
                                          FontSize="12" Height="34" VerticalContentAlignment="Center"
                                          Background="{DynamicResource ToolWindowBackgroundBrush}"
@@ -75,13 +76,13 @@
 
                     <StackPanel Spacing="12">
                         <StackPanel Spacing="4">
-                            <TextBlock Text="Formato Contenitore" FontSize="11" FontWeight="SemiBold" Opacity="0.7" Foreground="White"/>
+                            <TextBlock Text="{Binding [VideoExportContainerFormat], Source={x:Static infrastructure:LocalizationManager.Instance}}" FontSize="11" FontWeight="SemiBold" Opacity="0.7" Foreground="White"/>
                             <ComboBox HorizontalAlignment="Stretch" Height="34"
                                       ItemsSource="{Binding Containers}" SelectedItem="{Binding SelectedContainer}"/>
                         </StackPanel>
 
                         <StackPanel Spacing="4">
-                            <TextBlock Text="Compressione (Codec)" FontSize="11" FontWeight="SemiBold" Opacity="0.7" Foreground="White"/>
+                            <TextBlock Text="{Binding [VideoExportCodec], Source={x:Static infrastructure:LocalizationManager.Instance}}" FontSize="11" FontWeight="SemiBold" Opacity="0.7" Foreground="White"/>
                             <ComboBox HorizontalAlignment="Stretch" Height="34"
                                       ItemsSource="{Binding AvailableCodecs}" SelectedItem="{Binding SelectedCodec}"/>
                         </StackPanel>
@@ -91,13 +92,13 @@
 
                     <StackPanel Spacing="12">
                         <StackPanel Spacing="4">
-                            <TextBlock Text="Frame Rate (FPS)" FontSize="11" FontWeight="SemiBold" Opacity="0.7" Foreground="White"/>
+                            <TextBlock Text="{Binding [VideoExportFps], Source={x:Static infrastructure:LocalizationManager.Instance}}" FontSize="11" FontWeight="SemiBold" Opacity="0.7" Foreground="White"/>
                             <NumericUpDown Value="{Binding Fps}" Minimum="1" Maximum="120" FormatString="0" 
                                            HorizontalAlignment="Stretch" Height="34"/> 
                         </StackPanel>
 
                         <StackPanel Spacing="4">
-                            <TextBlock Text="Fattore di Riscalamento" FontSize="11" FontWeight="SemiBold" Opacity="0.7" Foreground="White"/>
+                            <TextBlock Text="{Binding [VideoExportScaling], Source={x:Static infrastructure:LocalizationManager.Instance}}" FontSize="11" FontWeight="SemiBold" Opacity="0.7" Foreground="White"/>
                             <Grid ColumnDefinitions="Auto, *" ColumnSpacing="10">
                                 <TextBox Grid.Column="0" x:Name="ScaleFactorBox" 
                                          Text="{Binding ScaleFactor, Mode=OneWay, StringFormat={}{0:N2}}" 
@@ -128,19 +129,19 @@
                         </Canvas>
 
                         <StackPanel Orientation="Horizontal" Spacing="4" Margin="10" HorizontalAlignment="Right" VerticalAlignment="Bottom" PointerPressed="OnControlsPointerPressed">
-                            <Button Click="OnZoomOutClicked"><avalonia:MaterialIcon Kind="Minus" Width="16" Height="16"/></Button>
-                            <Button Click="OnZoomInClicked"><avalonia:MaterialIcon Kind="Plus" Width="16" Height="16"/></Button>
-                            <Button Click="OnResetViewClicked"><avalonia:MaterialIcon Kind="FitToScreen" Width="16" Height="16"/></Button>
+                            <Button Click="OnZoomOutClicked" ToolTip.Tip="{Binding [TooltipZoomOut], Source={x:Static infrastructure:LocalizationManager.Instance}}"><avalonia:MaterialIcon Kind="Minus" Width="16" Height="16"/></Button>
+                            <Button Click="OnZoomInClicked" ToolTip.Tip="{Binding [TooltipZoomIn], Source={x:Static infrastructure:LocalizationManager.Instance}}"><avalonia:MaterialIcon Kind="Plus" Width="16" Height="16"/></Button>
+                            <Button Click="OnResetViewClicked" ToolTip.Tip="{Binding [TooltipResetView], Source={x:Static infrastructure:LocalizationManager.Instance}}"><avalonia:MaterialIcon Kind="FitToScreen" Width="16" Height="16"/></Button>
                             <Path Data="M0,0 V18" Stroke="#666666" StrokeThickness="1" Margin="8,4,8,4" VerticalAlignment="Center" />
-                            <Button Command="{Binding ResetThresholdsCommand}"><avalonia:MaterialIcon Kind="Contrast" Width="16" Height="16"/></Button>
+                            <Button Command="{Binding ResetThresholdsCommand}" ToolTip.Tip="{Binding [TooltipResetStretch], Source={x:Static infrastructure:LocalizationManager.Instance}}"><avalonia:MaterialIcon Kind="Contrast" Width="16" Height="16"/></Button>
                         </StackPanel>
 
                         <StackPanel Orientation="Horizontal" Spacing="4" Margin="10" HorizontalAlignment="Left" VerticalAlignment="Bottom" PointerPressed="OnControlsPointerPressed">
-                            <Button Command="{Binding Navigator.MoveToFirstCommand}"><avalonia:MaterialIcon Kind="ChevronDoubleLeft" Width="16" Height="16"/></Button>
-                            <Button Command="{Binding Navigator.PreviousCommand}"><avalonia:MaterialIcon Kind="ChevronLeft" Width="16" Height="16"/></Button>
+                            <Button Command="{Binding Navigator.MoveToFirstCommand}" ToolTip.Tip="{Binding [TooltipFirstImage], Source={x:Static infrastructure:LocalizationManager.Instance}}"><avalonia:MaterialIcon Kind="ChevronDoubleLeft" Width="16" Height="16"/></Button>
+                            <Button Command="{Binding Navigator.PreviousCommand}" ToolTip.Tip="{Binding [TooltipPrevImage], Source={x:Static infrastructure:LocalizationManager.Instance}}"><avalonia:MaterialIcon Kind="ChevronLeft" Width="16" Height="16"/></Button>
                             <TextBlock Text="{Binding CurrentImageText}" VerticalAlignment="Center" Margin="10,0" Foreground="White" FontWeight="Bold" FontSize="12"/>
-                            <Button Command="{Binding Navigator.NextCommand}"><avalonia:MaterialIcon Kind="ChevronRight" Width="16" Height="16"/></Button>
-                            <Button Command="{Binding Navigator.MoveToLastCommand}"><avalonia:MaterialIcon Kind="ChevronDoubleRight" Width="16" Height="16"/></Button>
+                            <Button Command="{Binding Navigator.NextCommand}" ToolTip.Tip="{Binding [TooltipNextImage], Source={x:Static infrastructure:LocalizationManager.Instance}}"><avalonia:MaterialIcon Kind="ChevronRight" Width="16" Height="16"/></Button>
+                            <Button Command="{Binding Navigator.MoveToLastCommand}" ToolTip.Tip="{Binding [TooltipLastImage], Source={x:Static infrastructure:LocalizationManager.Instance}}"><avalonia:MaterialIcon Kind="ChevronDoubleRight" Width="16" Height="16"/></Button>
                         </StackPanel>
                         
                         <Border HorizontalAlignment="Left" VerticalAlignment="Top" Margin="10" Padding="8,4" Background="{DynamicResource OverlayTextBackgroundBrush}" CornerRadius="4">
@@ -153,8 +154,8 @@
             <Border Grid.Column="2" Background="{DynamicResource ToolPanelBackgroundBrush}" Padding="20" BorderBrush="{DynamicResource Border.WhiteDimBrush}" BorderThickness="1,0,0,0" IsEnabled="{Binding IsInteractionEnabled}">
                 <StackPanel Spacing="15">
                     <StackPanel Spacing="4">
-                        <TextBlock Text="RIEPILOGO OUTPUT" FontWeight="Bold" HorizontalAlignment="Left" Opacity="0.5" LetterSpacing="1" FontSize="12"/>
-                        <TextBlock Text="Parametri tecnici e soglie di contrasto." FontSize="11" Opacity="0.6" TextWrapping="Wrap"/>
+                        <TextBlock Text="{Binding [VideoExportSummaryHeader], Source={x:Static infrastructure:LocalizationManager.Instance}}" FontWeight="Bold" HorizontalAlignment="Left" Opacity="0.5" LetterSpacing="1" FontSize="12"/>
+                        <TextBlock Text="{Binding [VideoExportSummaryDesc], Source={x:Static infrastructure:LocalizationManager.Instance}}" FontSize="11" Opacity="0.6" TextWrapping="Wrap"/>
                     </StackPanel>
                     
                     <Border Background="{DynamicResource ToolWindowBackgroundBrush}" CornerRadius="8" Padding="15" BorderBrush="{DynamicResource Border.WhiteDimBrush}" BorderThickness="1">
@@ -162,7 +163,7 @@
                             <Grid ColumnDefinitions="24, 12, *">
                                 <avalonia:MaterialIcon Grid.Column="0" Kind="AspectRatio" Foreground="Gray" Width="18" Height="18" HorizontalAlignment="Center" VerticalAlignment="Center"/>
                                 <StackPanel Grid.Column="2" VerticalAlignment="Center">
-                                    <TextBlock Text="Risoluzione" FontSize="10" Foreground="Gray"/>
+                                    <TextBlock Text="{Binding [CommonResolution], Source={x:Static infrastructure:LocalizationManager.Instance}}" FontSize="10" Foreground="Gray"/>
                                     <StackPanel Orientation="Horizontal" Spacing="4">
                                         <TextBlock Text="{Binding FinalWidth}" FontWeight="SemiBold"/>
                                         <TextBlock Text="x" Foreground="Gray"/>
@@ -175,7 +176,7 @@
                             <Grid ColumnDefinitions="24, 12, *">
                                 <avalonia:MaterialIcon Grid.Column="0" Kind="FileSettings" Foreground="Gray" Width="19" Height="19" HorizontalAlignment="Center" VerticalAlignment="Center"/>
                                 <StackPanel Grid.Column="2" VerticalAlignment="Center">
-                                    <TextBlock Text="Contenitore" FontSize="10" Foreground="Gray"/>
+                                    <TextBlock Text="{Binding [CommonContainer], Source={x:Static infrastructure:LocalizationManager.Instance}}" FontSize="10" Foreground="Gray"/>
                                     <TextBlock Text="{Binding SelectedContainer}" FontWeight="SemiBold"/>
                                 </StackPanel>
                             </Grid>
@@ -183,7 +184,7 @@
                             <Grid ColumnDefinitions="24, 12, *">
                                 <avalonia:MaterialIcon Grid.Column="0" Kind="Movie" Foreground="Gray" Width="19" Height="19" HorizontalAlignment="Center" VerticalAlignment="Center"/>
                                 <StackPanel Grid.Column="2" VerticalAlignment="Center">
-                                    <TextBlock Text="Compressione (Codec)" FontSize="10" Foreground="Gray"/>
+                                    <TextBlock Text="{Binding [VideoExportCodec], Source={x:Static infrastructure:LocalizationManager.Instance}}" FontSize="10" Foreground="Gray"/>
                                     <TextBlock Text="{Binding SelectedCodec}" FontWeight="SemiBold"/>
                                 </StackPanel>
                             </Grid>
@@ -191,7 +192,7 @@
                             <Grid ColumnDefinitions="24, 12, *">
                                 <avalonia:MaterialIcon Grid.Column="0" Kind="ClockOutline" Foreground="Gray" Width="21" Height="21" HorizontalAlignment="Center" VerticalAlignment="Center"/>
                                 <StackPanel Grid.Column="2" VerticalAlignment="Center">
-                                    <TextBlock Text="Durata stimata" FontSize="10" Foreground="Gray"/>
+                                    <TextBlock Text="{Binding [VideoExportEstDuration], Source={x:Static infrastructure:LocalizationManager.Instance}}" FontSize="10" Foreground="Gray"/>
                                     <TextBlock Text="{Binding DurationText}" FontWeight="SemiBold"/>
                                 </StackPanel>
                             </Grid>
@@ -201,7 +202,7 @@
                             <Grid ColumnDefinitions="24, 12, *">
                                 <avalonia:MaterialIcon Grid.Column="0" Kind="BrightnessLow" Foreground="Gray" Width="18" Height="18" HorizontalAlignment="Center" VerticalAlignment="Center"/>
                                 <StackPanel Grid.Column="2" VerticalAlignment="Center">
-                                    <TextBlock Text="Soglia Nero (ADU)" FontSize="10" Foreground="Gray"/>
+                                    <TextBlock Text="{Binding [CommonBlackPointAdu], Source={x:Static infrastructure:LocalizationManager.Instance}}" FontSize="10" Foreground="Gray"/>
                                     <TextBlock Text="{Binding CurrentBlackPoint, StringFormat={}{0:N0}}" FontWeight="SemiBold"/>
                                 </StackPanel>
                             </Grid>
@@ -209,14 +210,14 @@
                             <Grid ColumnDefinitions="24, 12, *">
                                 <avalonia:MaterialIcon Grid.Column="0" Kind="BrightnessHigh" Foreground="Gray" Width="18" Height="18" HorizontalAlignment="Center" VerticalAlignment="Center"/>
                                 <StackPanel Grid.Column="2" VerticalAlignment="Center">
-                                    <TextBlock Text="Soglia Bianco (ADU)" FontSize="10" Foreground="Gray"/>
+                                    <TextBlock Text="{Binding [CommonWhitePointAdu], Source={x:Static infrastructure:LocalizationManager.Instance}}" FontSize="10" Foreground="Gray"/>
                                     <TextBlock Text="{Binding CurrentWhitePoint, StringFormat={}{0:N0}}" FontWeight="SemiBold"/>
                                 </StackPanel>
                             </Grid>
                         </StackPanel>
                     </Border>
                     
-                    <TextBlock Text="* Le soglie regolate nell'anteprima verranno applicate a tutta la sequenza esportata." 
+                    <TextBlock Text="{Binding [VideoExportWarning], Source={x:Static infrastructure:LocalizationManager.Instance}}" 
                                FontSize="10" Opacity="0.4" TextWrapping="Wrap" FontStyle="Italic"/>
                 </StackPanel>
             </Border>
@@ -238,8 +239,8 @@
                 </Grid>
 
                 <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Right" Spacing="12">
-                    <Button Content="Annulla" Command="{Binding CancelCommand}" Width="120" Classes="cancel" HorizontalContentAlignment="Center" FontWeight="Normal"/>
-                    <Button Content="Esporta Video" 
+                    <Button Content="{Binding [Cancel], Source={x:Static infrastructure:LocalizationManager.Instance}}" Command="{Binding CancelCommand}" Width="120" Classes="cancel" HorizontalContentAlignment="Center" FontWeight="Normal"/>
+                    <Button Content="{Binding [VideoExportExecute], Source={x:Static infrastructure:LocalizationManager.Instance}}" 
                             Command="{Binding ConfirmCommand}" 
                             IsVisible="{Binding !IsExporting}"
                             Width="160" Classes="apply" 

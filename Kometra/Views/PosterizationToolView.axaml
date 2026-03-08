@@ -4,12 +4,13 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:avalonia="clr-namespace:Material.Icons.Avalonia;assembly=Material.Icons.Avalonia"
         xmlns:conv="clr-namespace:Kometra.Converters"
+        xmlns:infrastructure="clr-namespace:Kometra.Infrastructure"
         xmlns:imageProcessing="clr-namespace:Kometra.ViewModels.ImageProcessing"
         mc:Ignorable="d" d:DesignWidth="950" d:DesignHeight="650"
         x:Class="Kometra.Views.PosterizationToolView"
         x:DataType="imageProcessing:PosterizationToolViewModel"
         Icon="/Assets/Icon/icon32.ico"
-        Title="Posterizzazione"
+        Title="{Binding [PosterizationTitle], Source={x:Static infrastructure:LocalizationManager.Instance}}"
         Width="1000" Height="600"
         MinHeight="500" MinWidth="850"
         WindowStartupLocation="CenterScreen"
@@ -53,15 +54,16 @@
         <Border Grid.Column="0" Background="{DynamicResource ToolPanelBackgroundBrush}" Padding="10,14,10,6">
             <Grid RowDefinitions="Auto, *, Auto">
                 
-                <TextBlock Grid.Row="0" Text="Parametri Quantizzazione" FontSize="22" FontWeight="Bold" 
+                <TextBlock Grid.Row="0" Text="{Binding [PosterizationParamsHeader], Source={x:Static infrastructure:LocalizationManager.Instance}}" 
+                           FontSize="22" FontWeight="Bold" 
                            Foreground="{DynamicResource Text.StaticWhiteBrush}" Margin="5,0,0,15"/>
 
                 <ScrollViewer Grid.Row="1" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
                     <StackPanel Spacing="15" Margin="5,0,14,0">
                         
                         <StackPanel Spacing="2">
-                            <TextBlock Classes="sectionTitle" Text="Numero Livelli"/>
-                            <TextBlock Classes="description" Text="Divide l'immagine in toni discreti per isolare le isofote."/>
+                            <TextBlock Classes="sectionTitle" Text="{Binding [PosterizationLevelsTitle], Source={x:Static infrastructure:LocalizationManager.Instance}}"/>
+                            <TextBlock Classes="description" Text="{Binding [PosterizationLevelsDesc], Source={x:Static infrastructure:LocalizationManager.Instance}}"/>
                             
                             <Grid ColumnDefinitions="*, Auto">
                                 <Slider Grid.Column="0" Minimum="2" Maximum="{Binding MaxLevels}" Value="{Binding Levels}" 
@@ -75,8 +77,8 @@
                         <Border Height="1" Background="{DynamicResource ActionDisabledBackgroundBrush}" Margin="0,4"/>
                         
                         <StackPanel Spacing="2">
-                            <TextBlock Classes="sectionTitle" Text="Metodo Distribuzione"/>
-                            <TextBlock Classes="description" Text="Scegli come ripartire i toni per enfatizzare dettagli deboli."/>
+                            <TextBlock Classes="sectionTitle" Text="{Binding [PosterizationMethodTitle], Source={x:Static infrastructure:LocalizationManager.Instance}}"/>
+                            <TextBlock Classes="description" Text="{Binding [PosterizationMethodDesc], Source={x:Static infrastructure:LocalizationManager.Instance}}"/>
                             <ComboBox ItemsSource="{Binding AvailableModes}" 
                                       SelectedItem="{Binding SelectedMode}" 
                                       HorizontalAlignment="Stretch" Margin="0,6,0,0">
@@ -90,12 +92,12 @@
                         
                         <StackPanel Spacing="10">
                             <StackPanel Spacing="0">
-                                <TextBlock Classes="sectionTitle" Text="Range Dinamico (Clip)"/>
-                                <TextBlock Classes="description" Text="Definisce l'intervallo di segnale effettivo."/>
+                                <TextBlock Classes="sectionTitle" Text="{Binding [PosterizationRangeTitle], Source={x:Static infrastructure:LocalizationManager.Instance}}"/>
+                                <TextBlock Classes="description" Text="{Binding [PosterizationRangeDesc], Source={x:Static infrastructure:LocalizationManager.Instance}}"/>
                             </StackPanel>
                             
                             <StackPanel Spacing="2">
-                                <TextBlock Text="Soglia Nero" FontSize="11" Foreground="{DynamicResource Text.MediumGreyBrush}" FontWeight="SemiBold"/>
+                                <TextBlock Text="{Binding [PosterizationBlackThreshold], Source={x:Static infrastructure:LocalizationManager.Instance}}" FontSize="11" Foreground="{DynamicResource Text.MediumGreyBrush}" FontWeight="SemiBold"/>
                                 <Grid ColumnDefinitions="*, Auto">
                                     <Slider Grid.Column="0" Minimum="{Binding SliderMin}" Maximum="{Binding SliderMax}" Value="{Binding BlackPoint}" VerticalAlignment="Center"/>
                                     <TextBox Name="BlackInput" Grid.Column="1" Classes="valueInput"
@@ -105,7 +107,7 @@
                             </StackPanel>
                             
                             <StackPanel Spacing="2">
-                                <TextBlock Text="Soglia Bianco" FontSize="11" Foreground="{DynamicResource Text.MediumGreyBrush}" FontWeight="SemiBold"/>
+                                <TextBlock Text="{Binding [PosterizationWhiteThreshold], Source={x:Static infrastructure:LocalizationManager.Instance}}" FontSize="11" Foreground="{DynamicResource Text.MediumGreyBrush}" FontWeight="SemiBold"/>
                                 <Grid ColumnDefinitions="*, Auto">
                                     <Slider Grid.Column="0" Minimum="{Binding SliderMin}" Maximum="{Binding SliderMax}" Value="{Binding WhitePoint}" VerticalAlignment="Center"/>
                                     <TextBox Name="WhiteInput" Grid.Column="1" Classes="valueInput"
@@ -118,9 +120,9 @@
                         <Border Height="1" Background="{DynamicResource ActionDisabledBackgroundBrush}" Margin="0,4"/>
                         
                         <StackPanel Spacing="8">
-                            <TextBlock Classes="sectionTitle" Text="Opzioni aggiuntive"/>
+                            <TextBlock Classes="sectionTitle" Text="{Binding [PosterizationOptionsTitle], Source={x:Static infrastructure:LocalizationManager.Instance}}"/>
                             <CheckBox IsChecked="{Binding AutoAdaptThresholds}" Padding="8,0,0,0" FontSize="12" 
-                                      Content="Adatta luminosità al cambio immagine" Margin="0,0,0,6"/>
+                                      Content="{Binding [PosterizationAutoAdapt], Source={x:Static infrastructure:LocalizationManager.Instance}}" Margin="0,0,0,6"/>
                         </StackPanel>
                     </StackPanel>
                 </ScrollViewer>
@@ -133,7 +135,8 @@
                             <ProgressBar IsIndeterminate="True" Height="4" Foreground="{DynamicResource ActionPrimaryBackgroundBrush}"/>
                         </StackPanel>
                         
-                        <Button Content="Applica" Command="{Binding ApplyCommand}" Classes="actionBtn apply" IsEnabled="{Binding !IsProcessing}" Margin="0,8,0,10"/>
+                        <Button Content="{Binding [Save], Source={x:Static infrastructure:LocalizationManager.Instance}}" 
+                                Command="{Binding ApplyCommand}" Classes="actionBtn apply" IsEnabled="{Binding !IsProcessing}" Margin="0,8,0,10"/>
                     </StackPanel>
                 </StackPanel>
             </Grid>
@@ -167,29 +170,29 @@
                     </Border>
 
                     <StackPanel Orientation="Horizontal" Spacing="4" Margin="10" HorizontalAlignment="Left" VerticalAlignment="Bottom" ZIndex="1" IsVisible="{Binding IsNavigationVisible}">
-                        <Button Command="{Binding Navigator.PreviousCommand}" ToolTip.Tip="Immagine Precedente">
+                        <Button Command="{Binding Navigator.PreviousCommand}" ToolTip.Tip="{Binding [TooltipPrevImage], Source={x:Static infrastructure:LocalizationManager.Instance}}">
                             <avalonia:MaterialIcon Kind="ChevronLeft" Width="16" Height="16"/>
                         </Button>
                         <TextBlock Text="{Binding CurrentImageText}" VerticalAlignment="Center" Margin="8,0" Foreground="{DynamicResource Text.StaticWhiteBrush}" FontWeight="SemiBold" FontSize="13"/>
-                        <Button Command="{Binding Navigator.NextCommand}" ToolTip.Tip="Immagine Successiva">
+                        <Button Command="{Binding Navigator.NextCommand}" ToolTip.Tip="{Binding [TooltipNextImage], Source={x:Static infrastructure:LocalizationManager.Instance}}">
                             <avalonia:MaterialIcon Kind="ChevronRight" Width="16" Height="16"/>
                         </Button>
                     </StackPanel>
 
                     <StackPanel Orientation="Horizontal" Spacing="4" Margin="10" HorizontalAlignment="Right" VerticalAlignment="Bottom" ZIndex="1">
-                        <Button Click="OnZoomOutClicked" ToolTip.Tip="Zoom Out">
+                        <Button Click="OnZoomOutClicked" ToolTip.Tip="{Binding [TooltipZoomOut], Source={x:Static infrastructure:LocalizationManager.Instance}}">
                             <avalonia:MaterialIcon Kind="Minus" Width="16" Height="16"/>
                         </Button>
-                        <Button Click="OnZoomInClicked" ToolTip.Tip="Zoom In">
+                        <Button Click="OnZoomInClicked" ToolTip.Tip="{Binding [TooltipZoomIn], Source={x:Static infrastructure:LocalizationManager.Instance}}">
                             <avalonia:MaterialIcon Kind="Plus" Width="16" Height="16"/>
                         </Button>
-                        <Button Click="OnResetViewClicked" Margin="8,0,0,0" ToolTip.Tip="Adatta allo schermo">
+                        <Button Click="OnResetViewClicked" Margin="8,0,0,0" ToolTip.Tip="{Binding [TooltipFitView], Source={x:Static infrastructure:LocalizationManager.Instance}}">
                             <avalonia:MaterialIcon Kind="FitToScreen" Width="16" Height="16"/>
                         </Button>
                         
                         <Path Data="M0,0 V18" Stroke="{DynamicResource ActionDisabledBackgroundBrush}" StrokeThickness="1" Margin="8,4,8,4" VerticalAlignment="Center" />
                         
-                        <Button Command="{Binding ResetThresholdsCommand}" ToolTip.Tip="Reset Stretch (Livelli)">
+                        <Button Command="{Binding ResetThresholdsCommand}" ToolTip.Tip="{Binding [TooltipResetStretch], Source={x:Static infrastructure:LocalizationManager.Instance}}">
                             <avalonia:MaterialIcon Kind="Contrast" Width="16" Height="16"/>
                         </Button>
                     </StackPanel>

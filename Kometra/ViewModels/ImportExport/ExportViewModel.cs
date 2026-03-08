@@ -7,6 +7,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using Kometra.Infrastructure; // Aggiunto per localizzazione
 using Kometra.Models.Export;
 using Kometra.Models.Processing;
 using Kometra.Models.Processing.Batch;
@@ -71,7 +72,7 @@ public partial class ExportViewModel : ObservableObject, IDisposable
     [NotifyPropertyChangedFor(nameof(IsJpegOptionsVisible))]
     [NotifyPropertyChangedFor(nameof(IsVisualProcessingVisible))]
     [NotifyPropertyChangedFor(nameof(CanMergeToMef))] 
-    private ExportFormat _selectedFormat = ExportFormat.Fits;
+    private ExportFormat _selectedFormat = ExportFormat.FITS;
 
     [ObservableProperty] private bool _mergeIntoSingleFile;
     [ObservableProperty] private FitsCompressionMode _selectedCompression = FitsCompressionMode.None; 
@@ -79,7 +80,7 @@ public partial class ExportViewModel : ObservableObject, IDisposable
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(IsManualStretch))]
-    private string _stretchMode = "Auto Stretch";
+    private string _stretchMode = LocalizationManager.Instance["ExportStretchAuto"];
 
     public double CurrentBlackPoint
     {
@@ -113,9 +114,9 @@ public partial class ExportViewModel : ObservableObject, IDisposable
     // --- Computed Properties ---
     public bool IsInteractionEnabled => !IsExporting;
     public bool IsJpegOptionsVisible => SelectedFormat == ExportFormat.JPEG;
-    public bool IsFitsOptionsVisible => SelectedFormat == ExportFormat.Fits;
+    public bool IsFitsOptionsVisible => SelectedFormat == ExportFormat.FITS;
     public bool IsVisualProcessingVisible => !IsFitsOptionsVisible;
-    public bool IsManualStretch => StretchMode == "Manuale" && IsVisualProcessingVisible;
+    public bool IsManualStretch => StretchMode == LocalizationManager.Instance["ExportStretchManual"] && IsVisualProcessingVisible;
 
     // Visibile solo se è formato FITS E ci sono più di 1 file selezionati.
     public bool CanMergeToMef => IsFitsOptionsVisible && _navigableItems.Count > 1;
@@ -290,7 +291,7 @@ public partial class ExportViewModel : ObservableObject, IDisposable
         {
             if (!token.IsCancellationRequested)
             {
-                StatusText = "Errore: " + ex.Message;
+                StatusText = string.Format(LocalizationManager.Instance["ErrorGeneric"], ex.Message);
                 if (!ImageLoadedTcs.Task.IsCompleted) ImageLoadedTcs.TrySetException(ex);
             }
         }
@@ -364,7 +365,8 @@ public partial class ExportViewModel : ObservableObject, IDisposable
         // Esci se il valore è null
         if (_activeRenderer == null || string.IsNullOrEmpty(value)) return; 
     
-        if (value.Contains("Auto")) await _activeRenderer.ResetThresholdsAsync();
+        if (value.Contains(LocalizationManager.Instance["ExportStretchAuto"])) 
+            await _activeRenderer.ResetThresholdsAsync();
     
         OnPropertyChanged(nameof(CurrentBlackPoint));
         OnPropertyChanged(nameof(CurrentWhitePoint));
@@ -373,7 +375,7 @@ public partial class ExportViewModel : ObservableObject, IDisposable
     [RelayCommand(CanExecute = nameof(CanInteract))]
     private async Task SelectFolder()
     {
-        var path = await _dialogService.ShowOpenFolderDialogAsync("Seleziona destinazione");
+        var path = await _dialogService.ShowOpenFolderDialogAsync(LocalizationManager.Instance["ExportSelectFolderTitle"]);
         if (!string.IsNullOrWhiteSpace(path)) OutputDirectory = path;
     }
 
@@ -389,7 +391,7 @@ public partial class ExportViewModel : ObservableObject, IDisposable
         {
             case ExportFormat.JPEG: return ".jpg";
             case ExportFormat.PNG: return ".png";
-            case ExportFormat.Fits:
+            case ExportFormat.FITS:
                 return SelectedCompression != FitsCompressionMode.None ? ".fits.fz" : ".fits";
             default: return ".dat";
         }
@@ -399,13 +401,13 @@ public partial class ExportViewModel : ObservableObject, IDisposable
     private async Task ConfirmExport()
     {
         IsExporting = true;
-        StatusText = "Inizializzazione...";
+        StatusText = LocalizationManager.Instance["StatusInit"];
         ProgressValue = 0;
         _exportCts = new CancellationTokenSource();
 
         foreach (var item in _navigableItems)
         {
-            item.Status = "In coda";
+            item.Status = LocalizationManager.Instance["ExportStatusQueued"];
             item.IsSuccess = false; item.IsError = false;
         }
 
@@ -455,13 +457,13 @@ public partial class ExportViewModel : ObservableObject, IDisposable
 
             await _coordinator.ExecuteExportAsync(_navigableItems, settings, progress, _exportCts.Token);
 
-            StatusText = "Esportazione completata.";
+            StatusText = LocalizationManager.Instance["ExportStatusDone"];
             ProgressValue = 100;
             await Task.Delay(1500);
             RequestClose?.Invoke();
         }
-        catch (OperationCanceledException) { StatusText = "Annullato dall'utente."; }
-        catch (Exception ex) { StatusText = $"Errore: {ex.Message}"; }
+        catch (OperationCanceledException) { StatusText = LocalizationManager.Instance["StatusCancelledByUser"]; }
+        catch (Exception ex) { StatusText = string.Format(LocalizationManager.Instance["ErrorGeneric"], ex.Message); }
         finally
         {
             IsExporting = false;
@@ -490,7 +492,7 @@ public partial class ExportViewModel : ObservableObject, IDisposable
     [RelayCommand]
     private void Cancel()
     {
-        if (IsExporting) { _exportCts?.Cancel(); StatusText = "Annullamento..."; }
+        if (IsExporting) { _exportCts?.Cancel(); StatusText = LocalizationManager.Instance["StatusCancelling"]; }
         else RequestClose?.Invoke();
     }
 

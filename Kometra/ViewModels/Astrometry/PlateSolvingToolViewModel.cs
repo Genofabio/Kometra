@@ -6,6 +6,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using Kometra.Infrastructure; // Aggiunto per localizzazione
 using Kometra.Models.Astrometry.Solving;
 using Kometra.Models.Fits;
 using Kometra.Models.Fits.Structure;
@@ -26,7 +27,7 @@ public partial class PlateSolvingToolViewModel : ObservableObject, IDisposable
 
     public event Action? RequestClose;
 
-    [ObservableProperty] private string _title = "Risoluzione Astrometrica";
+    [ObservableProperty] private string _title = LocalizationManager.Instance["PlateTitle"];
     [ObservableProperty] private string _targetName = "";
     
     [ObservableProperty] 
@@ -43,7 +44,7 @@ public partial class PlateSolvingToolViewModel : ObservableObject, IDisposable
     [NotifyPropertyChangedFor(nameof(CanApply))]
     private PlateSolvingStatus _currentStatus = PlateSolvingStatus.Idle;
 
-    [ObservableProperty] private string _statusText = "Pronto.";
+    [ObservableProperty] private string _statusText = LocalizationManager.Instance["PlateStatusReady"];
     [ObservableProperty] private string _fullLog = ""; 
     [ObservableProperty] private int _progressValue = 0;
     [ObservableProperty] private int _progressMax = 100;
@@ -67,7 +68,7 @@ public partial class PlateSolvingToolViewModel : ObservableObject, IDisposable
         TargetName = targetName;
         ProgressMax = _targetFiles.Count;
         
-        if (_targetFiles.Count == 0) StatusText = "Nessun file selezionato.";
+        if (_targetFiles.Count == 0) StatusText = LocalizationManager.Instance["ErrorNoFilesSelected"];
         _coordinator.ClearSession();
     }
 
@@ -82,7 +83,7 @@ public partial class PlateSolvingToolViewModel : ObservableObject, IDisposable
         _coordinator.ClearSession(); 
         
         _logBuilder.Clear();
-        AppendLog("=== INIZIO SESSIONE DI RISOLUZIONE ==="); 
+        AppendLog(LocalizationManager.Instance["PlateLogStartSession"]); 
 
         _cts = new CancellationTokenSource();
         var progressHandler = new Progress<AstrometryProgressReport>(ProcessProgressReport);
@@ -99,9 +100,9 @@ public partial class PlateSolvingToolViewModel : ObservableObject, IDisposable
         }
         catch (Exception ex)
         {
-            AppendLog($"\n!!! ERRORE FATALE: {ex.Message}");
+            AppendLog(string.Format(LocalizationManager.Instance["PlateLogErrorFatal"], ex.Message));
             CurrentStatus = PlateSolvingStatus.Error;
-            StatusText = "Errore critico durante il processo.";
+            StatusText = LocalizationManager.Instance["PlateStatusCriticalError"];
         }
         finally
         {
@@ -114,9 +115,9 @@ public partial class PlateSolvingToolViewModel : ObservableObject, IDisposable
     {
         if (report.IsStarting)
         {
-            StatusText = $"Elaborazione: {report.FileName} ({report.CurrentFileIndex}/{report.TotalFiles})";
+            StatusText = string.Format(LocalizationManager.Instance["PlateStatusProcessing"], report.FileName, report.CurrentFileIndex, report.TotalFiles);
             ProgressValue = report.CurrentFileIndex;
-            AppendLog($"\n------------------------------------------------------------\n[FILE {report.CurrentFileIndex}/{report.TotalFiles}] {report.FileName}");
+            AppendLog(string.Format(LocalizationManager.Instance["PlateLogFileHeader"], report.CurrentFileIndex, report.TotalFiles, report.FileName));
             return;
         }
 
@@ -125,30 +126,30 @@ public partial class PlateSolvingToolViewModel : ObservableObject, IDisposable
         // Gestione Tag Semantici
         if (report.Message == "EVENT:CANCELLED")
         {
-            AppendLog("\n[!] Operazione interrotta dall'utente.");
+            AppendLog(LocalizationManager.Instance["PlateLogCancelled"]);
         }
         else if (report.Message.StartsWith("CONFIG:"))
         {
-            AppendLog($"   > Config: {report.Message.Substring(7)}");
+            AppendLog(string.Format(LocalizationManager.Instance["PlateLogConfig"], report.Message.Substring(7)));
         }
         else if (report.Message.StartsWith("TOOL:"))
         {
-            AppendLog($"     | {report.Message.Substring(5)}");
+            AppendLog(string.Format(LocalizationManager.Instance["PlateLogTool"], report.Message.Substring(5)));
         }
         else if (report.Message.StartsWith("SKIP:"))
         {
-            AppendLog($"   [!] SALTATO: Dati mancanti ({report.Message.Substring(5)})");
+            AppendLog(string.Format(LocalizationManager.Instance["PlateLogSkipped"], report.Message.Substring(5)));
         }
         else if (report.Message == "STATUS:SUCCESS")
         {
             if (report.Result?.SolvedHeader != null)
                 AppendLog(FormatWcsDetails(report.Result.SolvedHeader));
             
-            AppendLog("   >>> RISOLTO CON SUCCESSO");
+            AppendLog(LocalizationManager.Instance["PlateLogSuccess"]);
         }
         else if (report.Message.StartsWith("STATUS:FAIL:"))
         {
-            AppendLog($"   >>> FALLITO: {report.Message.Substring(12)}");
+            AppendLog(string.Format(LocalizationManager.Instance["PlateLogFailed"], report.Message.Substring(12)));
         }
         else if (report.Message.StartsWith("SUMMARY:"))
         {
@@ -159,7 +160,10 @@ public partial class PlateSolvingToolViewModel : ObservableObject, IDisposable
     private string FormatSummary(string summaryMsg)
     {
         var parts = summaryMsg.Split(':');
-        return $"\n============================================================\nSESSIONE COMPLETATA\nSuccessi: {parts[1]} su {parts[2]} files.\n============================================================";
+        // SUMMARY:successCount:totalCount
+        var header = LocalizationManager.Instance["PlateLogSummaryHeader"];
+        var stats = string.Format(LocalizationManager.Instance["PlateLogSummaryStats"], parts[1], parts[2]);
+        return $"{header}\n{stats}";
     }
 
     private string FormatWcsDetails(FitsHeader header)
@@ -167,7 +171,7 @@ public partial class PlateSolvingToolViewModel : ObservableObject, IDisposable
         var sb = new StringBuilder();
         var wcsKeys = new[] { "CTYPE1", "CTYPE2", "CRVAL1", "CRVAL2", "CD1_1", "CD1_2", "CD2_1", "CD2_2" };
 
-        sb.AppendLine("     [NUOVI DATI WCS]");
+        sb.AppendLine(LocalizationManager.Instance["PlateLogWcsData"]);
         foreach (var key in wcsKeys)
         {
             string val = _metadataService.GetStringValue(header, key);
@@ -183,7 +187,7 @@ public partial class PlateSolvingToolViewModel : ObservableObject, IDisposable
 
         if (cancelled)
         {
-            StatusText = "Operazione annullata.";
+            StatusText = LocalizationManager.Instance["StatusCancelled"];
             CurrentStatus = PlateSolvingStatus.Cancelled;
             // Nota: Il log del SUMMARY viene ora gestito esclusivamente dal ProcessProgressReport
         }
@@ -194,8 +198,8 @@ public partial class PlateSolvingToolViewModel : ObservableObject, IDisposable
                           : PlateSolvingStatus.Failed;
 
             StatusText = actualSuccesses > 0 
-                ? $"Sessione conclusa ({actualSuccesses}/{_targetFiles.Count} risolti)."
-                : "Risoluzione fallita (nessun file risolto).";
+                ? string.Format(LocalizationManager.Instance["PlateStatusFinished"], actualSuccesses, _targetFiles.Count)
+                : LocalizationManager.Instance["PlateStatusAllFailed"];
         }
 
         ApplyResultsCommand.NotifyCanExecuteChanged();

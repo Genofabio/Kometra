@@ -5,12 +5,13 @@
         xmlns:avalonia="clr-namespace:Material.Icons.Avalonia;assembly=Material.Icons.Avalonia"
         xmlns:imageProcessing="clr-namespace:Kometra.ViewModels.ImageProcessing"
         xmlns:converters="clr-namespace:Kometra.Converters"
+        xmlns:infrastructure="clr-namespace:Kometra.Infrastructure"
         xmlns:coordinators="clr-namespace:Kometra.Services.Processing.Coordinators"
         mc:Ignorable="d" d:DesignWidth="1000" d:DesignHeight="700"
         x:Class="Kometra.Views.CropToolView"
         x:DataType="imageProcessing:CropToolViewModel"
         Icon="/Assets/Icon/icon32.ico"
-        Title="Ritaglio e Centratura"
+        Title="{Binding [CropTitle], Source={x:Static infrastructure:LocalizationManager.Instance}}"
         Width="820" Height="600"
         MinHeight="550" MinWidth="800"
         WindowStartupLocation="CenterScreen"
@@ -82,7 +83,8 @@
             <Grid RowDefinitions="Auto, *, Auto">
                 
                 <StackPanel Grid.Row="0" Spacing="5" Margin="0,0,0,15">
-                    <TextBlock Text="RITAGLIO IMMAGINI" FontSize="18" FontWeight="Bold" Foreground="White"/>
+                    <TextBlock Text="{Binding [CropHeader], Source={x:Static infrastructure:LocalizationManager.Instance}}" 
+                               FontSize="18" FontWeight="Bold" Foreground="White"/>
                     <Border Height="1" Background="{DynamicResource Border.WhiteDimBrush}" Opacity="0.3" Margin="0,5"/>
                 </StackPanel>
 
@@ -91,20 +93,22 @@
                         
                         <StackPanel Spacing="8">
                             <StackPanel Spacing="0">
-                                <TextBlock Classes="sectionTitle" Text="Modalità Ritaglio"/>
-                                <TextBlock Classes="description" Text="Come viene applicato il centro del ritaglio."/>
+                                <TextBlock Classes="sectionTitle" Text="{Binding [CropModeTitle], Source={x:Static infrastructure:LocalizationManager.Instance}}"/>
+                                <TextBlock Classes="description" Text="{Binding [CropModeDesc], Source={x:Static infrastructure:LocalizationManager.Instance}}"/>
                             </StackPanel>
 
                             <Grid ColumnDefinitions="*,*">
-                                <RadioButton Grid.Column="0" GroupName="Mode" Content="Statica" 
+                                <RadioButton Grid.Column="0" GroupName="Mode" 
+                                             Content="{Binding [CropModeStatic], Source={x:Static infrastructure:LocalizationManager.Instance}}" 
                                              Classes="segmented" CornerRadius="4,0,0,4" BorderThickness="1,1,0,1"
                                              IsChecked="{Binding SelectedMode, Converter={StaticResource EnumToBool}, ConverterParameter={x:Static coordinators:CropMode.Static}}"
-                                             ToolTip.Tip="Usa lo stesso centro per tutte le immagini."/>
+                                             ToolTip.Tip="{Binding [CropModeStaticTooltip], Source={x:Static infrastructure:LocalizationManager.Instance}}"/>
                                 
-                                <RadioButton Grid.Column="1" GroupName="Mode" Content="Dinamica" 
+                                <RadioButton Grid.Column="1" GroupName="Mode" 
+                                             Content="{Binding [CropModeDynamic], Source={x:Static infrastructure:LocalizationManager.Instance}}" 
                                              Classes="segmented" CornerRadius="0,4,4,0" BorderThickness="1,1,1,1"
                                              IsChecked="{Binding SelectedMode, Converter={StaticResource EnumToBool}, ConverterParameter={x:Static coordinators:CropMode.Dynamic}}"
-                                             ToolTip.Tip="Definisci un centro diverso per ogni immagine."/>
+                                             ToolTip.Tip="{Binding [CropModeDynamicTooltip], Source={x:Static infrastructure:LocalizationManager.Instance}}"/>
                             </Grid>
                             
                             <TextBlock Text="{Binding InstructionsText}" 
@@ -116,12 +120,12 @@
 
                         <StackPanel Spacing="10">
                             <StackPanel Spacing="0">
-                                <TextBlock Classes="sectionTitle" Text="Dimensioni Ritaglio"/>
-                                <TextBlock Classes="description" Text="Dimensione finale dell'immagine (in pixel)."/>
+                                <TextBlock Classes="sectionTitle" Text="{Binding [CropSizeTitle], Source={x:Static infrastructure:LocalizationManager.Instance}}"/>
+                                <TextBlock Classes="description" Text="{Binding [CropSizeDesc], Source={x:Static infrastructure:LocalizationManager.Instance}}"/>
                             </StackPanel>
 
                             <StackPanel Spacing="2">
-                                <TextBlock Text="Larghezza (Width)" FontSize="11" Foreground="{DynamicResource Text.MediumGreyBrush}" FontWeight="SemiBold"/>
+                                <TextBlock Text="{Binding [CropWidth], Source={x:Static infrastructure:LocalizationManager.Instance}}" FontSize="11" Foreground="{DynamicResource Text.MediumGreyBrush}" FontWeight="SemiBold"/>
                                 <Grid ColumnDefinitions="*, 75"> 
                                     <Slider Grid.Column="0" Minimum="10" Maximum="{Binding MaxAllowedWidth}" Value="{Binding CropWidth}" 
                                             IsSnapToTickEnabled="True" TickFrequency="2" VerticalAlignment="Center" Margin="0,0,10,0"/>
@@ -132,7 +136,7 @@
                             </StackPanel>
 
                             <StackPanel Spacing="2">
-                                <TextBlock Text="Altezza (Height)" FontSize="11" Foreground="{DynamicResource Text.MediumGreyBrush}" FontWeight="SemiBold"/>
+                                <TextBlock Text="{Binding [CropHeight], Source={x:Static infrastructure:LocalizationManager.Instance}}" FontSize="11" Foreground="{DynamicResource Text.MediumGreyBrush}" FontWeight="SemiBold"/>
                                 <Grid ColumnDefinitions="*, 75">
                                     <Slider Grid.Column="0" Minimum="10" Maximum="{Binding MaxAllowedHeight}" Value="{Binding CropHeight}" 
                                             IsSnapToTickEnabled="True" TickFrequency="2" VerticalAlignment="Center" Margin="0,0,10,0"/>
@@ -142,8 +146,14 @@
                                 </Grid>
                             </StackPanel>
                             
-                            <TextBlock Text="{Binding MaxAllowedWidth, StringFormat='Max consentito: {0:0}px (dal file più piccolo)'}" 
-                                       FontSize="10" Foreground="Gray" HorizontalAlignment="Right" Margin="0,-5,0,0"/>
+                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,-5,0,0">
+                                <TextBlock Text="{Binding [CropMaxAllowed], Source={x:Static infrastructure:LocalizationManager.Instance}}" 
+                                           FontSize="10" Foreground="Gray"/>
+                                <TextBlock Text="{Binding MaxAllowedWidth}" 
+                                           FontSize="10" Foreground="Gray" Margin="4,0,0,0"/>
+                                <TextBlock Text="{Binding [CropFromSmallestFile], Source={x:Static infrastructure:LocalizationManager.Instance}}" 
+                                           FontSize="10" Foreground="Gray" Margin="4,0,0,0"/>
+                            </StackPanel>
                         </StackPanel>
 
                     </StackPanel>
@@ -158,7 +168,7 @@
                     </StackPanel>
 
                     <Button IsVisible="{Binding !IsBusy}" 
-                            Content="Applica" 
+                            Content="{Binding [CropApply], Source={x:Static infrastructure:LocalizationManager.Instance}}" 
                             Command="{Binding ApplyCommand}" 
                             Background="{DynamicResource ActionSuccessBackgroundBrush}" 
                             Foreground="White"
@@ -220,7 +230,7 @@
                             IsVisible="{Binding !Viewport.IsCropVisible}">
                         <StackPanel Orientation="Horizontal" Spacing="8">
                             <avalonia:MaterialIcon Kind="CursorDefaultClick" Foreground="{DynamicResource OverlayTextForegroundBrush}" Width="16" Height="16"/>
-                            <TextBlock Text="Clicca sull'immagine per definire il centro" 
+                            <TextBlock Text="{Binding [CropClickHint], Source={x:Static infrastructure:LocalizationManager.Instance}}" 
                                        Foreground="{DynamicResource OverlayTextForegroundBrush}" FontSize="14" VerticalAlignment="Center"/>
                         </StackPanel>
                     </Border>
@@ -232,29 +242,29 @@
                                 PointerPressed="OnControlsPointerPressed">
                         
                         <Button Command="{Binding SetCenterToImageMiddleCommand}" 
-                                ToolTip.Tip="Centra area di interesse nell'immagine">
+                                ToolTip.Tip="{Binding [TooltipCenterInterest], Source={x:Static infrastructure:LocalizationManager.Instance}}">
                             <avalonia:MaterialIcon Kind="CrosshairsGps" Width="16" Height="16"/>
                         </Button>
 
                         <Path Data="M0,0 V18" Stroke="{DynamicResource ActionDisabledBackgroundBrush}" 
                               StrokeThickness="1" Margin="8,4,8,4" VerticalAlignment="Center" />
     
-                        <Button Click="OnZoomOutClicked" ToolTip.Tip="Zoom Out">
+                        <Button Click="OnZoomOutClicked" ToolTip.Tip="{Binding [TooltipZoomOut], Source={x:Static infrastructure:LocalizationManager.Instance}}">
                             <avalonia:MaterialIcon Kind="Minus" Width="16" Height="16"/>
                         </Button>
     
-                        <Button Click="OnZoomInClicked" ToolTip.Tip="Zoom In">
+                        <Button Click="OnZoomInClicked" ToolTip.Tip="{Binding [TooltipZoomIn], Source={x:Static infrastructure:LocalizationManager.Instance}}">
                             <avalonia:MaterialIcon Kind="Plus" Width="16" Height="16"/>
                         </Button>
     
-                        <Button Click="OnResetViewClicked" Margin="8,0,0,0" ToolTip.Tip="Adatta allo schermo">
+                        <Button Click="OnResetViewClicked" Margin="8,0,0,0" ToolTip.Tip="{Binding [TooltipResetView], Source={x:Static infrastructure:LocalizationManager.Instance}}">
                             <avalonia:MaterialIcon Kind="FitToScreen" Width="16" Height="16"/>
                         </Button>
     
                         <Path Data="M0,0 V18" Stroke="{DynamicResource ActionDisabledBackgroundBrush}" 
                               StrokeThickness="1" Margin="8,4,8,4" VerticalAlignment="Center" />
     
-                        <Button Click="OnResetThresholdsClicked" ToolTip.Tip="Reset Stretch (Contrast)">
+                        <Button Click="OnResetThresholdsClicked" ToolTip.Tip="{Binding [TooltipResetStretch], Source={x:Static infrastructure:LocalizationManager.Instance}}">
                             <avalonia:MaterialIcon Kind="Contrast" Width="16" Height="16"/>
                         </Button>
                     </StackPanel>
@@ -265,11 +275,11 @@
                                 Background="Transparent"
                                 PointerPressed="OnControlsPointerPressed"> 
     
-                        <Button Command="{Binding Navigator.MoveToFirstCommand}" ToolTip.Tip="Prima Immagine">
+                        <Button Command="{Binding Navigator.MoveToFirstCommand}" ToolTip.Tip="{Binding [TooltipFirstImage], Source={x:Static infrastructure:LocalizationManager.Instance}}">
                             <avalonia:MaterialIcon Kind="ChevronDoubleLeft" Width="16" Height="16"/>
                         </Button>
 
-                        <Button Command="{Binding Navigator.PreviousCommand}" ToolTip.Tip="Precedente">
+                        <Button Command="{Binding Navigator.PreviousCommand}" ToolTip.Tip="{Binding [TooltipPrevImage], Source={x:Static infrastructure:LocalizationManager.Instance}}">
                             <avalonia:MaterialIcon Kind="ChevronLeft" Width="16" Height="16"/>
                         </Button>
 
@@ -277,11 +287,11 @@
                                    Margin="8,0" Foreground="{DynamicResource Text.StaticWhiteBrush}" 
                                    FontWeight="SemiBold" FontSize="13"/>
 
-                        <Button Command="{Binding Navigator.NextCommand}" ToolTip.Tip="Successiva">
+                        <Button Command="{Binding Navigator.NextCommand}" ToolTip.Tip="{Binding [TooltipNextImage], Source={x:Static infrastructure:LocalizationManager.Instance}}">
                             <avalonia:MaterialIcon Kind="ChevronRight" Width="16" Height="16"/>
                         </Button>
 
-                        <Button Command="{Binding Navigator.MoveToLastCommand}" ToolTip.Tip="Ultima Immagine">
+                        <Button Command="{Binding Navigator.MoveToLastCommand}" ToolTip.Tip="{Binding [TooltipLastImage], Source={x:Static infrastructure:LocalizationManager.Instance}}">
                             <avalonia:MaterialIcon Kind="ChevronDoubleRight" Width="16" Height="16"/>
                         </Button>
                     </StackPanel>

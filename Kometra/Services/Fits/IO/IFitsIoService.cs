@@ -18,7 +18,7 @@ public interface IFitsIoService
 
     /// <summary>
     /// Legge tutti gli HDU presenti nel file (Primario ed Estensioni).
-    /// Gestisce internamente l'ereditarietà dei metadati e la decompressione (Rice, Gzip, Deflate).
+    /// Gestisce internamente l'ereditarietà dei metadati e la decompressione (RICE, GZIP, Deflate).
     /// </summary>
     Task<List<FitsHdu>> ReadAllHdusAsync(string path);
 

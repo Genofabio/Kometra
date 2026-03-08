@@ -126,7 +126,6 @@ public partial class MultipleImagesNodeViewModel : ImageNodeViewModel
 
             if (imageHdu == null)
             {
-                System.Diagnostics.Debug.WriteLine($"[MultipleImagesNode] SKIP: Nessuna immagine trovata in {fileRef.FilePath}");
                 return;
             }
 

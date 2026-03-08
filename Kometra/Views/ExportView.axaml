@@ -3,13 +3,14 @@
         xmlns:sys="using:System" 
         xmlns:avalonia="clr-namespace:Material.Icons.Avalonia;assembly=Material.Icons.Avalonia"
         xmlns:vm="clr-namespace:Kometra.ViewModels.ImportExport"
+        xmlns:infrastructure="clr-namespace:Kometra.Infrastructure"
         xmlns:models="using:Kometra.Models.Export"
         xmlns:converters="using:Avalonia.Data.Converters"
         xmlns:converters1="clr-namespace:Kometra.Converters"
         x:Class="Kometra.Views.ExportView"
         x:DataType="vm:ExportViewModel"
         Icon="/Assets/Icon/icon32.ico"
-        Title="Esportazione immagine"
+        Title="{Binding [ExportTitle], Source={x:Static infrastructure:LocalizationManager.Instance}}"
         Width="1150" Height="640"
         MinWidth="1000" MinHeight="600"
         WindowStartupLocation="CenterOwner"
@@ -56,14 +57,15 @@
                     IsEnabled="{Binding IsInteractionEnabled}">
                 <Grid RowDefinitions="Auto, *">
                     <StackPanel Grid.Row="0" Spacing="6" Margin="20,20,20,10">
-                        <TextBlock Text="ESPORTAZIONE" FontWeight="Bold" Foreground="White" FontSize="18"/>
+                        <TextBlock Text="{Binding [ExportHeader], Source={x:Static infrastructure:LocalizationManager.Instance}}" 
+                                   FontWeight="Bold" Foreground="White" FontSize="18"/>
                         <Separator Margin="0,10,0,0"/>
                     </StackPanel>
 
                     <Grid Grid.Row="1" RowDefinitions="Auto, *, Auto">
                         <StackPanel Grid.Row="0" Margin="20,6,20,5">
-                            <TextBlock Text="FILE DA SALVARE" Classes="sectionHeader"/>
-                            <TextBlock Text="Seleziona i file da elaborare." FontSize="11" Opacity="0.5" FontStyle="Italic"/>
+                            <TextBlock Text="{Binding [ExportFilesToSave], Source={x:Static infrastructure:LocalizationManager.Instance}}" Classes="sectionHeader"/>
+                            <TextBlock Text="{Binding [ExportSelectFilesDesc], Source={x:Static infrastructure:LocalizationManager.Instance}}" FontSize="11" Opacity="0.5" FontStyle="Italic"/>
                         </StackPanel>
 
                         <Border Grid.Row="1" Margin="15,10,15,10" Background="{DynamicResource ToolWindowBackgroundBrush}" CornerRadius="4" BorderBrush="#33FFFFFF" BorderThickness="1">
@@ -81,13 +83,13 @@
 
                         <Grid Grid.Row="2" ColumnDefinitions="*, *" Margin="15,0,15,15" ColumnSpacing="10">
                             <Button Grid.Column="0" Command="{Binding SelectAllCommand}" 
-                                    Content="Seleziona tutto" 
+                                    Content="{Binding [ExportSelectAll], Source={x:Static infrastructure:LocalizationManager.Instance}}" 
                                     HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" VerticalContentAlignment="Center"
                                     Padding="0" Height="32" FontSize="10" FontWeight="Bold"
                                     Classes="calculate"/>
                             
                             <Button Grid.Column="1" Command="{Binding DeselectAllCommand}" 
-                                    Content="Deseleziona tutto" 
+                                    Content="{Binding [ExportDeselectAll], Source={x:Static infrastructure:LocalizationManager.Instance}}" 
                                     HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" VerticalContentAlignment="Center"
                                     Padding="0" Height="32" FontSize="10" FontWeight="Bold"
                                     Classes="cancel"/>
@@ -114,7 +116,8 @@
                         <Border IsVisible="{Binding IsLoadingPreview}" Background="#99000000" HorizontalAlignment="Stretch" VerticalAlignment="Stretch">
                             <StackPanel VerticalAlignment="Center" Spacing="10">
                                 <ProgressBar IsIndeterminate="True" Width="150" HorizontalAlignment="Center"/>
-                                <TextBlock Text="Rendering anteprima..." HorizontalAlignment="Center" FontSize="12" Foreground="White"/>
+                                <TextBlock Text="{Binding [ExportPreviewLoading], Source={x:Static infrastructure:LocalizationManager.Instance}}" 
+                                           HorizontalAlignment="Center" FontSize="12" Foreground="White"/>
                             </StackPanel>
                         </Border>
 
@@ -123,10 +126,10 @@
                                     PointerPressed="OnControlsPointerPressed" 
                                     IsVisible="{Binding ActiveRenderer, Converter={x:Static converters:ObjectConverters.IsNotNull}}">
                             
-                            <Button Command="{Binding Navigator.MoveToFirstCommand}" ToolTip.Tip="Prima Immagine" Classes="ghostBtn" Padding="5">
+                            <Button Command="{Binding Navigator.MoveToFirstCommand}" ToolTip.Tip="{Binding [TooltipFirstImage], Source={x:Static infrastructure:LocalizationManager.Instance}}" Classes="ghostBtn" Padding="5">
                                 <avalonia:MaterialIcon Kind="ChevronDoubleLeft" Width="16" Height="16"/>
                             </Button>
-                            <Button Command="{Binding Navigator.PreviousCommand}" ToolTip.Tip="Precedente" Classes="ghostBtn" Padding="5">
+                            <Button Command="{Binding Navigator.PreviousCommand}" ToolTip.Tip="{Binding [TooltipPrevImage], Source={x:Static infrastructure:LocalizationManager.Instance}}" Classes="ghostBtn" Padding="5">
                                 <avalonia:MaterialIcon Kind="ChevronLeft" Width="16" Height="16"/>
                             </Button>
                             
@@ -134,10 +137,10 @@
                                 <TextBlock Text="{Binding CurrentImageText}" Foreground="White" FontWeight="Bold" FontSize="12" VerticalAlignment="Center"/>
                             </Border>
                             
-                            <Button Command="{Binding Navigator.NextCommand}" ToolTip.Tip="Successiva" Classes="ghostBtn" Padding="5">
+                            <Button Command="{Binding Navigator.NextCommand}" ToolTip.Tip="{Binding [TooltipNextImage], Source={x:Static infrastructure:LocalizationManager.Instance}}" Classes="ghostBtn" Padding="5">
                                 <avalonia:MaterialIcon Kind="ChevronRight" Width="16" Height="16"/>
                             </Button>
-                            <Button Command="{Binding Navigator.MoveToLastCommand}" ToolTip.Tip="Ultima Immagine" Classes="ghostBtn" Padding="5">
+                            <Button Command="{Binding Navigator.MoveToLastCommand}" ToolTip.Tip="{Binding [TooltipLastImage], Source={x:Static infrastructure:LocalizationManager.Instance}}" Classes="ghostBtn" Padding="5">
                                 <avalonia:MaterialIcon Kind="ChevronDoubleRight" Width="16" Height="16"/>
                             </Button>
                         </StackPanel>
@@ -147,19 +150,19 @@
                                     PointerPressed="OnControlsPointerPressed"
                                     IsVisible="{Binding ActiveRenderer, Converter={x:Static converters:ObjectConverters.IsNotNull}}">
                             
-                            <Button Click="OnZoomOutClicked" ToolTip.Tip="Zoom Out" Classes="ghostBtn" Padding="5">
+                            <Button Click="OnZoomOutClicked" ToolTip.Tip="{Binding [TooltipZoomOut], Source={x:Static infrastructure:LocalizationManager.Instance}}" Classes="ghostBtn" Padding="5">
                                 <avalonia:MaterialIcon Kind="Minus" Width="16" Height="16"/>
                             </Button>
-                            <Button Click="OnZoomInClicked" ToolTip.Tip="Zoom In" Classes="ghostBtn" Padding="5">
+                            <Button Click="OnZoomInClicked" ToolTip.Tip="{Binding [TooltipZoomIn], Source={x:Static infrastructure:LocalizationManager.Instance}}" Classes="ghostBtn" Padding="5">
                                 <avalonia:MaterialIcon Kind="Plus" Width="16" Height="16"/>
                             </Button>
-                            <Button Click="OnFitViewClicked" ToolTip.Tip="Adatta allo Schermo" Classes="ghostBtn" Padding="5">
+                            <Button Click="OnFitViewClicked" ToolTip.Tip="{Binding [TooltipResetView], Source={x:Static infrastructure:LocalizationManager.Instance}}" Classes="ghostBtn" Padding="5">
                                 <avalonia:MaterialIcon Kind="FitToScreen" Width="16" Height="16"/>
                             </Button>
 
                             <Path Data="M0,0 V18" Stroke="#666666" StrokeThickness="1" Margin="6,0" VerticalAlignment="Center"/>
 
-                            <Button Command="{Binding ResetThresholdsCommand}" ToolTip.Tip="Reset Soglie (Auto)" Classes="ghostBtn" Padding="5">
+                            <Button Command="{Binding ResetThresholdsCommand}" ToolTip.Tip="{Binding [TooltipResetStretch], Source={x:Static infrastructure:LocalizationManager.Instance}}" Classes="ghostBtn" Padding="5">
                                 <avalonia:MaterialIcon Kind="Contrast" Width="16" Height="16"/>
                             </Button>
                         </StackPanel>
@@ -179,36 +182,36 @@
                 <Grid RowDefinitions="Auto, *">
                     
                     <StackPanel Grid.Row="0" Margin="20,20,20,0" Spacing="6">
-                        <TextBlock Text="CONFIGURAZIONE" FontWeight="Bold" Foreground="White" FontSize="16"/>
+                        <TextBlock Text="{Binding [ExportConfiguration], Source={x:Static infrastructure:LocalizationManager.Instance}}" FontWeight="Bold" Foreground="White" FontSize="16"/>
                         <Separator Margin="0,10,0,0"/>
                     </StackPanel>
 
                     <ScrollViewer Grid.Row="1" Padding="0,15,0,0" VerticalScrollBarVisibility="Auto">
                         <StackPanel Margin="20,0,20,60" Spacing="0">
 
-                            <TextBlock Text="DESTINAZIONE" Classes="sectionHeader"/>
+                            <TextBlock Text="{Binding [ExportDestination], Source={x:Static infrastructure:LocalizationManager.Instance}}" Classes="sectionHeader"/>
                             <Grid ColumnDefinitions="*, Auto" ColumnSpacing="6" Margin="0,5,0,0">
                                 <TextBox Text="{Binding OutputDirectory}" IsReadOnly="True" FontSize="11" Height="30" VerticalContentAlignment="Center"/>
                                 <Button Grid.Column="1" Command="{Binding SelectFolderCommand}" Width="36" Height="30" Padding="0">
                                     <avalonia:MaterialIcon Kind="FolderOpen" Width="16"/>
                                 </Button>
                             </Grid>
-                            <TextBox Text="{Binding BaseFileName}" Watermark="Nome base (Opzionale)" FontSize="11" Height="30" Margin="0,8,0,0" VerticalContentAlignment="Center"/>
+                            <TextBox Text="{Binding BaseFileName}" Watermark="{Binding [ExportBaseNameWatermark], Source={x:Static infrastructure:LocalizationManager.Instance}}" FontSize="11" Height="30" Margin="0,8,0,0" VerticalContentAlignment="Center"/>
 
                             <Separator/>
 
-                            <TextBlock Text="FORMATO OUTPUT" Classes="sectionHeader"/>
+                            <TextBlock Text="{Binding [ExportOutputFormat], Source={x:Static infrastructure:LocalizationManager.Instance}}" Classes="sectionHeader"/>
                             <ComboBox ItemsSource="{Binding AvailableFormats}" SelectedItem="{Binding SelectedFormat}" HorizontalAlignment="Stretch" Margin="0,5,0,0"/>
 
                             <Separator/>
 
-                            <TextBlock Text="OPZIONI DI SALVATAGGIO" Classes="sectionHeader" Margin="0,0,0,10"/>
+                            <TextBlock Text="{Binding [ExportSaveOptions], Source={x:Static infrastructure:LocalizationManager.Instance}}" Classes="sectionHeader" Margin="0,0,0,10"/>
                             
                             <Border Background="{DynamicResource ToolWindowBackgroundBrush}" CornerRadius="4" Padding="15" BorderBrush="{DynamicResource Border.WhiteDimBrush}" BorderThickness="1">
                                 <StackPanel Spacing="15">
                                     
                                     <StackPanel IsVisible="{Binding IsFitsOptionsVisible}" Spacing="5">
-                                        <TextBlock Text="Metodologia di compressione" FontSize="11" Opacity="0.6"/>
+                                        <TextBlock Text="{Binding [ExportCompressionMethod], Source={x:Static infrastructure:LocalizationManager.Instance}}" FontSize="11" Opacity="0.6"/>
                                         <ComboBox ItemsSource="{Binding AvailableCompressions}" 
                                                   SelectedItem="{Binding SelectedCompression}" 
                                                   HorizontalAlignment="Stretch"
@@ -223,7 +226,7 @@
 
                                     <StackPanel IsVisible="{Binding IsJpegOptionsVisible}" Spacing="5">
                                         <Grid ColumnDefinitions="*, Auto">
-                                            <TextBlock Text="Qualità Compressione" FontSize="11" Opacity="0.6"/>
+                                            <TextBlock Text="{Binding [ExportJpegQuality], Source={x:Static infrastructure:LocalizationManager.Instance}}" FontSize="11" Opacity="0.6"/>
                                             <TextBlock Text="{Binding JpegQuality, StringFormat='{}{0}%'}" FontSize="11" FontWeight="Bold" Grid.Column="1"/>
                                         </Grid>
                                         <Slider Value="{Binding JpegQuality}" Minimum="10" Maximum="100"/>
@@ -234,25 +237,25 @@
 
                                     <StackPanel IsVisible="{Binding IsVisualProcessingVisible}" Spacing="10">
                                         <StackPanel Spacing="5">
-                                            <TextBlock Text="Gestione Soglie (Stretch)" FontSize="11" Opacity="0.6"/>
+                                            <TextBlock Text="{Binding [ExportStretchManagement], Source={x:Static infrastructure:LocalizationManager.Instance}}" FontSize="11" Opacity="0.6"/>
                                             <ComboBox SelectedItem="{Binding StretchMode}" HorizontalAlignment="Stretch" FontSize="11" Margin="0,0,0,8"
                                                       PointerWheelChanged="OnComboBoxPointerWheelChanged">
-                                                <sys:String>Auto Stretch</sys:String>
-                                                <sys:String>Manuale</sys:String>
+                                                <ComboBoxItem Content="{Binding [ExportStretchAuto], Source={x:Static infrastructure:LocalizationManager.Instance}}"/>
+                                                <ComboBoxItem Content="{Binding [ExportStretchManual], Source={x:Static infrastructure:LocalizationManager.Instance}}"/>
                                             </ComboBox>
                                         </StackPanel>
                                         
                                         <StackPanel IsVisible="{Binding IsManualStretch}" Spacing="8">
                                             <StackPanel Spacing="2">
                                                 <Grid ColumnDefinitions="*, Auto">
-                                                    <TextBlock Text="Punto Nero" FontSize="10" Opacity="0.6"/>
+                                                    <TextBlock Text="{Binding [ExportBlackPoint], Source={x:Static infrastructure:LocalizationManager.Instance}}" FontSize="10" Opacity="0.6"/>
                                                     <TextBlock Text="{Binding CurrentBlackPoint, StringFormat='{}{0:N0}'}" FontSize="10" Grid.Column="1"/>
                                                 </Grid>
                                                 <Slider Value="{Binding CurrentBlackPoint}" Minimum="{Binding DataMin}" Maximum="{Binding DataMax}"/>
                                             </StackPanel>
                                             <StackPanel Spacing="2">
                                                 <Grid ColumnDefinitions="*, Auto">
-                                                    <TextBlock Text="Punto Bianco" FontSize="10" Opacity="0.6"/>
+                                                    <TextBlock Text="{Binding [ExportWhitePoint], Source={x:Static infrastructure:LocalizationManager.Instance}}" FontSize="10" Opacity="0.6"/>
                                                     <TextBlock Text="{Binding CurrentWhitePoint, StringFormat='{}{0:N0}'}" FontSize="10" Grid.Column="1"/>
                                                 </Grid>
                                                 <Slider Value="{Binding CurrentWhitePoint}" Minimum="{Binding DataMin}" Maximum="{Binding DataMax}"/>
@@ -262,9 +265,9 @@
 
                                     <StackPanel IsVisible="{Binding CanMergeToMef}">
                                         <Separator Background="{DynamicResource Border.WhiteDimBrush}" Opacity="0.2" Margin="0,0,0,10"/>
-                                        <TextBlock Text="Merge" FontSize="11" Opacity="0.6"/>
+                                        <TextBlock Text="{Binding [ExportMerge], Source={x:Static infrastructure:LocalizationManager.Instance}}" FontSize="11" Opacity="0.6"/>
                                         <CheckBox IsChecked="{Binding MergeIntoSingleFile}" 
-                                                  Content="Unisci in un unico file (MEF)" 
+                                                  Content="{Binding [ExportMergeMef], Source={x:Static infrastructure:LocalizationManager.Instance}}" 
                                                   FontSize="12" 
                                                   VerticalContentAlignment="Center"/>
                                     </StackPanel>
@@ -289,10 +292,12 @@
                 </StackPanel>
 
                 <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="12">
-                    <Button Content="Annulla" Command="{Binding CancelCommand}" Width="100" 
+                    <Button Content="{Binding [Cancel], Source={x:Static infrastructure:LocalizationManager.Instance}}" 
+                            Command="{Binding CancelCommand}" Width="100" 
                             Classes="cancel" HorizontalContentAlignment="Center" VerticalContentAlignment="Center"/>
                     
-                    <Button Content="Esporta" Command="{Binding ConfirmExportCommand}" Width="100"
+                    <Button Content="{Binding [ExportExecute], Source={x:Static infrastructure:LocalizationManager.Instance}}" 
+                            Command="{Binding ConfirmExportCommand}" Width="100"
                             Classes="apply" IsEnabled="{Binding !IsExporting}" HorizontalContentAlignment="Center" VerticalContentAlignment="Center"/>
                 </StackPanel>
             </Grid>

@@ -5,6 +5,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using Kometra.Infrastructure; // Aggiunto per localizzazione
 using Kometra.Models.Fits;
 using Kometra.Models.Processing;
 using Kometra.Models.Processing.Batch;
@@ -77,7 +78,7 @@ public partial class ImageEnhancementToolViewModel : ObservableObject, IDisposab
     [NotifyCanExecuteChangedFor(nameof(ApplyBatchCommand))]
     private bool _isBusy;
 
-    [ObservableProperty] private string _statusText = "Pronto";
+    [ObservableProperty] private string _statusText = string.Empty;
     [ObservableProperty] private double _progressValue;
 
     // --- MODALITÀ SELEZIONATA ---
@@ -97,7 +98,7 @@ public partial class ImageEnhancementToolViewModel : ObservableObject, IDisposab
     [NotifyPropertyChangedFor(nameof(IsClaheVisible))]
     [NotifyPropertyChangedFor(nameof(IsLocalNormVisible))]
     [NotifyPropertyChangedFor(nameof(IsKernelVisible))]
-    [NotifyPropertyChangedFor(nameof(IsLaplaceVisible))] // <--- AGGIUNTO
+    [NotifyPropertyChangedFor(nameof(IsLaplaceVisible))]
     private ImageEnhancementMode _selectedMode;
 
     // --- PARAMETRI SCIENTIFICI ---
@@ -146,12 +147,8 @@ public partial class ImageEnhancementToolViewModel : ObservableObject, IDisposab
     public bool IsRvsfSingleVisible => SelectedMode == ImageEnhancementMode.AdaptiveLaplacianRVSF;
     public bool IsRvsfMosaicVisible => SelectedMode == ImageEnhancementMode.AdaptiveLaplacianMosaic;
     
-    // FIX: Rimosso InverseRho e AzimuthalMedian (che non hanno parametri)
-    // Così il contenitore (e il titolo) spariscono quando non ci sono controlli.
     public bool IsAzimuthalContainerVisible => SelectedMode is ImageEnhancementMode.AzimuthalAverage 
                                                    or ImageEnhancementMode.AzimuthalRenormalization 
-                                                   // or ImageEnhancementMode.InverseRho  <-- RIMOSSO
-                                                   // or ImageEnhancementMode.AzimuthalMedian <-- RIMOSSO
                                                    or ImageEnhancementMode.MedianComaModel
                                                    or ImageEnhancementMode.RadialWeightedModel;
 
@@ -174,7 +171,6 @@ public partial class ImageEnhancementToolViewModel : ObservableObject, IDisposab
     public bool IsClaheVisible => SelectedMode == ImageEnhancementMode.ClaheLocalContrast;
     public bool IsLocalNormVisible => SelectedMode == ImageEnhancementMode.AdaptiveLocalNormalization;
     
-    // <--- AGGIUNTO
     public bool IsLaplaceVisible => SelectedMode == ImageEnhancementMode.AdaptiveLaplaceFilter;
 
     public ImageEnhancementToolViewModel(
@@ -191,6 +187,8 @@ public partial class ImageEnhancementToolViewModel : ObservableObject, IDisposab
         _rendererFactory = rendererFactory;
         _coordinator = coordinator;
         _metadataService = metadataService;
+
+        _statusText = LocalizationManager.Instance["EnhanceStatusReady"];
 
         AvailableModes = Enum.GetValues<ImageEnhancementMode>()
                              .Cast<ImageEnhancementMode>()
@@ -215,7 +213,7 @@ public partial class ImageEnhancementToolViewModel : ObservableObject, IDisposab
         }
         catch (Exception ex)
         {
-            StatusText = $"Errore: {ex.Message}";
+            StatusText = string.Format(LocalizationManager.Instance["EnhanceStatusError"], ex.Message);
             ImageLoadedTcs.TrySetException(ex);
         }
     }
@@ -231,13 +229,13 @@ public partial class ImageEnhancementToolViewModel : ObservableObject, IDisposab
 
         try
         {
-            StatusText = "Caricamento...";
+            StatusText = LocalizationManager.Instance["EnhanceStatusLoading"];
             var fileRef = _sourceFiles[index];
             FitsRenderer newRenderer;
 
             if (CurrentState == EnhancementToolState.ResultsReady)
             {
-                StatusText = "Elaborazione anteprima...";
+                StatusText = LocalizationManager.Instance["EnhanceStatusProcessingPreview"];
                 var parameters = BuildParameters();
                 
                 Array processedPixels = await _coordinator.CalculatePreviewDataAsync(fileRef, SelectedMode, parameters, token);
@@ -245,7 +243,7 @@ public partial class ImageEnhancementToolViewModel : ObservableObject, IDisposab
 
                 var originalData = await _dataManager.GetDataAsync(fileRef.FilePath);
                 var originalHdu = originalData.FirstImageHdu ?? originalData.PrimaryHdu;
-                if (originalHdu == null) throw new InvalidOperationException("File sorgente privo di immagini.");
+                if (originalHdu == null) throw new InvalidOperationException(LocalizationManager.Instance["ErrorSourceFileEmpty"]);
 
                 var header = fileRef.ModifiedHeader ?? originalHdu.Header;
 
@@ -257,7 +255,7 @@ public partial class ImageEnhancementToolViewModel : ObservableObject, IDisposab
                 }
 
                 newRenderer = await _rendererFactory.CreateAsync(processedPixels, header);
-                StatusText = "Anteprima attiva";
+                StatusText = LocalizationManager.Instance["EnhanceStatusPreviewActive"];
             }
             else
             {
@@ -265,10 +263,10 @@ public partial class ImageEnhancementToolViewModel : ObservableObject, IDisposab
                 token.ThrowIfCancellationRequested();
                 
                 var imageHdu = data.FirstImageHdu ?? data.PrimaryHdu;
-                if (imageHdu == null) throw new InvalidOperationException("Nessuna immagine valida trovata.");
+                if (imageHdu == null) throw new InvalidOperationException(LocalizationManager.Instance["ErrorNoValidImageFound"]);
 
                 newRenderer = await _rendererFactory.CreateAsync(imageHdu.PixelData, fileRef.ModifiedHeader ?? imageHdu.Header);
-                StatusText = "Pronto";
+                StatusText = LocalizationManager.Instance["EnhanceStatusReady"];
             }
 
             token.ThrowIfCancellationRequested();
@@ -300,11 +298,11 @@ public partial class ImageEnhancementToolViewModel : ObservableObject, IDisposab
         }
         catch (OperationCanceledException) 
         { 
-            StatusText = "Caricamento interrotto";
+            StatusText = LocalizationManager.Instance["EnhanceStatusLoadingCancelled"];
         }
         catch (Exception ex) 
         { 
-            StatusText = $"Errore: {ex.Message}";
+            StatusText = string.Format(LocalizationManager.Instance["EnhanceStatusError"], ex.Message);
             if (CurrentState == EnhancementToolState.ResultsReady) CurrentState = EnhancementToolState.Initial;
         }
         finally { IsBusy = false; ProgressValue = 0; }
@@ -342,7 +340,7 @@ public partial class ImageEnhancementToolViewModel : ObservableObject, IDisposab
         }
         catch (Exception ex)
         {
-            StatusText = $"Errore Calcolo: {ex.Message}";
+            StatusText = string.Format(LocalizationManager.Instance["EnhanceStatusCalcError"], ex.Message);
             CurrentState = EnhancementToolState.Initial;
         }
         finally { IsBusy = false; }
@@ -362,7 +360,7 @@ public partial class ImageEnhancementToolViewModel : ObservableObject, IDisposab
         try
         {
             var progress = new Progress<BatchProgressReport>(p =>
-                StatusText = $"File {p.CurrentFileIndex} / {p.TotalFiles}...");
+                StatusText = string.Format(LocalizationManager.Instance["EnhanceStatusBatchProgress"], p.CurrentFileIndex, p.TotalFiles));
 
             var results = await _coordinator.ExecuteBatchAsync(
                 _sourceFiles, 
@@ -380,12 +378,12 @@ public partial class ImageEnhancementToolViewModel : ObservableObject, IDisposab
         }
         catch (OperationCanceledException)
         {
-            StatusText = "Elaborazione batch annullata.";
+            StatusText = LocalizationManager.Instance["EnhanceStatusBatchCancelled"];
             CurrentState = EnhancementToolState.ResultsReady;
         }
         catch (Exception ex)
         {
-            StatusText = $"Errore Batch: {ex.Message}";
+            StatusText = string.Format(LocalizationManager.Instance["EnhanceStatusBatchError"], ex.Message);
             CurrentState = EnhancementToolState.ResultsReady;
         }
         finally { IsBusy = false; }
@@ -405,7 +403,7 @@ public partial class ImageEnhancementToolViewModel : ObservableObject, IDisposab
         else if (CurrentState == EnhancementToolState.Processing)
         {
             CurrentState = EnhancementToolState.ResultsReady;
-            StatusText = "Operazione interrotta";
+            StatusText = LocalizationManager.Instance["EnhanceStatusInterrupted"];
         }
         else
         {

@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Globalization;
 using Avalonia.Data.Converters;
+using Kometra.Infrastructure; // Aggiunto per l'accesso al LocalizationManager
 using Kometra.Models.Export;
 
 namespace Kometra.Converters;
@@ -13,7 +14,8 @@ public class CompressionNameConverter : IValueConverter
         {
             return mode switch
             {
-                FitsCompressionMode.None => "Nessuna",
+                // Recuperiamo la traduzione tramite il LocalizationManager
+                FitsCompressionMode.None => LocalizationManager.Instance["ExportCompressionNone"],
                 _ => mode.ToString()
             };
         }

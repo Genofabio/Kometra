@@ -4,12 +4,13 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:avalonia="clr-namespace:Material.Icons.Avalonia;assembly=Material.Icons.Avalonia"
         xmlns:astrometry="clr-namespace:Kometra.ViewModels.Astrometry"
+        xmlns:infrastructure="clr-namespace:Kometra.Infrastructure"
         mc:Ignorable="d" d:DesignWidth="650" d:DesignHeight="550"
         x:Class="Kometra.Views.PlateSolvingToolView"
         x:DataType="astrometry:PlateSolvingToolViewModel"
         x:Name="RootWindow"
         Icon="/Assets/Icon/icon32.ico"
-        Title="Risoluzione Astrometrica"
+        Title="{Binding [PlateTitle], Source={x:Static infrastructure:LocalizationManager.Instance}}"
         Width="650" Height="550"
         MinWidth="650" MinHeight="550"
         WindowStartupLocation="CenterOwner"
@@ -22,10 +23,10 @@
             <StackPanel Grid.Row="0" Spacing="10">
                 <TextBlock Classes="TitleText" Text="{Binding Title}"/>
                 <TextBlock Classes="DescriptionText" 
-                           Text="Analizza la disposizione delle stelle per calcolare le coordinate celesti reali (WCS)."/>
+                           Text="{Binding [PlateDesc], Source={x:Static infrastructure:LocalizationManager.Instance}}"/>
                 <Border Height="1" Background="{DynamicResource ActionDisabledBackgroundBrush}" Margin="0,5"/>
                 <StackPanel Orientation="Horizontal" Spacing="5">
-                    <TextBlock Classes="TargetLabel" Text="Target:"/>
+                    <TextBlock Classes="TargetLabel" Text="{Binding [PlateTargetLabel], Source={x:Static infrastructure:LocalizationManager.Instance}}"/>
                     <TextBlock Classes="TargetValue" Text="{Binding TargetName}"/>
                 </StackPanel>
             </StackPanel>
@@ -33,9 +34,13 @@
             <StackPanel Grid.Row="1" Spacing="8">
                 <Grid ColumnDefinitions="*, Auto">
                     <TextBlock Text="{Binding StatusText}" FontWeight="SemiBold" FontSize="14"/>
-                    <TextBlock Text="{Binding ProgressValue, StringFormat='Processati: {0}'}" 
-                               Foreground="{DynamicResource Text.MediumGreyBrush}" 
-                               FontSize="12" IsVisible="{Binding IsBusyState}" Grid.Column="1"/>
+                    
+                    <StackPanel Orientation="Horizontal" Grid.Column="1" IsVisible="{Binding IsBusyState}">
+                        <TextBlock Text="{Binding [PlateProcessedLabel], Source={x:Static infrastructure:LocalizationManager.Instance}}" 
+                                   Foreground="{DynamicResource Text.MediumGreyBrush}" FontSize="12"/>
+                        <TextBlock Text="{Binding ProgressValue}" Margin="4,0,0,0"
+                                   Foreground="{DynamicResource Text.MediumGreyBrush}" FontSize="12"/>
+                    </StackPanel>
                 </Grid>
                 <ProgressBar Height="6" Minimum="0" Maximum="{Binding ProgressMax}" Value="{Binding ProgressValue}"
                              IsVisible="{Binding IsBusyState}" 
@@ -55,9 +60,9 @@
                 <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
                     <avalonia:MaterialIcon Kind="AlertCircleOutline" Width="16" Height="16" 
                                            Foreground="{DynamicResource OverlaySearchBoxBrush}"/>
-                    <TextBlock Classes="WarningLabel" Text="Attenzione:" FontWeight="Bold" VerticalAlignment="Center"/>
+                    <TextBlock Classes="WarningLabel" Text="{Binding [PlateWarningLabel], Source={x:Static infrastructure:LocalizationManager.Instance}}" FontWeight="Bold" VerticalAlignment="Center"/>
                     <TextBlock Classes="WarningBody" Margin="0"
-                               Text="salva i risultati per rendere le modifiche all'header permanenti." 
+                               Text="{Binding [PlateWarningBody], Source={x:Static infrastructure:LocalizationManager.Instance}}" 
                                VerticalAlignment="Center"/>
                 </StackPanel>
 
@@ -66,14 +71,14 @@
                                 IsVisible="{Binding IsInitialState}">
                         <Button Classes="baseBtn calculate" 
                                 Command="{Binding StartSolvingCommand}"
-                                Content="Avvia risoluzione"/>
+                                Content="{Binding [PlateStart], Source={x:Static infrastructure:LocalizationManager.Instance}}"/>
                     </StackPanel>
 
                     <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" 
                                 IsVisible="{Binding IsBusyState}">
                         <Button Classes="baseBtn cancel" 
                                 Command="{Binding CancelCommand}"
-                                Content="Interrompi"/>
+                                Content="{Binding [PlateStop], Source={x:Static infrastructure:LocalizationManager.Instance}}"/>
                     </StackPanel>
 
                     <StackPanel Orientation="Horizontal" Spacing="10" HorizontalAlignment="Right" 
@@ -81,15 +86,15 @@
         
                         <Button Classes="baseBtn calculate" 
                                 Command="{Binding StartSolvingCommand}"
-                                Content="Riavvia risoluzione"/>
+                                Content="{Binding [PlateRestart], Source={x:Static infrastructure:LocalizationManager.Instance}}"/>
 
                         <Button Classes="baseBtn cancel" 
                                 Command="{Binding CloseCommand}"
-                                Content="Annulla"/>
+                                Content="{Binding [Cancel], Source={x:Static infrastructure:LocalizationManager.Instance}}"/>
 
                         <Button Classes="baseBtn apply" 
                                 Command="{Binding ApplyResultsCommand}"
-                                Content="Applica"
+                                Content="{Binding [Save], Source={x:Static infrastructure:LocalizationManager.Instance}}"
                                 IsEnabled="{Binding CanApply}"/>
                     </StackPanel>
                 </Grid>

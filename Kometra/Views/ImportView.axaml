@@ -5,12 +5,13 @@
         xmlns:avalonia="clr-namespace:Material.Icons.Avalonia;assembly=Material.Icons.Avalonia"
         xmlns:imageProcessing="clr-namespace:Kometra.ViewModels.ImageProcessing"
         xmlns:conv="clr-namespace:Kometra.Converters"
+        xmlns:infrastructure="clr-namespace:Kometra.Infrastructure"
         xmlns:importExport="clr-namespace:Kometra.ViewModels.ImportExport"
         mc:Ignorable="d" d:DesignWidth="1100" d:DesignHeight="750"
         x:Class="Kometra.Views.ImportView"
         x:DataType="importExport:ImportViewModel"
         Icon="/Assets/Icon/icon32.ico"
-        Title="Importazione e Calibrazione Scientifica"
+        Title="{Binding [ImportTitle], Source={x:Static infrastructure:LocalizationManager.Instance}}"
         Width="1000" Height="668"
         WindowStartupLocation="CenterOwner"
         Background="{DynamicResource ToolWindowBackgroundBrush}">
@@ -31,10 +32,10 @@
                 
                 <Grid Grid.Row="0" ColumnDefinitions="*, 25, 380" Margin="0,0,0,15">
                     <Border Grid.Column="0" BorderBrush="{DynamicResource Border.WhiteDimBrush}" BorderThickness="0,0,0,1" Padding="0,0,0,10">
-                        <TextBlock Text="1. IMMAGINI SORGENTE (LIGHTS)" FontWeight="Bold" Foreground="White" FontSize="16"/>
+                        <TextBlock Text="{Binding [ImportSourceImages], Source={x:Static infrastructure:LocalizationManager.Instance}}" FontWeight="Bold" Foreground="White" FontSize="16"/>
                     </Border>
                     <Border Grid.Column="2" BorderBrush="{DynamicResource Border.WhiteDimBrush}" BorderThickness="0,0,0,1" Padding="0,0,0,10">
-                        <TextBlock Text="2. CALIBRAZIONE" FontWeight="Bold" Foreground="White" FontSize="16"/>
+                        <TextBlock Text="{Binding [ImportCalibration], Source={x:Static infrastructure:LocalizationManager.Instance}}" FontWeight="Bold" Foreground="White" FontSize="16"/>
                     </Border>
                 </Grid>
 
@@ -44,7 +45,7 @@
                         
                         <Border x:Name="LightsCard" Grid.Row="0" Background="{DynamicResource ToolPanelBackgroundBrush}" CornerRadius="4" Padding="12">
                             <Grid RowDefinitions="Auto, *, Auto">
-                                <TextBlock Grid.Row="0" Text="Immagini del Soggetto" FontSize="14" FontWeight="Bold" Margin="0,0,0,10"/>
+                                <TextBlock Grid.Row="0" Text="{Binding [ImportSubjectImages], Source={x:Static infrastructure:LocalizationManager.Instance}}" FontSize="14" FontWeight="Bold" Margin="0,0,0,10"/>
                                 
                                 <Border Grid.Row="1" Background="{DynamicResource ToolWindowBackgroundBrush}" CornerRadius="4" BorderBrush="{DynamicResource Border.WhiteDimBrush}" BorderThickness="1">
                                     <ListBox ItemsSource="{Binding LightFiles}" Background="Transparent">
@@ -75,22 +76,22 @@
                                 </Border>
 
                                 <Grid Grid.Row="2" ColumnDefinitions="*, *" Margin="0,12,0,0">
-                                    <Button Grid.Column="0" Content="Aggiungi immagine" Command="{Binding AddLightsCommand}" Classes="addPrimary" Margin="0,0,4,0"/>
-                                    <Button Grid.Column="1" Content="Svuota " Command="{Binding ClearLightsCommand}" Classes="clearDestructive" Margin="4,0,0,0"/>
+                                    <Button Grid.Column="0" Content="{Binding [ImportAddLight], Source={x:Static infrastructure:LocalizationManager.Instance}}" Command="{Binding AddLightsCommand}" Classes="addPrimary" Margin="0,0,4,0"/>
+                                    <Button Grid.Column="1" Content="{Binding [ImportClear], Source={x:Static infrastructure:LocalizationManager.Instance}}" Command="{Binding ClearLightsCommand}" Classes="clearDestructive" Margin="4,0,0,0"/>
                                 </Grid>
                             </Grid>
                         </Border>
 
                         <Border Grid.Row="2" Background="{DynamicResource ToolPanelBackgroundBrush}" CornerRadius="4" Padding="12">
                             <StackPanel Spacing="10">
-                                <TextBlock Text="Opzioni di Importazione" FontSize="14" FontWeight="Bold"/>
+                                <TextBlock Text="{Binding [ImportOptions], Source={x:Static infrastructure:LocalizationManager.Instance}}" FontSize="14" FontWeight="Bold"/>
                                 
                                 <CheckBox IsChecked="{Binding ImportAsSeparateNodes}" 
-                                          Content="Importa come immagini separate"
+                                          Content="{Binding [ImportSeparateNodes], Source={x:Static infrastructure:LocalizationManager.Instance}}"
                                           Foreground="{DynamicResource Text.MainGreyBrush}"
-                                          ToolTip.Tip="Se attivo, crea un nodo indipendente per ogni immagine invece di raggrupparle in una sequenza."/>
+                                          ToolTip.Tip="{Binding [ImportTooltipSeparateNodes], Source={x:Static infrastructure:LocalizationManager.Instance}}"/>
                                 
-                                <TextBlock Text="Utile per analizzare singolarmente le estensioni di file mosaico o immagini indipendenti." 
+                                <TextBlock Text="{Binding [ImportSeparateNodesDesc], Source={x:Static infrastructure:LocalizationManager.Instance}}" 
                                            FontSize="10" Foreground="{DynamicResource Text.MediumGreyBrush}" 
                                            TextWrapping="Wrap" Margin="28,-18,0,0"/>
                             </StackPanel>
@@ -103,7 +104,7 @@
                         <StackPanel Spacing="12">
                             <Border Background="{DynamicResource ToolPanelBackgroundBrush}" CornerRadius="4" Padding="12">
                                 <Grid RowDefinitions="Auto, *, Auto">
-                                    <TextBlock Grid.Row="0" Text="Bias Frames" FontWeight="Bold" FontSize="14" Margin="0,0,0,8"/>
+                                    <TextBlock Grid.Row="0" Text="{Binding [ImportBiasFrames], Source={x:Static infrastructure:LocalizationManager.Instance}}" FontWeight="Bold" FontSize="14" Margin="0,0,0,8"/>
                                     <Border Grid.Row="1" Background="{DynamicResource ToolWindowBackgroundBrush}" CornerRadius="4" BorderThickness="1" BorderBrush="{DynamicResource Border.WhiteDimBrush}">
                                         <ListBox Height="70" ItemsSource="{Binding BiasFiles}" Background="Transparent">
                                             <ListBox.ItemTemplate>
@@ -129,15 +130,15 @@
                                         </ListBox>
                                     </Border>
                                     <Grid Grid.Row="2" ColumnDefinitions="*, *" Margin="0,8,0,0">
-                                        <Button Grid.Column="0" Content="Aggiungi Bias" Command="{Binding AddBiasCommand}" Classes="addPrimary" Margin="0,0,4,0"/>
-                                        <Button Grid.Column="1" Content="Svuota" Command="{Binding ClearBiasCommand}" Classes="clearDestructive" Margin="4,0,0,0"/>
+                                        <Button Grid.Column="0" Content="{Binding [ImportAddBias], Source={x:Static infrastructure:LocalizationManager.Instance}}" Command="{Binding AddBiasCommand}" Classes="addPrimary" Margin="0,0,4,0"/>
+                                        <Button Grid.Column="1" Content="{Binding [ImportClear], Source={x:Static infrastructure:LocalizationManager.Instance}}" Command="{Binding ClearBiasCommand}" Classes="clearDestructive" Margin="4,0,0,0"/>
                                     </Grid>
                                 </Grid>
                             </Border>
 
                             <Border Background="{DynamicResource ToolPanelBackgroundBrush}" CornerRadius="4" Padding="12">
                                 <Grid RowDefinitions="Auto, *, Auto">
-                                    <TextBlock Grid.Row="0" Text="Dark Frames" FontWeight="Bold" FontSize="14" Margin="0,0,0,8"/>
+                                    <TextBlock Grid.Row="0" Text="{Binding [ImportDarkFrames], Source={x:Static infrastructure:LocalizationManager.Instance}}" FontWeight="Bold" FontSize="14" Margin="0,0,0,8"/>
                                     <Border Grid.Row="1" Background="{DynamicResource ToolWindowBackgroundBrush}" CornerRadius="4" BorderThickness="1" BorderBrush="{DynamicResource Border.WhiteDimBrush}">
                                         <ListBox Height="70" ItemsSource="{Binding DarkFiles}" Background="Transparent">
                                             <ListBox.ItemTemplate>
@@ -163,15 +164,15 @@
                                         </ListBox>
                                     </Border>
                                     <Grid Grid.Row="2" ColumnDefinitions="*, *" Margin="0,8,0,0">
-                                        <Button Grid.Column="0" Content="Aggiungi Dark" Command="{Binding AddDarkCommand}" Classes="addPrimary" Margin="0,0,4,0"/>
-                                        <Button Grid.Column="1" Content="Svuota" Command="{Binding ClearDarksCommand}" Classes="clearDestructive" Margin="4,0,0,0"/>
+                                        <Button Grid.Column="0" Content="{Binding [ImportAddDark], Source={x:Static infrastructure:LocalizationManager.Instance}}" Command="{Binding AddDarkCommand}" Classes="addPrimary" Margin="0,0,4,0"/>
+                                        <Button Grid.Column="1" Content="{Binding [ImportClear], Source={x:Static infrastructure:LocalizationManager.Instance}}" Command="{Binding ClearDarksCommand}" Classes="clearDestructive" Margin="4,0,0,0"/>
                                     </Grid>
                                 </Grid>
                             </Border>
 
                             <Border Background="{DynamicResource ToolPanelBackgroundBrush}" CornerRadius="4" Padding="12">
                                 <Grid RowDefinitions="Auto, *, Auto">
-                                    <TextBlock Grid.Row="0" Text="Flat Fields" FontWeight="Bold" FontSize="14" Margin="0,0,0,8"/>
+                                    <TextBlock Grid.Row="0" Text="{Binding [ImportFlatFields], Source={x:Static infrastructure:LocalizationManager.Instance}}" FontWeight="Bold" FontSize="14" Margin="0,0,0,8"/>
                                     <Border Grid.Row="1" Background="{DynamicResource ToolWindowBackgroundBrush}" CornerRadius="4" BorderThickness="1" BorderBrush="{DynamicResource Border.WhiteDimBrush}">
                                         <ListBox Height="70" ItemsSource="{Binding FlatFiles}" Background="Transparent">
                                             <ListBox.ItemTemplate>
@@ -197,8 +198,8 @@
                                         </ListBox>
                                     </Border>
                                     <Grid Grid.Row="2" ColumnDefinitions="*, *" Margin="0,8,0,0">
-                                        <Button Grid.Column="0" Content="Aggiungi Flat" Command="{Binding AddFlatCommand}" Classes="addPrimary" Margin="0,0,4,0"/>
-                                        <Button Grid.Column="1" Content="Svuota" Command="{Binding ClearFlatsCommand}" Classes="clearDestructive" Margin="4,0,0,0"/>
+                                        <Button Grid.Column="0" Content="{Binding [ImportAddFlat], Source={x:Static infrastructure:LocalizationManager.Instance}}" Command="{Binding AddFlatCommand}" Classes="addPrimary" Margin="0,0,4,0"/>
+                                        <Button Grid.Column="1" Content="{Binding [ImportClear], Source={x:Static infrastructure:LocalizationManager.Instance}}" Command="{Binding ClearFlatsCommand}" Classes="clearDestructive" Margin="4,0,0,0"/>
                                     </Grid>
                                 </Grid>
                             </Border>
@@ -219,8 +220,8 @@
                 </StackPanel>
                 
                 <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="12">
-                    <Button Content="Annulla" Command="{Binding CancelCommand}" Width="130" Classes="clearDestructive"/>
-                    <Button Content="Applica e Importa" Command="{Binding ConfirmCommand}" Width="230" 
+                    <Button Content="{Binding [Cancel], Source={x:Static infrastructure:LocalizationManager.Instance}}" Command="{Binding CancelCommand}" Width="130" Classes="clearDestructive"/>
+                    <Button Content="{Binding [ImportApply], Source={x:Static infrastructure:LocalizationManager.Instance}}" Command="{Binding ConfirmCommand}" Width="230" 
                             Classes="applySuccess"
                             IsEnabled="{Binding HasLights}"
                             Opacity="{Binding HasLights, Converter={StaticResource BoolToOpacityConverter}}"/>

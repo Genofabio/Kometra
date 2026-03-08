@@ -6,7 +6,7 @@ namespace Kometra.Services.Fits.IO
 {
     /// <summary>
     /// Porting C# completo (Encode/Decode) di 'ricecomp.c' e 'rdecomp.c' (CFITSIO).
-    /// Gestisce decompressione Rice per 8, 16 e 32 bit con logica bit-exact compatibile con fpack.
+    /// Gestisce decompressione RICE per 8, 16 e 32 bit con logica bit-exact compatibile con fpack.
     /// </summary>
     public static class RiceCodec
     {

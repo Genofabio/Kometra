@@ -1,7 +1,8 @@
 ﻿using System;
 using System.Globalization;
 using Avalonia.Data.Converters;
-using Material.Icons; // Assicurati di avere questo using
+using Material.Icons;
+using Kometra.Infrastructure; // Aggiunto per l'accesso al LocalizationManager
 
 namespace Kometra.Converters;
 
@@ -28,9 +29,12 @@ public class AnimationTextConverter : IValueConverter
     {
         if (value is bool isRunning && isRunning)
         {
-            return "Ferma Animazione";
+            // Recupera la traduzione per "Ferma Animazione"
+            return LocalizationManager.Instance["MenuStopAnimation"];
         }
-        return "Avvia Animazione";
+        
+        // Recupera la traduzione per "Avvia Animazione"
+        return LocalizationManager.Instance["MenuStartAnimation"];
     }
 
     public object? ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture) 

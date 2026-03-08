@@ -351,6 +351,13 @@ public partial class BoardViewModel : ObservableObject
         catch (Exception ex) { Debug.WriteLine($"Export fallito: {ex.Message}"); }
     }
     
+    [RelayCommand]
+    private async Task ShowSettingsWindow()
+    {
+        // La Board chiama il servizio per mostrare le impostazioni
+        await _windowService.ShowSettingsWindowAsync();
+    }
+    
     [RelayCommand(CanExecute = nameof(CanExecuteOnImageNode))] private async Task ShowPlateSolvingWindow() { if(SelectedNode is ImageNodeViewModel n) await _windowService.ShowPlateSolvingWindowAsync(n); }
     [RelayCommand(CanExecute = nameof(CanEditHeader))] private async Task EditSelectedNodeHeader() { if(SelectedNode is ImageNodeViewModel n) await _windowService.ShowHeaderEditorAsync(n.CurrentFiles, n.Navigator); }
     [RelayCommand(CanExecute = nameof(CanExecuteOnImageNode))] private async Task ResetNormalization() { if(SelectedNode is ImageNodeViewModel n) await n.ResetThresholdsAsync(); }
