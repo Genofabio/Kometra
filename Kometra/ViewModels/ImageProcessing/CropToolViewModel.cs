@@ -41,7 +41,6 @@ public partial class CropToolViewModel : ObservableObject, IDisposable
 
     // --- Stato UI ---
     
-    // CORREZIONE QUI: Rimosso l'attributo errato [NotifyPropertyChangedFor]
     [ObservableProperty] 
     private FitsRenderer? _activeRenderer;
 
@@ -164,9 +163,6 @@ public partial class CropToolViewModel : ObservableObject, IDisposable
         _loadCts = new CancellationTokenSource();
         var token = _loadCts.Token;
 
-        // NOTA: Abbiamo rimosso IsBusy = true qui per evitare 
-        // che la barra di progresso compaia ad ogni cambio immagine.
-        
         try
         {
             var fileRef = _files[index];
@@ -202,7 +198,6 @@ public partial class CropToolViewModel : ObservableObject, IDisposable
         }
         catch (OperationCanceledException) { }
         catch (Exception ex) { StatusText = string.Format(LocalizationManager.Instance["ErrorLoading"], ex.Message); }
-        // Rimosso il finally { IsBusy = false }
     }
 
     // --- Logica Interazione (Centri) ---
@@ -226,7 +221,7 @@ public partial class CropToolViewModel : ObservableObject, IDisposable
         }
 
         UpdateViewportOverlay(index);
-        ApplyCommand.NotifyCanExecuteChanged(); // Aggiorna stato pulsante Applica
+        ApplyCommand.NotifyCanExecuteChanged(); 
     }
 
     public void ClearCenter()
@@ -247,7 +242,7 @@ public partial class CropToolViewModel : ObservableObject, IDisposable
         }
 
         UpdateViewportOverlay(index);
-        ApplyCommand.NotifyCanExecuteChanged(); // Aggiorna stato pulsante Applica
+        ApplyCommand.NotifyCanExecuteChanged();
     }
 
     private void UpdateViewportOverlay(int index)
@@ -256,10 +251,11 @@ public partial class CropToolViewModel : ObservableObject, IDisposable
 
         if (centerToShow.HasValue)
         {
+            // CORRETTO: Ora passa correttamente CropWidth e CropHeight permettendo forme rettangolari
             Viewport.SetCropGeometry(
                 new Point(centerToShow.Value.X, centerToShow.Value.Y), 
                 CropWidth, 
-                CropWidth); // Nota: avevi CropWidth ripetuto o CropHeight? Ho tenuto la tua logica originale se era intenzionale, altrimenti rettifica in CropHeight.
+                CropHeight);
         }
         else
         {
@@ -296,7 +292,6 @@ public partial class CropToolViewModel : ObservableObject, IDisposable
         }
         else
         {
-            // In dinamica tutti i frame devono avere un centro
             return _centers.All(c => c != null);
         }
     }
@@ -306,10 +301,8 @@ public partial class CropToolViewModel : ObservableObject, IDisposable
     {
         if (IsBusy) return;
         
-        // Doppia verifica (ridondante ma sicura)
         if (!CanApply())
         {
-            // Se siamo qui in modalità dinamica, aiutiamo l'utente a trovare il frame mancante
             if (SelectedMode == CropMode.Dynamic)
             {
                 int missing = Array.IndexOf(_centers, null);
@@ -329,7 +322,6 @@ public partial class CropToolViewModel : ObservableObject, IDisposable
         {
             var size = new Size2D(CropWidth, CropHeight);
             
-            // Prepara la lista centri normalizzata
             var centersList = (SelectedMode == CropMode.Static)
                 ? Enumerable.Repeat(_staticCenter, _files.Count).ToList()
                 : _centers.ToList();
@@ -366,15 +358,11 @@ public partial class CropToolViewModel : ObservableObject, IDisposable
     [RelayCommand]
     public void SetCenterToImageMiddle()
     {
-        // Verifichiamo che ci sia un'immagine caricata
         if (ActiveRenderer == null || Viewport.ImageSize.Width <= 0) return;
 
-        // Calcoliamo il centro esatto
         double centerX = Viewport.ImageSize.Width / 2.0;
         double centerY = Viewport.ImageSize.Height / 2.0;
 
-        // Usiamo il metodo SetCenter già esistente che gestisce 
-        // correttamente sia la modalità Statica che Dinamica
         SetCenter(new Point(centerX, centerY));
     
         StatusText = LocalizationManager.Instance["StatusCenterGeometricInit"];

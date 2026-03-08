@@ -39,8 +39,8 @@
         <data name="MenuExit" xml:space="preserve">
         <value>Exit</value>
     </data>
-        <data name="MenuModify" xml:space="preserve">
-        <value>Modify</value>
+    <data name="MenuModify" xml:space="preserve">
+        <value>Edit</value>
     </data>
         <data name="MenuAlignCenter" xml:space="preserve">
         <value>Align and Center</value>
@@ -665,4 +665,22 @@
     <data name="VideoExportStatusProcessingFrame" xml:space="preserve"><value>Processing frame... {0:N0}%</value></data>
     <data name="VideoExportStatusSuccess" xml:space="preserve"><value>Video Saved!</value></data>
     <data name="VideoExportStatusError" xml:space="preserve"><value>Error during export.</value></data>
+    <data name="CommonResolution" xml:space="preserve"><value>Resolution</value></data>
+    <data name="CommonContainer" xml:space="preserve"><value>Container</value></data>
+    <data name="CommonBlackPointAdu" xml:space="preserve"><value>Black Point (ADU)</value></data>
+    <data name="CommonWhitePointAdu" xml:space="preserve"><value>White Point (ADU)</value></data>
+
+    <data name="TooltipResetView" xml:space="preserve"><value>Fit to screen</value></data>
+    <data name="TooltipResetStretch" xml:space="preserve"><value>Reset thresholds</value></data>
+    <data name="TooltipFirstImage" xml:space="preserve"><value>First image</value></data>
+    <data name="TooltipLastImage" xml:space="preserve"><value>Last image</value></data>
+    <data name="PlateErrorExeNotFound" xml:space="preserve"><value>ASTAP executable not found.</value></data>
+    <data name="PlateConfigRadius" xml:space="preserve"><value>Radius {0}° {1}</value></data>
+    <data name="PlateHinted" xml:space="preserve"><value>(Hinted)</value></data>
+    <data name="PlateBlind" xml:space="preserve"><value>(Blind)</value></data>
+    <data name="PlateStatusSuccess" xml:space="preserve"><value>Resolution OK</value></data>
+    <data name="PlateErrorWcsRead" xml:space="preserve"><value>Error reading WCS output</value></data>
+    <data name="PlateErrorNoSolution" xml:space="preserve"><value>Solution not found</value></data>
+    <data name="PlateProcessInterrupted" xml:space="preserve"><value>!!! PROCESS INTERRUPTED BY USER !!!</value></data>
+    <data name="PlateErrorNoImages" xml:space="preserve"><value>Cannot perform plate solving: FITS file contains no images.</value></data>
 </root>

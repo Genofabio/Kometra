@@ -6,6 +6,7 @@ using System.Linq;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using Kometra.Infrastructure; // Localizzazione
 using Kometra.Models.Astrometry;
 using Kometra.Models.Astrometry.Solving;
 using Kometra.Models.Fits;
@@ -49,7 +50,7 @@ public class PlateSolvingService : IPlateSolvingService
 
         if (string.IsNullOrEmpty(exePath)) 
         {
-            result.Message = "Eseguibile ASTAP non trovato.";
+            result.Message = LocalizationManager.Instance["PlateErrorExeNotFound"];
             return result;
         }
 
@@ -69,7 +70,11 @@ public class PlateSolvingService : IPlateSolvingService
             // -z 0: No downsampling, -update: scrivi WCS nel file
             var args = $"-f \"{tempFilePath}\" -r {radius} -update -z 0 {hints}";
 
-            liveLog?.Report($"CONFIG:Raggio {radius}° {(hints.Length > 0 ? "(Hinted)" : "(Blind)")}");
+            string hintLabel = hints.Length > 0 
+                ? LocalizationManager.Instance["PlateHinted"] 
+                : LocalizationManager.Instance["PlateBlind"];
+
+            liveLog?.Report($"CONFIG:{string.Format(LocalizationManager.Instance["PlateConfigRadius"], radius, hintLabel)}");
 
             var logBuilder = new StringBuilder();
             bool solutionFound = false;
@@ -103,13 +108,12 @@ public class PlateSolvingService : IPlateSolvingService
             if (solutionFound && hasWcs)
             {
                 result.Success = true;
-                result.Message = "Risoluzione OK";
+                result.Message = LocalizationManager.Instance["PlateStatusSuccess"];
 
                 // A. CLONAZIONE PULITA
                 var finalHeader = _metadataService.CloneHeader(currentHeader!);
 
                 // B. TRASFERIMENTO CHIRURGICO DEL WCS (Incluso TPV/SIP)
-                // Lista chiavi standard WCS
                 var standardWcsKeys = new[] { 
                     "CTYPE1", "CTYPE2", "CRVAL1", "CRVAL2", "CRPIX1", "CRPIX2", 
                     "CD1_1", "CD1_2", "CD2_1", "CD2_2", 
@@ -118,12 +122,10 @@ public class PlateSolvingService : IPlateSolvingService
                     "EQUINOX", "RADESYS", "LONPOLE", "LATPOLE" 
                 };
 
-                // Iteriamo tutte le card di output per catturare anche le distorsioni
                 foreach (var card in astapOutputHeader!.Cards)
                 {
                     string k = card.Key.ToUpperInvariant();
                     
-                    // Condizione: È una chiave standard WCS O è un coefficiente di distorsione (PV, A_, B_)
                     bool isWcsKey = standardWcsKeys.Contains(k) ||
                                     k.StartsWith("PV") ||      // Distorsione TPV
                                     k.StartsWith("A_") ||      // Distorsione SIP A
@@ -133,8 +135,8 @@ public class PlateSolvingService : IPlateSolvingService
 
                     if (isWcsKey)
                     {
-                        finalHeader.RemoveCard(k); // Rimuovi vecchia (se esiste)
-                        finalHeader.AddCard(card); // Aggiungi nuova da ASTAP
+                        finalHeader.RemoveCard(k); 
+                        finalHeader.AddCard(card); 
                     }
                 }
 
@@ -151,19 +153,21 @@ public class PlateSolvingService : IPlateSolvingService
             else
             {
                 result.Success = false;
-                result.Message = solutionFound ? "Errore lettura WCS output" : "Soluzione non trovata";
+                result.Message = solutionFound 
+                    ? LocalizationManager.Instance["PlateErrorWcsRead"] 
+                    : LocalizationManager.Instance["PlateErrorNoSolution"];
             }
             
             result.FullLog = logBuilder.ToString();
         }
         catch (OperationCanceledException)
         {
-            result.Message = "Operazione interrotta.";
+            result.Message = LocalizationManager.Instance["StatusCancelled"];
             result.Success = false;
         }
         catch (Exception ex) 
         { 
-            result.Message = $"Errore: {ex.Message}"; 
+            result.Message = string.Format(LocalizationManager.Instance["ErrorGeneric"], ex.Message); 
             result.Success = false;
         }
         finally 
@@ -223,7 +227,7 @@ public class PlateSolvingService : IPlateSolvingService
         using var registration = token.Register(() => 
         {
             try { if (!process.HasExited) process.Kill(true); } 
-            catch { /* Processo già chiuso */ }
+            catch { }
         });
 
         var outputDone = new TaskCompletionSource<bool>();
@@ -256,7 +260,7 @@ public class PlateSolvingService : IPlateSolvingService
         catch (OperationCanceledException)
         {
             Debug.WriteLine("[ASTAP-CANCEL] Operazione annullata dall'utente.");
-            onLineReceived("!!! PROCESSO INTERROTTO DALL'UTENTE !!!");
+            onLineReceived(LocalizationManager.Instance["PlateProcessInterrupted"]);
             throw;
         }
     }
@@ -266,25 +270,19 @@ public class PlateSolvingService : IPlateSolvingService
         if (fileRef.ModifiedHeader != null)
         {
             var package = await _dataManager.GetDataAsync(fileRef.FilePath);
-            
-            // [MODIFICA MEF] 
-            // Recuperiamo la prima immagine valida (o il primario se non ce ne sono altre)
-            // Non possiamo più usare .PixelData direttamente dal package.
             var imageHdu = package.FirstImageHdu ?? package.PrimaryHdu;
 
             if (imageHdu == null) 
-                throw new InvalidOperationException("Impossibile eseguire il plate solving: Il file FITS non contiene immagini.");
+                throw new InvalidOperationException(LocalizationManager.Instance["PlateErrorNoImages"]);
 
-            // Salviamo un file temporaneo con l'header modificato dall'utente e i pixel originali
             var temp = await _dataManager.SaveAsTemporaryAsync(
                 imageHdu.PixelData, 
-                fileRef.ModifiedHeader, // Usa l'header modificato in RAM
+                fileRef.ModifiedHeader, 
                 "Astrometry_Mem");
             
             return temp.FilePath;
         }
         
-        // Se non ci sono modifiche in RAM, copia fisica del file originale
         return await _dataManager.CreateSandboxCopyAsync(fileRef.FilePath, "Astrometry_Disk");
     }
 

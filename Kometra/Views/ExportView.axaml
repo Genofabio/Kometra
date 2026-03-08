@@ -124,7 +124,7 @@
                         <StackPanel Orientation="Horizontal" Spacing="4" Margin="10" 
                                     HorizontalAlignment="Left" VerticalAlignment="Bottom" ZIndex="1" 
                                     PointerPressed="OnControlsPointerPressed" 
-                                    IsVisible="{Binding ActiveRenderer, Converter={x:Static converters:ObjectConverters.IsNotNull}}">
+                                    IsVisible="{Binding IsNavigationUIVisible}">
                             
                             <Button Command="{Binding Navigator.MoveToFirstCommand}" ToolTip.Tip="{Binding [TooltipFirstImage], Source={x:Static infrastructure:LocalizationManager.Instance}}" Classes="ghostBtn" Padding="5">
                                 <avalonia:MaterialIcon Kind="ChevronDoubleLeft" Width="16" Height="16"/>
@@ -238,11 +238,8 @@
                                     <StackPanel IsVisible="{Binding IsVisualProcessingVisible}" Spacing="10">
                                         <StackPanel Spacing="5">
                                             <TextBlock Text="{Binding [ExportStretchManagement], Source={x:Static infrastructure:LocalizationManager.Instance}}" FontSize="11" Opacity="0.6"/>
-                                            <ComboBox SelectedItem="{Binding StretchMode}" HorizontalAlignment="Stretch" FontSize="11" Margin="0,0,0,8"
-                                                      PointerWheelChanged="OnComboBoxPointerWheelChanged">
-                                                <ComboBoxItem Content="{Binding [ExportStretchAuto], Source={x:Static infrastructure:LocalizationManager.Instance}}"/>
-                                                <ComboBoxItem Content="{Binding [ExportStretchManual], Source={x:Static infrastructure:LocalizationManager.Instance}}"/>
-                                            </ComboBox>
+                                            <ComboBox ItemsSource="{Binding StretchModes}" SelectedItem="{Binding StretchMode}" HorizontalAlignment="Stretch" FontSize="11" Margin="0,0,0,8"
+                                                      PointerWheelChanged="OnComboBoxPointerWheelChanged"/>
                                         </StackPanel>
                                         
                                         <StackPanel IsVisible="{Binding IsManualStretch}" Spacing="8">

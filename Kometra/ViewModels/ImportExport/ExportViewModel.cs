@@ -43,6 +43,7 @@ public partial class ExportViewModel : ObservableObject, IDisposable
     [ObservableProperty] 
     [NotifyPropertyChangedFor(nameof(CurrentBlackPoint))]
     [NotifyPropertyChangedFor(nameof(CurrentWhitePoint))]
+    [NotifyPropertyChangedFor(nameof(IsNavigationUIVisible))] // Notifica la visibilità della navigazione
     private FitsRenderer? _activeRenderer;
     
     [ObservableProperty] private double _dataMin = 0;
@@ -66,6 +67,9 @@ public partial class ExportViewModel : ObservableObject, IDisposable
 
     public List<ExportFormat> AvailableFormats { get; } = Enum.GetValues<ExportFormat>().ToList();
     public List<FitsCompressionMode> AvailableCompressions { get; } = Enum.GetValues<FitsCompressionMode>().ToList();
+    
+    // Lista per popolare la ComboBox dello Stretch ed evitare che risulti vuota all'avvio
+    public ObservableCollection<string> StretchModes { get; } = new();
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(IsFitsOptionsVisible))]
@@ -80,7 +84,7 @@ public partial class ExportViewModel : ObservableObject, IDisposable
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(IsManualStretch))]
-    private string _stretchMode = LocalizationManager.Instance["ExportStretchAuto"];
+    private string _stretchMode = string.Empty;
 
     public double CurrentBlackPoint
     {
@@ -121,6 +125,9 @@ public partial class ExportViewModel : ObservableObject, IDisposable
     // Visibile solo se è formato FITS E ci sono più di 1 file selezionati.
     public bool CanMergeToMef => IsFitsOptionsVisible && _navigableItems.Count > 1;
 
+    // Proprietà per controllare la visibilità della navigazione nella Viewport
+    public bool IsNavigationUIVisible => ActiveRenderer != null && _navigableItems.Count > 0;
+
     private bool CanInteract() => !IsExporting;
 
     public ExportViewModel(
@@ -134,6 +141,11 @@ public partial class ExportViewModel : ObservableObject, IDisposable
         _dialogService = dialogService ?? throw new ArgumentNullException(nameof(dialogService));
         _dataManager = dataManager;
         _rendererFactory = rendererFactory;
+
+        // Popolamento delle modalità di stretch per la ComboBox
+        StretchModes.Add(LocalizationManager.Instance["ExportStretchAuto"]);
+        StretchModes.Add(LocalizationManager.Instance["ExportStretchManual"]);
+        _stretchMode = StretchModes[0];
 
         foreach (var path in sourceFilePaths)
         {
@@ -190,6 +202,7 @@ public partial class ExportViewModel : ObservableObject, IDisposable
             MergeIntoSingleFile = false;
         }
         OnPropertyChanged(nameof(CanMergeToMef)); 
+        OnPropertyChanged(nameof(IsNavigationUIVisible)); // Notifica il cambio di stato visibilità navigazione
 
         if (SelectedPreviewItem != null && _navigableItems.Contains(SelectedPreviewItem))
         {

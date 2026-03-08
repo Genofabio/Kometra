@@ -151,6 +151,9 @@
                                            FontSize="10" Foreground="Gray"/>
                                 <TextBlock Text="{Binding MaxAllowedWidth}" 
                                            FontSize="10" Foreground="Gray" Margin="4,0,0,0"/>
+                                <TextBlock Text=" x " FontSize="10" Foreground="Gray"/>
+                                <TextBlock Text="{Binding MaxAllowedHeight}" 
+                                           FontSize="10" Foreground="Gray"/>
                                 <TextBlock Text="{Binding [CropFromSmallestFile], Source={x:Static infrastructure:LocalizationManager.Instance}}" 
                                            FontSize="10" Foreground="Gray" Margin="4,0,0,0"/>
                             </StackPanel>

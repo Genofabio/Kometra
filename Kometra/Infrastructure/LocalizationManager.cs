@@ -1,15 +1,14 @@
-﻿using System.ComponentModel;
+﻿using System;
+using System.ComponentModel;
 using System.Globalization;
 using System.Runtime.CompilerServices;
 using Kometra.Assets;
 
-// Assicurati che questo namespace corrisponda a dove hai creato i file .resx
-
 namespace Kometra.Infrastructure;
 
 /// <summary>
-/// Gestisce la localizzazione a runtime. 
-/// Utilizza il pattern Singleton per essere facilmente accessibile dallo XAML.
+/// Gestisce la localizzazione a runtime e la conversione dei caratteri speciali.
+/// Utilizza il pattern Singleton per essere accessibile globalmente da XAML e C#.
 /// </summary>
 public class LocalizationManager : INotifyPropertyChanged
 {
@@ -22,7 +21,7 @@ public class LocalizationManager : INotifyPropertyChanged
 
     private LocalizationManager()
     {
-        // Imposta una lingua di default se vuoi (es. basata sul sistema)
+        // Sincronizza la cultura delle risorse con quella attuale
         Strings.Culture = _currentCulture;
     }
 
@@ -36,21 +35,30 @@ public class LocalizationManager : INotifyPropertyChanged
                 _currentCulture = value;
                 Strings.Culture = value;
                 
-                // Notifica alla UI che TUTTE le stringhe tradotte devono essere ricaricate
-                OnPropertyChanged("Item"); 
+                // Notifica alla UI che tutte le stringhe tradotte (gestite dall'indexer) devono essere ricaricate
+                // "Item[]" è la stringa standard per notificare il cambiamento di un indicizzatore
+                OnPropertyChanged(string.Empty);
+                OnPropertyChanged("Item");
+                OnPropertyChanged("Item[]");
             }
         }
     }
 
     /// <summary>
-    /// Indexer fondamentale per lo XAML. Permette di fare: Binding [NomeChiave]
+    /// Indexer per lo XAML. Permette il binding: {Binding [NomeChiave], Source={x:Static infrastructure:LocalizationManager.Instance}}
+    /// Gestisce automaticamente la conversione dei caratteri \n in ritorni a capo reali.
     /// </summary>
     public string this[string key]
     {
         get
         {
-            var translation = Strings.ResourceManager.GetString(key, CurrentCulture);
-            return translation ?? $"#{key}#"; // Restituisce la chiave tra # se manca la traduzione
+            var translation = Strings.ResourceManager.GetString(key, _currentCulture);
+            
+            if (translation == null) 
+                return $"#{key}#";
+
+            // Converte le sequenze di testo "\n" caricate dal file .resx in caratteri di "A capo" effettivi
+            return translation.Replace("\\n", Environment.NewLine);
         }
     }
 

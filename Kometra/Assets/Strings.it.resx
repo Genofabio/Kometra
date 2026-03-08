@@ -563,4 +563,22 @@
     <data name="VideoExportStatusProcessingFrame" xml:space="preserve"><value>Elaborazione frame... {0:N0}%</value></data>
     <data name="VideoExportStatusSuccess" xml:space="preserve"><value>Video Salvato!</value></data>
     <data name="VideoExportStatusError" xml:space="preserve"><value>Errore durante l'esportazione.</value></data>
+    <data name="CommonResolution" xml:space="preserve"><value>Risoluzione</value></data>
+    <data name="CommonContainer" xml:space="preserve"><value>Contenitore</value></data>
+    <data name="CommonBlackPointAdu" xml:space="preserve"><value>Soglia Nero (ADU)</value></data>
+    <data name="CommonWhitePointAdu" xml:space="preserve"><value>Soglia Bianco (ADU)</value></data>
+
+    <data name="TooltipResetView" xml:space="preserve"><value>Adatta allo schermo</value></data>
+    <data name="TooltipResetStretch" xml:space="preserve"><value>Resetta visualizzazione</value></data>
+    <data name="TooltipFirstImage" xml:space="preserve"><value>Prima immagine</value></data>
+    <data name="TooltipLastImage" xml:space="preserve"><value>Ultima immagine</value></data>
+    <data name="PlateErrorExeNotFound" xml:space="preserve"><value>Eseguibile ASTAP non trovato.</value></data>
+    <data name="PlateConfigRadius" xml:space="preserve"><value>Raggio {0}° {1}</value></data>
+    <data name="PlateHinted" xml:space="preserve"><value>(Hinted)</value></data>
+    <data name="PlateBlind" xml:space="preserve"><value>(Blind)</value></data>
+    <data name="PlateStatusSuccess" xml:space="preserve"><value>Risoluzione OK</value></data>
+    <data name="PlateErrorWcsRead" xml:space="preserve"><value>Errore lettura WCS output</value></data>
+    <data name="PlateErrorNoSolution" xml:space="preserve"><value>Soluzione non trovata</value></data>
+    <data name="PlateProcessInterrupted" xml:space="preserve"><value>!!! PROCESSO INTERROTTO DALL'UTENTE !!!</value></data>
+    <data name="PlateErrorNoImages" xml:space="preserve"><value>Impossibile eseguire il plate solving: Il file FITS non contiene immagini.</value></data>
 </root>

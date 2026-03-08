@@ -1,7 +1,5 @@
 ﻿using System;
-using System.Diagnostics;
 using System.Runtime.InteropServices;
-using Kometra.Models.Fits;
 using Kometra.Models.Fits.Structure;
 using OpenCvSharp;
 
@@ -19,9 +17,6 @@ public class FitsOpenCvConverter : IFitsOpenCvConverter
 
         int rows = rawPixels.GetLength(0);
         int cols = rawPixels.GetLength(1);
-
-        // --- DIAGNOSTICA VELOCE ---
-        Debug.WriteLine($"[FitsConverter] Elaborazione: {cols}x{rows}, Type: {rawPixels.GetType().Name}");
 
         if (rows == 0 || cols == 0) return new Mat();
 
@@ -41,7 +36,6 @@ public class FitsOpenCvConverter : IFitsOpenCvConverter
         // =========================================================
         if (elementType == typeof(uint))
         {
-            Debug.WriteLine("[FitsConverter] Applicato Safe-Path per UINT.");
             return ConvertUIntToMatSafe((uint[,])rawPixels, destType, bScale, bZero);
         }
 
