@@ -3,44 +3,46 @@
 ![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)
 ![Framework](https://img.shields.io/badge/Framework-.NET%208.0-512BD4)
 ![UI](https://img.shields.io/badge/UI-Avalonia-purple)
-![License](https://img.shields.io/badge/License-MIT-green)
+![License](https://img.shields.io/badge/License-GPLv3-blue)
 
-**Kometra** è un sistema software integrato, multipiattaforma e ad alte prestazioni, concepito esclusivamente per l'elaborazione astrometrica e l'analisi morfologica avanzata di immagini cometarie.
+**Kometra** is an integrated, cross-platform, and high-performance software system specifically designed for the astrometric processing and advanced morphological analysis of cometary images. 
 
-Il progetto nasce come lavoro di Tesi Magistrale in Ingegneria Informatica presso il **Politecnico di Torino**, in stretta collaborazione con i ricercatori dell'**Osservatorio Astrofisico di Asiago**, con l'obiettivo di fornire alla comunità scientifica e astrofila uno strumento moderno per superare i limiti dei flussi di lavoro tradizionali.
+🌍 *The application interface is fully available in both **English** and **Italian**.*
+
+The project originated as a Master's Thesis in Computer Engineering at **Politecnico di Torino**, in close collaboration with researchers from the **Asiago Astrophysical Observatory**, with the aim of providing the scientific and amateur astronomy community with a modern tool to overcome the limitations of traditional workflows.
 
 ---
 
-## Funzionalità Principali
+## Main Features
 
-Kometra offre una pipeline completa per il trattamento del dato astronomico, dall'importazione del file grezzo fino all'esportazione dell'analisi morfologica:
+Kometra offers a comprehensive pipeline for astronomical data processing, from importing raw files to exporting morphological analysis:
 
-- **Infrastruttura Dati FITS Proprietaria:** Parser FITS scritto da zero, con supporto a Multi-Extension FITS (MEF) e Tiled Image Compression (algoritmi Rice e GZIP bit-exact).
-- **Astrometria e Tracking Dinamico:** Rilevamento sub-pixel dell'optocentro cometario per allineamento dinamico. Integrazione con risolutori astrometrici locali (ASTAP) e database effemeridali (JPL/NASA).
-- **FITS Header Editor & Diagnostica:** Interfaccia interattiva per l'ispezione non distruttiva dei metadati, con valutazione semaforica dei requisiti astrometrici (*Health Evaluator*).
-- **Starless Pipeline (Segmentazione e Inpainting):** Rimozione automatica delle stelle di campo tramite algoritmi di morfologia matematica e ricostruzione stocastica del fondo cielo, preservando l'integrità fotometrica della chioma.
-- **Filtri Morfologici Avanzati:** Implementazione rigorosa di filtri rotazionali, radiali e tensoriali (es. Larson-Sekanina, Median Coma Model, Hessiana di Frangi) per l'estrazione di getti di polvere e strutture a basso contrasto.
-- **Flusso di Lavoro a Nodi (Node Tree):** Paradigma non distruttivo che permette di condurre esperimenti paralleli (A/B testing) e visualizzare anteprime in tempo reale senza alterare i file originali.
-- **Media & Scientific Export:** Esportazione di dati scientifici in FITS/MEF (compressi e non) e generazione automatizzata di timelapse video per la divulgazione.
+- **Proprietary FITS Data Infrastructure:** Custom-built FITS parser supporting Multi-Extension FITS (MEF) and Tiled Image Compression (Rice and bit-exact GZIP algorithms).
+- **Astrometry and Dynamic Tracking:** Sub-pixel detection of the cometary optocenter for dynamic alignment. Integration with local astrometric solvers (ASTAP) and ephemeris databases (JPL/NASA).
+- **FITS Header Editor & Diagnostics:** Interactive interface for non-destructive metadata inspection, featuring a traffic-light evaluation system for astrometric requirements (*Health Evaluator*).
+- **Starless Pipeline (Segmentation and Inpainting):** Automatic removal of field stars using mathematical morphology algorithms and stochastic background sky reconstruction, preserving the photometric integrity of the coma.
+- **Advanced Morphological Filters:** Rigorous implementation of rotational, radial, and tensorial filters (e.g., Larson-Sekanina, Median Coma Model, Frangi Hessian) for the extraction of dust jets and low-contrast structures.
+- **Node Tree Workflow:** Non-destructive paradigm that allows conducting parallel experiments (A/B testing) and real-time previews without altering the original files.
+- **Media & Scientific Export:** Export of scientific data in FITS/MEF (compressed or uncompressed) and automated generation of video timelapses for outreach.
 
-## Stack Tecnologico
+## Tech Stack
 
-Il software è stato ingegnerizzato per massimizzare le prestazioni e garantire la portabilità:
+The software has been engineered to maximize performance and ensure portability:
 
-- **Core & Logica:** C# / .NET
-- **Interfaccia Grafica (GUI):** Avalonia UI (Pattern MVVM)
-- **Motore Matematico:** OpenCV (tramite wrapper .NET) per le manipolazioni matriciali ad alta precisione.
-- **Gestione Memoria:** Ottimizzazioni per matrici massive in virgola mobile tramite multithreading concorrenziale, `ArrayPool` e `ThreadLocal` per prevenire i colli di bottiglia del Garbage Collector.
+- **Core & Logic:** C# / .NET
+- **Graphical User Interface (GUI):** Avalonia UI (MVVM Pattern)
+- **Mathematical Engine:** OpenCV (via .NET wrapper) for high-precision matrix manipulations.
+- **Memory Management:** Optimizations for massive floating-point matrices through concurrent multithreading, `ArrayPool`, and `ThreadLocal` to prevent Garbage Collector bottlenecks.
 
-## Installazione e Compilazione
+## Installation and Build
 
-Essendo basato su .NET e Avalonia, Kometra può essere compilato ed eseguito nativamente su **Windows, macOS e Linux**.
+Being based on .NET and Avalonia, Kometra can be compiled and run natively on **Windows, macOS, and Linux**.
 
-### Prerequisiti
-- [.NET 8.0 SDK](https://dotnet.microsoft.com/download) (o superiore)
+### Prerequisites
+- [.NET 8.0 SDK](https://dotnet.microsoft.com/download) (or higher)
 
-### Build da sorgente
-Clona il repository e compila il progetto:
+### Build from source
+Clone the repository and build the project:
 ```bash
 git clone [https://github.com/tuo-username/Kometra.git](https://github.com/tuo-username/Kometra.git)
 cd Kometra
@@ -59,10 +61,16 @@ dotnet build -c Release
 
 <br>
 
-### Filtri Morfologici
-<img src="https://github.com/user-attachments/assets/d1ead85f-4be0-472c-9704-cecc50f1e8e5" width="65%" alt="Filtri Morfologici">
+### Morphological Filters
+<img src="https://github.com/user-attachments/assets/d1ead85f-4be0-472c-9704-cecc50f1e8e5" width="65%" alt="Morphological Filters">
 
 <br>
 
-### Esportazione Timelapse
-<img src="https://github.com/user-attachments/assets/fa931aec-253e-4382-8132-b9893d63e012" width="65%" alt="Esportazione Timelapse">
+### Timelapse Export
+<img src="https://github.com/user-attachments/assets/fa931aec-253e-4382-8132-b9893d63e012" width="65%" alt="Timelapse Export">
+
+---
+
+## License
+
+This project is licensed under the **GNU General Public License v3.0** (GPLv3) - see the [LICENSE](LICENSE) file for details.
