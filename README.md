@@ -9,7 +9,7 @@
 
 🌍 *The application interface is fully available in both **English** and **Italian**.*
 
-The project originated as a Master's Thesis in Computer Engineering at **Politecnico di Torino**, in close collaboration with researchers from the **Asiago Astrophysical Observatory**, with the aim of providing the scientific and amateur astronomy community with a modern tool to overcome the limitations of traditional workflows.
+The project originated as a Master's Thesis in Computer Engineering at Politecnico di Torino, in close collaboration with amateur astronomers affiliated with the Asiago Astrophysical Observatory, with the aim of providing the scientific and amateur astronomy community with a modern tool to overcome the limitations of traditional workflows.
 
 ---
 
