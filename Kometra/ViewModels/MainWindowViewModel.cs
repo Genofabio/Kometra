@@ -1,4 +1,6 @@
-﻿using Avalonia;
+﻿using System.Diagnostics;
+using System.Runtime.InteropServices;
+using Avalonia;
 using Avalonia.Controls.ApplicationLifetimes;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -37,6 +39,32 @@ public partial class MainWindowViewModel : ObservableObject
         if (Application.Current?.ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
             desktop.Shutdown();
+        }
+    }
+    
+    [RelayCommand]
+    private void OpenProjectPage()
+    {
+        // Ricordati di inserire il link esatto del tuo repository
+        string url = "https://github.com/Genofabio/Kometra"; 
+
+        try
+        {
+            if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+            {
+                Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
+            }
+            else if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
+            {
+                Process.Start("xdg-open", url);
+            }
+            else if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
+            {
+                Process.Start("open", url);
+            }
+        }
+        catch
+        {
         }
     }
 }

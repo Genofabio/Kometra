@@ -304,7 +304,9 @@
         </MenuItem>
 
         <MenuItem Header="{Binding [MenuHelp], Source={x:Static infrastructure:LocalizationManager.Instance}}">
-            <MenuItem Header="{Binding [MenuAbout], Source={x:Static infrastructure:LocalizationManager.Instance}}" Classes="innerMenuItem">
+            <MenuItem Header="{Binding [MenuAbout], Source={x:Static infrastructure:LocalizationManager.Instance}}" 
+                      Classes="innerMenuItem"
+                      Command="{Binding OpenProjectPageCommand}">
                 <MenuItem.Icon>
                     <avalonia:MaterialIcon Kind="InformationOutline" />
                 </MenuItem.Icon>
