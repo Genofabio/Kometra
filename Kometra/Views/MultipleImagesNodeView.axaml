@@ -8,106 +8,130 @@
              x:Class="Kometra.Views.MultipleImagesNodeView"
              x:DataType="nodes:MultipleImagesNodeViewModel"
              d:DesignWidth="300" d:DesignHeight="250"
+             ClipToBounds="False"
              PointerPressed="OnPointerPressed"
              PointerReleased="OnPointerReleased"
              PointerMoved="OnPointerMoved"
              PointerWheelChanged="OnPointerWheelChanged">
     
-    <Border Classes="NodeFrame" 
-            Classes.selected="{Binding IsSelected}"
-            Tag="Image">
-        
-        <Grid RowDefinitions="Auto, *">
+    <Grid ClipToBounds="False">
+        <Border Classes="NodeFrame" 
+                Classes.selected="{Binding IsSelected}"
+                Tag="Image"
+                ZIndex="1">
             
-            <Border Grid.Row="0" 
-                    Name="TitleHeader"
-                    Classes="Header" 
-                    MaxWidth="{Binding NodeContentSize.Width}" 
-                    ClipToBounds="True"
-                    Background="Transparent">
+            <Grid RowDefinitions="Auto, *">
                 
-                <Grid ColumnDefinitions="*,Auto">
-                    <TextBox Name="TitleTextBox"
-                             Grid.Column="0" 
-                             Classes="NodeTitleEditor"
-                             Text="{Binding Title, Mode=TwoWay}"
-                             IsReadOnly="True"
-                             HorizontalAlignment="Stretch"
-                             TextAlignment="Left" 
-                             TextWrapping="NoWrap"
-                             AcceptsReturn="False"
-                             LostFocus="TitleTextBox_OnLostFocus"
-                             KeyDown="TitleTextBox_OnKeyDown"/>
+                <Border Grid.Row="0" 
+                        Name="TitleHeader"
+                        Classes="Header" 
+                        MaxWidth="{Binding NodeContentSize.Width}" 
+                        ClipToBounds="True"
+                        Background="Transparent">
                     
-                    <Button Grid.Column="1" 
-                            Content="✕" 
-                            Classes="CloseButton"
-                            Command="{Binding RemoveSelfCommand}"
-                            Width="{Binding $self.Bounds.Height}"/>
-                </Grid>
-            </Border>
-            
-            <Border Grid.Row="1" 
-                    Name="ImageContainer" 
-                    Classes="Body"
-                    ClipToBounds="True"
-                    Width="{Binding NodeContentSize.Width}"
-                    Height="{Binding NodeContentSize.Height}"
-                    Background="{DynamicResource ImageCanvasBackgroundBrush}">
-                
-                <Grid>
-                    <Image Source="{Binding ActiveFitsImage.Image}"
-                           Stretch="None"
-                           HorizontalAlignment="Left"
-                           VerticalAlignment="Top"
-                           RenderTransformOrigin="0,0"
-                           RenderOptions.BitmapInterpolationMode="None">
+                    <Grid ColumnDefinitions="*,Auto">
+                        <TextBox Name="TitleTextBox"
+                                 Grid.Column="0" 
+                                 Classes="NodeTitleEditor"
+                                 Text="{Binding Title, Mode=TwoWay}"
+                                 IsReadOnly="True"
+                                 HorizontalAlignment="Stretch"
+                                 TextAlignment="Left" 
+                                 TextWrapping="NoWrap"
+                                 AcceptsReturn="False"
+                                 LostFocus="TitleTextBox_OnLostFocus"
+                                 KeyDown="TitleTextBox_OnKeyDown"/>
                         
-                        <Image.RenderTransform>
-                            <TransformGroup>
-                                <ScaleTransform ScaleX="{Binding Viewport.Scale}" 
-                                                ScaleY="{Binding Viewport.Scale}"/>
-                                <TranslateTransform X="{Binding Viewport.OffsetX}" 
-                                                    Y="{Binding Viewport.OffsetY}"/>
-                            </TransformGroup>
-                        </Image.RenderTransform>
-                    </Image>
+                        <Button Grid.Column="1" 
+                                Content="✕" 
+                                Classes="CloseButton"
+                                Command="{Binding RemoveSelfCommand}"
+                                Width="{Binding $self.Bounds.Height}"/>
+                    </Grid>
+                </Border>
+                
+                <Border Grid.Row="1" 
+                        Name="ImageContainer" 
+                        Classes="Body"
+                        ClipToBounds="True"
+                        Width="{Binding NodeContentSize.Width}"
+                        Height="{Binding NodeContentSize.Height}"
+                        Background="{DynamicResource ImageCanvasBackgroundBrush}">
                     
-                    <Border Classes="ZoomOverlay"
-                            IsVisible="{Binding Viewport.IsZoomed}">
-                        <TextBlock Classes="ZoomText"
-                                   Text="{Binding Viewport.Scale, StringFormat='{}{0:P0}'}"
-                                   FontWeight="Bold"/>
-                    </Border>
-                    
-                    <Grid Classes="NavOverlay"> 
-                        <Border Classes="CounterBadge">
-                            <TextBlock Classes="CounterText"
-                                       Text="{Binding CurrentImageText}"/> 
+                    <Grid>
+                        <Image Source="{Binding ActiveFitsImage.Image}"
+                               Stretch="None"
+                               HorizontalAlignment="Left"
+                               VerticalAlignment="Top"
+                               RenderTransformOrigin="0,0"
+                               RenderOptions.BitmapInterpolationMode="None">
+                            
+                            <Image.RenderTransform>
+                                <TransformGroup>
+                                    <ScaleTransform ScaleX="{Binding Viewport.Scale}" 
+                                                    ScaleY="{Binding Viewport.Scale}"/>
+                                    <TranslateTransform X="{Binding Viewport.OffsetX}" 
+                                                        Y="{Binding Viewport.OffsetY}"/>
+                                </TransformGroup>
+                            </Image.RenderTransform>
+                        </Image>
+                        
+                        <Border Classes="ZoomOverlay"
+                                IsVisible="{Binding Viewport.IsZoomed}">
+                            <TextBlock Classes="ZoomText"
+                                       Text="{Binding Viewport.Scale, StringFormat='{}{0:P0}'}"
+                                       FontWeight="Bold"/>
                         </Border>
                         
-                        <Button Classes="NavButton" 
-                                HorizontalAlignment="Left" VerticalAlignment="Center" 
-                                Margin="10,10"
-                                Padding="14,16,18,16"
-                                CornerRadius="4"
-                                Command="{Binding Navigator.PreviousCommand}"
-                                IsVisible="{Binding Navigator.CanMovePrevious}">
-                            <avalonia:MaterialIcon Kind="ChevronLeft" />
-                        </Button>
-                        
-                        <Button Classes="NavButton" 
-                                HorizontalAlignment="Right" VerticalAlignment="Center" 
-                                Margin="10,10"
-                                Padding="18,16,14,16"
-                                CornerRadius="4"
-                                Command="{Binding Navigator.NextCommand}"
-                                IsVisible="{Binding Navigator.CanMoveNext}">
-                            <avalonia:MaterialIcon Kind="ChevronRight" />
-                        </Button>
+                        <Grid Classes="NavOverlay"> 
+                            <Border Classes="CounterBadge">
+                                <TextBlock Classes="CounterText"
+                                           Text="{Binding CurrentImageText}"/> 
+                            </Border>
+                            
+                            <Button Classes="NavButton" 
+                                    HorizontalAlignment="Left" VerticalAlignment="Center" 
+                                    Margin="10,10"
+                                    Padding="14,16,18,16"
+                                    CornerRadius="4"
+                                    Command="{Binding Navigator.PreviousCommand}"
+                                    IsVisible="{Binding Navigator.CanMovePrevious}">
+                                <avalonia:MaterialIcon Kind="ChevronLeft" />
+                            </Button>
+                            
+                            <Button Classes="NavButton" 
+                                    HorizontalAlignment="Right" VerticalAlignment="Center" 
+                                    Margin="10,10"
+                                    Padding="18,16,14,16"
+                                    CornerRadius="4"
+                                    Command="{Binding Navigator.NextCommand}"
+                                    IsVisible="{Binding Navigator.CanMoveNext}">
+                                <avalonia:MaterialIcon Kind="ChevronRight" />
+                            </Button>
+                        </Grid>
                     </Grid>
-                </Grid>
-            </Border>
-        </Grid>
-    </Border>
+                </Border>
+            </Grid>
+        </Border>
+
+        <Border Background="{DynamicResource ActionPrimaryBackgroundBrush}"
+                IsVisible="{Binding SelectionLetter, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
+                HorizontalAlignment="Left"
+                VerticalAlignment="Top"
+                Margin="-34,-34,0,0"
+                Padding="12,6"
+                Width="68"
+                Height="68"
+                CornerRadius="8"
+                ZIndex="10"
+                IsHitTestVisible="False"
+                BoxShadow="0 4 8 0 #60000000">
+            <TextBlock Text="{Binding SelectionLetter}"
+                       Foreground="White"
+                       FontSize="40"
+                       FontWeight="ExtraBold"
+                       HorizontalAlignment="Center"
+                       VerticalAlignment="Center"/>
+        </Border>
+    </Grid>
 </UserControl>

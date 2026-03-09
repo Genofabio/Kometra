@@ -68,12 +68,10 @@ public partial class SingleImageNodeView : UserControl
         var sourceVisual = e.Source as Visual;
 
         // VERIFICA: Abbiamo cliccato sulla zona del titolo (Header)?
-        // Nota: Grazie allo stile, se TextBox è ReadOnly, il click "passa attraverso" e colpisce TitleHeader.
-        // Se TextBox è in edit, il click colpisce TextBox.
         bool isHeaderClick = headerBorder != null && sourceVisual != null && 
                              (sourceVisual == headerBorder || headerBorder.IsVisualAncestorOf(sourceVisual));
 
-        // Verifichiamo che NON sia il pulsante di chiusura (che è dentro l'header)
+        // Verifichiamo che NON sia il pulsante di chiusura
         if (isHeaderClick && sourceVisual is Button) isHeaderClick = false; 
         if (isHeaderClick && sourceVisual.GetVisualAncestors().OfType<Button>().Any()) isHeaderClick = false;
 
@@ -82,8 +80,6 @@ public partial class SingleImageNodeView : UserControl
         {
             if (isHeaderClick && textBox != null)
             {
-                // Attiviamo manualmente la TextBox
-                // Lo stile XAML riattiverà automaticamente IsHitTestVisible quando IsReadOnly diventa false
                 textBox.IsReadOnly = false; 
                 textBox.Focus();            
                 textBox.SelectAll();        
@@ -107,11 +103,8 @@ public partial class SingleImageNodeView : UserControl
         // --- 3. DRAG DEL NODO & SELEZIONE ---
         if (properties.IsLeftButtonPressed)
         {
-            // Se la TextBox è in modalità EDIT (!IsReadOnly), lasciamo che gestisca lei il click
-            // (per posizionare il cursore). sourceVisual sarà la TextBox o un suo figlio.
             if (textBox != null && !textBox.IsReadOnly)
             {
-                // Se clicchiamo fuori dalla textbox mentre è aperta, la chiudiamo
                 if (!isHeaderClick && !textBox.IsVisualAncestorOf(sourceVisual))
                 {
                     textBox.IsReadOnly = true;
@@ -119,12 +112,18 @@ public partial class SingleImageNodeView : UserControl
                 }
                 else
                 {
-                    return; // Lasciamo il cursore muoversi
+                    return; 
                 }
             }
 
-            // Selezione e Drag standard
-            _cachedBoardVm?.SetSelectedNode(nodeVm);
+            // --- LOGICA MULTI-SELEZIONE ---
+            // Rileviamo se Shift o Ctrl sono premuti per la logica a 2 nodi
+            bool isModifier = e.KeyModifiers.HasFlag(KeyModifiers.Shift) || 
+                              e.KeyModifiers.HasFlag(KeyModifiers.Control);
+
+            // Avvisiamo il ViewModel passando il modificatore
+            _cachedBoardVm?.SetSelectedNode(nodeVm, isModifier);
+            
             nodeVm.BringToFront();
 
             if (_cachedBoardView != null)
@@ -152,14 +151,12 @@ public partial class SingleImageNodeView : UserControl
     {
         if (e.Key == Key.Enter && sender is TextBox textBox)
         {
-            // Conferma e chiudi
             textBox.IsReadOnly = true;
             this.Focus(); 
             e.Handled = true;
         }
         else if (e.Key == Key.Escape && sender is TextBox tb)
         {
-            // Annulla (opzionale: qui servirebbe ricaricare il vecchio titolo)
             tb.IsReadOnly = true;
             this.Focus();
             e.Handled = true;
@@ -176,7 +173,6 @@ public partial class SingleImageNodeView : UserControl
         }
     }
 
-    // ... (Il resto dei metodi OnPointerMoved, OnPointerReleased, OnPointerWheelChanged rimane invariato) ...
     private void OnPointerMoved(object? sender, PointerEventArgs e)
     {
         if (DataContext is not ImageNodeViewModel nodeVm) return;

@@ -35,6 +35,13 @@ public abstract partial class BaseNodeViewModel : ObservableObject, IDisposable
     [ObservableProperty] private bool _isSelected;
     [ObservableProperty] private int _zIndex;
 
+    // --- PROPRIETÀ PER MULTI-SELEZIONE (A/B) ---
+    [ObservableProperty] 
+    [NotifyPropertyChangedFor(nameof(IsSelectionBadgeVisible))]
+    private string _selectionLetter = string.Empty;
+
+    public bool IsSelectionBadgeVisible => !string.IsNullOrEmpty(SelectionLetter);
+
     // Eventi per la Board
     public event Action<BaseNodeViewModel>? RequestRemove;
     public event Action<BaseNodeViewModel>? RequestBringToFront;

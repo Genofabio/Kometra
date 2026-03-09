@@ -8,7 +8,6 @@ using Avalonia.Media;
 using Avalonia.VisualTree;
 using Kometra.ViewModels;
 using Kometra.ViewModels.Nodes;
-using SequenceNavigator = Kometra.ViewModels.Shared.SequenceNavigator;
 using Shared_SequenceNavigator = Kometra.ViewModels.Shared.SequenceNavigator;
 
 namespace Kometra.Views;
@@ -75,7 +74,6 @@ public partial class MultipleImagesNodeView : UserControl
 
         // --- VERIFICA HIT TEST HEADER ---
         // Verifichiamo se il click è avvenuto sull'area del titolo (Header).
-        // Se TextBox è ReadOnly, lo stile IsHitTestVisible=False fa passare il click al Border (TitleHeader).
         bool isHeaderClick = headerBorder != null && sourceVisual != null && 
                              (sourceVisual == headerBorder || headerBorder.IsVisualAncestorOf(sourceVisual));
 
@@ -88,11 +86,10 @@ public partial class MultipleImagesNodeView : UserControl
         {
             if (isHeaderClick && textBox != null)
             {
-                // Attivazione manuale della modifica
                 textBox.IsReadOnly = false;
                 textBox.Focus();
                 textBox.SelectAll();
-                e.Handled = true; // Stop all'evento (niente drag)
+                e.Handled = true; 
                 return;
             }
         }
@@ -110,13 +107,11 @@ public partial class MultipleImagesNodeView : UserControl
             return; 
         }
 
-        // --- 3. DRAG DEL NODO (Tasto Sinistro) ---
+        // --- 3. DRAG DEL NODO & SELEZIONE (Tasto Sinistro) ---
         if (properties.IsLeftButtonPressed)
         {
-            // Se siamo in modalità EDIT (!IsReadOnly), lasciamo gestire il click alla TextBox
             if (textBox != null && !textBox.IsReadOnly)
             {
-                // Se clicchiamo fuori dalla textbox (ma non sull'header per riattivarla), chiudiamo l'edit
                 if (!isHeaderClick && !textBox.IsVisualAncestorOf(sourceVisual))
                 {
                     textBox.IsReadOnly = true;
@@ -124,11 +119,16 @@ public partial class MultipleImagesNodeView : UserControl
                 }
                 else
                 {
-                    return; // Lasciamo il cursore muoversi nel testo
+                    return; 
                 }
             }
 
-            _cachedBoardVm?.SetSelectedNode(nodeVm);
+            // --- GESTIONE SELEZIONE MULTIPLA ---
+            // Rileviamo Shift o Ctrl per la logica a 2 nodi nel ViewModel
+            bool isModifier = e.KeyModifiers.HasFlag(KeyModifiers.Shift) || 
+                             e.KeyModifiers.HasFlag(KeyModifiers.Control);
+
+            _cachedBoardVm?.SetSelectedNode(nodeVm, isModifier);
             nodeVm.BringToFront(); 
 
             if (_cachedBoardView != null)
@@ -152,14 +152,12 @@ public partial class MultipleImagesNodeView : UserControl
         }
     }
     
-    // --- GESTORI EDITING TITOLO ---
-
     private void TitleTextBox_OnKeyDown(object? sender, KeyEventArgs e)
     {
         if (e.Key == Key.Enter && sender is TextBox textBox)
         {
             textBox.IsReadOnly = true;
-            this.Focus(); // Toglie il focus
+            this.Focus(); 
             e.Handled = true;
         }
         else if (e.Key == Key.Escape && sender is TextBox tb)
@@ -179,8 +177,6 @@ public partial class MultipleImagesNodeView : UserControl
             textBox.SelectionEnd = 0;
         }
     }
-
-    // --- ALTRI EVENTI (Moved, Released, Wheel) ---
 
     private void OnPointerMoved(object? sender, PointerEventArgs e)
     {

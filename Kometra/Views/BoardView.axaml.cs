@@ -54,7 +54,9 @@ public partial class BoardView : UserControl
 
     private void OnPointerPressed(object? sender, PointerPressedEventArgs e)
     {
+        // Se un nodo ha già gestito il click (e.Handled = true), la Board non deve fare nulla.
         if (e.Handled) return;
+        
         this.Focus();
 
         var props = e.GetCurrentPoint(this).Properties;
@@ -83,6 +85,8 @@ public partial class BoardView : UserControl
         }
         else if (props.IsLeftButtonPressed)
         {
+            // Se arriviamo qui, significa che l'utente ha cliccato sul "vuoto" della Board,
+            // poiché il click non è stato intercettato da nessun nodo.
             if (DataContext is BoardViewModel vm)
             {
                 vm.DeselectAllNodes();
