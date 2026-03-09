@@ -1,0 +1,24 @@
+cff-version: 1.2.0
+message: "If you use this software in your research, please cite it as below."
+authors:
+  - family-names: "Genovese"
+    given-names: "Fabio"
+    affiliation: "Politecnico di Torino"
+title: "Kometra"
+abstract: "An integrated, cross-platform software system for astrometric processing and advanced morphological analysis of cometary images."
+version: 1.0.0
+date-released: "2026-03-09"
+repository-code: "https://github.com/Genofabio/Kometra"
+license: "GPL-3.0-or-later"
+type: software
+keywords:
+  - astrometry
+  - comets
+  - fits
+  - morphological-analysis
+  - image-processing
+  - computer-vision
+  - opencv
+  - csharp
+  - avalonia
+  - cross-platform
