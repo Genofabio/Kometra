@@ -52,22 +52,22 @@ dotnet build -c Release
 ## Screenshots
 
 ### Workspace & Node Tree
-<img src="https://github.com/user-attachments/assets/1b6c7589-25ae-4aeb-99f2-da73c623432c" width="65%" alt="Workspace & Node Tree">
+<img src="https://github.com/user-attachments/assets/da343126-9398-4f1e-b01f-7ebc48344bd2" width="65%" alt="Workspace & Node Tree">
 
 <br>
 
 ### FITS Header Editor
-<img src="https://github.com/user-attachments/assets/32838a5b-10e7-4c8e-a66d-8e785ab1cfc6" width="65%" alt="FITS Header Editor">
+<img src="https://github.com/user-attachments/assets/a459fe52-a5f8-4967-ba74-907c82ac6c33" width="65%" alt="FITS Header Editor">
 
 <br>
 
 ### Morphological Filters
-<img src="https://github.com/user-attachments/assets/d1ead85f-4be0-472c-9704-cecc50f1e8e5" width="65%" alt="Morphological Filters">
+<img src="https://github.com/user-attachments/assets/5c7e49e6-5bc7-4402-9b74-57f4fa18b6e9" width="65%" alt="Morphological Filters">
 
 <br>
 
-### Timelapse Export
-<img src="https://github.com/user-attachments/assets/fa931aec-253e-4382-8132-b9893d63e012" width="65%" alt="Timelapse Export">
+### Export Tool
+<img src="https://github.com/user-attachments/assets/359ce463-5318-47f0-ae21-cfcadf8d36f8" width="65%" alt="Export">
 
 ---
 
