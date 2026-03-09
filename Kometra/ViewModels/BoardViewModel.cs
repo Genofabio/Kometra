@@ -11,6 +11,7 @@ using CommunityToolkit.Mvvm.Input;
 using Kometra.Models.Fits;
 using Kometra.Models.Nodes;
 using Kometra.Models.Processing;
+using Kometra.Models.Processing.Arithmetic;
 using Kometra.Models.Processing.Enhancement;
 using Kometra.Models.Processing.Stacking;
 using Kometra.Models.Visualization;
@@ -40,6 +41,7 @@ public partial class BoardViewModel : ObservableObject
     private readonly IStackingCoordinator _stackingCoordinator;
     private readonly IVideoExportCoordinator _videoCoordinator;
     private readonly IConfigurationService _configService;
+    private readonly IArithmeticCoordinator _arithmeticCoordinator;
 
     // --- Stato Navigazione ---
     public BoardViewport Viewport { get; } = new();
@@ -55,7 +57,7 @@ public partial class BoardViewModel : ObservableObject
     // Proprietà per monitorare il numero di nodi selezionati
     public int SelectedNodesCount => SelectedNodes.Count;
     
-    // Restituisce il nodo immagine solo se la selezione è univoca
+    // Restituisce il nodo immagine solo se la selezione è univoca (1 solo nodo selezionato)
     private ImageNodeViewModel? SelectedImageNode => SelectedNodesCount == 1 ? SelectedNodes[0] as ImageNodeViewModel : null;
 
     // --- PROPRIETÀ DINAMICHE PER L'INTERFACCIA ---
@@ -85,7 +87,8 @@ public partial class BoardViewModel : ObservableObject
         IFitsDataManager dataManager,
         IStackingCoordinator stackingCoordinator,
         IVideoExportCoordinator videoCoordinator,
-        IConfigurationService configService)
+        IConfigurationService configService,
+        IArithmeticCoordinator arithmeticCoordinator)
     {
         _nodeFactory = nodeFactory ?? throw new ArgumentNullException(nameof(nodeFactory));
         _windowService = windowService ?? throw new ArgumentNullException(nameof(windowService));
@@ -95,6 +98,7 @@ public partial class BoardViewModel : ObservableObject
         _stackingCoordinator = stackingCoordinator ?? throw new ArgumentNullException(nameof(stackingCoordinator));
         _videoCoordinator = videoCoordinator ?? throw new ArgumentNullException(nameof(videoCoordinator));
         _configService = configService ?? throw new ArgumentNullException(nameof(configService));
+        _arithmeticCoordinator = arithmeticCoordinator ?? throw new ArgumentNullException(nameof(arithmeticCoordinator));
 
         if (_configService is ConfigurationService cs)
         {
@@ -130,7 +134,6 @@ public partial class BoardViewModel : ObservableObject
 
         if (!isModifierPressed)
         {
-            // Click normale senza Ctrl/Shift: pulizia totale e selezione singola
             DeselectAllNodes();
             node.IsSelected = true;
             SelectedNodes.Add(node);
@@ -138,11 +141,8 @@ public partial class BoardViewModel : ObservableObject
         }
         else
         {
-            // --- LOGICA MODIFICATORE (SHIFT/CTRL) ---
             if (SelectedNodes.Contains(node))
             {
-                // Se è già selezionato, lo portiamo in prima posizione (diventa "A")
-                // se non lo è già. Questo permette l'inversione rapida A/B.
                 if (SelectedNodes.IndexOf(node) != 0)
                 {
                     SelectedNodes.Remove(node);
@@ -151,7 +151,6 @@ public partial class BoardViewModel : ObservableObject
             }
             else
             {
-                // Se è un nuovo nodo e ne abbiamo già 2, rimuoviamo il più "vecchio" (FIFO)
                 if (SelectedNodes.Count >= 2)
                 {
                     var oldest = SelectedNodes[0];
@@ -163,7 +162,6 @@ public partial class BoardViewModel : ObservableObject
                 SelectedNodes.Add(node);
             }
 
-            // Aggiorniamo SelectedNode (null se sono 2 o 0, il nodo stesso se è 1)
             SelectedNode = SelectedNodes.Count == 1 ? SelectedNodes[0] : null;
         }
     }
@@ -181,11 +179,8 @@ public partial class BoardViewModel : ObservableObject
 
     private void NotifySelectionCommands()
     {
-        // --- GESTIONE ETICHETTE SELEZIONE (A/B) ---
-        // Resettiamo sempre tutte le lettere per pulizia
         foreach (var n in Nodes) n.SelectionLetter = string.Empty;
 
-        // Le lettere compaiono SOLO se sono selezionati esattamente due nodi
         if (SelectedNodes.Count == 2)
         {
             SelectedNodes[0].SelectionLetter = "A";
@@ -194,7 +189,6 @@ public partial class BoardViewModel : ObservableObject
 
         OnPropertyChanged(nameof(SelectedNodesCount));
         
-        // Comandi Selezione Singola
         ResetNormalizationCommand.NotifyCanExecuteChanged();
         ResetNodeViewCommand.NotifyCanExecuteChanged();
         ShowAlignmentWindowCommand.NotifyCanExecuteChanged();
@@ -212,7 +206,6 @@ public partial class BoardViewModel : ObservableObject
         ShowStarMaskingWindowCommand.NotifyCanExecuteChanged();
         ShowCropWindowCommand.NotifyCanExecuteChanged();
 
-        // Comandi Selezione Doppia (Matematica)
         AddNodesCommand.NotifyCanExecuteChanged();
         SubtractNodesCommand.NotifyCanExecuteChanged();
         MultiplyNodesCommand.NotifyCanExecuteChanged();
@@ -250,19 +243,43 @@ public partial class BoardViewModel : ObservableObject
         _undoService.RecordAction(action);
     }
 
+    // --- GESTIONE RISULTATI ELABORAZIONE (COLLEGAMENTI) ---
+    
+    // Metodo helper per singolo genitore (mantenuto per compatibilità con altri tool)
     private void RegisterProcessingResult(BaseNodeViewModel newNode, BaseNodeViewModel sourceNode, string tempFilePath, string undoLabel)
     {
+        RegisterProcessingResult(newNode, new List<BaseNodeViewModel> { sourceNode }, tempFilePath, undoLabel);
+    }
+
+    // Metodo principale che supporta genitori multipli
+    private void RegisterProcessingResult(BaseNodeViewModel newNode, IEnumerable<BaseNodeViewModel> sourceNodes, string tempFilePath, string undoLabel)
+    {
+        var sources = sourceNodes.ToList();
         var action = new DelegateAction(undoLabel,
             execute: () => {
-                if (!Nodes.Contains(newNode)) { Nodes.Add(newNode); RegisterNodeEvents(newNode); newNode.ZIndex = ++_maxZIndex; CreateConnection(sourceNode, newNode); }
+                if (!Nodes.Contains(newNode)) 
+                { 
+                    Nodes.Add(newNode); 
+                    RegisterNodeEvents(newNode); 
+                    newNode.ZIndex = ++_maxZIndex; 
+                    
+                    // Creiamo una connessione per ogni nodo genitore
+                    foreach (var source in sources)
+                    {
+                        CreateConnection(source, newNode);
+                    }
+                }
                 SetSelectedNode(newNode);
             },
             undo: () => {
                 if (Nodes.Contains(newNode)) {
-                    var link = Connections.FirstOrDefault(c => c.Source == sourceNode && c.Target == newNode);
-                    if (link != null) Connections.Remove(link);
+                    // Rimuoviamo tutte le connessioni verso questo nodo
+                    var links = Connections.Where(c => c.Target == newNode).ToList();
+                    foreach (var link in links) Connections.Remove(link);
+                    
                     if (SelectedNodes.Contains(newNode)) DeselectAllNodes();
-                    UnregisterNodeEvents(newNode); Nodes.Remove(newNode);
+                    UnregisterNodeEvents(newNode); 
+                    Nodes.Remove(newNode);
                 }
             },
             onDispose: (wasExecuted) => { if (!wasExecuted && !string.IsNullOrEmpty(tempFilePath)) _dataManager.DeleteTemporaryData(tempFilePath); }
@@ -414,19 +431,65 @@ public partial class BoardViewModel : ObservableObject
     // ---------------------------------------------------------------------------
 
     [RelayCommand(CanExecute = nameof(CanExecuteMath))]
-    private async Task AddNodes() { /* Logica futura A+B */ }
+    private async Task AddNodes() => await RunArithmetic(ArithmeticOperation.Add, "Somma Immagini");
 
     [RelayCommand(CanExecute = nameof(CanExecuteMath))]
-    private async Task SubtractNodes() { /* Logica futura A-B */ }
+    private async Task SubtractNodes() => await RunArithmetic(ArithmeticOperation.Subtract, "Sottrazione Immagini");
 
     [RelayCommand(CanExecute = nameof(CanExecuteMath))]
-    private async Task MultiplyNodes() { /* Logica futura A*B */ }
+    private async Task MultiplyNodes() => await RunArithmetic(ArithmeticOperation.Multiply, "Moltiplicazione Immagini");
 
     [RelayCommand(CanExecute = nameof(CanExecuteMath))]
-    private async Task DivideNodes() { /* Logica futura A/B */ }
+    private async Task DivideNodes() => await RunArithmetic(ArithmeticOperation.Divide, "Divisione Immagini");
+
+    private async Task RunArithmetic(ArithmeticOperation op, string undoLabel)
+    {
+        var nodeA = SelectedNodes[0] as ImageNodeViewModel;
+        var nodeB = SelectedNodes[1] as ImageNodeViewModel;
+        if (nodeA == null || nodeB == null) return;
+
+        try
+        {
+            var resultPaths = await _arithmeticCoordinator.ProcessAsync(
+                nodeA.CurrentFiles.ToList(), 
+                nodeB.CurrentFiles.ToList(), 
+                op);
+
+            if (resultPaths == null || !resultPaths.Any()) return;
+
+            // --- POSIZIONAMENTO (Rispetto al Nodo A) ---
+            double offsetX = 100.0;
+            double targetCenterY = nodeA.Y + (nodeA.EstimatedTotalSize.Height / 2.0);
+            double nodeAWidth = nodeA.EstimatedTotalSize.Width;
+            double targetCenterX = nodeA.X + nodeAWidth + offsetX + (nodeAWidth / 2.0);
+
+            BaseNodeViewModel newNode = resultPaths.Count == 1
+                ? await _nodeFactory.CreateSingleImageNodeAsync(resultPaths[0], targetCenterX, targetCenterY)
+                : await _nodeFactory.CreateMultipleImagesNodeAsync(resultPaths, targetCenterX, targetCenterY);
+
+            string opSymbol = op switch { 
+                ArithmeticOperation.Add => "+", 
+                ArithmeticOperation.Subtract => "-", 
+                ArithmeticOperation.Multiply => "*", 
+                ArithmeticOperation.Divide => "/", 
+                _ => "?" 
+            };
+
+            newNode.Title = $"{nodeA.Title} {opSymbol} {nodeB.Title}";
+            if (newNode is ImageNodeViewModel resNode) resNode.VisualizationMode = nodeA.VisualizationMode;
+
+            // --- REGISTRAZIONE CON COLLEGAMENTI MULTIPLI ---
+            // Passiamo sia nodeA che nodeB come sorgenti
+            RegisterProcessingResult(newNode, new List<BaseNodeViewModel> { nodeA, nodeB }, resultPaths[0], undoLabel);
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"Errore aritmetico: {ex.Message}");
+        }
+    }
 
     // ---------------------------------------------------------------------------
-    // COMANDI BOARD / IMPORT
+    // COMANDI BOARD / IMPORT / ALTRE OPERAZIONI
     // ---------------------------------------------------------------------------
 
     [RelayCommand]
@@ -526,7 +589,15 @@ public partial class BoardViewModel : ObservableObject
 
     // --- PREDICATI DI ESECUZIONE ---
 
-    private bool CanExecuteMath() => SelectedNodesCount == 2;
+    private bool CanExecuteMath()
+    {
+        if (SelectedNodesCount != 2) return false;
+        var nodeA = SelectedNodes[0] as ImageNodeViewModel;
+        var nodeB = SelectedNodes[1] as ImageNodeViewModel;
+        if (nodeA == null || nodeB == null) return false;
+        return _arithmeticCoordinator.CanProcess(nodeA.CurrentFiles.ToList(), nodeB.CurrentFiles.ToList());
+    }
+
     private bool CanExecuteOnImageNode() => SelectedNodesCount == 1 && SelectedNodes[0] is ImageNodeViewModel;
     private bool CanEditHeader() => SelectedNodesCount == 1 && SelectedNodes[0] is ImageNodeViewModel n && n.ActiveFile != null;
     private bool CanSetVisualizationMode(VisualizationMode mode) => SelectedNodesCount == 1 && SelectedNodes[0] is ImageNodeViewModel n && n.VisualizationMode != mode;

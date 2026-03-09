@@ -710,4 +710,5 @@
     <data name="PlateErrorExeNotFound" xml:space="preserve">
     <value>ASTAP executable not found in the configured folder. Please check your settings.</value>
 </data>
+    
 </root>

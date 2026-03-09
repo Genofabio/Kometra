@@ -158,6 +158,44 @@
             
             <Separator />
 
+            <MenuItem Header="{Binding [MenuArithOps], Source={x:Static infrastructure:LocalizationManager.Instance}}" Classes="innerMenuItem">
+                <MenuItem.Icon>
+                    <avalonia:MaterialIcon Kind="Calculator" />
+                </MenuItem.Icon>
+
+                <MenuItem Header="{Binding [MenuArithAdd], Source={x:Static infrastructure:LocalizationManager.Instance}}"
+                          Classes="innerMenuItem"
+                          Command="{Binding BoardVm.AddNodesCommand}">
+                    <MenuItem.Icon>
+                        <avalonia:MaterialIcon Kind="Plus" />
+                    </MenuItem.Icon>
+                </MenuItem>
+
+                <MenuItem Header="{Binding [MenuArithSub], Source={x:Static infrastructure:LocalizationManager.Instance}}"
+                          Classes="innerMenuItem"
+                          Command="{Binding BoardVm.SubtractNodesCommand}">
+                    <MenuItem.Icon>
+                        <avalonia:MaterialIcon Kind="Minus" />
+                    </MenuItem.Icon>
+                </MenuItem>
+
+                <MenuItem Header="{Binding [MenuArithMul], Source={x:Static infrastructure:LocalizationManager.Instance}}"
+                          Classes="innerMenuItem"
+                          Command="{Binding BoardVm.MultiplyNodesCommand}">
+                    <MenuItem.Icon>
+                        <avalonia:MaterialIcon Kind="Close" />
+                    </MenuItem.Icon>
+                </MenuItem>
+
+                <MenuItem Header="{Binding [MenuArithDiv], Source={x:Static infrastructure:LocalizationManager.Instance}}"
+                          Classes="innerMenuItem"
+                          Command="{Binding BoardVm.DivideNodesCommand}">
+                    <MenuItem.Icon>
+                        <avalonia:MaterialIcon Kind="Division" />
+                    </MenuItem.Icon>
+                </MenuItem>
+            </MenuItem>
+
             <MenuItem Header="{Binding [MenuStackOps], Source={x:Static infrastructure:LocalizationManager.Instance}}" Classes="innerMenuItem">
                 <MenuItem.Icon>
                     <avalonia:MaterialIcon Kind="Layers" />

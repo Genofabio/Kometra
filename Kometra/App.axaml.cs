@@ -94,6 +94,7 @@ public class App : Application
         services.AddSingleton<IImageEffectsEngine, ImageEffectsEngine>();
         services.AddSingleton<IImageAnalysisEngine, ImageAnalysisEngine>();
         services.AddSingleton<IGeometricEngine, GeometricEngine>(); 
+        services.AddSingleton<IArithmeticEngine, ArithmeticEngine>(); // <-- AGGIUNTO
         services.AddSingleton<IImagePresentationService, ImagePresentationService>();
         services.AddSingleton<ICalibrationEngine, CalibrationEngine>();
         services.AddSingleton<IGradientRadialEngine, GradientRadialEngine>();
@@ -120,6 +121,7 @@ public class App : Application
         services.AddSingleton<IAlignmentCoordinator, AlignmentCoordinator>(); 
         services.AddSingleton<ICropCoordinator, CropCoordinator>();
         services.AddSingleton<IStackingCoordinator, StackingCoordinator>();
+        services.AddSingleton<IArithmeticCoordinator, ArithmeticCoordinator>(); // <-- AGGIUNTO
         services.AddSingleton<ICalibrationCoordinator, CalibrationCoordinator>();
         services.AddSingleton<IImageEnhancementCoordinator, ImageEnhancementCoordinator>();
         services.AddSingleton<IMaskingCoordinator, MaskingCoordinator>();

@@ -608,4 +608,9 @@
     <data name="PlateErrorExeNotFound" xml:space="preserve">
     <value>Eseguibile ASTAP non trovato nella cartella configurata. Per favore, controlla le impostazioni.</value>
 </data>
+    <data name="MenuArithOps" xml:space="preserve"><value>Operazioni Aritmetiche</value></data>
+    <data name="MenuArithAdd" xml:space="preserve"><value>Somma (A + B)</value></data>
+    <data name="MenuArithSub" xml:space="preserve"><value>Sottrazione (A - B)</value></data>
+    <data name="MenuArithMul" xml:space="preserve"><value>Moltiplicazione (A × B)</value></data>
+    <data name="MenuArithDiv" xml:space="preserve"><value>Divisione (A ÷ B)</value></data>
 </root>
