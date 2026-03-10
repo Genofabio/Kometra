@@ -2,7 +2,7 @@
     <PropertyGroup>
         <OutputType>WinExe</OutputType>
         <TargetFramework>net9.0</TargetFramework>
-	<ApplicationIcon>Assets\Icon\icon256.ico</ApplicationIcon>
+        <ApplicationIcon>Assets\Icon\icon256.ico</ApplicationIcon>
         <Nullable>enable</Nullable>
         <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
         <ApplicationManifest>app.manifest</ApplicationManifest>
@@ -21,7 +21,6 @@
         <PackageReference Include="Avalonia.Desktop" Version="11.3.10" />
         <PackageReference Include="Avalonia.Themes.Fluent" Version="11.3.10" />
         <PackageReference Include="Avalonia.Fonts.Inter" Version="11.3.10" />
-        <!--Condition below is needed to remove Avalonia.Diagnostics package from build output in Release configuration.-->
         <PackageReference Include="Avalonia.Diagnostics" Version="11.3.10">
             <IncludeAssets Condition="'$(Configuration)' != 'Debug'">None</IncludeAssets>
             <PrivateAssets Condition="'$(Configuration)' != 'Debug'">All</PrivateAssets>
@@ -54,4 +53,20 @@
         <DependentUpon>Strings.resx</DependentUpon>
       </Compile>
     </ItemGroup>
+
+    <Target Name="CreateMacAppBundle" AfterTargets="Publish" Condition="'$(RuntimeIdentifier)' == 'osx-arm64' Or '$(RuntimeIdentifier)' == 'osx-x64'">
+        <PropertyGroup>
+            <AppBundleDir>$(PublishDir)$(AssemblyName).app</AppBundleDir>
+            <MacOsDir>$(AppBundleDir)\Contents\MacOS</MacOsDir>
+            <ResourcesDir>$(AppBundleDir)\Contents\Resources</ResourcesDir>
+        </PropertyGroup>
+
+        <MakeDir Directories="$(AppBundleDir);$(MacOsDir);$(ResourcesDir)" />
+
+        <Move SourceFiles="$(PublishDir)$(AssemblyName)" DestinationFolder="$(MacOsDir)" />
+
+        <Copy SourceFiles="Assets\Publish\Info.plist" DestinationFolder="$(AppBundleDir)\Contents" />
+        <Copy SourceFiles="Assets\Icon\icon256.icns" DestinationFolder="$(ResourcesDir)" />
+    </Target>
+
 </Project>
