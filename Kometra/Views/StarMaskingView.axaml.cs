@@ -166,7 +166,11 @@ public partial class StarMaskingView : Window
         if (previewBorder == null) return;
 
         var props = e.GetCurrentPoint(previewBorder).Properties;
-        if (props.IsMiddleButtonPressed || props.IsLeftButtonPressed)
+        
+        bool isMiddlePan = props.IsMiddleButtonPressed;
+        bool isAltPan = props.IsLeftButtonPressed && e.KeyModifiers.HasFlag(KeyModifiers.Alt);
+
+        if (isMiddlePan || isAltPan)
         {
             _lastPointerPosForPanning = e.GetPosition(previewBorder);
             _isPanning = true;
@@ -177,7 +181,7 @@ public partial class StarMaskingView : Window
 
     private void OnPreviewPointerReleased(object? sender, PointerReleasedEventArgs e)
     {
-        if (_isPanning)
+        if (_isPanning && (e.InitialPressMouseButton == MouseButton.Middle || e.InitialPressMouseButton == MouseButton.Left))
         {
             _isPanning = false;
             _lastPointerPosForPanning = null;
@@ -192,6 +196,18 @@ public partial class StarMaskingView : Window
         var previewBorder = this.FindControl<Border>("PreviewBorder");
         if (!_isPanning || DataContext is not StarMaskingViewModel vm || previewBorder == null || _lastPointerPosForPanning == null) return;
 
+        var props = e.GetCurrentPoint(previewBorder).Properties;
+
+        // Se l'utente rilascia i tasti, sganciamo il pan
+        if (!props.IsMiddleButtonPressed && !props.IsLeftButtonPressed)
+        {
+            _isPanning = false;
+            _lastPointerPosForPanning = null;
+            e.Pointer.Capture(null);
+            this.Cursor = Cursor.Default;
+            return;
+        }
+
         var currentPos = e.GetPosition(previewBorder);
         var delta = currentPos - _lastPointerPosForPanning.Value;
         _lastPointerPosForPanning = currentPos;
@@ -204,10 +220,15 @@ public partial class StarMaskingView : Window
         var previewBorder = this.FindControl<Border>("PreviewBorder");
         if (DataContext is not StarMaskingViewModel vm || previewBorder == null || vm.ActiveRenderer == null) return;
         
-        if (e.KeyModifiers.HasFlag(KeyModifiers.Control))
+        // FIX CROSS-PLATFORM: Gestione Delta.X per Mac (Shift + Scroll)
+        double effectiveDelta = Math.Abs(e.Delta.Y) > Math.Abs(e.Delta.X) ? e.Delta.Y : e.Delta.X;
+        if (Math.Abs(effectiveDelta) < 0.0001) return;
+
+        // ZOOM (CTRL o CMD + WHEEL)
+        if (e.KeyModifiers.HasFlag(KeyModifiers.Control) || e.KeyModifiers.HasFlag(KeyModifiers.Meta))
         {
             var mousePos = e.GetPosition(previewBorder);
-            double factor = e.Delta.Y > 0 ? 1.1 : (1.0 / 1.1);
+            double factor = effectiveDelta > 0 ? 1.1 : (1.0 / 1.1);
             vm.Viewport.ApplyZoomAtPoint(factor, mousePos);
             e.Handled = true;
             return;
@@ -215,7 +236,8 @@ public partial class StarMaskingView : Window
 
         double currentRange = Math.Abs(vm.ActiveRenderer.WhitePoint - vm.ActiveRenderer.BlackPoint);
         double step = Math.Max(0.0001, (currentRange > 0.00001) ? currentRange * 0.05 : 1.0);
-        if (e.Delta.Y < 0) step = -step;
+        
+        if (effectiveDelta < 0) step = -step;
 
         if (e.KeyModifiers.HasFlag(KeyModifiers.Shift))
         {

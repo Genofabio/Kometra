@@ -89,7 +89,10 @@ public partial class SingleImageNodeView : UserControl
         }
 
         // --- 2. PAN INTERNO ---
-        if (properties.IsMiddleButtonPressed)
+        bool isMiddleClickPan = properties.IsMiddleButtonPressed;
+        bool isAltPan = properties.IsLeftButtonPressed && e.KeyModifiers.HasFlag(KeyModifiers.Alt);
+
+        if (isMiddleClickPan || isAltPan)
         {
             if (!nodeVm.IsSelected) return;
             _isPanningImage = true;
@@ -117,9 +120,10 @@ public partial class SingleImageNodeView : UserControl
             }
 
             // --- LOGICA MULTI-SELEZIONE ---
-            // Rileviamo se Shift o Ctrl sono premuti per la logica a 2 nodi
+            // Rileviamo se Shift, Ctrl o Cmd(Meta) sono premuti per la logica a 2 nodi
             bool isModifier = e.KeyModifiers.HasFlag(KeyModifiers.Shift) || 
-                              e.KeyModifiers.HasFlag(KeyModifiers.Control);
+                              e.KeyModifiers.HasFlag(KeyModifiers.Control) ||
+                              e.KeyModifiers.HasFlag(KeyModifiers.Meta);
 
             // Avvisiamo il ViewModel passando il modificatore
             _cachedBoardVm?.SetSelectedNode(nodeVm, isModifier);
@@ -211,7 +215,7 @@ public partial class SingleImageNodeView : UserControl
 
     private void OnPointerReleased(object? sender, PointerReleasedEventArgs e)
     {
-        if (_isPanningImage && e.InitialPressMouseButton == MouseButton.Middle)
+        if (_isPanningImage && (e.InitialPressMouseButton == MouseButton.Middle || e.InitialPressMouseButton == MouseButton.Left))
         {
             _isPanningImage = false;
             this.Cursor = Cursor.Default;
@@ -245,34 +249,65 @@ public partial class SingleImageNodeView : UserControl
         if (DataContext is not ImageNodeViewModel vm) return;
         if (!vm.IsSelected) return;
 
-        if ((e.KeyModifiers & KeyModifiers.Control) == KeyModifiers.Control)
+        // FIX CROSS-PLATFORM: Gestione Delta.X per Mac (Shift + Scroll)
+        double effectiveDelta = Math.Abs(e.Delta.Y) > Math.Abs(e.Delta.X) ? e.Delta.Y : e.Delta.X;
+        if (Math.Abs(effectiveDelta) < 0.0001) return;
+
+        // ZOOM (CTRL o CMD + WHEEL)
+        if (e.KeyModifiers.HasFlag(KeyModifiers.Control) || e.KeyModifiers.HasFlag(KeyModifiers.Meta))
         {
             var container = this.FindControl<Border>("ImageContainer");
             if (container != null)
             {
                 var mousePos = e.GetPosition(container);
-                double factor = e.Delta.Y > 0 ? 1.1 : (1.0 / 1.1);
+                double factor = effectiveDelta > 0 ? 1.1 : (1.0 / 1.1);
                 vm.Viewport.ApplyZoomAtPoint(factor, mousePos);
             }
             e.Handled = true;
             return;
         }
 
+        // SOGLIE RADIOMETRICHE (SHIFT o DEFAULT + WHEEL)
         if (vm.ActiveRenderer != null)
         {
             double currentRange = Math.Abs(vm.ActiveRenderer.WhitePoint - vm.ActiveRenderer.BlackPoint);
-            if (currentRange < 0.001) currentRange = 1.0; 
-        
-            double stepPercentage = 0.05; 
-            double deltaAmount = (currentRange * stepPercentage) * e.Delta.Y;
-        
-            bool isShiftPressed = (e.KeyModifiers & KeyModifiers.Shift) == KeyModifiers.Shift;
+            double baseStep = (currentRange > 0.00001) ? currentRange * 0.05 : 1.0;
+            double step = Math.Max(0.0001, baseStep);
+
+            if (effectiveDelta < 0) step = -step;
+
+            bool isShiftPressed = e.KeyModifiers.HasFlag(KeyModifiers.Shift);
 
             if (isShiftPressed)
-                vm.ActiveRenderer.BlackPoint += deltaAmount;
+            {
+                // Modifica BLACK POINT (con protezione anti-crossing)
+                double newBlack = vm.ActiveRenderer.BlackPoint + step;
+                if (step > 0)
+                {
+                    double maxAllowed = vm.ActiveRenderer.WhitePoint - (step * 0.1);
+                    vm.ActiveRenderer.BlackPoint = Math.Min(newBlack, maxAllowed);
+                }
+                else
+                {
+                    vm.ActiveRenderer.BlackPoint = newBlack;
+                }
+            }
             else
-                vm.ActiveRenderer.WhitePoint += deltaAmount;
+            {
+                // Modifica WHITE POINT (con protezione anti-crossing)
+                double newWhite = vm.ActiveRenderer.WhitePoint + step;
+                if (step < 0)
+                {
+                    double minAllowed = vm.ActiveRenderer.BlackPoint + (Math.Abs(step) * 0.1);
+                    vm.ActiveRenderer.WhitePoint = Math.Max(newWhite, minAllowed);
+                }
+                else
+                {
+                    vm.ActiveRenderer.WhitePoint = newWhite;
+                }
+            }
         }
+        
         e.Handled = true; 
     }
 }

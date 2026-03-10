@@ -97,20 +97,28 @@ public partial class ExportView : Window
         if (border == null || _vm?.ActiveRenderer == null) return;
 
         var properties = e.GetCurrentPoint(border).Properties;
-        if (properties.IsMiddleButtonPressed || properties.IsLeftButtonPressed)
+        
+        bool isMiddlePan = properties.IsMiddleButtonPressed;
+        bool isAltPan = properties.IsLeftButtonPressed && e.KeyModifiers.HasFlag(KeyModifiers.Alt);
+
+        if (isMiddlePan || isAltPan)
         {
             _isPanning = true;
             _lastPointerPos = e.GetPosition(border);
             e.Pointer.Capture(border);
-            Cursor = new Cursor(StandardCursorType.SizeAll);
+            this.Cursor = new Cursor(StandardCursorType.SizeAll);
         }
     }
 
     private void OnPreviewPointerReleased(object? sender, PointerReleasedEventArgs e)
     {
-        _isPanning = false;
-        e.Pointer.Capture(null);
-        Cursor = Cursor.Default;
+        if (_isPanning && (e.InitialPressMouseButton == MouseButton.Middle || e.InitialPressMouseButton == MouseButton.Left))
+        {
+            _isPanning = false;
+            _lastPointerPos = null;
+            e.Pointer.Capture(null);
+            this.Cursor = Cursor.Default;
+        }
     }
 
     private void OnPreviewPointerMoved(object? sender, PointerEventArgs e)
@@ -118,6 +126,20 @@ public partial class ExportView : Window
         if (!_isPanning || _vm == null || _lastPointerPos == null) return;
         
         var border = sender as Control;
+        if (border == null) return;
+
+        var props = e.GetCurrentPoint(border).Properties;
+
+        // Se l'utente rilascia i tasti fuori dalla finestra, sganciamo il pan
+        if (!props.IsMiddleButtonPressed && !props.IsLeftButtonPressed)
+        {
+            _isPanning = false;
+            _lastPointerPos = null;
+            e.Pointer.Capture(null);
+            this.Cursor = Cursor.Default;
+            return;
+        }
+        
         var pos = e.GetPosition(border);
         var delta = pos - _lastPointerPos.Value;
         _lastPointerPos = pos;
@@ -133,12 +155,16 @@ public partial class ExportView : Window
         if (visual == null) return;
 
         var modifiers = e.KeyModifiers;
+
+        // FIX CROSS-PLATFORM: Gestione Delta.X per Mac (Shift + Scroll)
+        double effectiveDelta = Math.Abs(e.Delta.Y) > Math.Abs(e.Delta.X) ? e.Delta.Y : e.Delta.X;
+        if (Math.Abs(effectiveDelta) < 0.0001) return;
         
-        // --- 1. ZOOM (CTRL + WHEEL) ---
-        if (modifiers.HasFlag(KeyModifiers.Control))
+        // --- 1. ZOOM (CTRL o CMD + WHEEL) ---
+        if (modifiers.HasFlag(KeyModifiers.Control) || modifiers.HasFlag(KeyModifiers.Meta))
         {
             var border = sender as Control;
-            double zoomFactor = e.Delta.Y > 0 ? 1.1 : 1.0 / 1.1;
+            double zoomFactor = effectiveDelta > 0 ? 1.1 : 1.0 / 1.1;
             _vm.Viewport.ApplyZoomAtPoint(zoomFactor, e.GetPosition(border));
             e.Handled = true;
             return;
@@ -154,7 +180,7 @@ public partial class ExportView : Window
         double step = Math.Max(0.0001, baseStep); 
 
         // Direzione della rotella
-        if (e.Delta.Y < 0) step = -step;
+        if (effectiveDelta < 0) step = -step;
 
         if (modifiers.HasFlag(KeyModifiers.Shift))
         {
@@ -224,4 +250,3 @@ public partial class ExportView : Window
         e.Handled = true;
     }
 }
-

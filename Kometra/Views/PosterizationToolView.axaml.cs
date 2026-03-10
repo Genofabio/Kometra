@@ -97,7 +97,11 @@ namespace Kometra.Views
             if (sender is not Border border) return;
             var props = e.GetCurrentPoint(border).Properties;
             
-            if (props.IsMiddleButtonPressed || props.IsRightButtonPressed)
+            bool isMiddlePan = props.IsMiddleButtonPressed;
+            bool isRightPan = props.IsRightButtonPressed; // Mantenuto come in originale
+            bool isAltPan = props.IsLeftButtonPressed && e.KeyModifiers.HasFlag(KeyModifiers.Alt);
+            
+            if (isMiddlePan || isRightPan || isAltPan)
             {
                 _isPanning = true;
                 _lastPointerPos = e.GetPosition(border);
@@ -108,9 +112,12 @@ namespace Kometra.Views
 
         private void OnPreviewPointerReleased(object? sender, PointerReleasedEventArgs e)
         {
-            if (_isPanning)
+            if (_isPanning && (e.InitialPressMouseButton == MouseButton.Middle || 
+                               e.InitialPressMouseButton == MouseButton.Right || 
+                               e.InitialPressMouseButton == MouseButton.Left))
             {
                 _isPanning = false;
+                _lastPointerPos = null;
                 e.Pointer.Capture(null);
                 this.Cursor = Cursor.Default;
             }
@@ -120,6 +127,18 @@ namespace Kometra.Views
         {
             if (!_isPanning || _lastPointerPos == null || sender is not Border border) return;
             if (DataContext is not ImageProcessing_PosterizationToolViewModel vm) return;
+            
+            var props = e.GetCurrentPoint(border).Properties;
+
+            // Se nessuno dei tasti di panning è premuto, sganciamo
+            if (!props.IsMiddleButtonPressed && !props.IsRightButtonPressed && !props.IsLeftButtonPressed)
+            {
+                _isPanning = false;
+                _lastPointerPos = null;
+                e.Pointer.Capture(null);
+                this.Cursor = Cursor.Default;
+                return;
+            }
             
             var currentPos = e.GetPosition(border);
             var delta = currentPos - _lastPointerPos.Value;
@@ -134,10 +153,15 @@ namespace Kometra.Views
             if (DataContext is not ImageProcessing_PosterizationToolViewModel vm || vm.ActiveRenderer == null) return;
             if (sender is not Border border) return;
 
-            if (e.KeyModifiers.HasFlag(KeyModifiers.Control))
+            // FIX CROSS-PLATFORM: Gestione Delta.X per Mac (Shift + Scroll)
+            double effectiveDelta = Math.Abs(e.Delta.Y) > Math.Abs(e.Delta.X) ? e.Delta.Y : e.Delta.X;
+            if (Math.Abs(effectiveDelta) < 0.0001) return;
+
+            // ZOOM (CTRL o CMD + WHEEL)
+            if (e.KeyModifiers.HasFlag(KeyModifiers.Control) || e.KeyModifiers.HasFlag(KeyModifiers.Meta))
             {
                 var mousePos = e.GetPosition(border);
-                double factor = e.Delta.Y > 0 ? 1.1 : (1.0 / 1.1);
+                double factor = effectiveDelta > 0 ? 1.1 : (1.0 / 1.1);
                 vm.Viewport.ApplyZoomAtPoint(factor, mousePos);
                 e.Handled = true;
                 return;
@@ -148,7 +172,7 @@ namespace Kometra.Views
             if (totalRange < 1e-4) totalRange = 1.0; 
             
             double baseStep = totalRange * 0.005; 
-            bool isScrollingUp = e.Delta.Y > 0;
+            bool isScrollingUp = effectiveDelta > 0;
 
             if (e.KeyModifiers.HasFlag(KeyModifiers.Shift))
             {

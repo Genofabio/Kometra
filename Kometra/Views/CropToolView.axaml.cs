@@ -135,7 +135,10 @@ public partial class CropToolView : Window
 
         var props = e.GetCurrentPoint(previewBorder).Properties;
 
-        if (props.IsMiddleButtonPressed)
+        bool isMiddlePan = props.IsMiddleButtonPressed;
+        bool isAltPan = props.IsLeftButtonPressed && e.KeyModifiers.HasFlag(KeyModifiers.Alt);
+
+        if (isMiddlePan || isAltPan)
         {
             _lastPointerPosForPanning = e.GetPosition(previewBorder);
             _isPanning = true;
@@ -167,7 +170,7 @@ public partial class CropToolView : Window
 
     private void OnPreviewPointerReleased(object? sender, PointerReleasedEventArgs e)
     {
-        if (_isPanning && e.InitialPressMouseButton == MouseButton.Middle)
+        if (_isPanning && (e.InitialPressMouseButton == MouseButton.Middle || e.InitialPressMouseButton == MouseButton.Left))
         {
             _isPanning = false;
             _lastPointerPosForPanning = null;
@@ -184,7 +187,9 @@ public partial class CropToolView : Window
         var previewBorder = this.FindControl<Border>("PreviewBorder");
         if (!_isPanning || DataContext is not CropToolViewModel vm || previewBorder == null) return;
 
-        if (!e.GetCurrentPoint(previewBorder).Properties.IsMiddleButtonPressed)
+        var props = e.GetCurrentPoint(previewBorder).Properties;
+
+        if (!props.IsMiddleButtonPressed && !props.IsLeftButtonPressed)
         {
             _isPanning = false;
             _lastPointerPosForPanning = null;
@@ -210,10 +215,16 @@ public partial class CropToolView : Window
         if (_isPanning) return;
         if (vm.ActiveRenderer == null) return;
 
-        if (e.KeyModifiers.HasFlag(KeyModifiers.Control))
+        // FIX CROSS-PLATFORM: Gestione Delta.X per Mac (Shift + Scroll)
+        double effectiveDelta = Math.Abs(e.Delta.Y) > Math.Abs(e.Delta.X) ? e.Delta.Y : e.Delta.X;
+        
+        if (Math.Abs(effectiveDelta) < 0.0001) return;
+
+        // ZOOM (CTRL o CMD + WHEEL)
+        if (e.KeyModifiers.HasFlag(KeyModifiers.Control) || e.KeyModifiers.HasFlag(KeyModifiers.Meta))
         {
             var mousePos = e.GetPosition(previewBorder);
-            double factor = e.Delta.Y > 0 ? 1.1 : (1.0 / 1.1);
+            double factor = effectiveDelta > 0 ? 1.1 : (1.0 / 1.1);
 
             vm.Viewport.ApplyZoomAtPoint(factor, mousePos);
             e.Handled = true;
@@ -224,7 +235,7 @@ public partial class CropToolView : Window
         double baseStep = (currentRange > 0.00001) ? currentRange * 0.05 : 1.0;
         double step = Math.Max(0.0001, baseStep);
 
-        if (e.Delta.Y < 0) step = -step;
+        if (effectiveDelta < 0) step = -step;
 
         if (e.KeyModifiers.HasFlag(KeyModifiers.Shift))
         {

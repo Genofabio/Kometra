@@ -126,7 +126,13 @@ public partial class VideoExportToolView : Window
     {
         var border = sender as Control;
         if (border == null) return;
-        if (e.GetCurrentPoint(border).Properties.IsMiddleButtonPressed) 
+        
+        var props = e.GetCurrentPoint(border).Properties;
+        
+        bool isMiddlePan = props.IsMiddleButtonPressed;
+        bool isAltPan = props.IsLeftButtonPressed && e.KeyModifiers.HasFlag(KeyModifiers.Alt);
+
+        if (isMiddlePan || isAltPan) 
         {
             _isPanning = true; 
             _lastPointerPos = e.GetPosition(border);
@@ -137,13 +143,33 @@ public partial class VideoExportToolView : Window
 
     private void OnPreviewPointerReleased(object? sender, PointerReleasedEventArgs e) 
     {
-        _isPanning = false; e.Pointer.Capture(null); this.Cursor = Cursor.Default;
+        if (_isPanning && (e.InitialPressMouseButton == MouseButton.Middle || e.InitialPressMouseButton == MouseButton.Left))
+        {
+            _isPanning = false; 
+            _lastPointerPos = null;
+            e.Pointer.Capture(null); 
+            this.Cursor = Cursor.Default;
+        }
     }
 
     private void OnPreviewPointerMoved(object? sender, PointerEventArgs e) 
     {
         if (!_isPanning || _vm == null || _lastPointerPos == null) return;
-        var pos = e.GetPosition(sender as Control);
+        var border = sender as Control;
+        if (border == null) return;
+
+        var props = e.GetCurrentPoint(border).Properties;
+        
+        if (!props.IsMiddleButtonPressed && !props.IsLeftButtonPressed)
+        {
+            _isPanning = false;
+            _lastPointerPos = null;
+            e.Pointer.Capture(null);
+            this.Cursor = Cursor.Default;
+            return;
+        }
+
+        var pos = e.GetPosition(border);
         var delta = pos - _lastPointerPos.Value; 
         _lastPointerPos = pos;
         _vm.Viewport.ApplyPan(delta.X, delta.Y);
@@ -154,22 +180,53 @@ public partial class VideoExportToolView : Window
         if (_vm == null || _vm.ActiveRenderer == null) return;
         var border = sender as Control; if (border == null) return;
 
-        if (e.KeyModifiers.HasFlag(KeyModifiers.Control)) 
+        // FIX CROSS-PLATFORM: Gestione Delta.X per Mac (Shift + Scroll)
+        double effectiveDelta = Math.Abs(e.Delta.Y) > Math.Abs(e.Delta.X) ? e.Delta.Y : e.Delta.X;
+        if (Math.Abs(effectiveDelta) < 0.0001) return;
+
+        // ZOOM (CTRL o CMD + WHEEL)
+        if (e.KeyModifiers.HasFlag(KeyModifiers.Control) || e.KeyModifiers.HasFlag(KeyModifiers.Meta)) 
         {
-            _vm.Viewport.ApplyZoomAtPoint(e.Delta.Y > 0 ? 1.1 : 1.0 / 1.1, e.GetPosition(border));
+            double factor = effectiveDelta > 0 ? 1.1 : 1.0 / 1.1;
+            _vm.Viewport.ApplyZoomAtPoint(factor, e.GetPosition(border));
+            e.Handled = true;
+            return;
         } 
+
+        // SOGLIE RADIOMETRICHE (SHIFT o DEFAULT + WHEEL)
+        double range = Math.Abs(_vm.ActiveRenderer.WhitePoint - _vm.ActiveRenderer.BlackPoint);
+        double step = (range > 1e-6 ? range * 0.05 : 0.001);
+        
+        if (effectiveDelta < 0) step = -step;
+
+        if (e.KeyModifiers.HasFlag(KeyModifiers.Shift)) 
+        {
+            double newBlack = _vm.ActiveRenderer.BlackPoint + step;
+            if (step > 0)
+            {
+                double maxAllowed = _vm.ActiveRenderer.WhitePoint - (step * 0.1);
+                _vm.ActiveRenderer.BlackPoint = Math.Min(newBlack, maxAllowed);
+            }
+            else
+            {
+                _vm.ActiveRenderer.BlackPoint = newBlack;
+            }
+        }
         else 
         {
-            double range = Math.Abs(_vm.ActiveRenderer.WhitePoint - _vm.ActiveRenderer.BlackPoint);
-            double step = (range > 1e-6 ? range * 0.05 : 0.001) * (e.Delta.Y < 0 ? -1 : 1);
-
-            if (e.KeyModifiers.HasFlag(KeyModifiers.Shift)) 
-                _vm.ActiveRenderer.BlackPoint += step;
-            else 
-                _vm.ActiveRenderer.WhitePoint += step;
-
-            _vm.NotifyThresholdsChanged();
+            double newWhite = _vm.ActiveRenderer.WhitePoint + step;
+            if (step < 0)
+            {
+                double minAllowed = _vm.ActiveRenderer.BlackPoint + (Math.Abs(step) * 0.1);
+                _vm.ActiveRenderer.WhitePoint = Math.Max(newWhite, minAllowed);
+            }
+            else
+            {
+                _vm.ActiveRenderer.WhitePoint = newWhite;
+            }
         }
+
+        _vm.NotifyThresholdsChanged();
         e.Handled = true;
     }
     

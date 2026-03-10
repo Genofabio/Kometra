@@ -124,7 +124,10 @@ public partial class AlignmentToolView : Window
     
         var props = e.GetCurrentPoint(previewBorder).Properties;
 
-        if (props.IsMiddleButtonPressed)
+        bool isMiddlePan = props.IsMiddleButtonPressed;
+        bool isAltPan = props.IsLeftButtonPressed && e.KeyModifiers.HasFlag(KeyModifiers.Alt);
+
+        if (isMiddlePan || isAltPan)
         {
             _lastPointerPosForPanning = e.GetPosition(previewBorder);
             _isPanning = true; 
@@ -148,7 +151,7 @@ public partial class AlignmentToolView : Window
 
     private void OnPreviewPointerReleased(object? sender, PointerReleasedEventArgs e)
     {
-        if (_isPanning && e.InitialPressMouseButton == MouseButton.Middle)
+        if (_isPanning && (e.InitialPressMouseButton == MouseButton.Middle || e.InitialPressMouseButton == MouseButton.Left))
         {
             _isPanning = false;
             _lastPointerPosForPanning = null;
@@ -165,7 +168,9 @@ public partial class AlignmentToolView : Window
         var previewBorder = this.FindControl<Border>("PreviewBorder");
         if (!_isPanning || DataContext is not ImageProcessing_AlignmentToolViewModel vm || previewBorder == null) return;
         
-        if (!e.GetCurrentPoint(previewBorder).Properties.IsMiddleButtonPressed)
+        var props = e.GetCurrentPoint(previewBorder).Properties;
+        
+        if (!props.IsMiddleButtonPressed && !props.IsLeftButtonPressed)
         {
             _isPanning = false;
             _lastPointerPosForPanning = null;
@@ -192,11 +197,20 @@ public partial class AlignmentToolView : Window
         if (_isPanning) return; 
         if (vm.ActiveRenderer == null) return; 
 
-        // ZOOM (CTRL + WHEEL)
-        if (e.KeyModifiers.HasFlag(KeyModifiers.Control))
+        // FIX CROSS-PLATFORM: Su macOS (specie con trackpad), Shift + Scroll verticale
+        // viene tradotto dal sistema operativo in Scroll orizzontale (Delta.X).
+        // Prendiamo il delta maggiore in valore assoluto per gestire in modo affidabile entrambi i casi.
+        double effectiveDelta = Math.Abs(e.Delta.Y) > Math.Abs(e.Delta.X) ? e.Delta.Y : e.Delta.X;
+        
+        // Ignora movimenti nulli (evita divisioni per zero o step vuoti)
+        if (Math.Abs(effectiveDelta) < 0.0001) return;
+
+        // ZOOM (CTRL o CMD + WHEEL)
+        // Aggiunto KeyModifiers.Meta per supportare il tasto Command (⌘) nativo su Mac
+        if (e.KeyModifiers.HasFlag(KeyModifiers.Control) || e.KeyModifiers.HasFlag(KeyModifiers.Meta))
         {
             var mousePos = e.GetPosition(previewBorder);
-            double factor = e.Delta.Y > 0 ? 1.1 : (1.0 / 1.1);
+            double factor = effectiveDelta > 0 ? 1.1 : (1.0 / 1.1);
 
             vm.Viewport.ApplyZoomAtPoint(factor, mousePos);
             e.Handled = true;
@@ -211,8 +225,8 @@ public partial class AlignmentToolView : Window
         // Step minimo per evitare blocco su float molto piccoli
         double step = Math.Max(0.0001, baseStep); 
 
-        // Direzione
-        if (e.Delta.Y < 0) step = -step;
+        // Direzione (ora basata sul delta effettivo cross-platform)
+        if (effectiveDelta < 0) step = -step;
 
         // 2. Applicazione con guardie anti-crossing
         if (e.KeyModifiers.HasFlag(KeyModifiers.Shift))

@@ -61,7 +61,10 @@ public partial class BoardView : UserControl
 
         var props = e.GetCurrentPoint(this).Properties;
 
-        if (props.IsMiddleButtonPressed)
+        bool isMiddlePan = props.IsMiddleButtonPressed;
+        bool isAltPan = props.IsLeftButtonPressed && e.KeyModifiers.HasFlag(KeyModifiers.Alt);
+
+        if (isMiddlePan || isAltPan)
         {
             // Inizio Panning
             _lastPointerPosForPanning = e.GetPosition(this);
@@ -99,7 +102,9 @@ public partial class BoardView : UserControl
         if (!_isPanning || _lastPointerPosForPanning == null) 
             return;
 
-        if (!e.GetCurrentPoint(this).Properties.IsMiddleButtonPressed)
+        var props = e.GetCurrentPoint(this).Properties;
+
+        if (!props.IsMiddleButtonPressed && !props.IsLeftButtonPressed)
         {
             EndPanning(e);
             return;
@@ -124,7 +129,7 @@ public partial class BoardView : UserControl
 
     private void OnPointerReleased(object? sender, PointerReleasedEventArgs e)
     {
-        if (_isPanning && e.InitialPressMouseButton == MouseButton.Middle)
+        if (_isPanning && (e.InitialPressMouseButton == MouseButton.Middle || e.InitialPressMouseButton == MouseButton.Left))
         {
             EndPanning(e);
         }
@@ -163,10 +168,14 @@ public partial class BoardView : UserControl
         if (e.Handled) return;
         if (DataContext is not BoardViewModel vm) return;
         
+        // FIX CROSS-PLATFORM: Gestione Delta.X per Mac (Shift + Scroll) o Trackpad
+        double effectiveDelta = Math.Abs(e.Delta.Y) > Math.Abs(e.Delta.X) ? e.Delta.Y : e.Delta.X;
+        if (Math.Abs(effectiveDelta) < 0.0001) return;
+
         var mousePos = e.GetPosition(this);
         
         // Calcolo fattore di zoom (esponenziale per fluidità)
-        double factor = e.Delta.Y > 0 ? 1.1 : (1.0 / 1.1);
+        double factor = effectiveDelta > 0 ? 1.1 : (1.0 / 1.1);
         
         // Deleghiamo al ViewportManager della Board
         vm.Viewport.ApplyZoomAtPoint(factor, mousePos);

@@ -306,8 +306,10 @@ public partial class ImageEnhancementToolView : Window
 
         var properties = e.GetCurrentPoint(border).Properties;
 
-        // Panning attivato con tasto centrale
-        if (properties.IsMiddleButtonPressed) 
+        bool isMiddlePan = properties.IsMiddleButtonPressed;
+        bool isAltPan = properties.IsLeftButtonPressed && e.KeyModifiers.HasFlag(KeyModifiers.Alt);
+
+        if (isMiddlePan || isAltPan) 
         { 
             _isPanning = true; 
             _lastPointerPos = e.GetPosition(border); 
@@ -318,7 +320,12 @@ public partial class ImageEnhancementToolView : Window
 
     private void OnPreviewPointerReleased(object? sender, PointerReleasedEventArgs e)
     {
-        if (_isPanning) { _isPanning = false; e.Pointer.Capture(null); this.Cursor = Cursor.Default; }
+        if (_isPanning && (e.InitialPressMouseButton == MouseButton.Middle || e.InitialPressMouseButton == MouseButton.Left))
+        {
+            _isPanning = false;
+            e.Pointer.Capture(null);
+            this.Cursor = Cursor.Default;
+        }
     }
 
     private void OnPreviewPointerMoved(object? sender, PointerEventArgs e)
@@ -326,6 +333,19 @@ public partial class ImageEnhancementToolView : Window
         if (!_isPanning || _vm == null) return;
         var b = sender as Border;
         if (b == null || _lastPointerPos == null) return;
+
+        var props = e.GetCurrentPoint(b).Properties;
+        
+        // Se non stiamo più premendo né il centrale né il sinistro, ferma il panning
+        if (!props.IsMiddleButtonPressed && !props.IsLeftButtonPressed)
+        {
+            _isPanning = false;
+            _lastPointerPos = null;
+            e.Pointer.Capture(null);
+            this.Cursor = Cursor.Default;
+            return;
+        }
+
         var pos = e.GetPosition(b);
         var d = pos - _lastPointerPos.Value;
         _lastPointerPos = pos;
@@ -337,20 +357,53 @@ public partial class ImageEnhancementToolView : Window
         if (_vm == null || _vm.ActiveRenderer == null || _vm.IsBusy) return;
         var b = sender as Border; if (b == null) return;
 
-        if (e.KeyModifiers.HasFlag(KeyModifiers.Control))
+        // FIX CROSS-PLATFORM: Gestione Delta.X per Mac (Shift + Scroll)
+        double effectiveDelta = Math.Abs(e.Delta.Y) > Math.Abs(e.Delta.X) ? e.Delta.Y : e.Delta.X;
+        if (Math.Abs(effectiveDelta) < 0.0001) return;
+
+        // ZOOM (CTRL o CMD + WHEEL)
+        if (e.KeyModifiers.HasFlag(KeyModifiers.Control) || e.KeyModifiers.HasFlag(KeyModifiers.Meta))
         {
-            double f = e.Delta.Y > 0 ? 1.1 : 1.0 / 1.1;
+            double f = effectiveDelta > 0 ? 1.1 : 1.0 / 1.1;
             _vm.Viewport.ApplyZoomAtPoint(f, e.GetPosition(b));
+            e.Handled = true;
+            return;
         }
-        else
+
+        // SOGLIE RADIOMETRICHE (SHIFT o DEFAULT + WHEEL)
+        double r = Math.Abs(_vm.ActiveRenderer.WhitePoint - _vm.ActiveRenderer.BlackPoint);
+        double s = (r > 1e-6 ? r * 0.05 : 0.001);
+        
+        if (effectiveDelta < 0) s = -s;
+
+        // Applicazione con guardie anti-crossing
+        if (e.KeyModifiers.HasFlag(KeyModifiers.Shift)) 
         {
-            double r = Math.Abs(_vm.ActiveRenderer.WhitePoint - _vm.ActiveRenderer.BlackPoint);
-            double s = (r > 1e-6 ? r * 0.05 : 0.001) * (e.Delta.Y < 0 ? -1 : 1);
-            if (e.KeyModifiers.HasFlag(KeyModifiers.Shift)) 
-                _vm.ActiveRenderer.BlackPoint += s;
-            else 
-                _vm.ActiveRenderer.WhitePoint += s;
+            double newBlack = _vm.ActiveRenderer.BlackPoint + s;
+            if (s > 0)
+            {
+                double maxAllowed = _vm.ActiveRenderer.WhitePoint - (s * 0.1);
+                _vm.ActiveRenderer.BlackPoint = Math.Min(newBlack, maxAllowed);
+            }
+            else
+            {
+                _vm.ActiveRenderer.BlackPoint = newBlack;
+            }
         }
+        else 
+        {
+            double newWhite = _vm.ActiveRenderer.WhitePoint + s;
+            if (s < 0)
+            {
+                double minAllowed = _vm.ActiveRenderer.BlackPoint + (Math.Abs(s) * 0.1);
+                _vm.ActiveRenderer.WhitePoint = Math.Max(newWhite, minAllowed);
+            }
+            else
+            {
+                _vm.ActiveRenderer.WhitePoint = newWhite;
+            }
+        }
+        
         e.Handled = true;
     }
 

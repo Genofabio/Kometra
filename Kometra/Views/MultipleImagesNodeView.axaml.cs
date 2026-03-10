@@ -94,8 +94,11 @@ public partial class MultipleImagesNodeView : UserControl
             }
         }
 
-        // --- 2. PAN INTERNO (Tasto Centrale) ---
-        if (properties.IsMiddleButtonPressed)
+        // --- 2. PAN INTERNO (Tasto Centrale OPPURE Alt + Tasto Sinistro) ---
+        bool isMiddlePan = properties.IsMiddleButtonPressed;
+        bool isAltPan = properties.IsLeftButtonPressed && e.KeyModifiers.HasFlag(KeyModifiers.Alt);
+
+        if (isMiddlePan || isAltPan)
         {
             if (!nodeVm.IsSelected || nodeVm.Navigator is Shared_SequenceNavigator { IsLooping: true }) return;
             
@@ -124,9 +127,10 @@ public partial class MultipleImagesNodeView : UserControl
             }
 
             // --- GESTIONE SELEZIONE MULTIPLA ---
-            // Rileviamo Shift o Ctrl per la logica a 2 nodi nel ViewModel
+            // Rileviamo Shift, Ctrl o Cmd(Meta) per la logica a 2 nodi nel ViewModel
             bool isModifier = e.KeyModifiers.HasFlag(KeyModifiers.Shift) || 
-                             e.KeyModifiers.HasFlag(KeyModifiers.Control);
+                              e.KeyModifiers.HasFlag(KeyModifiers.Control) ||
+                              e.KeyModifiers.HasFlag(KeyModifiers.Meta);
 
             _cachedBoardVm?.SetSelectedNode(nodeVm, isModifier);
             nodeVm.BringToFront(); 
@@ -216,7 +220,8 @@ public partial class MultipleImagesNodeView : UserControl
 
     private void OnPointerReleased(object? sender, PointerReleasedEventArgs e)
     {
-        if (_isPanningImage && e.InitialPressMouseButton == MouseButton.Middle)
+        // Rilasciamo il pan sia se era attivo col centrale, sia se era attivo col sinistro (+ Alt)
+        if (_isPanningImage && (e.InitialPressMouseButton == MouseButton.Middle || e.InitialPressMouseButton == MouseButton.Left))
         {
             _isPanningImage = false;
             this.Cursor = Cursor.Default;
@@ -251,33 +256,63 @@ public partial class MultipleImagesNodeView : UserControl
         if (vm.Navigator is Shared_SequenceNavigator { IsLooping: true }) return;
         if (!vm.IsSelected) return;
 
-        if ((e.KeyModifiers & KeyModifiers.Control) == KeyModifiers.Control)
+        // FIX CROSS-PLATFORM: Gestione Delta.X per Mac (Shift + Scroll)
+        double effectiveDelta = Math.Abs(e.Delta.Y) > Math.Abs(e.Delta.X) ? e.Delta.Y : e.Delta.X;
+        if (Math.Abs(effectiveDelta) < 0.0001) return;
+
+        // ZOOM (CTRL o CMD + WHEEL)
+        if (e.KeyModifiers.HasFlag(KeyModifiers.Control) || e.KeyModifiers.HasFlag(KeyModifiers.Meta))
         {
             var container = this.FindControl<Border>("ImageContainer");
             if (container != null)
             {
                 var mousePos = e.GetPosition(container);
-                double factor = e.Delta.Y > 0 ? 1.1 : (1.0 / 1.1);
+                double factor = effectiveDelta > 0 ? 1.1 : (1.0 / 1.1);
                 vm.Viewport.ApplyZoomAtPoint(factor, mousePos);
             }
             e.Handled = true;
             return;
         }
         
+        // SOGLIE RADIOMETRICHE (SHIFT o DEFAULT + WHEEL)
         if (vm.ActiveRenderer != null)
         {
             double currentRange = Math.Abs(vm.ActiveRenderer.WhitePoint - vm.ActiveRenderer.BlackPoint);
-            if (currentRange < 0.0001) currentRange = 1.0;
+            double baseStep = (currentRange > 0.00001) ? currentRange * 0.05 : 1.0;
+            double step = Math.Max(0.0001, baseStep);
 
-            double stepPercentage = 0.05; 
-            double deltaAmount = (currentRange * stepPercentage) * e.Delta.Y;
+            if (effectiveDelta < 0) step = -step;
 
-            bool isShiftPressed = (e.KeyModifiers & KeyModifiers.Shift) == KeyModifiers.Shift;
+            bool isShiftPressed = e.KeyModifiers.HasFlag(KeyModifiers.Shift);
 
             if (isShiftPressed)
-                vm.ActiveRenderer.BlackPoint += deltaAmount;
+            {
+                // Modifica BLACK POINT (con protezione anti-crossing)
+                double newBlack = vm.ActiveRenderer.BlackPoint + step;
+                if (step > 0)
+                {
+                    double maxAllowed = vm.ActiveRenderer.WhitePoint - (step * 0.1);
+                    vm.ActiveRenderer.BlackPoint = Math.Min(newBlack, maxAllowed);
+                }
+                else
+                {
+                    vm.ActiveRenderer.BlackPoint = newBlack;
+                }
+            }
             else
-                vm.ActiveRenderer.WhitePoint += deltaAmount;
+            {
+                // Modifica WHITE POINT (con protezione anti-crossing)
+                double newWhite = vm.ActiveRenderer.WhitePoint + step;
+                if (step < 0)
+                {
+                    double minAllowed = vm.ActiveRenderer.BlackPoint + (Math.Abs(step) * 0.1);
+                    vm.ActiveRenderer.WhitePoint = Math.Max(newWhite, minAllowed);
+                }
+                else
+                {
+                    vm.ActiveRenderer.WhitePoint = newWhite;
+                }
+            }
         }
 
         e.Handled = true; 
