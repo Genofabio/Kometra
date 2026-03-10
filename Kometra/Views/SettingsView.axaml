@@ -5,7 +5,7 @@
         xmlns:viewModels="clr-namespace:Kometra.ViewModels"
         x:Class="Kometra.Views.SettingsView"
         x:DataType="viewModels:SettingsViewModel"
-        Icon="/Assets/Icon/icon32.ico"
+        Icon="/Assets/Icon/icon.ico"
         Title="{Binding [SettingsTitle], Source={x:Static infrastructure:LocalizationManager.Instance}}"
         Width="450" Height="500"
         WindowStartupLocation="CenterOwner"

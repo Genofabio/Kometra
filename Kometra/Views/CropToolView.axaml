@@ -10,7 +10,7 @@
         mc:Ignorable="d" d:DesignWidth="1000" d:DesignHeight="700"
         x:Class="Kometra.Views.CropToolView"
         x:DataType="imageProcessing:CropToolViewModel"
-        Icon="/Assets/Icon/icon32.ico"
+        Icon="/Assets/Icon/icon.ico"
         Title="{Binding [CropTitle], Source={x:Static infrastructure:LocalizationManager.Instance}}"
         Width="820" Height="600"
         MinHeight="550" MinWidth="800"

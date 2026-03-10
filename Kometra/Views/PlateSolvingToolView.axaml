@@ -9,7 +9,7 @@
         x:Class="Kometra.Views.PlateSolvingToolView"
         x:DataType="astrometry:PlateSolvingToolViewModel"
         x:Name="RootWindow"
-        Icon="/Assets/Icon/icon32.ico"
+        Icon="/Assets/Icon/icon.ico"
         Title="{Binding [PlateTitle], Source={x:Static infrastructure:LocalizationManager.Instance}}"
         Width="650" Height="550"
         MinWidth="650" MinHeight="550"

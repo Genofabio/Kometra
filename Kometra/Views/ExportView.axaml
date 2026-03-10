@@ -9,7 +9,7 @@
         xmlns:converters1="clr-namespace:Kometra.Converters"
         x:Class="Kometra.Views.ExportView"
         x:DataType="vm:ExportViewModel"
-        Icon="/Assets/Icon/icon32.ico"
+        Icon="/Assets/Icon/icon.ico"
         Title="{Binding [ExportTitle], Source={x:Static infrastructure:LocalizationManager.Instance}}"
         Width="1150" Height="640"
         MinWidth="1000" MinHeight="600"

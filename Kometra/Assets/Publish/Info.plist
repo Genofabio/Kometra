@@ -15,7 +15,7 @@
         <key>CFBundleExecutable</key>
         <string>Kometra</string>
         <key>CFBundleIconFile</key>
-        <string>icon256.icns</string>
+        <string>icon.icns</string>
         <key>NSHighResolutionCapable</key>
         <true/>
     </dict>

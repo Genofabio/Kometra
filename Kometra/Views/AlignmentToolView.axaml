@@ -12,7 +12,7 @@
         mc:Ignorable="d" d:DesignWidth="800" d:DesignHeight="600"
         x:Class="Kometra.Views.AlignmentToolView"
         x:DataType="imageProcessing:AlignmentToolViewModel"
-        Icon="/Assets/Icon/icon32.ico"
+        Icon="/Assets/Icon/icon.ico"
         Title="{Binding [AlignTitle], Source={x:Static infrastructure:LocalizationManager.Instance}}"
         Width="800" Height="600"
         MinHeight="500" MinWidth="710"

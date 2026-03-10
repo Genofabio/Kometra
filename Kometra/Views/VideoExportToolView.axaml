@@ -5,7 +5,7 @@
         xmlns:infrastructure="clr-namespace:Kometra.Infrastructure"
         x:Class="Kometra.Views.VideoExportToolView"
         x:DataType="importExport:VideoExportToolViewModel"
-        Icon="/Assets/Icon/icon32.ico"
+        Icon="/Assets/Icon/icon.ico"
         Title="{Binding [VideoExportTitle], Source={x:Static infrastructure:LocalizationManager.Instance}}"
         Width="1020" Height="620"
         MinWidth="1010" MinHeight="620"

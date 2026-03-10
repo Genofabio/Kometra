@@ -2,7 +2,7 @@
     <PropertyGroup>
         <OutputType>WinExe</OutputType>
         <TargetFramework>net9.0</TargetFramework>
-        <ApplicationIcon>Assets\Icon\icon256.ico</ApplicationIcon>
+        <ApplicationIcon>Assets\Icon\icon.ico</ApplicationIcon>
         <Nullable>enable</Nullable>
         <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
         <ApplicationManifest>app.manifest</ApplicationManifest>
@@ -66,7 +66,7 @@
         <Move SourceFiles="$(PublishDir)$(AssemblyName)" DestinationFolder="$(MacOsDir)" />
 
         <Copy SourceFiles="Assets\Publish\Info.plist" DestinationFolder="$(AppBundleDir)\Contents" />
-        <Copy SourceFiles="Assets\Icon\icon256.icns" DestinationFolder="$(ResourcesDir)" />
+        <Copy SourceFiles="Assets\Icon\icon.icns" DestinationFolder="$(ResourcesDir)" />
     </Target>
 
 </Project>
