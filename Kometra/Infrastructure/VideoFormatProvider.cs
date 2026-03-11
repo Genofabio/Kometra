@@ -5,6 +5,7 @@ using System.Collections.Concurrent;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using System.Runtime.InteropServices;
 using OpenCvSharp;
 using Kometra.Models.Visualization;
 using Kometra.Models.Export;
@@ -21,6 +22,7 @@ public class VideoFormatProvider : IVideoFormatProvider
     };
 
     private readonly SemaphoreSlim _semaphore = new(1, 1);
+    private readonly object _nativeInitLock = new(); 
     private bool _isInitialized = false;
     private Dictionary<VideoContainer, List<VideoCodec>> _validatedFormats = new();
     
@@ -33,9 +35,14 @@ public class VideoFormatProvider : IVideoFormatProvider
         await _semaphore.WaitAsync();
         try {
             if (_isInitialized) return;
-            // Eseguiamo la validazione in un task per non bloccare la UI
+            
+            Console.WriteLine("[VideoFormatProvider] Avvio validazione codec su " + (RuntimeInformation.IsOSPlatform(OSPlatform.OSX) ? "macOS" : "Windows/Linux"));
+            
+            // Parallelismo impostato a 1 per evitare conflitti con AVAssetWriter durante i test
             _validatedFormats = await Task.Run(() => ValidateAvailableCodecsParallel());
+            
             _isInitialized = true;
+            Console.WriteLine("[VideoFormatProvider] Inizializzazione completata.");
         }
         finally { _semaphore.Release(); }
     }
@@ -43,27 +50,32 @@ public class VideoFormatProvider : IVideoFormatProvider
     private Dictionary<VideoContainer, List<VideoCodec>> ValidateAvailableCodecsParallel()
     {
         var result = new ConcurrentDictionary<VideoContainer, ConcurrentBag<VideoCodec>>();
-        string tempDir = Path.GetTempPath();
+        string tempDir = Path.GetFullPath(Path.GetTempPath());
 
         // 1. Lista di tutti i test da fare
         var allTests = _registry.SelectMany(kvp => 
             kvp.Value.Codecs.Select(codec => new { Container = kvp.Key, Codec = codec }))
             .ToList();
 
-        // 2. CORREZIONE: Ordine dei backend.
-        // FFMPEG deve essere il primo perché è il più compatibile (specialmente per MKV).
-        // MSMF spesso fallisce su formati non nativi Windows.
-        var backendsToTest = new[] { 
-            VideoCaptureAPIs.FFMPEG,       // <--- PRIORITARIO
-            VideoCaptureAPIs.MSMF,         // Windows Native
-            VideoCaptureAPIs.AVFOUNDATION, // MacOS
-            VideoCaptureAPIs.V4L2          // Linux
-        };
+        // 2. Definizione backend in base all'OS
+        var backendsToTest = new List<VideoCaptureAPIs>();
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
+        {
+            backendsToTest.Add(VideoCaptureAPIs.AVFOUNDATION);
+            backendsToTest.Add(VideoCaptureAPIs.FFMPEG);
+        }
+        else if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+        {
+            backendsToTest.Add(VideoCaptureAPIs.FFMPEG);
+            backendsToTest.Add(VideoCaptureAPIs.MSMF);
+        }
+        else
+        {
+            backendsToTest.Add(VideoCaptureAPIs.FFMPEG);
+        }
 
-        // 3. CORREZIONE: Limitazione del parallelismo.
-        // Usare ProcessorCount (es. 12-16 thread) causa race conditions nelle DLL native di OpenCV/FFMPEG.
-        // 4 thread sono il bilanciamento perfetto tra velocità e stabilità.
-        var options = new ParallelOptions { MaxDegreeOfParallelism = 4 };
+        // 3. Esecuzione test (MaxDegreeOfParallelism = 1 per stabilità su Mac)
+        var options = new ParallelOptions { MaxDegreeOfParallelism = 1 };
 
         Parallel.ForEach(allTests, options, testItem => 
         {
@@ -73,7 +85,7 @@ public class VideoFormatProvider : IVideoFormatProvider
                 {
                     var list = result.GetOrAdd(testItem.Container, _ => new ConcurrentBag<VideoCodec>());
                     list.Add(testItem.Codec);
-                    break; // Trovato un backend funzionante per questo codec, passo al prossimo codec
+                    break; 
                 }
             }
         });
@@ -86,39 +98,47 @@ public class VideoFormatProvider : IVideoFormatProvider
 
     private bool TryAndCache(VideoContainer cont, VideoCodec cod, VideoCaptureAPIs api, string dir)
     {
-        string file = Path.Combine(dir, $"kometra_test_{Guid.NewGuid():N}{GetExtension(cont)}");
+        string fileName = $"kometra_test_{Guid.NewGuid():N}{GetExtension(cont)}";
+        string filePath = Path.Combine(dir, fileName);
         int fourcc = GetFourCC(cod, cont);
         var size = new Size(128, 128);
 
         try {
-            // Nota: Se openCV fallisce l'init, spesso non lancia eccezione ma IsOpened resta false
-            using var writer = new VideoWriter(file, api, fourcc, 25, size, true);
-            
-            if (writer.IsOpened()) 
+            lock (_nativeInitLock)
             {
-                using var dummyFrame = Mat.Zeros(size, MatType.CV_8UC3);
-                writer.Write(dummyFrame);
-                writer.Release(); // Importante: finalizza il file
-
-                var fileInfo = new FileInfo(file);
-                // Controllo robusto: il file deve esistere ed avere contenuto
-                bool isValid = fileInfo.Exists && fileInfo.Length > 500;
-
-                if (isValid)
+                using var writer = new VideoWriter();
+                // Apertura esplicita con backend selezionato
+                bool opened = writer.Open(filePath, api, fourcc, 25, size, true);
+                
+                if (opened && writer.IsOpened()) 
                 {
-                    _apiCache.TryAdd((cont, cod), api);
-                }
+                    using var dummyFrame = Mat.Zeros(size, MatType.CV_8UC3);
+                    writer.Write(dummyFrame);
+                    writer.Release(); 
 
-                if (fileInfo.Exists) fileInfo.Delete();
-                return isValid;
+                    var fileInfo = new FileInfo(filePath);
+                    bool isValid = fileInfo.Exists && fileInfo.Length > 500;
+
+                    if (isValid)
+                    {
+                        Console.WriteLine($"[Test OK] {cont}/{cod} tramite {api}. Dimensione: {fileInfo.Length} bytes");
+                        _apiCache.TryAdd((cont, cod), api);
+                        if (fileInfo.Exists) fileInfo.Delete();
+                        return true;
+                    }
+                }
+                else
+                {
+                    Console.WriteLine($"[Test FAIL] {cont}/{cod} tramite {api}. IsOpened: false");
+                }
             }
         } 
-        catch 
+        catch (Exception ex)
         {
-            // Ignoriamo errori qui, significa semplicemente che il codec non è supportato
+            Console.WriteLine($"[Test ERROR] {cont}/{cod} tramite {api}. Errore: {ex.Message}");
         }
         
-        try { if (File.Exists(file)) File.Delete(file); } catch { }
+        if (File.Exists(filePath)) try { File.Delete(filePath); } catch { }
         return false;
     }
 
@@ -129,23 +149,22 @@ public class VideoFormatProvider : IVideoFormatProvider
     public IEnumerable<VideoCodec> GetSupportedCodecs(VideoContainer c) => _validatedFormats.GetValueOrDefault(c) ?? new();
     public string GetExtension(VideoContainer c) => _registry[c].Ext;
 
-    // CORREZIONE: FourCC aggiornati per massima compatibilità
-    public int GetFourCC(VideoCodec codec, VideoContainer container) => (codec, container) switch
+    public int GetFourCC(VideoCodec codec, VideoContainer container)
     {
-        // MP4 usa standard Apple/ISO
-        (VideoCodec.H264, VideoContainer.MP4) => VideoWriter.FourCC('a', 'v', 'c', '1'),
-        (VideoCodec.H265, VideoContainer.MP4) => VideoWriter.FourCC('H', 'E', 'V', 'C'),
-        
-        // MKV preferisce codici Open Source (X264 invece di H264 è cruciale per FFMPEG)
-        (VideoCodec.H264, VideoContainer.MKV) => VideoWriter.FourCC('X', '2', '6', '4'),
-        (VideoCodec.H265, VideoContainer.MKV) => VideoWriter.FourCC('H', 'E', 'V', 'C'),
-        
-        // Codec legacy
-        (VideoCodec.XVID, VideoContainer.AVI) => VideoWriter.FourCC('X', 'V', 'I', 'D'),
-        (VideoCodec.XVID, VideoContainer.MKV) => VideoWriter.FourCC('X', 'V', 'I', 'D'),
-        
-        // Fallback MJPG
-        (VideoCodec.MJPG, _) => VideoWriter.FourCC('M', 'J', 'P', 'G'),
-        _ => VideoWriter.FourCC('M', 'J', 'P', 'G')
-    };
+        bool isMac = RuntimeInformation.IsOSPlatform(OSPlatform.OSX);
+
+        return (codec, container) switch
+        {
+            // MP4: H264 e H265 confermati dai log su Mac
+            (VideoCodec.H264, VideoContainer.MP4) => VideoWriter.FourCC('a', 'v', 'c', '1'),
+            (VideoCodec.H265, VideoContainer.MP4) => isMac ? VideoWriter.FourCC('h', 'v', 'c', '1') : VideoWriter.FourCC('H', 'E', 'V', 'C'),
+            
+            // MKV/AVI: Fallback per compatibilità cross-platform
+            (VideoCodec.H264, VideoContainer.MKV) => VideoWriter.FourCC('X', '2', '6', '4'),
+            (VideoCodec.H265, VideoContainer.MKV) => VideoWriter.FourCC('H', 'E', 'V', 'C'),
+            (VideoCodec.XVID, _) => VideoWriter.FourCC('X', 'V', 'I', 'D'),
+            (VideoCodec.MJPG, _) => VideoWriter.FourCC('M', 'J', 'P', 'G'),
+            _ => VideoWriter.FourCC('M', 'J', 'P', 'G')
+        };
+    }
 }

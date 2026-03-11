@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using System.Runtime.InteropServices;
 using Kometra.Infrastructure;
 using Kometra.Models.Export;
 using Kometra.Models.Fits;
@@ -54,6 +55,18 @@ public class VideoExportCoordinator : IVideoExportCoordinator
             SigmaContrastProfile? referenceSigmaProfile = null;
             bool isInitialized = false;
             bool success = false; 
+
+            // DETERMINAZIONE PERCORSO DI SCRITTURA (Fix per macOS)
+            // Se siamo su Mac, scriviamo in Temp per bypassare i blocchi di sicurezza di AVAssetWriter
+            bool isMac = RuntimeInformation.IsOSPlatform(OSPlatform.OSX);
+            string actualWritePath = settings.OutputPath;
+            
+            if (isMac)
+            {
+                string tempFileName = $"kometra_export_{Guid.NewGuid():N}{_formatProvider.GetExtension(settings.Container)}";
+                actualWritePath = Path.Combine(Path.GetTempPath(), tempFileName);
+                Console.WriteLine($"[Coordinator] macOS rilevato. Scrittura temporanea in: {actualWritePath}");
+            }
         
             var filesList = sourceFiles as IReadOnlyList<FitsFileReference> ?? sourceFiles.ToList();
             int total = filesList.Count;
@@ -65,15 +78,8 @@ public class VideoExportCoordinator : IVideoExportCoordinator
                 {
                     token.ThrowIfCancellationRequested();
 
-                    // Caricamento frame scientifico (Mat float/double)
-                    // Nota: LoadFitsToScientificMat ora gestisce MEF internamente
                     using Mat scientificMat = await LoadFitsToScientificMat(fileRef);
-                    
-                    if (scientificMat.Empty()) 
-                    {
-                        // Skip se il frame è vuoto o non valido
-                        continue; 
-                    }
+                    if (scientificMat.Empty()) continue; 
 
                     using Mat scaledMat = ApplyRescale(scientificMat, settings.ScaleFactor);
 
@@ -83,7 +89,7 @@ public class VideoExportCoordinator : IVideoExportCoordinator
                         var bestApi = _formatProvider.GetBestAPI(settings.Container, settings.Codec);
 
                         _encoder.Initialize(
-                            settings.OutputPath, 
+                            actualWritePath, 
                             settings.Fps, 
                             scaledMat.Width, 
                             scaledMat.Height, 
@@ -108,7 +114,6 @@ public class VideoExportCoordinator : IVideoExportCoordinator
                     _encoder.WriteFrame(colorFrame);
 
                     current++;
-                    // Lasciamo lo spazio visivo per la sincronizzazione
                     progress?.Report((double)current / (total + 1) * 100.0);
                 }
                 
@@ -118,32 +123,42 @@ public class VideoExportCoordinator : IVideoExportCoordinator
             catch (Exception ex) { success = false; throw new Exception($"Errore export: {ex.Message}", ex); }
             finally
             {
-                // 1. CHIUSURA ENCODER (Rilascia l'handle della libreria video)
+                // 1. Chiusura encoder e rilascio file
                 _encoder.Dispose();
 
                 if (success)
                 {
-                    // 2. FORZA IL FLUSH FISICO E VERIFICA L'INTEGRITÀ (Cross-Platform)
-                    await FinalizeAndVerifyDiskSyncAsync(settings.OutputPath, token);
+                    // 2. Forza il flush fisico
+                    await FinalizeAndVerifyDiskSyncAsync(actualWritePath, token);
+
+                    // 3. SPOSTAMENTO FINALE (Solo su Mac)
+                    if (isMac && File.Exists(actualWritePath))
+                    {
+                        try 
+                        {
+                            Console.WriteLine($"[Coordinator] Spostamento video finale in: {settings.OutputPath}");
+                            if (File.Exists(settings.OutputPath)) File.Delete(settings.OutputPath);
+                            File.Move(actualWritePath, settings.OutputPath);
+                        }
+                        catch (Exception ex)
+                        {
+                            throw new IOException($"Errore durante lo spostamento del file video finale: {ex.Message}", ex);
+                        }
+                    }
                 
-                    // 3. ORA È COMPLETATO AL 100%
                     progress?.Report(100.0);
                 }
-                else if (!string.IsNullOrEmpty(settings.OutputPath) && File.Exists(settings.OutputPath))
+                else if (File.Exists(actualWritePath))
                 {
-                    try { await Task.Delay(200); File.Delete(settings.OutputPath); } catch { }
+                    try { await Task.Delay(200); File.Delete(actualWritePath); } catch { }
                 }
             }
         }, token);
     }
 
-    /// <summary>
-    /// Forza la scrittura fisica dei buffer su disco usando metodi .NET cross-platform
-    /// e verifica che il file sia realmente accessibile e completo.
-    /// </summary>
     private async Task FinalizeAndVerifyDiskSyncAsync(string filePath, CancellationToken token)
     {
-        const int maxRetries = 20;
+        const int maxRetries = 15;
         for (int i = 0; i < maxRetries; i++)
         {
             token.ThrowIfCancellationRequested();
@@ -156,51 +171,24 @@ public class VideoExportCoordinator : IVideoExportCoordinator
 
             try
             {
-                // Apriamo il file in modalità esclusiva (FileShare.None)
-                // Se l'OS o un encoder asincrono lo stanno ancora toccando, questo fallisce.
                 using (var fs = new FileStream(filePath, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
                 {
-                    // IL CUORE DEL FIX: Flush(true) forza lo svuotamento dei buffer 
-                    // del file system verso l'hardware fisico del disco.
                     fs.Flush(flushToDisk: true);
-
-                    // VERIFICA DI REALTÀ: 
-                    // Se riusciamo a leggere l'ultimo byte, la finalizzazione dell'indice è avvenuta.
-                    if (fs.Length > 0)
-                    {
-                        fs.Seek(-1, SeekOrigin.End);
-                        fs.ReadByte(); 
-                        
-                        // Se arriviamo qui senza eccezioni, il file è stabile.
-                        return; 
-                    }
+                    if (fs.Length > 0) return; 
                 }
             }
-            catch (IOException)
-            {
-                // Il sistema operativo o il backend video non hanno ancora rilasciato il file.
-                // Aspettiamo e riproviamo.
-            }
+            catch (IOException) { }
 
             await Task.Delay(500, token);
         }
     }
 
-    // --- Metodi Helper ---
-
     private async Task<Mat> LoadFitsToScientificMat(FitsFileReference fileRef)
     {
         var data = await _dataManager.GetDataAsync(fileRef.FilePath);
-        
-        // [MODIFICA MEF] Accesso sicuro all'HDU immagine
         var imageHdu = data.FirstImageHdu ?? data.PrimaryHdu;
-        if (imageHdu == null) 
-        {
-            // Restituisce una Mat vuota se non ci sono immagini, che verrà gestita dal loop principale
-            return new Mat();
-        }
+        if (imageHdu == null) return new Mat();
 
-        // Priorità Header: RAM > HDU
         var header = fileRef.ModifiedHeader ?? imageHdu.Header;
         
         int bitpix = (int)_metadata.GetDoubleValue(header, "BITPIX", 16);
@@ -213,7 +201,6 @@ public class VideoExportCoordinator : IVideoExportCoordinator
             _ => FitsBitDepth.Int16 
         };
 
-        // Usiamo i PixelData dell'HDU
         return _converter.RawToMat(
             imageHdu.PixelData, 
             _metadata.GetDoubleValue(header, "BSCALE", 1.0), 
@@ -223,17 +210,13 @@ public class VideoExportCoordinator : IVideoExportCoordinator
 
     private Mat ApplyRescale(Mat source, double factor)
     {
-        // Calcola le nuove dimensioni
         int rawW = (int)(source.Width * factor);
         int rawH = (int)(source.Height * factor);
 
-        // [FIX H.265] 
-        // Allinea a multipli di 32 per massima compatibilità con encoder hardware e software.
-        // Esempio: 1920 diventa 1920, 1925 diventa 1920.
+        // Allineamento a multipli di 32 (Fondamentale per chip M1/M2/M3)
         int w = (rawW / 32) * 32;
         int h = (rawH / 32) * 32;
 
-        // Protezione per immagini piccolissime (minimo 32x32)
         w = Math.Max(32, w);
         h = Math.Max(32, h);
 
