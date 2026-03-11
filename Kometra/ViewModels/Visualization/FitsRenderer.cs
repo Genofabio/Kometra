@@ -2,6 +2,7 @@
 using System.Diagnostics;
 using System.Threading;
 using System.Threading.Tasks;
+using System.Runtime.InteropServices;
 using Avalonia;
 using Avalonia.Media.Imaging;
 using Avalonia.Platform;
@@ -22,6 +23,9 @@ namespace Kometra.ViewModels.Visualization;
 /// </summary>
 public partial class FitsRenderer : ObservableObject, IDisposable
 {
+    // --- Rilevamento OS a Runtime ---
+    private static readonly bool IsLinux = RuntimeInformation.IsOSPlatform(OSPlatform.Linux);
+
     // --- Dati Sorgente (Temporanei) ---
     private Array? _rawPixels; 
     private readonly double _bScale;
@@ -199,14 +203,24 @@ public partial class FitsRenderer : ObservableObject, IDisposable
                 await Task.Run(() =>
                 {
                     token.ThrowIfCancellationRequested();
-                    
-                    using var dstMat = Mat.FromPixelData(_height, _width, MatType.CV_8UC1, lockedBuffer.Address, lockedBuffer.RowBytes);
 
-                    // Esegue lo stretch delegando al servizio dedicato
-                    _presentationService.RenderTo8Bit(_cachedScientificMat, dstMat, BlackPoint, WhitePoint, VisualizationMode);
+                    if (IsLinux)
+                    {
+                        // FALLBACK LINUX: Conversione esplicita a 32 bit (BGRA)
+                        using var grayMat = new Mat(_height, _width, MatType.CV_8UC1);
+                        _presentationService.RenderTo8Bit(_cachedScientificMat, grayMat, BlackPoint, WhitePoint, VisualizationMode);
+                        PostProcessAction?.Invoke(grayMat);
 
-                    // Applica eventuali filtri post-stretch (es. Posterizzazione)
-                    PostProcessAction?.Invoke(dstMat);
+                        using var dstMat = Mat.FromPixelData(_height, _width, MatType.CV_8UC4, lockedBuffer.Address, lockedBuffer.RowBytes);
+                        Cv2.CvtColor(grayMat, dstMat, ColorConversionCodes.GRAY2BGRA);
+                    }
+                    else
+                    {
+                        // PERCORSO OTTIMIZZATO WIN/MAC: Assegnazione diretta a 8 bit (Gray8)
+                        using var dstMat = Mat.FromPixelData(_height, _width, MatType.CV_8UC1, lockedBuffer.Address, lockedBuffer.RowBytes);
+                        _presentationService.RenderTo8Bit(_cachedScientificMat, dstMat, BlackPoint, WhitePoint, VisualizationMode);
+                        PostProcessAction?.Invoke(dstMat);
+                    }
 
                 }, token);
             }
@@ -227,7 +241,12 @@ public partial class FitsRenderer : ObservableObject, IDisposable
         {
             var tmp = _backBuffer; _backBuffer = null; return tmp;
         }
-        return new WriteableBitmap(new PixelSize(_width, _height), new Vector(96, 96), PixelFormats.Gray8, AlphaFormat.Opaque);
+
+        // Se siamo su Linux usiamo il pesante BGRA8888, altrimenti il leggerissimo Gray8
+        PixelFormat format = IsLinux ? PixelFormats.Bgra8888 : PixelFormats.Gray8;
+        AlphaFormat alpha = IsLinux ? AlphaFormat.Premul : AlphaFormat.Opaque;
+
+        return new WriteableBitmap(new PixelSize(_width, _height), new Vector(96, 96), format, alpha);
     }
 
     private void RecycleBuffer(WriteableBitmap bmp) => _backBuffer ??= bmp;
