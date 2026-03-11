@@ -3,8 +3,8 @@
 public enum ImageEnhancementMode
 {
     // --- 1. RADIAL & ROTATIONAL ENHANCEMENT (Morfologia Cometa) ---
-    LarsonSekaninaStandard,
     LarsonSekaninaSymmetric,
+    LarsonSekaninaStandard,
     AdaptiveLaplacianRVSF,
     AdaptiveLaplacianMosaic,
     MedianComaModel,

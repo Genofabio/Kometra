@@ -33,6 +33,16 @@ public partial class SettingsViewModel : ObservableObject
 
     // --- PROPRIETÀ PONTE ---
 
+    public int AnimationFps
+    {
+        get => DraftSettings.AnimationFps;
+        set
+        {
+            DraftSettings.AnimationFps = value;
+            OnPropertyChanged();
+        }
+    }
+
     public string AstapFolderPath
     {
         get => DraftSettings.AstapFolder;

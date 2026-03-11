@@ -6,6 +6,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Avalonia;
 using Kometra.Models.Nodes;
+using Kometra.Services; // Aggiunto per IConfigurationService
 using Kometra.Services.Fits;
 using Kometra.Services.Fits.Metadata;
 using Kometra.ViewModels.Nodes;
@@ -17,20 +18,22 @@ public class NodeViewModelFactory : INodeViewModelFactory
     private readonly IFitsDataManager _dataManager;
     private readonly IFitsMetadataService _metadataService;
     private readonly IFitsRendererFactory _rendererFactory;
+    private readonly IConfigurationService _configService; // Nuova dipendenza
 
     public NodeViewModelFactory(
         IFitsDataManager dataManager,
         IFitsMetadataService metadataService,
-        IFitsRendererFactory rendererFactory)
+        IFitsRendererFactory rendererFactory,
+        IConfigurationService configService)
     {
         _dataManager = dataManager;
         _metadataService = metadataService;
         _rendererFactory = rendererFactory;
+        _configService = configService;
     }
 
     public async Task<SingleImageNodeViewModel> CreateSingleImageNodeAsync(string path, double x, double y)
     {
-        // 1. Calcoliamo le dimensioni reali dall'header
         var size = await CalculateMaxDimensionsAsync(new List<string> { path });
 
         var model = new SingleImageNodeModel
@@ -41,8 +44,8 @@ public class NodeViewModelFactory : INodeViewModelFactory
             Y = y
         };
 
-        // 2. Creazione VM (Senza dipendenze di export)
-        var vm = new SingleImageNodeViewModel(model, _dataManager, _rendererFactory, size);
+        // Passiamo il configService al nodo
+        var vm = new SingleImageNodeViewModel(model, _dataManager, _rendererFactory, _configService, size);
     
         await vm.InitializeAsync();
         ApplyNodeCentering(vm, x, y);
@@ -54,7 +57,6 @@ public class NodeViewModelFactory : INodeViewModelFactory
     {
         if (paths == null || !paths.Any()) throw new ArgumentException("Nessun file selezionato.");
 
-        // 1. Analisi preliminare per il layout e titolo intelligente
         var maxSize = await CalculateMaxDimensionsAsync(paths);
         string title = await DetermineSmartTitleAsync(paths[0], paths.Count);
 
@@ -66,12 +68,12 @@ public class NodeViewModelFactory : INodeViewModelFactory
             Y = y
         };
 
-        // 2. Istanziamento VM ripulito
-        // Passiamo solo le dipendenze necessarie alla gestione della sequenza
+        // Passiamo il configService al nodo
         var vm = new MultipleImagesNodeViewModel(
             model, 
             _dataManager, 
             _rendererFactory, 
+            _configService,
             maxSize);
         
         await vm.InitializeAsync();
@@ -79,8 +81,6 @@ public class NodeViewModelFactory : INodeViewModelFactory
 
         return vm;
     }
-
-    // --- Helpers Strategici ---
 
     private async Task<string> DetermineSmartTitleAsync(string firstPath, int count)
     {

@@ -53,7 +53,7 @@
     <data name="MenuHeaderEditor" xml:space="preserve"><value>Editor Header / Metadati</value></data>
     <data name="MenuPlateSolving" xml:space="preserve"><value>Risoluzione Astrometrica (ASTAP)</value></data>
 
-    <data name="MenuStackOps" xml:space="preserve"><value>Operazioni Stack</value></data>
+    <data name="MenuStackOps" xml:space="preserve"><value>Stack</value></data>
     <data name="MenuStackSum" xml:space="preserve"><value>Somma</value></data>
     <data name="MenuStackAverage" xml:space="preserve"><value>Media</value></data>
     <data name="MenuStackMedian" xml:space="preserve"><value>Mediana</value></data>
@@ -613,4 +613,7 @@
     <data name="MenuArithSub" xml:space="preserve"><value>Sottrazione (A - B)</value></data>
     <data name="MenuArithMul" xml:space="preserve"><value>Moltiplicazione (A × B)</value></data>
     <data name="MenuArithDiv" xml:space="preserve"><value>Divisione (A ÷ B)</value></data>
+    <data name="SettingsAnimationFps" xml:space="preserve">
+        <value>Velocità Animazione (FPS)</value>
+    </data>
 </root>

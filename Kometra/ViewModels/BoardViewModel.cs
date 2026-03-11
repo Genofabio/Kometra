@@ -575,7 +575,17 @@ public partial class BoardViewModel : ObservableObject
     [RelayCommand(CanExecute = nameof(CanExecuteOnImageNode))] private void ResetNodeView() { if(SelectedImageNode is ImageNodeViewModel n) n.ResetView(); }
     [RelayCommand] private void ResetBoard() { Viewport.ResetView(); OnPropertyChanged(nameof(Viewport)); }
     [RelayCommand(CanExecute = nameof(CanSetVisualizationMode))] private void SetVisualizationMode(VisualizationMode mode) { if(SelectedImageNode is ImageNodeViewModel n) n.VisualizationMode = mode; }
-    [RelayCommand(CanExecute = nameof(CanToggleAnimation))] private void ToggleNodeAnimation() { if(SelectedImageNode is ImageNodeViewModel { Navigator: Shared_SequenceNavigator sn }) { sn.ToggleLoop(); OnPropertyChanged(nameof(IsGlobalAnimationRunning)); } }
+    
+    // --- IL METODO TOGGLE ANIMATION INSERITO ---
+    [RelayCommand(CanExecute = nameof(CanToggleAnimation))] 
+    private void ToggleNodeAnimation() 
+    { 
+        if(SelectedImageNode is ImageNodeViewModel { Navigator: Shared_SequenceNavigator sn }) 
+        { 
+            sn.ToggleLoop(); 
+            OnPropertyChanged(nameof(IsGlobalAnimationRunning)); 
+        } 
+    }
     
     [RelayCommand] public void FitView() => Viewport.ZoomToFit(Nodes);
     [RelayCommand(CanExecute = nameof(CanUndo))] private void Undo() => _undoService.Undo();

@@ -11,6 +11,9 @@ public class AppSettings
     // --- INTERFACCIA (Colori salvati come stringhe Hex) ---
     public string BoardBackgroundColor { get; set; }
     public string PrimarySelectionColor { get; set; }
+    
+    // --- VISUALIZZAZIONE ---
+    public int AnimationFps { get; set; }
 
     // --- MOTORI ESTERNI (Percorso cartella) ---
     public string AstapFolder { get; set; } = string.Empty;
@@ -24,6 +27,9 @@ public class AppSettings
         // Altri default fissi
         BoardBackgroundColor = "#121212";
         PrimarySelectionColor = "#8058E8";
+        
+        // Default animazione: 10 frame al secondo
+        AnimationFps = 10;
     }
 
     /// <summary>
@@ -36,6 +42,7 @@ public class AppSettings
             Language = this.Language,
             BoardBackgroundColor = this.BoardBackgroundColor,
             PrimarySelectionColor = this.PrimarySelectionColor,
+            AnimationFps = this.AnimationFps,
             AstapFolder = this.AstapFolder
         };
     }

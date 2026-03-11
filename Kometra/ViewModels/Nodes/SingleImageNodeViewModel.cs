@@ -7,6 +7,7 @@ using Avalonia;
 using CommunityToolkit.Mvvm.ComponentModel;
 using Kometra.Models.Fits;
 using Kometra.Models.Nodes;
+using Kometra.Services; // Aggiunto per IConfigurationService
 using Kometra.Services.Factories;
 using Kometra.Services.Fits;
 using Kometra.ViewModels.Visualization;
@@ -33,7 +34,7 @@ public partial class SingleImageNodeViewModel : ImageNodeViewModel
     private readonly Size _imageSize; // Aggiungi questo campo
     
     // Componente di navigazione coerente (fisso a 1 immagine)
-    private readonly SequenceNavigator _navigator = new();
+    private readonly SequenceNavigator _navigator; // Rimosso l'inizializzatore inline "= new()"
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(ActiveRenderer))]
@@ -67,12 +68,16 @@ public partial class SingleImageNodeViewModel : ImageNodeViewModel
         SingleImageNodeModel model, 
         IFitsDataManager dataManager, 
         IFitsRendererFactory rendererFactory,
-        Size imageSize) // <--- Aggiunto
+        IConfigurationService configService, // <--- Nuova dipendenza aggiunta
+        Size imageSize) 
         : base(model)
     {
         _dataManager = dataManager;
         _rendererFactory = rendererFactory;
-        _imageSize = imageSize; // <--- Memorizza la dimensione
+        _imageSize = imageSize; 
+        
+        // Passiamo la configurazione al navigatore!
+        _navigator = new SequenceNavigator(configService);
         
         _fileReference = new FitsFileReference(model.ImagePath);
         _filesWrapper = new List<FitsFileReference> { _fileReference };

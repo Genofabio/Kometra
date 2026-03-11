@@ -87,6 +87,16 @@
                                          IsAlphaEnabled="False" HorizontalAlignment="Right"
                                          Margin="0,0,10,0"/>
                         </Grid>
+                        
+                        <Grid ColumnDefinitions="*, Auto">
+                            <TextBlock Grid.Column="0" Classes="label" Text="{Binding [SettingsAnimationFps], Source={x:Static infrastructure:LocalizationManager.Instance}}"/>
+                            <NumericUpDown Grid.Column="1" Value="{Binding AnimationFps}" 
+                                           Minimum="1" Maximum="60" FormatString="0" 
+                                           Width="120" Height="36" HorizontalAlignment="Right" 
+                                           Margin="0,0,10,0"
+                                           HorizontalContentAlignment="Center"
+                                           VerticalContentAlignment="Center"/>
+                        </Grid>
                     </StackPanel>
                 </Border>
 

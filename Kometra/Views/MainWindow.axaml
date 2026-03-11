@@ -15,12 +15,15 @@
         
         Icon="/Assets/Icon/icon.ico"
         Title="{Binding WindowTitle}" 
-        WindowState="Maximized">
+        WindowState="Maximized"
+        KeyDown="OnGlobalKeyDown">
         
     <Window.KeyBindings>
-        <KeyBinding Gesture="Ctrl+Z" Command="{Binding BoardVm.UndoCommand}" />
-        <KeyBinding Gesture="Ctrl+Y" Command="{Binding BoardVm.RedoCommand}" />
-        <KeyBinding Gesture="Ctrl+Shift+Z" Command="{Binding BoardVm.RedoCommand}" />
+        <KeyBinding Gesture="{OnPlatform Default=Ctrl+Z, macOS=Cmd+Z}" Command="{Binding BoardVm.UndoCommand}" />
+        
+        <KeyBinding Gesture="{OnPlatform Default=Ctrl+Y, macOS=Cmd+Y}" Command="{Binding BoardVm.RedoCommand}" />
+        
+        <KeyBinding Gesture="{OnPlatform Default=Ctrl+Shift+Z, macOS=Cmd+Shift+Z}" Command="{Binding BoardVm.RedoCommand}" />
     </Window.KeyBindings>
 
     <Grid RowDefinitions="Auto, *">

@@ -14,8 +14,8 @@ public static class ImageEnhancementModeExtensions
     {
         return mode switch
         {
-            ImageEnhancementMode.LarsonSekaninaStandard => EnhancementCategory.RadialRotational,
             ImageEnhancementMode.LarsonSekaninaSymmetric => EnhancementCategory.RadialRotational,
+            ImageEnhancementMode.LarsonSekaninaStandard => EnhancementCategory.RadialRotational,
             ImageEnhancementMode.AdaptiveLaplacianRVSF => EnhancementCategory.RadialRotational,
             ImageEnhancementMode.AdaptiveLaplacianMosaic => EnhancementCategory.RadialRotational,
             ImageEnhancementMode.InverseRho => EnhancementCategory.RadialRotational,

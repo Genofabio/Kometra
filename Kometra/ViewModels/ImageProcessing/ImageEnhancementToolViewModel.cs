@@ -190,9 +190,11 @@ public partial class ImageEnhancementToolViewModel : ObservableObject, IDisposab
 
         _statusText = LocalizationManager.Instance["EnhanceStatusReady"];
 
+        // CORREZIONE: Ordiniamo i modi in modo che LarsonSekaninaSymmetric sia il primo se presente nella categoria
         AvailableModes = Enum.GetValues<ImageEnhancementMode>()
                              .Cast<ImageEnhancementMode>()
                              .Where(m => m.GetCategory() == _category)
+                             .OrderBy(m => m != ImageEnhancementMode.LarsonSekaninaSymmetric) // 'False' (uguale) viene prima di 'True' (diverso)
                              .ToList();
 
         if (AvailableModes.Any()) SelectedMode = AvailableModes.First();

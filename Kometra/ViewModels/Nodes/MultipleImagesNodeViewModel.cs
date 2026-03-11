@@ -9,6 +9,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using Kometra.Models.Visualization;
 using Kometra.Models.Fits;
 using Kometra.Models.Nodes;
+using Kometra.Services; // Aggiunto per IConfigurationService
 using Kometra.Services.Factories;
 using Kometra.Services.Fits;
 using Kometra.ViewModels.Visualization;
@@ -29,7 +30,7 @@ public partial class MultipleImagesNodeViewModel : ImageNodeViewModel
 
     // --- Componenti e Stato ---
     private readonly List<FitsFileReference> _files = new();
-    private readonly SequenceNavigator _navigator = new();
+    private readonly SequenceNavigator _navigator; // Rimosso l'inizializzatore inline "= new()"
     private readonly Size _maxImageSize;
     
     private CancellationTokenSource? _navigationCts;
@@ -70,12 +71,16 @@ public partial class MultipleImagesNodeViewModel : ImageNodeViewModel
         MultipleImagesNodeModel model,
         IFitsDataManager dataManager,
         IFitsRendererFactory rendererFactory,
+        IConfigurationService configService, // Nuova dipendenza aggiunta
         Size maxSize) 
         : base(model)
     {
         _dataManager = dataManager ?? throw new ArgumentNullException(nameof(dataManager));
         _rendererFactory = rendererFactory ?? throw new ArgumentNullException(nameof(rendererFactory));
         _maxImageSize = maxSize;
+
+        // Inizializziamo il navigatore passandogli il servizio di configurazione
+        _navigator = new SequenceNavigator(configService);
 
         foreach (var path in model.ImagePaths)
         {

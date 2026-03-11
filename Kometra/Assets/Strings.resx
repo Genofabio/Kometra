@@ -72,8 +72,8 @@
         <data name="MenuPlateSolving" xml:space="preserve">
         <value>Astrometric Solving (ASTAP)</value>
     </data>
-        <data name="MenuStackOps" xml:space="preserve">
-        <value>Stack Operations</value>
+    <data name="MenuStackOps" xml:space="preserve">
+        <value>Stack</value>
     </data>
         <data name="MenuStackSum" xml:space="preserve">
         <value>Sum</value>
@@ -725,4 +725,7 @@
     <data name="MenuArithDiv" xml:space="preserve">
     <value>Divide (A ÷ B)</value>
 </data>
+    <data name="SettingsAnimationFps" xml:space="preserve">
+        <value>Animation Speed (FPS)</value>
+    </data>
 </root>

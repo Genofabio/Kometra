@@ -1,10 +1,12 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.Linq;
 using System.Threading.Tasks;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using Kometra.Services;
 using Kometra.ViewModels.Nodes;
 
 namespace Kometra.ViewModels.Shared;
@@ -12,13 +14,14 @@ namespace Kometra.ViewModels.Shared;
 public partial class SequenceNavigator : ObservableObject, IImageNavigator
 {
     private readonly DispatcherTimer _timer;
+    private readonly IConfigurationService? _configService;
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(DisplayIndex))]
     [NotifyPropertyChangedFor(nameof(CanMoveNext))] 
     [NotifyPropertyChangedFor(nameof(CanMovePrevious))]
     [NotifyCanExecuteChangedFor(nameof(NextCommand), nameof(PreviousCommand))]
-    [NotifyCanExecuteChangedFor(nameof(MoveToFirstCommand), nameof(MoveToLastCommand))] // Aggiorna anche i nuovi comandi
+    [NotifyCanExecuteChangedFor(nameof(MoveToFirstCommand), nameof(MoveToLastCommand))] 
     private int _currentIndex;
 
     [ObservableProperty]
@@ -30,7 +33,9 @@ public partial class SequenceNavigator : ObservableObject, IImageNavigator
     private int _totalCount;
 
     [ObservableProperty] private bool _isLooping;
-    [ObservableProperty] private int _intervalMs = 250;
+    
+    // Il default diventa 100ms (10 FPS) se il servizio di configurazione non è disponibile
+    [ObservableProperty] private int _intervalMs = 100; 
 
     // Filtro per indici accessibili (es. solo 0 e l'ultimo in modalità guidata)
     private Predicate<int>? _indexFilter;
@@ -55,10 +60,44 @@ public partial class SequenceNavigator : ObservableObject, IImageNavigator
 
     public event EventHandler<int>? IndexChanged;
 
-    public SequenceNavigator()
+    // Costruttore con iniezione opzionale del servizio di configurazione
+    public SequenceNavigator(IConfigurationService? configService = null)
     {
+        _configService = configService;
+
+        // Se il servizio di configurazione è disponibile, ascoltiamo i cambiamenti in tempo reale.
+        // Così, se modifichi gli FPS nelle impostazioni, la velocità si aggiorna all'istante
+        // anche se l'animazione è già in corso!
+        if (_configService is INotifyPropertyChanged npc)
+        {
+            npc.PropertyChanged += (s, e) =>
+            {
+                if (e.PropertyName == nameof(IConfigurationService.Current) && IsLooping)
+                {
+                    UpdateTimerInterval();
+                }
+            };
+        }
+
         _timer = new DispatcherTimer(DispatcherPriority.Render);
         _timer.Tick += (s, e) => MoveNextInternal(loop: true);
+    }
+
+    /// <summary>
+    /// Legge gli FPS dalle impostazioni e aggiorna l'intervallo in millisecondi del timer.
+    /// </summary>
+    private void UpdateTimerInterval()
+    {
+        // Recuperiamo gli FPS (fallback a 10 se il servizio è assente o qualcosa va storto)
+        int fps = _configService?.Current?.AnimationFps ?? 10;
+        
+        // Protezione contro valori impossibili (zero o negativi)
+        if (fps <= 0) fps = 10; 
+        
+        // Conversione matematica: millisecondi = 1000 / frame al secondo
+        IntervalMs = 1000 / fps;
+        
+        _timer.Interval = TimeSpan.FromMilliseconds(IntervalMs);
     }
 
     public void UpdateStatus(int index, int total)
@@ -103,10 +142,14 @@ public partial class SequenceNavigator : ObservableObject, IImageNavigator
         IsLooping = !IsLooping;
         if (IsLooping)
         {
-            _timer.Interval = TimeSpan.FromMilliseconds(IntervalMs);
+            // Aggiorniamo la velocità di riproduzione leggendo l'impostazione dell'utente
+            UpdateTimerInterval();
             _timer.Start();
         }
-        else _timer.Stop();
+        else 
+        {
+            _timer.Stop();
+        }
     }
 
     // --- NAVIGAZIONE STANDARD ---
