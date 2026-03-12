@@ -728,4 +728,6 @@
     <data name="SettingsAnimationFps" xml:space="preserve">
         <value>Animation Speed (FPS)</value>
     </data>
+    <data name="MenuNodeJoin" xml:space="preserve"><value>Join Nodes</value></data>
+    <data name="MenuNodeSplit" xml:space="preserve"><value>Split Node</value></data>
 </root>

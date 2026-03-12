@@ -4,7 +4,8 @@ using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.Linq;
 using System.Threading.Tasks;
-using System.ComponentModel; // Per PropertyChangedEventArgs
+using System.ComponentModel;
+using System.IO; 
 using Avalonia;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -33,6 +34,10 @@ using Shared_SequenceNavigator = Shared.SequenceNavigator;
 
 public partial class BoardViewModel : ObservableObject
 {
+    // --- Costanti per Layout Grafico ---
+    private const double DefaultNodeMarginX = 140.0;
+    private const double CascadeOffsetY = 100.0;
+
     // --- Dipendenze ---
     private readonly INodeViewModelFactory _nodeFactory;
     private readonly IWindowService _windowService;
@@ -43,6 +48,7 @@ public partial class BoardViewModel : ObservableObject
     private readonly IVideoExportCoordinator _videoCoordinator;
     private readonly IConfigurationService _configService;
     private readonly IArithmeticCoordinator _arithmeticCoordinator;
+    private readonly INodeStructureCoordinator _nodeStructureCoordinator;
 
     // --- Stato Navigazione ---
     public BoardViewport Viewport { get; } = new();
@@ -89,7 +95,8 @@ public partial class BoardViewModel : ObservableObject
         IStackingCoordinator stackingCoordinator,
         IVideoExportCoordinator videoCoordinator,
         IConfigurationService configService,
-        IArithmeticCoordinator arithmeticCoordinator)
+        IArithmeticCoordinator arithmeticCoordinator,
+        INodeStructureCoordinator nodeStructureCoordinator)
     {
         _nodeFactory = nodeFactory ?? throw new ArgumentNullException(nameof(nodeFactory));
         _windowService = windowService ?? throw new ArgumentNullException(nameof(windowService));
@@ -100,13 +107,13 @@ public partial class BoardViewModel : ObservableObject
         _videoCoordinator = videoCoordinator ?? throw new ArgumentNullException(nameof(videoCoordinator));
         _configService = configService ?? throw new ArgumentNullException(nameof(configService));
         _arithmeticCoordinator = arithmeticCoordinator ?? throw new ArgumentNullException(nameof(arithmeticCoordinator));
-
+        _nodeStructureCoordinator = nodeStructureCoordinator ?? throw new ArgumentNullException(nameof(nodeStructureCoordinator));
+        
         if (_configService is ConfigurationService cs)
         {
             cs.PropertyChanged += OnSettingsChanged;
         }
 
-        // Monitoriamo i cambiamenti della collezione per aggiornare lo stato dei comandi
         SelectedNodes.CollectionChanged += (s, e) => NotifySelectionCommands();
     }
 
@@ -211,6 +218,37 @@ public partial class BoardViewModel : ObservableObject
         SubtractNodesCommand.NotifyCanExecuteChanged();
         MultiplyNodesCommand.NotifyCanExecuteChanged();
         DivideNodesCommand.NotifyCanExecuteChanged();
+        
+        JoinCommand.NotifyCanExecuteChanged();
+        SplitCommand.NotifyCanExecuteChanged();
+    }
+
+    // ---------------------------------------------------------------------------
+    // HELPER POSIZIONAMENTO GRAFO
+    // ---------------------------------------------------------------------------
+
+    /// <summary>
+    /// Riposiziona il nuovo nodo calcolando l'esatta spaziatura (60px) tra il 
+    /// bordo destro del sorgente e il bordo sinistro del nuovo, allineandoli al centro.
+    /// Aggiunge l'offset a cascata per i nodi multipli successivi.
+    /// </summary>
+    private void RepositionNewNode(BaseNodeViewModel sourceNode, BaseNodeViewModel newNode, int index = 0)
+    {
+        double sourceHalfWidth = sourceNode.EstimatedTotalSize.Width / 2.0;
+        double newHalfWidth = newNode.EstimatedTotalSize.Width / 2.0;
+        
+        // Distanza dal centro sorgente al centro del nuovo nodo = (MetàSorgente + Spazio + MetàNuovo)
+        double deltaX = sourceHalfWidth + DefaultNodeMarginX + newHalfWidth;
+        
+        // Centratura verticale basata sul centro geometrico
+        double sourceCenterY = sourceNode.Y + (sourceNode.EstimatedTotalSize.Height / 2.0);
+        double newHalfHeight = newNode.EstimatedTotalSize.Height / 2.0;
+        
+        // Se generiamo nodi multipli (Split), applichiamo la cascata
+        double offset = index * CascadeOffsetY;
+
+        newNode.X = sourceNode.X + deltaX;
+        newNode.Y = sourceCenterY - newHalfHeight + offset;
     }
 
     // [GRAFO: Add/Remove/Register] 
@@ -246,13 +284,11 @@ public partial class BoardViewModel : ObservableObject
 
     // --- GESTIONE RISULTATI ELABORAZIONE (COLLEGAMENTI) ---
     
-    // Metodo helper per singolo genitore (mantenuto per compatibilità con altri tool)
     private void RegisterProcessingResult(BaseNodeViewModel newNode, BaseNodeViewModel sourceNode, string tempFilePath, string undoLabel)
     {
         RegisterProcessingResult(newNode, new List<BaseNodeViewModel> { sourceNode }, tempFilePath, undoLabel);
     }
 
-    // Metodo principale che supporta genitori multipli
     private void RegisterProcessingResult(BaseNodeViewModel newNode, IEnumerable<BaseNodeViewModel> sourceNodes, string tempFilePath, string undoLabel)
     {
         var sources = sourceNodes.ToList();
@@ -264,7 +300,6 @@ public partial class BoardViewModel : ObservableObject
                     RegisterNodeEvents(newNode); 
                     newNode.ZIndex = ++_maxZIndex; 
                     
-                    // Creiamo una connessione per ogni nodo genitore
                     foreach (var source in sources)
                     {
                         CreateConnection(source, newNode);
@@ -274,7 +309,6 @@ public partial class BoardViewModel : ObservableObject
             },
             undo: () => {
                 if (Nodes.Contains(newNode)) {
-                    // Rimuoviamo tutte le connessioni verso questo nodo
                     var links = Connections.Where(c => c.Target == newNode).ToList();
                     foreach (var link in links) Connections.Remove(link);
                     
@@ -389,17 +423,20 @@ public partial class BoardViewModel : ObservableObject
             if (result == null || result.Value.Paths == null || !result.Value.Paths.Any()) return;
 
             var (resultPaths, titleSuffix) = result.Value;
-            double centerX = imgNode.X + (1.5 * imgNode.EstimatedTotalSize.Width);
-            double centerY = imgNode.Y + (imgNode.EstimatedTotalSize.Height / 2.0);
-
+            
             GC.Collect(); GC.WaitForPendingFinalizers();
 
+            // Creazione temporanea senza posizionamento (X=0, Y=0)
             BaseNodeViewModel newNode = resultPaths.Count == 1
-                ? await _nodeFactory.CreateSingleImageNodeAsync(resultPaths[0], centerX + 400, centerY)
-                : await _nodeFactory.CreateMultipleImagesNodeAsync(resultPaths, centerX + 400, centerY);
+                ? await _nodeFactory.CreateSingleImageNodeAsync(resultPaths[0], 0, 0)
+                : await _nodeFactory.CreateMultipleImagesNodeAsync(resultPaths, 0, 0);
+
+            // Calcolo posizione definitiva basata sulle dimensioni reali generate
+            RepositionNewNode(imgNode, newNode);
 
             newNode.Title = $"{imgNode.Title} {titleSuffix}";
             if (newNode is ImageNodeViewModel resNode) resNode.VisualizationMode = imgNode.VisualizationMode;
+            
             RegisterProcessingResult(newNode, imgNode, resultPaths[0], undoLabel);
         }
         catch (Exception ex) { Debug.WriteLine($"Errore: {ex.Message}"); }
@@ -458,15 +495,12 @@ public partial class BoardViewModel : ObservableObject
 
             if (resultPaths == null || !resultPaths.Any()) return;
 
-            // --- POSIZIONAMENTO (Rispetto al Nodo A) ---
-            double offsetX = 100.0;
-            double targetCenterY = nodeA.Y + (nodeA.EstimatedTotalSize.Height / 2.0);
-            double nodeAWidth = nodeA.EstimatedTotalSize.Width;
-            double targetCenterX = nodeA.X + nodeAWidth + offsetX + (nodeAWidth / 2.0);
-
             BaseNodeViewModel newNode = resultPaths.Count == 1
-                ? await _nodeFactory.CreateSingleImageNodeAsync(resultPaths[0], targetCenterX, targetCenterY)
-                : await _nodeFactory.CreateMultipleImagesNodeAsync(resultPaths, targetCenterX, targetCenterY);
+                ? await _nodeFactory.CreateSingleImageNodeAsync(resultPaths[0], 0, 0)
+                : await _nodeFactory.CreateMultipleImagesNodeAsync(resultPaths, 0, 0);
+
+            // Calcolo posizione definitiva rispetto a Node A
+            RepositionNewNode(nodeA, newNode);
 
             string opSymbol = op switch { 
                 ArithmeticOperation.Add => "+", 
@@ -479,14 +513,75 @@ public partial class BoardViewModel : ObservableObject
             newNode.Title = $"{nodeA.Title} {opSymbol} {nodeB.Title}";
             if (newNode is ImageNodeViewModel resNode) resNode.VisualizationMode = nodeA.VisualizationMode;
 
-            // --- REGISTRAZIONE CON COLLEGAMENTI MULTIPLI ---
-            // Passiamo sia nodeA che nodeB come sorgenti
             RegisterProcessingResult(newNode, new List<BaseNodeViewModel> { nodeA, nodeB }, resultPaths[0], undoLabel);
         }
         catch (Exception ex)
         {
             Debug.WriteLine($"Errore aritmetico: {ex.Message}");
         }
+    }
+    
+    // ===========================================================================
+    // OPERAZIONI DI STRUTTURA NODI (JOIN / SPLIT)
+    // ===========================================================================
+
+    [RelayCommand(CanExecute = nameof(CanJoin))]
+    private async Task Join()
+    {
+        var allFiles = SelectedNodes.OfType<ImageNodeViewModel>()
+                                    .SelectMany(n => n.CurrentFiles)
+                                    .ToList();
+
+        if (!allFiles.Any()) return;
+
+        try 
+        {
+            var paths = await _nodeStructureCoordinator.JoinNodesAsync(allFiles);
+        
+            // Identifichiamo il nodo più a destra tra quelli selezionati
+            var rightmostNode = SelectedNodes.OrderByDescending(n => n.X).First();
+            
+            var newNode = await _nodeFactory.CreateMultipleImagesNodeAsync(paths, 0, 0);
+            
+            // Riposizionamento calcolando l'ingombro reale del nodo destinazione e sorgente
+            RepositionNewNode(rightmostNode, newNode);
+            
+            newNode.Title = "Joined Sequence";
+            
+            if (SelectedNodes[0] is ImageNodeViewModel firstNode && newNode is ImageNodeViewModel resNode)
+                resNode.VisualizationMode = firstNode.VisualizationMode;
+
+            RegisterProcessingResult(newNode, SelectedNodes.ToList(), paths[0], "Unione Nodi");
+        } 
+        catch (Exception ex) { Debug.WriteLine($"Errore Join: {ex.Message}"); }
+    }
+
+    [RelayCommand(CanExecute = nameof(CanSplit))]
+    private async Task Split()
+    {
+        var node = SelectedImageNode;
+        if (node == null || node.Navigator.TotalCount <= 1) return;
+
+        try 
+        {
+            var paths = _nodeStructureCoordinator.SplitNode(node.CurrentFiles.ToList());
+            
+            for (int i = 0; i < paths.Count; i++)
+            {
+                var newNode = await _nodeFactory.CreateSingleImageNodeAsync(paths[i], 0, 0);
+                
+                // Riposizionamento preciso con l'offset a cascata applicato
+                RepositionNewNode(node, newNode, i);
+
+                newNode.Title = System.IO.Path.GetFileNameWithoutExtension(paths[i]);
+                
+                if (newNode is ImageNodeViewModel resNode)
+                    resNode.VisualizationMode = node.VisualizationMode;
+
+                RegisterProcessingResult(newNode, node, paths[i], "Divisione Sequenza");
+            }
+        }
+        catch (Exception ex) { Debug.WriteLine($"Errore Split: {ex.Message}"); }
     }
 
     // ---------------------------------------------------------------------------
@@ -540,9 +635,12 @@ public partial class BoardViewModel : ObservableObject
         if(s == null) return; 
         try { 
             var r = await _stackingCoordinator.ExecuteStackingAsync(s.CurrentFiles, mode); 
-            double x=s.X+1.5*s.EstimatedTotalSize.Width; 
-            double y=s.Y+s.EstimatedTotalSize.Height/2.0; 
-            var n = await _nodeFactory.CreateSingleImageNodeAsync(r.FilePath, x+400, y); 
+            
+            var n = await _nodeFactory.CreateSingleImageNodeAsync(r.FilePath, 0, 0); 
+            
+            // UTILIZZO DELL'HELPER PER ALLINEAMENTO PERFETTO
+            RepositionNewNode(s, n);
+
             n.Title=$"{s.Title} ({mode})"; 
             if(n is ImageNodeViewModel res) res.VisualizationMode=s.VisualizationMode; 
             RegisterProcessingResult(n, s, r.FilePath, "Stacking"); 
@@ -577,7 +675,6 @@ public partial class BoardViewModel : ObservableObject
     [RelayCommand] private void ResetBoard() { Viewport.ResetView(); OnPropertyChanged(nameof(Viewport)); }
     [RelayCommand(CanExecute = nameof(CanSetVisualizationMode))] private void SetVisualizationMode(VisualizationMode mode) { if(SelectedImageNode is ImageNodeViewModel n) n.VisualizationMode = mode; }
     
-    // --- IL METODO TOGGLE ANIMATION INSERITO ---
     [RelayCommand(CanExecute = nameof(CanToggleAnimation))] 
     private void ToggleNodeAnimation() 
     { 
@@ -608,6 +705,9 @@ public partial class BoardViewModel : ObservableObject
         if (nodeA == null || nodeB == null) return false;
         return _arithmeticCoordinator.CanProcess(nodeA.CurrentFiles.ToList(), nodeB.CurrentFiles.ToList());
     }
+    
+    private bool CanJoin() => SelectedNodesCount >= 2;
+    private bool CanSplit() => SelectedNodesCount == 1 && SelectedImageNode?.Navigator.TotalCount > 1;
 
     private bool CanExecuteOnImageNode() => SelectedNodesCount == 1 && SelectedNodes[0] is ImageNodeViewModel;
     private bool CanEditHeader() => SelectedNodesCount == 1 && SelectedNodes[0] is ImageNodeViewModel n && n.ActiveFile != null;

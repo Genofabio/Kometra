@@ -6,7 +6,6 @@
              xmlns:vm="clr-namespace:Kometra.ViewModels"
              xmlns:infrastructure="clr-namespace:Kometra.Infrastructure"
              xmlns:conv="clr-namespace:Kometra.Converters"
-             xmlns:processing="clr-namespace:Kometra.Models.Processing"
              xmlns:visualization="clr-namespace:Kometra.Models.Visualization"
              xmlns:stacking="clr-namespace:Kometra.Models.Processing.Stacking"
              mc:Ignorable="d" d:DesignWidth="800" d:DesignHeight="450"
@@ -87,6 +86,24 @@
                       Command="{Binding BoardVm.ShowCropWindowCommand}">
                 <MenuItem.Icon>
                     <avalonia:MaterialIcon Kind="Crop" />
+                </MenuItem.Icon>
+            </MenuItem>
+            
+            <Separator />
+
+            <MenuItem Header="{Binding [MenuNodeJoin], Source={x:Static infrastructure:LocalizationManager.Instance}}"
+                      Classes="innerMenuItem"
+                      Command="{Binding BoardVm.JoinCommand}">
+                <MenuItem.Icon>
+                    <avalonia:MaterialIcon Kind="Merge" />
+                </MenuItem.Icon>
+            </MenuItem>
+
+            <MenuItem Header="{Binding [MenuNodeSplit], Source={x:Static infrastructure:LocalizationManager.Instance}}"
+                      Classes="innerMenuItem"
+                      Command="{Binding BoardVm.SplitCommand}">
+                <MenuItem.Icon>
+                    <avalonia:MaterialIcon Kind="CallSplit" />
                 </MenuItem.Icon>
             </MenuItem>
             

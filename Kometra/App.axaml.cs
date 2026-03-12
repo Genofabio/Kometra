@@ -129,6 +129,7 @@ public class App : Application
         services.AddSingleton<IMaskingCoordinator, MaskingCoordinator>();
         services.AddSingleton<IVideoExportCoordinator, VideoExportCoordinator>();
         services.AddSingleton<IExportCoordinator, ExportCoordinator>();
+        services.AddSingleton<INodeStructureCoordinator, NodeStructureCoordinator>(); // <-- AGGIUNTO
 
         // --- 6. Factories ---
         services.AddSingleton<INodeViewModelFactory, NodeViewModelFactory>();

@@ -616,4 +616,6 @@
     <data name="SettingsAnimationFps" xml:space="preserve">
         <value>Velocità Animazione (FPS)</value>
     </data>
+    <data name="MenuNodeJoin" xml:space="preserve"><value>Unisci Nodi</value></data>
+    <data name="MenuNodeSplit" xml:space="preserve"><value>Dividi Nodo</value></data>
 </root>
