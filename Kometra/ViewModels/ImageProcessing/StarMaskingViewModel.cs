@@ -327,13 +327,20 @@ public partial class StarMaskingViewModel : ObservableObject, IDisposable
         int height = bytes.GetLength(0);
         int width = bytes.GetLength(1);
 
-        var bitmap = new WriteableBitmap(new PixelSize(width, height), new Vector(96, 96), PixelFormat.Bgra8888, AlphaFormat.Premul);
+        // Usa Unpremul per evitare artefatti di compositing strani su Linux/X11
+        var bitmap = new WriteableBitmap(
+            new PixelSize(width, height), 
+            new Vector(96, 96), 
+            PixelFormat.Bgra8888, 
+            AlphaFormat.Unpremul);
 
+        // Formato BGRA: l'ordine dei byte in memoria (Little Endian)
         byte a = (byte)(255 * opacity);
         byte r = overlayColor.R;
         byte g = overlayColor.G;
         byte b = overlayColor.B;
-        
+    
+        // BGRA int packing
         int colorPixel = (a << 24) | (r << 16) | (g << 8) | b;
         int transparentPixel = 0;
 
@@ -344,13 +351,20 @@ public partial class StarMaskingViewModel : ObservableObject, IDisposable
 
             Parallel.For(0, height, y =>
             {
+                // Rent ti dà un array ALMENO grande quanto richiesto (potrebbe essere più grande)
+                // e PIENO di dati vecchi (spazzatura in RAM).
                 int[] rowBuffer = ArrayPool<int>.Shared.Rent(width);
+            
                 try
                 {
+                    // Pulisci esplicitamente la parte di array che usi per evitare "ghosting"
+                    Array.Clear(rowBuffer, 0, width); 
+
                     for (int x = 0; x < width; x++)
                     {
                         rowBuffer[x] = bytes[y, x] > 0 ? colorPixel : transparentPixel;
                     }
+                
                     IntPtr destPtr = IntPtr.Add(backBuffer, y * rowBytes);
                     Marshal.Copy(rowBuffer, 0, destPtr, width);
                 }

@@ -214,7 +214,7 @@ public class RadiometryEngine : IRadiometryEngine
     private Mat CreateValidMask(Mat image)
     {
         Mat mask = new Mat();
-        Cv2.Compare(image, image, mask, CmpType.EQ);
+        Cv2.Compare(image, image, mask, CmpTypes.EQ);
     
         return mask;
     }

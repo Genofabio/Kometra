@@ -159,7 +159,7 @@ public abstract class AlignmentStrategyBase : IAlignmentStrategy
             using var mask = new Mat();
             // Confrontando la matrice con se stessa usando NotEqual, 
             // solo i NaN risulteranno True (255) perché (NaN != NaN)
-            Cv2.Compare(mat, mat, mask, CmpType.NE);
+            Cv2.Compare(mat, mat, mask, CmpTypes.NE);
             
             // 2. Impostiamo a 'val' i pixel identificati dalla maschera
             // Se la maschera è vuota (countNonZero == 0), SetTo è quasi istantaneo

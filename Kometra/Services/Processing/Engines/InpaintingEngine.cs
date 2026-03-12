@@ -33,7 +33,7 @@ public class InpaintingEngine : IInpaintingEngine
 
         // 1. PREPARAZIONE MASCHERE (OpenCV)
         using Mat nanMask = new Mat();
-        Cv2.Compare(image, image, nanMask, CmpType.NE); 
+        Cv2.Compare(image, image, nanMask, CmpTypes.NE); 
 
         using Mat fillMask = new Mat();
         if (starMask.Type() != MatType.CV_8UC1) starMask.ConvertTo(fillMask, MatType.CV_8UC1);

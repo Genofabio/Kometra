@@ -28,11 +28,11 @@ public class GeometricEngine : IGeometricEngine
         {
             // Nota: Compare con se stesso per NaN fallisce in alcune versioni, meglio check != 0 se nan-patched
             // Qui assumiamo che i NaN siano gestiti o che usiamo una maschera binaria sicura.
-            Cv2.Compare(source, source, mask, CmpType.EQ); 
+            Cv2.Compare(source, source, mask, CmpTypes.EQ); 
         }
         else
         {
-            Cv2.Compare(source, new Scalar(0), mask, CmpType.NE);
+            Cv2.Compare(source, new Scalar(0), mask, CmpTypes.NE);
         }
         
         Rect validRect = Cv2.BoundingRect(mask);
@@ -47,7 +47,7 @@ public class GeometricEngine : IGeometricEngine
         // Pulizia NaN interni: sostituiamo con 0 per non corrompere i calcoli di Lanczos
         using (Mat nanMask = new Mat())
         {
-            Cv2.Compare(workingSrc, workingSrc, nanMask, CmpType.NE); // Trova i NaN (dove a != a)
+            Cv2.Compare(workingSrc, workingSrc, nanMask, CmpTypes.NE); // Trova i NaN (dove a != a)
             workingSrc.SetTo(new Scalar(0), nanMask);
         }
 
@@ -81,7 +81,7 @@ public class GeometricEngine : IGeometricEngine
         // 7. Ripristino dei NaN (Clipping finale)
         // Usiamo la maschera warpata per tagliare via tutto ciò che è stato "replicato" o "inventato" fuori dai bordi.
         using Mat finalMask = new Mat();
-        Cv2.Compare(warpedMask, new Scalar(0), finalMask, CmpType.EQ);
+        Cv2.Compare(warpedMask, new Scalar(0), finalMask, CmpTypes.EQ);
         result.SetTo(new Scalar(double.NaN), finalMask);
 
         return result;

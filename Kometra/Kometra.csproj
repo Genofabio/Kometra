@@ -7,6 +7,10 @@
         <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
         <ApplicationManifest>app.manifest</ApplicationManifest>
         <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
+        
+        <PublishReadyToRun>false</PublishReadyToRun>
+        
+        <UseRidGraph>true</UseRidGraph>
     </PropertyGroup>
 
     <ItemGroup>
@@ -31,9 +35,22 @@
         <PackageReference Include="Microsoft.Extensions.Caching.Memory" Version="10.0.2" />
         <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.1" />
         <PackageReference Include="Microsoft.Extensions.Http" Version="10.0.1" />
+        
+        <PackageReference Include="OpenCvSharp4" Version="4.13.0.20260308" />
+        
+        <PackageReference Include="OpenCvSharp4.official.runtime.ubuntu.24.04-x64" Version="4.13.0.20260308" GeneratePathProperty="true" />
+        
+        <PackageReference Include="OpenCvSharp4.runtime.osx.10.15-universal" Version="4.7.0.20230224" />
         <PackageReference Include="OpenCvSharp4.runtime.osx_arm64" Version="4.8.1-rc" />
-        <PackageReference Include="OpenCvSharp4.runtime.win" Version="4.11.0.20250507" />
-        <PackageReference Include="OpenCvSharp4.Windows" Version="4.11.0.20250507" />
+        <PackageReference Include="OpenCvSharp4.runtime.win" Version="4.13.0.20260302" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <Content Include="$(PkgOpenCvSharp4_official_runtime_ubuntu_24_04-x64)\runtimes\ubuntu.24.04-x64\native\libOpenCvSharpExtern.so">
+            <Link>libOpenCvSharpExtern.so</Link>
+            <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+            <PublishState>Included</PublishState>
+        </Content>
     </ItemGroup>
 
     <ItemGroup>
@@ -60,13 +77,9 @@
             <MacOsDir>$(AppBundleDir)\Contents\MacOS</MacOsDir>
             <ResourcesDir>$(AppBundleDir)\Contents\Resources</ResourcesDir>
         </PropertyGroup>
-
         <MakeDir Directories="$(AppBundleDir);$(MacOsDir);$(ResourcesDir)" />
-
         <Move SourceFiles="$(PublishDir)$(AssemblyName)" DestinationFolder="$(MacOsDir)" />
-
         <Copy SourceFiles="Assets\Publish\Info.plist" DestinationFolder="$(AppBundleDir)\Contents" />
         <Copy SourceFiles="Assets\Icon\icon.icns" DestinationFolder="$(ResourcesDir)" />
     </Target>
-
 </Project>

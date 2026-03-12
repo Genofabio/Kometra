@@ -40,8 +40,8 @@ public class ArithmeticEngine : IArithmeticEngine
         using Mat mask = new Mat();
         using Mat maskA = new Mat();
         using Mat maskB = new Mat();
-        Cv2.Compare(workingA, workingA, maskA, CmpType.EQ); // Check NaN in A
-        Cv2.Compare(workingB, workingB, maskB, CmpType.EQ); // Check NaN in B
+        Cv2.Compare(workingA, workingA, maskA, CmpTypes.EQ); // Check NaN in A
+        Cv2.Compare(workingB, workingB, maskB, CmpTypes.EQ); // Check NaN in B
         Cv2.BitwiseAnd(maskA, maskB, mask);
 
         // Inizializziamo il risultato con NaN (rappresenta "nessun dato")
@@ -70,7 +70,7 @@ public class ArithmeticEngine : IArithmeticEngine
                 // Check divisione per zero
                 using (Mat zeroMask = new Mat())
                 {
-                    Cv2.Compare(workingB, 0, zeroMask, CmpType.EQ);
+                    Cv2.Compare(workingB, 0, zeroMask, CmpTypes.EQ);
                     using Mat combinedInvalid = new Mat();
                     Cv2.BitwiseOr(zeroMask, mask, combinedInvalid); // Dove B è 0 o uno dei due è NaN
                     
@@ -79,7 +79,7 @@ public class ArithmeticEngine : IArithmeticEngine
                     
                     // Reset a NaN dove la divisione non era possibile
                     using Mat finalInvalidMask = new Mat();
-                    Cv2.Compare(result, result, finalInvalidMask, CmpType.NE); // Trova NaN generati da OpenCV
+                    Cv2.Compare(result, result, finalInvalidMask, CmpTypes.NE); // Trova NaN generati da OpenCV
                     Cv2.BitwiseOr(finalInvalidMask, zeroMask, finalInvalidMask);
                     result.SetTo(useDouble ? new Scalar(double.NaN) : new Scalar(float.NaN), finalInvalidMask);
                 }

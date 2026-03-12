@@ -254,7 +254,7 @@ public class StackingEngine : IStackingEngine
 
         // Se siamo qui, i tipi sono identici (Float+Float o Double+Double). Procediamo.
         using Mat mask = new Mat();
-        Cv2.Compare(currentFrame, currentFrame, mask, CmpType.EQ); // NaN Check
+        Cv2.Compare(currentFrame, currentFrame, mask, CmpTypes.EQ); // NaN Check
         
         Cv2.Add(accumulator, currentFrame, accumulator, mask: mask, dtype: accumulator.Type().Value);
         

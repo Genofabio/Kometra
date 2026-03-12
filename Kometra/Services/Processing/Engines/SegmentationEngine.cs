@@ -62,7 +62,7 @@ public class SegmentationEngine : ISegmentationEngine
 
         if (centerLabel > 0)
         {
-            Cv2.Compare(labels, new Scalar(centerLabel), finalMask, CmpType.EQ);
+            Cv2.Compare(labels, new Scalar(centerLabel), finalMask, CmpTypes.EQ);
 
             using var closeKernel = Cv2.GetStructuringElement(MorphShapes.Ellipse, new Size(5, 5));
             Cv2.MorphologyEx(finalMask, finalMask, MorphTypes.Close, closeKernel);

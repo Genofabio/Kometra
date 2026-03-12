@@ -27,7 +27,7 @@ public class ImageAnalysisEngine : IImageAnalysisEngine
 
         using Mat mask = new Mat();
         // Vecchia logica: Compare EQ per trovare i non-NaN
-        Cv2.Compare(image, image, mask, CmpType.EQ); 
+        Cv2.Compare(image, image, mask, CmpTypes.EQ); 
         var rect = Cv2.BoundingRect(mask);
         
         return new Rect2D(rect.X, rect.Y, rect.Width, rect.Height);
@@ -57,7 +57,7 @@ public class ImageAnalysisEngine : IImageAnalysisEngine
 
         // 3. Calcolo Soglia (Mean + 3*Sigma)
         using Mat tempMask = new Mat();
-        Cv2.Compare(workingMat, workingMat, tempMask, CmpType.EQ);
+        Cv2.Compare(workingMat, workingMat, tempMask, CmpTypes.EQ);
         using Mat meanMat = new Mat();
         using Mat stdDevMat = new Mat();
         Cv2.MeanStdDev(workingMat, meanMat, stdDevMat, tempMask);
