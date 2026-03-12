@@ -35,8 +35,8 @@ using Shared_SequenceNavigator = Shared.SequenceNavigator;
 public partial class BoardViewModel : ObservableObject
 {
     // --- Costanti per Layout Grafico ---
-    private const double DefaultNodeMarginX = 60.0;
-    private const double CascadeOffsetY = 40.0;
+    private const double DefaultNodeMarginX = 150.0;
+    private const double CascadeOffsetY = 100.0;
 
     // --- Dipendenze ---
     private readonly INodeViewModelFactory _nodeFactory;
