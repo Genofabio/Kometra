@@ -2,7 +2,6 @@
 using System.Diagnostics;
 using System.Threading;
 using System.Threading.Tasks;
-using System.Runtime.InteropServices;
 using Avalonia;
 using Avalonia.Media.Imaging;
 using Avalonia.Platform;
@@ -20,12 +19,10 @@ namespace Kometra.ViewModels.Visualization;
 /// Gestisce il ciclo di vita visuale di un'immagine FITS.
 /// Ottimizzato per ridurre l'impronta in RAM tramite bit-depth adattivo (32/64 bit)
 /// e scaricamento immediato dei buffer sorgente dopo l'idratazione della matrice scientifica.
+/// Tutti gli OS utilizzano Gray8 per minimizzare il consumo di VRAM.
 /// </summary>
 public partial class FitsRenderer : ObservableObject, IDisposable
 {
-    // --- Rilevamento OS a Runtime ---
-    private static readonly bool IsLinux = RuntimeInformation.IsOSPlatform(OSPlatform.Linux);
-
     // --- Dati Sorgente (Temporanei) ---
     private Array? _rawPixels; 
     private readonly double _bScale;
@@ -92,51 +89,18 @@ public partial class FitsRenderer : ObservableObject, IDisposable
     {
         if (_disposedValue || _rawPixels == null) return;
 
-        Console.WriteLine($"\n[FitsRenderer] >>> INIZIO INITIALIZE ASYNC ({_width}x{_height})");
-        Console.WriteLine($"[FitsRenderer] Parametri: Scale={_bScale}, Zero={_bZero}, Depth={_targetBitDepth}");
-
-        try
+        await Task.Run(() =>
         {
-            await Task.Run(() =>
-            {
-                Console.WriteLine("[FitsRenderer] [Thread Task] Verifica pre-chiamata RawToMat...");
-                if (_converter == null) throw new Exception("Il servizio _converter è NULL!");
-                
-                Console.WriteLine("[FitsRenderer] [Thread Task] Sto per invocare _converter.RawToMat...");
-                
-                // PUNTO CRITICO: Il salto verso il converter
-                _cachedScientificMat = _converter.RawToMat(_rawPixels, _bScale, _bZero, _targetBitDepth);
-                
-                Console.WriteLine("[FitsRenderer] [Thread Task] _converter.RawToMat è ritornato con successo.");
-                
-                if (_cachedScientificMat == null) Console.WriteLine("[FitsRenderer] ATTENZIONE: Mat ritornata è NULL!");
-                else Console.WriteLine($"[FitsRenderer] Mat creata: {_cachedScientificMat.Width}x{_cachedScientificMat.Height}, Type: {_cachedScientificMat.Type()}");
-
-                // 2. OTTIMIZZAZIONE RAM: Rilasciamo l'array originale
-                _rawPixels = null; 
-                Console.WriteLine("[FitsRenderer] Array rawPixels rilasciato (null).");
-            });
-
-            // 3. Setup iniziale del contrasto (AutoStretch)
-            Console.WriteLine("[FitsRenderer] Invocazione ResetThresholdsAsync...");
-            await ResetThresholdsAsync(skipRegeneration: true);
+            // 1. Conversione con bit-depth adattivo
+            _cachedScientificMat = _converter.RawToMat(_rawPixels, _bScale, _bZero, _targetBitDepth);
             
-            Console.WriteLine("[FitsRenderer] Invocazione TriggerRegeneration (Prima Visualizzazione)...");
-            await TriggerRegeneration();
-            
-            Console.WriteLine("[FitsRenderer] <<< INITIALIZE ASYNC COMPLETATO CORRETTAMENTE.\n");
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine("***************************************************");
-            Console.WriteLine("[FitsRenderer CRASH] Errore rilevato durante InitializeAsync!");
-            Console.WriteLine($"Tipo Eccezione: {ex.GetType().Name}");
-            Console.WriteLine($"Messaggio: {ex.Message}");
-            if (ex.InnerException != null) 
-                Console.WriteLine($"Inner Exception: {ex.InnerException.Message}");
-            Console.WriteLine($"Stack Trace: {ex.StackTrace}");
-            Console.WriteLine("***************************************************");
-        }
+            // 2. OTTIMIZZAZIONE RAM: Rilasciamo l'array originale
+            _rawPixels = null; 
+        });
+
+        // 3. Setup iniziale del contrasto (AutoStretch)
+        await ResetThresholdsAsync(skipRegeneration: true);
+        await TriggerRegeneration();
     }
 
     // =======================================================================
@@ -184,7 +148,6 @@ public partial class FitsRenderer : ObservableObject, IDisposable
     {
         if (_disposedValue || _cachedScientificMat == null) return;
 
-        Console.WriteLine("[FitsRenderer] ResetThresholds: Calcolo PresentationRequirements...");
         _presentationRequirements = await Task.Run(() => 
             _presentationService.GetPresentationRequirements(_cachedScientificMat));
         
@@ -219,7 +182,7 @@ public partial class FitsRenderer : ObservableObject, IDisposable
 
         try { await RegeneratePreviewImageAsync(token); }
         catch (OperationCanceledException) { }
-        catch (Exception ex) { Console.WriteLine($"[FitsRenderer] Errore rigenerazione: {ex.Message}"); }
+        catch (Exception ex) { Debug.WriteLine($"[FitsRenderer] Error: {ex.Message}"); }
     }
 
     private async Task RegeneratePreviewImageAsync(CancellationToken token)
@@ -236,22 +199,10 @@ public partial class FitsRenderer : ObservableObject, IDisposable
                 {
                     token.ThrowIfCancellationRequested();
 
-                    if (IsLinux)
-                    {
-                        Console.WriteLine("[FitsRenderer] [Render] Linux Path: Creazione buffer BGRA...");
-                        using var grayMat = new Mat(_height, _width, MatType.CV_8UC1);
-                        _presentationService.RenderTo8Bit(_cachedScientificMat, grayMat, BlackPoint, WhitePoint, VisualizationMode);
-                        PostProcessAction?.Invoke(grayMat);
-
-                        using var dstMat = Mat.FromPixelData(_height, _width, MatType.CV_8UC4, lockedBuffer.Address, lockedBuffer.RowBytes);
-                        Cv2.CvtColor(grayMat, dstMat, ColorConversionCodes.GRAY2BGRA);
-                    }
-                    else
-                    {
-                        using var dstMat = Mat.FromPixelData(_height, _width, MatType.CV_8UC1, lockedBuffer.Address, lockedBuffer.RowBytes);
-                        _presentationService.RenderTo8Bit(_cachedScientificMat, dstMat, BlackPoint, WhitePoint, VisualizationMode);
-                        PostProcessAction?.Invoke(dstMat);
-                    }
+                    // PERCORSO UNIVERSALE OTTIMIZZATO (Gray8)
+                    using var dstMat = Mat.FromPixelData(_height, _width, MatType.CV_8UC1, lockedBuffer.Address, lockedBuffer.RowBytes);
+                    _presentationService.RenderTo8Bit(_cachedScientificMat, dstMat, BlackPoint, WhitePoint, VisualizationMode);
+                    PostProcessAction?.Invoke(dstMat);
 
                 }, token);
             }
@@ -259,9 +210,8 @@ public partial class FitsRenderer : ObservableObject, IDisposable
             if (!token.IsCancellationRequested) SwapBuffer(targetBitmap);
             else RecycleBuffer(targetBitmap);
         }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"[FitsRenderer] CRASH durante RegeneratePreview: {ex.Message}");
+        catch 
+        { 
             targetBitmap.Dispose(); 
             throw; 
         }
@@ -278,10 +228,12 @@ public partial class FitsRenderer : ObservableObject, IDisposable
             var tmp = _backBuffer; _backBuffer = null; return tmp;
         }
 
-        PixelFormat format = IsLinux ? PixelFormats.Bgra8888 : PixelFormats.Gray8;
-        AlphaFormat alpha = IsLinux ? AlphaFormat.Premul : AlphaFormat.Opaque;
-
-        return new WriteableBitmap(new PixelSize(_width, _height), new Vector(96, 96), format, alpha);
+        // Utilizziamo SEMPRE Gray8 per risparmiare il 75% di memoria UI
+        return new WriteableBitmap(
+            new PixelSize(_width, _height), 
+            new Vector(96, 96), 
+            PixelFormats.Gray8, 
+            AlphaFormat.Opaque);
     }
 
     private void RecycleBuffer(WriteableBitmap bmp) => _backBuffer ??= bmp;
