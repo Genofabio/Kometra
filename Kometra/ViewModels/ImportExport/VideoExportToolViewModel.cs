@@ -16,6 +16,7 @@ using Kometra.Models.Visualization;
 using Kometra.Services.Factories;
 using Kometra.Services.Fits;
 using Kometra.Services.ImportExport;
+using Kometra.Services.Settings; // Aggiunto per IToolParametersCache
 using Kometra.Services.UI;
 using Kometra.ViewModels.Shared;
 using Kometra.ViewModels.Visualization;
@@ -30,6 +31,7 @@ public partial class VideoExportToolViewModel : ObservableObject, IDisposable
     private readonly IFitsRendererFactory _rendererFactory;
     private readonly IVideoExportCoordinator _videoCoordinator;
     private readonly IDialogService _dialogService;
+    private readonly IToolParametersCache _parametersCache; // Aggiunto cassetto
     private readonly IReadOnlyList<FitsFileReference> _sourceFiles;
 
     // --- STATO E LOGICA ---
@@ -132,6 +134,7 @@ public partial class VideoExportToolViewModel : ObservableObject, IDisposable
         IFitsRendererFactory rendererFactory,
         IVideoExportCoordinator videoCoordinator,
         IDialogService dialogService,
+        IToolParametersCache parametersCache, // Aggiunto nel costruttore
         IReadOnlyList<FitsFileReference> files,
         VisualizationMode currentMode, 
         Size originalSize)
@@ -141,6 +144,7 @@ public partial class VideoExportToolViewModel : ObservableObject, IDisposable
         _rendererFactory = rendererFactory;
         _videoCoordinator = videoCoordinator;
         _dialogService = dialogService;
+        _parametersCache = parametersCache;
         _sourceFiles = files;
         _mode = currentMode;
         
@@ -149,8 +153,17 @@ public partial class VideoExportToolViewModel : ObservableObject, IDisposable
 
         _statusText = LocalizationManager.Instance["StatusReady"];
 
-        // Imposta una cartella di default (Documenti)
-        OutputFolder = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
+        // --- LETTURA DALLA CACHE ---
+        var settings = _parametersCache.VideoExport;
+
+        // Imposta cartella (Cache o Documenti)
+        OutputFolder = !string.IsNullOrWhiteSpace(settings.OutputFolder) 
+            ? settings.OutputFolder 
+            : Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
+
+        // Parametri numerici
+        Fps = settings.Fps;
+        ScaleFactor = settings.ScaleFactor;
 
         // Imposta il nome file di default basato sul primo file della sequenza
         if (_sourceFiles.Any())
@@ -166,10 +179,19 @@ public partial class VideoExportToolViewModel : ObservableObject, IDisposable
         // Inizializza Contenitori e Codec
         var supported = _formatProvider.GetSupportedContainers().ToList();
         Containers = new ObservableCollection<VideoContainer>(supported);
-        SelectedContainer = supported.Contains(VideoContainer.MP4) ? VideoContainer.MP4 : supported.FirstOrDefault();
+        
+        // Se il contenitore in cache è ancora supportato lo usiamo, altrimenti MP4/Default
+        if (supported.Contains(settings.SelectedContainer))
+            SelectedContainer = settings.SelectedContainer;
+        else
+            SelectedContainer = supported.Contains(VideoContainer.MP4) ? VideoContainer.MP4 : supported.FirstOrDefault();
         
         _availableCodecs = new ObservableCollection<VideoCodec>();
         UpdateCodecs();
+
+        // Se il codec in cache è supportato per il contenitore scelto, lo usiamo
+        if (AvailableCodecs.Contains(settings.SelectedCodec))
+            SelectedCodec = settings.SelectedCodec;
 
         Navigator.UpdateStatus(0, _sourceFiles.Count);
         Navigator.IndexChanged += OnNavigatorIndexChanged;
@@ -243,6 +265,14 @@ public partial class VideoExportToolViewModel : ObservableObject, IDisposable
     { 
         IsExporting = true;
         _exportCts = new CancellationTokenSource();
+
+        // --- SALVATAGGIO IN CACHE ---
+        var settingsCache = _parametersCache.VideoExport;
+        settingsCache.OutputFolder = OutputFolder;
+        settingsCache.Fps = Fps;
+        settingsCache.ScaleFactor = ScaleFactor;
+        settingsCache.SelectedContainer = SelectedContainer;
+        settingsCache.SelectedCodec = SelectedCodec;
 
         try 
         {

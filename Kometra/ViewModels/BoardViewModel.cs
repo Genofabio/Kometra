@@ -21,6 +21,7 @@ using Kometra.Services.Fits;
 using Kometra.Services.Fits.Metadata;
 using Kometra.Services.ImportExport;
 using Kometra.Services.Processing.Coordinators;
+using Kometra.Services.Settings;
 using Kometra.Services.UI;
 using Kometra.Services.Undo;
 using Kometra.ViewModels.Nodes;

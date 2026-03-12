@@ -1,6 +1,7 @@
 ﻿using Avalonia.Controls;
 using Avalonia.Interactivity;
 using Kometra.ViewModels;
+using SettingsViewModel = Kometra.ViewModels.Settings.SettingsViewModel;
 
 namespace Kometra.Views;
 

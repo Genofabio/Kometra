@@ -1,6 +1,6 @@
 ﻿using Kometra.Models.Settings;
 
-namespace Kometra.Services;
+namespace Kometra.Services.Settings;
 
 public interface IConfigurationService
 {

@@ -173,13 +173,11 @@
                     <Button IsVisible="{Binding !IsBusy}" 
                             Content="{Binding [CropApply], Source={x:Static infrastructure:LocalizationManager.Instance}}" 
                             Command="{Binding ApplyCommand}" 
-                            Background="{DynamicResource ActionSuccessBackgroundBrush}" 
-                            Foreground="White"
+                            Classes="actionBtn apply"
                             Height="38"
                             HorizontalAlignment="Stretch" 
                             HorizontalContentAlignment="Center" 
-                            VerticalContentAlignment="Center"
-                            FontWeight="Bold" FontSize="14"/>
+                            VerticalContentAlignment="Center"/>
                 </StackPanel>
             </Grid>
         </Border>

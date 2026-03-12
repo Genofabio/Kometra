@@ -16,6 +16,7 @@ using Kometra.Models.Processing.Alignment;
 using Kometra.Services.Factories;
 using Kometra.Services.Fits;
 using Kometra.Services.Processing.Coordinators;
+using Kometra.Services.Settings; // Aggiunto per IToolParametersCache
 using Kometra.ViewModels.Visualization;
 using CoordinateEntry = Kometra.ViewModels.Shared.CoordinateEntry;
 using SequenceNavigator = Kometra.ViewModels.Shared.SequenceNavigator;
@@ -28,6 +29,7 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
     private readonly IAlignmentCoordinator _coordinator;
     private readonly IFitsDataManager _dataManager;
     private readonly IFitsRendererFactory _rendererFactory;
+    private readonly IToolParametersCache _parametersCache; // Aggiunto cassetto
 
     // --- CACHE DATI JPL/WCS ---
     // Memorizza i punti calcolati da JPL/WCS per evitare chiamate ripetute
@@ -245,11 +247,13 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
         List<FitsFileReference> sourceFiles, 
         IAlignmentCoordinator coordinator,
         IFitsDataManager dataManager,
-        IFitsRendererFactory rendererFactory)
+        IFitsRendererFactory rendererFactory,
+        IToolParametersCache parametersCache) // Aggiunto nel costruttore
     {
         _coordinator = coordinator;
         _dataManager = dataManager;
         _rendererFactory = rendererFactory;
+        _parametersCache = parametersCache;
         
         _files = sourceFiles; 
         
@@ -277,10 +281,16 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
             }
 
             var metadata = await _coordinator.GetFileMetadataAsync(_files[0]);
-            TargetName = metadata.ObjectName;
+
+            // --- LETTURA DALLA CACHE ---
+            var settings = _parametersCache.Alignment;
+            SelectedTarget = settings.Target;
+            SelectedMode = settings.Mode;
+            SearchRadius = settings.SearchRadius;
+            UseJplAstrometry = settings.UseJplAstrometry;
+            CropToCommonArea = settings.CropToCommonArea;
             
-            SelectedTarget = AlignmentTarget.Comet;
-            SelectedMode = AlignmentMode.Automatic;
+            TargetName = !string.IsNullOrWhiteSpace(settings.LastTargetName) ? settings.LastTargetName : metadata.ObjectName;
 
             await LoadImageAsync(0);
             ImageLoadedTcs.TrySetResult(true);
@@ -508,6 +518,15 @@ public partial class AlignmentToolViewModel : ObservableObject, IDisposable
         IsBusy = true;
         try
         {
+            // --- SALVATAGGIO IN CACHE ---
+            var settings = _parametersCache.Alignment;
+            settings.Target = SelectedTarget;
+            settings.Mode = SelectedMode;
+            settings.SearchRadius = SearchRadius;
+            settings.UseJplAstrometry = UseJplAstrometry;
+            settings.CropToCommonArea = CropToCommonArea;
+            settings.LastTargetName = TargetName;
+
             var centers = GetCoordinatesFromUi();
 
             int effectiveRadius = SearchRadius; 

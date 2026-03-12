@@ -6,13 +6,14 @@ using System.Threading.Tasks;
 using Avalonia;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
-using Kometra.Infrastructure; // Aggiunto per l'accesso al LocalizationManager
+using Kometra.Infrastructure; 
 using Kometra.Models.Fits;
 using Kometra.Models.Primitives;
 using Kometra.Models.Visualization;
 using Kometra.Services.Factories;
 using Kometra.Services.Fits;
 using Kometra.Services.Processing.Coordinators;
+using Kometra.Services.Settings;
 using Kometra.ViewModels.Shared;
 using Kometra.ViewModels.Visualization;
 
@@ -23,6 +24,7 @@ public partial class CropToolViewModel : ObservableObject, IDisposable
     private readonly ICropCoordinator _coordinator;
     private readonly IFitsDataManager _dataManager;
     private readonly IFitsRendererFactory _rendererFactory;
+    private readonly IToolParametersCache _parametersCache; 
     private readonly List<FitsFileReference> _files;
 
     // Dati dei centri
@@ -78,12 +80,14 @@ public partial class CropToolViewModel : ObservableObject, IDisposable
         List<FitsFileReference> files,
         ICropCoordinator coordinator,
         IFitsDataManager dataManager,
-        IFitsRendererFactory rendererFactory)
+        IFitsRendererFactory rendererFactory,
+        IToolParametersCache parametersCache) 
     {
         _files = files ?? throw new ArgumentNullException(nameof(files));
         _coordinator = coordinator ?? throw new ArgumentNullException(nameof(coordinator));
         _dataManager = dataManager ?? throw new ArgumentNullException(nameof(dataManager));
         _rendererFactory = rendererFactory ?? throw new ArgumentNullException(nameof(rendererFactory));
+        _parametersCache = parametersCache ?? throw new ArgumentNullException(nameof(parametersCache));
         
         _centers = new Point2D?[_files.Count];
 
@@ -101,19 +105,23 @@ public partial class CropToolViewModel : ObservableObject, IDisposable
         IsBusy = true;
         try
         {
-            // 1. Analisi dei limiti (già esistente)
+            // 1. Analisi dei limiti
             var minSize = await _coordinator.AnalyzeSequenceLimitsAsync(_files);
             MaxAllowedWidth = minSize.Width;
             MaxAllowedHeight = minSize.Height;
 
-            // Default dimensioni crop (già esistente)
-            CropWidth = Math.Min(500, (int)(MaxAllowedWidth / 2));
-            CropHeight = Math.Min(500, (int)(MaxAllowedHeight / 2));
+            // --- LETTURA DEI PARAMETRI DAL MODEL DI CONFIGURAZIONE ---
+            var settings = _parametersCache.Crop;
+            
+            SelectedMode = settings.Mode; 
+            
+            CropWidth = (int)Math.Min(MaxAllowedWidth, settings.Width);
+            CropHeight = (int)Math.Min(MaxAllowedHeight, settings.Height);
 
-            // 2. Caricamento della prima immagine (già esistente)
+            // 2. Caricamento della prima immagine
             await LoadImageAsync(0);
 
-            // --- NUOVA LOGICA: IMPOSTAZIONE CENTRO DI DEFAULT ---
+            // --- IMPOSTAZIONE CENTRO DI DEFAULT ---
             if (ActiveRenderer != null)
             {
                 // Calcoliamo il centro geometrico
@@ -125,7 +133,6 @@ public partial class CropToolViewModel : ObservableObject, IDisposable
                 _staticCenter = midPoint;
 
                 // Pre-popoliamo anche l'array dei centri dinamici (per la modalità Dinamica)
-                // così se l'utente switcha modalità, non trova i campi vuoti.
                 for (int i = 0; i < _centers.Length; i++)
                 {
                     _centers[i] = midPoint;
@@ -251,7 +258,6 @@ public partial class CropToolViewModel : ObservableObject, IDisposable
 
         if (centerToShow.HasValue)
         {
-            // CORRETTO: Ora passa correttamente CropWidth e CropHeight permettendo forme rettangolari
             Viewport.SetCropGeometry(
                 new Point(centerToShow.Value.X, centerToShow.Value.Y), 
                 CropWidth, 
@@ -317,6 +323,11 @@ public partial class CropToolViewModel : ObservableObject, IDisposable
 
         IsBusy = true;
         StatusText = LocalizationManager.Instance["StatusProcessing"];
+
+        // --- SALVATAGGIO DEI PARAMETRI NEL MODEL ---
+        _parametersCache.Crop.Mode = SelectedMode;
+        _parametersCache.Crop.Width = CropWidth;
+        _parametersCache.Crop.Height = CropHeight;
 
         try
         {

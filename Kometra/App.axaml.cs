@@ -19,6 +19,7 @@ using Kometra.Services.Processing.Coordinators;
 using Kometra.Services.Processing.Engines;
 using Kometra.Services.Processing.Engines.Enhancement;
 using Kometra.Services.Processing.Rendering;
+using Kometra.Services.Settings;
 using Kometra.Services.UI;
 using Kometra.Services.Undo;
 using Kometra.ViewModels;
@@ -72,6 +73,7 @@ public class App : Application
 
         // --- 1. Infrastruttura & I/O di Base ---
         services.AddSingleton<IConfigurationService, ConfigurationService>();
+        services.AddSingleton<IToolParametersCache, ToolParametersCache>(); // <-- AGGIUNTO IL CASSETTO DELLA MEMORIA
         services.AddSingleton<LocalFileStreamProvider>();
         services.AddSingleton<AvaloniaAssetStreamProvider>();
         services.AddSingleton<IFileStreamProvider, FileStreamResolver>();
@@ -94,7 +96,7 @@ public class App : Application
         services.AddSingleton<IImageEffectsEngine, ImageEffectsEngine>();
         services.AddSingleton<IImageAnalysisEngine, ImageAnalysisEngine>();
         services.AddSingleton<IGeometricEngine, GeometricEngine>(); 
-        services.AddSingleton<IArithmeticEngine, ArithmeticEngine>(); // <-- AGGIUNTO
+        services.AddSingleton<IArithmeticEngine, ArithmeticEngine>(); 
         services.AddSingleton<IImagePresentationService, ImagePresentationService>();
         services.AddSingleton<ICalibrationEngine, CalibrationEngine>();
         services.AddSingleton<IGradientRadialEngine, GradientRadialEngine>();
@@ -121,7 +123,7 @@ public class App : Application
         services.AddSingleton<IAlignmentCoordinator, AlignmentCoordinator>(); 
         services.AddSingleton<ICropCoordinator, CropCoordinator>();
         services.AddSingleton<IStackingCoordinator, StackingCoordinator>();
-        services.AddSingleton<IArithmeticCoordinator, ArithmeticCoordinator>(); // <-- AGGIUNTO
+        services.AddSingleton<IArithmeticCoordinator, ArithmeticCoordinator>(); 
         services.AddSingleton<ICalibrationCoordinator, CalibrationCoordinator>();
         services.AddSingleton<IImageEnhancementCoordinator, ImageEnhancementCoordinator>();
         services.AddSingleton<IMaskingCoordinator, MaskingCoordinator>();

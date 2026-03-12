@@ -7,6 +7,7 @@ using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Kometra.Services;
+using Kometra.Services.Settings;
 using Kometra.ViewModels.Nodes;
 
 namespace Kometra.ViewModels.Shared;

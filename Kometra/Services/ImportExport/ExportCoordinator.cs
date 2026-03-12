@@ -160,7 +160,12 @@ public class ExportCoordinator : IExportCoordinator
                 
                 string outName = Path.GetFileNameWithoutExtension(item.FileName);
                 if (!string.IsNullOrWhiteSpace(settings.BaseFileName))
-                    outName = $"{settings.BaseFileName}_{i + 1:D3}";
+                {
+                    // MODIFICA: Se c'è solo un'immagine, usiamo il nome base puro senza indicizzazione numerica
+                    outName = items.Count > 1 
+                        ? $"{settings.BaseFileName}_{i + 1:D3}" 
+                        : settings.BaseFileName;
+                }
                 
                 string outPath = Path.Combine(settings.OutputDirectory, outName + extension);
 

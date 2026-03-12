@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
+using Avalonia;
 using Avalonia.Controls;
 using Kometra.Infrastructure;
 using Kometra.Models.Export;
@@ -15,6 +16,7 @@ using Kometra.Services.Fits;
 using Kometra.Services.Fits.Metadata;
 using Kometra.Services.ImportExport;
 using Kometra.Services.Processing.Coordinators;
+using Kometra.Services.Settings;
 using Kometra.ViewModels;
 using Kometra.ViewModels.Astrometry;
 using Kometra.ViewModels.Fits;
@@ -24,6 +26,7 @@ using Kometra.ViewModels.Nodes;
 using Kometra.Views;
 using Microsoft.Extensions.DependencyInjection;
 using ImportViewModel = Kometra.ViewModels.ImportExport.ImportViewModel;
+using SettingsViewModel = Kometra.ViewModels.Settings.SettingsViewModel;
 using VideoExportToolViewModel = Kometra.ViewModels.ImportExport.VideoExportToolViewModel;
 
 namespace Kometra.Services.UI;
@@ -55,8 +58,9 @@ public class WindowService : IWindowService
         var coordinator = _serviceProvider.GetRequiredService<IAlignmentCoordinator>();
         var dataManager = _serviceProvider.GetRequiredService<IFitsDataManager>();
         var rendererFactory = _serviceProvider.GetRequiredService<IFitsRendererFactory>();
+        var parametersCache = _serviceProvider.GetRequiredService<IToolParametersCache>();
 
-        using var viewModel = new AlignmentToolViewModel(sourceFiles, coordinator, dataManager, rendererFactory);
+        using var viewModel = new AlignmentToolViewModel(sourceFiles, coordinator, dataManager, rendererFactory, parametersCache);
         var view = new AlignmentToolView { DataContext = viewModel };
 
         return await ShowDialogAndGetResultAsync(view, viewModel, vm => vm.FinalProcessedPaths);
@@ -113,8 +117,9 @@ public class WindowService : IWindowService
         var dataManager = _serviceProvider.GetRequiredService<IFitsDataManager>();
         var rendererFactory = _serviceProvider.GetRequiredService<IFitsRendererFactory>();
         var coordinator = _serviceProvider.GetRequiredService<IPosterizationCoordinator>();
+        var parametersCache = _serviceProvider.GetRequiredService<IToolParametersCache>();
         
-        using var viewModel = new PosterizationToolViewModel(sourceFiles, dataManager, rendererFactory, coordinator);
+        using var viewModel = new PosterizationToolViewModel(sourceFiles, dataManager, rendererFactory, coordinator, parametersCache);
         var view = new PosterizationToolView { DataContext = viewModel };
 
         return await ShowDialogAndGetResultAsync(view, viewModel, vm => vm.ResultPaths);
@@ -161,8 +166,9 @@ public class WindowService : IWindowService
         var rendererFactory = _serviceProvider.GetRequiredService<IFitsRendererFactory>();
         var coordinator = _serviceProvider.GetRequiredService<IImageEnhancementCoordinator>();
         var metadataService = _serviceProvider.GetRequiredService<IFitsMetadataService>();
+        var parametersCache = _serviceProvider.GetRequiredService<IToolParametersCache>();
 
-        using var viewModel = new ImageEnhancementToolViewModel(category, sourceFiles, dataManager, rendererFactory, coordinator, metadataService);
+        using var viewModel = new ImageEnhancementToolViewModel(category, sourceFiles, dataManager, rendererFactory, coordinator, metadataService, parametersCache);
         var view = new ImageEnhancementToolView { DataContext = viewModel };
 
         return await ShowDialogAndGetResultAsync(view, viewModel, vm => (vm.ResultPaths, vm.SelectedMode));
@@ -183,6 +189,7 @@ public class WindowService : IWindowService
         var rendererFactory = _serviceProvider.GetRequiredService<IFitsRendererFactory>();
         var videoCoordinator = _serviceProvider.GetRequiredService<IVideoExportCoordinator>();
         var dialogService = _serviceProvider.GetRequiredService<IDialogService>();
+        var parametersCache = _serviceProvider.GetRequiredService<IToolParametersCache>(); // Aggiunto
 
         await formatProvider.InitializeAsync();
 
@@ -195,6 +202,7 @@ public class WindowService : IWindowService
             rendererFactory,
             videoCoordinator, 
             dialogService,    
+            parametersCache, // Passato al ViewModel
             sourceFiles,
             currentMode, 
             originalSize);
@@ -214,8 +222,9 @@ public class WindowService : IWindowService
         var coordinator = _serviceProvider.GetRequiredService<IMaskingCoordinator>();
         var dataManager = _serviceProvider.GetRequiredService<IFitsDataManager>();
         var rendererFactory = _serviceProvider.GetRequiredService<IFitsRendererFactory>();
+        var parametersCache = _serviceProvider.GetRequiredService<IToolParametersCache>();
 
-        using var viewModel = new StarMaskingViewModel(sourceFiles, coordinator, dataManager, rendererFactory);
+        using var viewModel = new StarMaskingViewModel(sourceFiles, coordinator, dataManager, rendererFactory, parametersCache);
         var view = new StarMaskingView { DataContext = viewModel };
 
         return await ShowDialogAndGetResultAsync(view, viewModel, vm => vm.ResultPaths);
@@ -232,12 +241,14 @@ public class WindowService : IWindowService
         var dialogService = _serviceProvider.GetRequiredService<IDialogService>();
         var dataManager = _serviceProvider.GetRequiredService<IFitsDataManager>();
         var rendererFactory = _serviceProvider.GetRequiredService<IFitsRendererFactory>();
+        var parametersCache = _serviceProvider.GetRequiredService<IToolParametersCache>(); // Aggiunto
 
         using var viewModel = new ExportViewModel(
             coordinator, 
             dialogService, 
             dataManager, 
             rendererFactory, 
+            parametersCache, // Passato al ViewModel
             filePaths);
             
         var view = new ExportView { DataContext = viewModel };
@@ -256,8 +267,10 @@ public class WindowService : IWindowService
         var coordinator = _serviceProvider.GetRequiredService<ICropCoordinator>();
         var dataManager = _serviceProvider.GetRequiredService<IFitsDataManager>();
         var rendererFactory = _serviceProvider.GetRequiredService<IFitsRendererFactory>();
+        var parametersCache = _serviceProvider.GetRequiredService<IToolParametersCache>();
 
-        using var viewModel = new CropToolViewModel(sourceFiles, coordinator, dataManager, rendererFactory);
+        // Passiamo i parametri corretti (incluso il ParametersCache)
+        using var viewModel = new CropToolViewModel(sourceFiles, coordinator, dataManager, rendererFactory, parametersCache);
         viewModel.VisualizationMode = initialMode;
 
         var view = new CropToolView 

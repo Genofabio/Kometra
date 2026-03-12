@@ -10,6 +10,7 @@ using Kometra.Models.Nodes;
 using Kometra.Services; // Aggiunto per IConfigurationService
 using Kometra.Services.Factories;
 using Kometra.Services.Fits;
+using Kometra.Services.Settings;
 using Kometra.ViewModels.Visualization;
 using SequenceNavigator = Kometra.ViewModels.Shared.SequenceNavigator;
 

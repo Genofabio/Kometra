@@ -9,6 +9,7 @@ using Kometra.Models.Nodes;
 using Kometra.Services; // Aggiunto per IConfigurationService
 using Kometra.Services.Fits;
 using Kometra.Services.Fits.Metadata;
+using Kometra.Services.Settings;
 using Kometra.ViewModels.Nodes;
 
 namespace Kometra.Services.Factories;

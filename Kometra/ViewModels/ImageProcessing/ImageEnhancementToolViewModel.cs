@@ -14,6 +14,7 @@ using Kometra.Services.Factories;
 using Kometra.Services.Fits;
 using Kometra.Services.Fits.Metadata;
 using Kometra.Services.Processing.Coordinators;
+using Kometra.Services.Settings; // Aggiunto per IToolParametersCache
 using Kometra.ViewModels.Visualization;
 using SequenceNavigator = Kometra.ViewModels.Shared.SequenceNavigator;
 
@@ -34,6 +35,7 @@ public partial class ImageEnhancementToolViewModel : ObservableObject, IDisposab
     private readonly IFitsRendererFactory _rendererFactory;
     private readonly IImageEnhancementCoordinator _coordinator;
     private readonly IFitsMetadataService _metadataService;
+    private readonly IToolParametersCache _parametersCache; // Aggiunto cassetto
 
     // --- DATI INTERNI ---
     private readonly List<FitsFileReference> _sourceFiles;
@@ -179,7 +181,8 @@ public partial class ImageEnhancementToolViewModel : ObservableObject, IDisposab
         IFitsDataManager dataManager,
         IFitsRendererFactory rendererFactory,
         IImageEnhancementCoordinator coordinator,
-        IFitsMetadataService metadataService)
+        IFitsMetadataService metadataService,
+        IToolParametersCache parametersCache)
     {
         _category = targetCategory;
         _sourceFiles = files;
@@ -187,17 +190,26 @@ public partial class ImageEnhancementToolViewModel : ObservableObject, IDisposab
         _rendererFactory = rendererFactory;
         _coordinator = coordinator;
         _metadataService = metadataService;
+        _parametersCache = parametersCache;
 
         _statusText = LocalizationManager.Instance["EnhanceStatusReady"];
 
-        // CORREZIONE: Ordiniamo i modi in modo che LarsonSekaninaSymmetric sia il primo se presente nella categoria
         AvailableModes = Enum.GetValues<ImageEnhancementMode>()
                              .Cast<ImageEnhancementMode>()
                              .Where(m => m.GetCategory() == _category)
-                             .OrderBy(m => m != ImageEnhancementMode.LarsonSekaninaSymmetric) // 'False' (uguale) viene prima di 'True' (diverso)
+                             .OrderBy(m => m != ImageEnhancementMode.LarsonSekaninaSymmetric) 
                              .ToList();
 
-        if (AvailableModes.Any()) SelectedMode = AvailableModes.First();
+        // --- CARICAMENTO MODALITÀ DA CACHE ---
+        var settings = _parametersCache.Enhancement;
+        if (settings.LastMode.HasValue && AvailableModes.Contains(settings.LastMode.Value))
+        {
+            SelectedMode = settings.LastMode.Value;
+        }
+        else if (AvailableModes.Any())
+        {
+            SelectedMode = AvailableModes.First();
+        }
 
         Navigator.UpdateStatus(0, _sourceFiles.Count);
         
@@ -210,6 +222,34 @@ public partial class ImageEnhancementToolViewModel : ObservableObject, IDisposab
     {
         try
         {
+            // --- CARICAMENTO PARAMETRI SCIENTIFICI DA CACHE ---
+            var s = _parametersCache.Enhancement;
+            RotationAngle = s.RotationAngle;
+            ShiftX = s.ShiftX;
+            ShiftY = s.ShiftY;
+            UseLogScale = s.UseLogScale;
+            RvsfA_1 = s.RvsfA_1;
+            RvsfA_2 = s.RvsfA_2;
+            RvsfB_1 = s.RvsfB_1;
+            RvsfB_2 = s.RvsfB_2;
+            RvsfN_1 = s.RvsfN_1;
+            RvsfN_2 = s.RvsfN_2;
+            RadialSubsampling = s.RadialSubsampling;
+            RadialMaxRadius = s.RadialMaxRadius;
+            AzimuthalRejSigma = s.AzimuthalRejSigma;
+            AzimuthalNormSigma = s.AzimuthalNormSigma;
+            FrangiSigma = s.FrangiSigma;
+            FrangiBeta = s.FrangiBeta;
+            FrangiC = s.FrangiC;
+            TensorSigma = s.TensorSigma;
+            TensorRho = s.TensorRho;
+            TopHatKernelSize = s.TopHatKernelSize;
+            KernelSize = s.KernelSize;
+            ClaheClipLimit = s.ClaheClipLimit;
+            ClaheTileSize = s.ClaheTileSize;
+            LocalNormWindowSize = s.LocalNormWindowSize;
+            LocalNormIntensity = s.LocalNormIntensity;
+
             if (_sourceFiles.Count > 0) await LoadImageAtIndexAsync(0, resetVisuals: true, autoFit: true);
             ImageLoadedTcs.TrySetResult(true);
         }
@@ -354,6 +394,35 @@ public partial class ImageEnhancementToolViewModel : ObservableObject, IDisposab
     {
         CurrentState = EnhancementToolState.Processing;
         IsBusy = true;
+
+        // --- SALVATAGGIO PARAMETRI IN CACHE PRIMA DELL'ESECUZIONE ---
+        var s = _parametersCache.Enhancement;
+        s.LastMode = SelectedMode;
+        s.RotationAngle = RotationAngle;
+        s.ShiftX = ShiftX;
+        s.ShiftY = ShiftY;
+        s.UseLogScale = UseLogScale;
+        s.RvsfA_1 = RvsfA_1;
+        s.RvsfA_2 = RvsfA_2;
+        s.RvsfB_1 = RvsfB_1;
+        s.RvsfB_2 = RvsfB_2;
+        s.RvsfN_1 = RvsfN_1;
+        s.RvsfN_2 = RvsfN_2;
+        s.RadialSubsampling = RadialSubsampling;
+        s.RadialMaxRadius = RadialMaxRadius;
+        s.AzimuthalRejSigma = AzimuthalRejSigma;
+        s.AzimuthalNormSigma = AzimuthalNormSigma;
+        s.FrangiSigma = FrangiSigma;
+        s.FrangiBeta = FrangiBeta;
+        s.FrangiC = FrangiC;
+        s.TensorSigma = TensorSigma;
+        s.TensorRho = TensorRho;
+        s.TopHatKernelSize = TopHatKernelSize;
+        s.KernelSize = KernelSize;
+        s.ClaheClipLimit = ClaheClipLimit;
+        s.ClaheTileSize = ClaheTileSize;
+        s.LocalNormWindowSize = LocalNormWindowSize;
+        s.LocalNormIntensity = LocalNormIntensity;
 
         _loadingCts?.Cancel();
         _loadingCts = new CancellationTokenSource();

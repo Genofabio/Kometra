@@ -9,12 +9,12 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Kometra.Infrastructure; // Aggiunto per localizzazione
 using Kometra.Models.Export;
-using Kometra.Models.Processing;
 using Kometra.Models.Processing.Batch;
 using Kometra.Models.Visualization;
 using Kometra.Services.Factories;
 using Kometra.Services.Fits;
 using Kometra.Services.ImportExport;
+using Kometra.Services.Settings; // Aggiunto per IToolParametersCache
 using Kometra.Services.UI;
 using Kometra.ViewModels.Shared;
 using Kometra.ViewModels.Visualization;
@@ -27,6 +27,7 @@ public partial class ExportViewModel : ObservableObject, IDisposable
     private readonly IDialogService _dialogService;
     private readonly IFitsDataManager _dataManager;
     private readonly IFitsRendererFactory _rendererFactory;
+    private readonly IToolParametersCache _parametersCache; // Aggiunto cassetto
 
     private CancellationTokenSource? _exportCts;
     private CancellationTokenSource? _previewCts;
@@ -135,17 +136,38 @@ public partial class ExportViewModel : ObservableObject, IDisposable
         IDialogService dialogService,
         IFitsDataManager dataManager,
         IFitsRendererFactory rendererFactory,
+        IToolParametersCache parametersCache, // Aggiunto nel costruttore
         IEnumerable<string> sourceFilePaths)
     {
         _coordinator = coordinator ?? throw new ArgumentNullException(nameof(coordinator));
         _dialogService = dialogService ?? throw new ArgumentNullException(nameof(dialogService));
         _dataManager = dataManager;
         _rendererFactory = rendererFactory;
+        _parametersCache = parametersCache;
 
         // Popolamento delle modalità di stretch per la ComboBox
         StretchModes.Add(LocalizationManager.Instance["ExportStretchAuto"]);
         StretchModes.Add(LocalizationManager.Instance["ExportStretchManual"]);
-        _stretchMode = StretchModes[0];
+        
+        // --- LETTURA DALLA CACHE ---
+        var settings = _parametersCache.Export;
+        
+        SelectedFormat = settings.SelectedFormat;
+        MergeIntoSingleFile = settings.MergeIntoSingleFile;
+        SelectedCompression = settings.SelectedCompression;
+        JpegQuality = settings.JpegQuality;
+
+        // Se abbiamo uno stretch salvato e corrisponde a uno esistente, usiamolo, altrimenti default
+        if (!string.IsNullOrEmpty(settings.StretchMode) && StretchModes.Contains(settings.StretchMode))
+            _stretchMode = settings.StretchMode;
+        else
+            _stretchMode = StretchModes[0];
+
+        // Se la cartella in cache è valida usiamola, altrimenti Documents
+        if (!string.IsNullOrWhiteSpace(settings.OutputDirectory))
+            OutputDirectory = settings.OutputDirectory;
+        else
+            OutputDirectory = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
 
         foreach (var path in sourceFilePaths)
         {
@@ -153,8 +175,6 @@ public partial class ExportViewModel : ObservableObject, IDisposable
             item.PropertyChanged += OnItemPropertyChanged;
             Items.Add(item);
         }
-
-        OutputDirectory = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
 
         RefreshNavigableItems();
         Navigator.IndexChanged += OnNavigatorIndexChanged;
@@ -170,13 +190,10 @@ public partial class ExportViewModel : ObservableObject, IDisposable
     {
         if (_activeRenderer == null) return;
 
-        // 1. Rimuoviamo l'assegnazione a StretchMode!
-        // Non tocchiamo più la ComboBox.
-    
-        // 2. Chiamiamo direttamente il reset delle soglie
+        // 1. Chiamiamo direttamente il reset delle soglie
         await _activeRenderer.ResetThresholdsAsync();
     
-        // 3. Notifichiamo all'interfaccia che i valori sono cambiati
+        // 2. Notifichiamo all'interfaccia che i valori sono cambiati
         // in modo che gli slider si aggiornino visivamente
         OnPropertyChanged(nameof(CurrentBlackPoint));
         OnPropertyChanged(nameof(CurrentWhitePoint));
@@ -418,6 +435,15 @@ public partial class ExportViewModel : ObservableObject, IDisposable
         ProgressValue = 0;
         _exportCts = new CancellationTokenSource();
 
+        // --- SALVATAGGIO IN CACHE ---
+        var settings = _parametersCache.Export;
+        settings.SelectedFormat = SelectedFormat;
+        settings.MergeIntoSingleFile = MergeIntoSingleFile;
+        settings.SelectedCompression = SelectedCompression;
+        settings.JpegQuality = JpegQuality;
+        settings.StretchMode = StretchMode;
+        settings.OutputDirectory = OutputDirectory;
+
         foreach (var item in _navigableItems)
         {
             item.Status = LocalizationManager.Instance["ExportStatusQueued"];
@@ -451,9 +477,7 @@ public partial class ExportViewModel : ObservableObject, IDisposable
             else profile = new AbsoluteContrastProfile(0, 65535);
 
             // 3. Creazione Job Settings
-            // Nota: Passiamo il nome pulito. Il Coordinator appenderà l'estensione corretta
-            // basandosi su SelectedFormat/Compression o sulla logica implementata qui.
-            var settings = new ExportJobSettings(
+            var settingsJob = new ExportJobSettings(
                 OutputDirectory, 
                 cleanedFileName, // Nome pulito
                 SelectedFormat, 
@@ -468,7 +492,7 @@ public partial class ExportViewModel : ObservableObject, IDisposable
                 StatusText = $"{r.CurrentFileName} ({r.CurrentFileIndex}/{r.TotalFiles})";
             });
 
-            await _coordinator.ExecuteExportAsync(_navigableItems, settings, progress, _exportCts.Token);
+            await _coordinator.ExecuteExportAsync(_navigableItems, settingsJob, progress, _exportCts.Token);
 
             StatusText = LocalizationManager.Instance["ExportStatusDone"];
             ProgressValue = 100;

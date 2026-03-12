@@ -14,7 +14,8 @@ using Kometra.Models.Fits;
 using Kometra.Models.Fits.Structure;
 using Kometra.Services.Fits;
 using Kometra.Services.Fits.Metadata;
-using Kometra.Services; // Namespace per IConfigurationService
+using Kometra.Services;
+using Kometra.Services.Settings; // Namespace per IConfigurationService
 
 namespace Kometra.Services.Astrometry;
 

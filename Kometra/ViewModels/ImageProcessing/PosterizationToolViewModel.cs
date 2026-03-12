@@ -13,6 +13,7 @@ using Kometra.Models.Visualization;
 using Kometra.Services.Factories;
 using Kometra.Services.Fits;
 using Kometra.Services.Processing.Coordinators;
+using Kometra.Services.Settings; // Aggiunto per IToolParametersCache
 using Kometra.ViewModels.Visualization;
 using SequenceNavigator = Kometra.ViewModels.Shared.SequenceNavigator;
 
@@ -27,6 +28,7 @@ public partial class PosterizationToolViewModel : ObservableObject, IDisposable
     private readonly IFitsDataManager _dataManager;
     private readonly IFitsRendererFactory _rendererFactory;
     private readonly IPosterizationCoordinator _coordinator;
+    private readonly IToolParametersCache _parametersCache; // Aggiunto cassetto
 
     private readonly List<FitsFileReference> _sourceFiles;
     private CancellationTokenSource? _loadingCts;
@@ -133,12 +135,14 @@ public partial class PosterizationToolViewModel : ObservableObject, IDisposable
         List<FitsFileReference> files,
         IFitsDataManager dataManager,
         IFitsRendererFactory rendererFactory,
-        IPosterizationCoordinator coordinator)
+        IPosterizationCoordinator coordinator,
+        IToolParametersCache parametersCache) // Aggiunto nel costruttore
     {
         _sourceFiles = files ?? throw new ArgumentNullException(nameof(files));
         _dataManager = dataManager ?? throw new ArgumentNullException(nameof(dataManager));
         _rendererFactory = rendererFactory ?? throw new ArgumentNullException(nameof(rendererFactory));
         _coordinator = coordinator ?? throw new ArgumentNullException(nameof(coordinator));
+        _parametersCache = parametersCache ?? throw new ArgumentNullException(nameof(parametersCache));
 
         _statusText = LocalizationManager.Instance["StatusInit"];
 
@@ -153,6 +157,11 @@ public partial class PosterizationToolViewModel : ObservableObject, IDisposable
         IsProcessing = true;
         try
         {
+            // --- CARICAMENTO DALLA CACHE ---
+            var settings = _parametersCache.Posterization;
+            AutoAdaptThresholds = settings.AutoAdaptThresholds;
+            Levels = settings.Levels;
+
             if (_sourceFiles.Count > 0)
             {
                 await LoadImageAtIndexAsync(0);
@@ -242,7 +251,7 @@ public partial class PosterizationToolViewModel : ObservableObject, IDisposable
             else
             {
                 MaxLevels = 64;
-                if (!_hasLoadedFirstImage) Levels = 64; 
+                // Se caricata per la prima volta e il valore in cache è troppo alto per bit depth attuali, il setter lo clamping.
             }
 
             newRenderer.PostProcessAction = _coordinator.GetPreviewEffect(Levels);
@@ -313,6 +322,10 @@ public partial class PosterizationToolViewModel : ObservableObject, IDisposable
         IsProcessing = true;
         try
         {
+            // --- SALVATAGGIO IN CACHE ---
+            _parametersCache.Posterization.Levels = Levels;
+            _parametersCache.Posterization.AutoAdaptThresholds = AutoAdaptThresholds;
+
             var currentProfile = ActiveRenderer.CaptureSigmaProfile();
 
             var progress = new Progress<BatchProgressReport>(p => 

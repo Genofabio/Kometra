@@ -22,6 +22,7 @@ using Kometra.Models.Processing.Masking;
 using Kometra.Services.Factories;
 using Kometra.Services.Fits;
 using Kometra.Services.Processing.Coordinators;
+using Kometra.Services.Settings; // Aggiunto per IToolParametersCache
 using Kometra.ViewModels.Visualization;
 using SequenceNavigator = Kometra.ViewModels.Shared.SequenceNavigator;
 
@@ -40,6 +41,7 @@ public partial class StarMaskingViewModel : ObservableObject, IDisposable
     private readonly IMaskingCoordinator _coordinator;
     private readonly IFitsDataManager _dataManager;
     private readonly IFitsRendererFactory _rendererFactory;
+    private readonly IToolParametersCache _parametersCache; // Aggiunto cassetto
     
     private readonly List<FitsFileReference> _files;
     private CancellationTokenSource? _cts;           
@@ -129,14 +131,24 @@ public partial class StarMaskingViewModel : ObservableObject, IDisposable
         List<FitsFileReference> files,
         IMaskingCoordinator coordinator,
         IFitsDataManager dataManager,
-        IFitsRendererFactory rendererFactory)
+        IFitsRendererFactory rendererFactory,
+        IToolParametersCache parametersCache) // Aggiunto nel costruttore
     {
         _files = files ?? throw new ArgumentNullException(nameof(files));
         _coordinator = coordinator ?? throw new ArgumentNullException(nameof(coordinator));
         _dataManager = dataManager ?? throw new ArgumentNullException(nameof(dataManager));
         _rendererFactory = rendererFactory ?? throw new ArgumentNullException(nameof(rendererFactory));
+        _parametersCache = parametersCache ?? throw new ArgumentNullException(nameof(parametersCache));
 
         _statusMessage = LocalizationManager.Instance["StarStatusReady"];
+
+        // --- LETTURA DALLA CACHE ---
+        var settings = _parametersCache.StarMasking;
+        _params.CometThresholdSigma = settings.CometThresholdSigma;
+        _params.CometDilation = settings.CometDilation;
+        _params.StarThresholdSigma = settings.StarThresholdSigma;
+        _params.StarDilation = settings.StarDilation;
+        _params.MinStarDiameter = settings.MinStarDiameter;
 
         Navigator.UpdateStatus(0, _files.Count);
         Navigator.IndexChanged += async (s, i) => await LoadImageAsync(i, autoFit: false);
@@ -278,6 +290,14 @@ public partial class StarMaskingViewModel : ObservableObject, IDisposable
         CurrentState = StarRemovalState.ProcessingBatch;
         StatusMessage = LocalizationManager.Instance["StarStatusBatchInit"];
         
+        // --- SALVATAGGIO IN CACHE ---
+        var settings = _parametersCache.StarMasking;
+        settings.CometThresholdSigma = _params.CometThresholdSigma;
+        settings.CometDilation = _params.CometDilation;
+        settings.StarThresholdSigma = _params.StarThresholdSigma;
+        settings.StarDilation = _params.StarDilation;
+        settings.MinStarDiameter = _params.MinStarDiameter;
+
         _cts?.Cancel();
         _cts = new CancellationTokenSource();
 

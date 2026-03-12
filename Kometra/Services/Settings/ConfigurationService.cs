@@ -3,13 +3,12 @@ using System.ComponentModel;
 using System.Globalization;
 using System.IO;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using System.Text.Json;
 using Kometra.Models.Settings;
-using System.Runtime.InteropServices;
-using System.Linq;
 using Kometra.Services.UI;
 
-namespace Kometra.Services;
+namespace Kometra.Services.Settings;
 
 /// <summary>
 /// Gestisce la persistenza delle impostazioni nella cartella dell'applicazione (Portable Mode).

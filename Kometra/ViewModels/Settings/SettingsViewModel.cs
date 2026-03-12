@@ -8,9 +8,10 @@ using CommunityToolkit.Mvvm.Input;
 using Kometra.Infrastructure;
 using Kometra.Models.Settings;
 using Kometra.Services;
+using Kometra.Services.Settings;
 using Kometra.Services.UI;
 
-namespace Kometra.ViewModels;
+namespace Kometra.ViewModels.Settings;
 
 public partial class SettingsViewModel : ObservableObject
 {
@@ -55,7 +56,7 @@ public partial class SettingsViewModel : ObservableObject
 
     public Color BoardColor
     {
-        get => Color.Parse(DraftSettings.BoardBackgroundColor);
+        get => Color.Parse((string)DraftSettings.BoardBackgroundColor);
         set 
         { 
             DraftSettings.BoardBackgroundColor = value.ToString(); 
@@ -65,7 +66,7 @@ public partial class SettingsViewModel : ObservableObject
 
     public Color SelectionColor
     {
-        get => Color.Parse(DraftSettings.PrimarySelectionColor);
+        get => Color.Parse((string)DraftSettings.PrimarySelectionColor);
         set 
         { 
             DraftSettings.PrimarySelectionColor = value.ToString(); 
