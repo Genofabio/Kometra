@@ -618,4 +618,8 @@
     </data>
     <data name="MenuNodeJoin" xml:space="preserve"><value>Unisci Nodi</value></data>
     <data name="MenuNodeSplit" xml:space="preserve"><value>Dividi Nodo</value></data>
+    <data name="VideoExportDefaultName" xml:space="preserve"><value>Sequenza_Esportata</value></data>
+    <data name="StatusReady" xml:space="preserve"><value>Pronto.</value></data>
+    <data name="StatusCancelled" xml:space="preserve"><value>Operazione annullata.</value></data>
+    <data name="VideoExportStatusCancelling" xml:space="preserve"><value>Annullamento esportazione in corso...</value></data>
 </root>

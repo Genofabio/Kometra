@@ -284,7 +284,7 @@ public partial class VideoExportToolViewModel : ObservableObject, IDisposable
                 if (p >= 99) 
                     StatusText = LocalizationManager.Instance["VideoExportStatusFinalizing"];
                 else 
-                    StatusText = string.Format(LocalizationManager.Instance["VideoExportStatusProcessing"], p);
+                    StatusText = string.Format(LocalizationManager.Instance["VideoExportStatusProcessingFrame"], p);
             });
 
             await _videoCoordinator.ExportVideoAsync(

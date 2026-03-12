@@ -730,4 +730,8 @@
     </data>
     <data name="MenuNodeJoin" xml:space="preserve"><value>Join Nodes</value></data>
     <data name="MenuNodeSplit" xml:space="preserve"><value>Split Node</value></data>
+    <data name="VideoExportDefaultName" xml:space="preserve"><value>Exported_Sequence</value></data>
+    <data name="StatusReady" xml:space="preserve"><value>Ready.</value></data>
+    <data name="StatusCancelled" xml:space="preserve"><value>Operation cancelled.</value></data>
+    <data name="VideoExportStatusCancelling" xml:space="preserve"><value>Cancelling export...</value></data>
 </root>
