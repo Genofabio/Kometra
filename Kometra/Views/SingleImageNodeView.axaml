@@ -8,6 +8,10 @@
              PointerReleased="OnPointerReleased"
              PointerMoved="OnPointerMoved"
              PointerWheelChanged="OnPointerWheelChanged">
+             
+    <UserControl.RenderTransform>
+        <TranslateTransform X="{Binding VisualOffsetX}" Y="{Binding VisualOffsetY}"/>
+    </UserControl.RenderTransform>
     
     <Grid ClipToBounds="False">
         <Border Classes="NodeFrame" 

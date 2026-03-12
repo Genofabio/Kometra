@@ -35,8 +35,8 @@ using Shared_SequenceNavigator = Shared.SequenceNavigator;
 public partial class BoardViewModel : ObservableObject
 {
     // --- Costanti per Layout Grafico ---
-    private const double DefaultNodeMarginX = 140.0;
-    private const double CascadeOffsetY = 100.0;
+    private const double DefaultNodeMarginX = 60.0;
+    private const double CascadeOffsetY = 40.0;
 
     // --- Dipendenze ---
     private readonly INodeViewModelFactory _nodeFactory;
@@ -58,7 +58,7 @@ public partial class BoardViewModel : ObservableObject
     [NotifyPropertyChangedFor(nameof(SelectedImageNode))]
     private BaseNodeViewModel? _selectedNode;
 
-    // Collezione per la gestione della multi-selezione (Max 2 nodi)
+    // Collezione per la gestione della multi-selezione
     public ObservableCollection<BaseNodeViewModel> SelectedNodes { get; } = new();
 
     // Proprietà per monitorare il numero di nodi selezionati
@@ -142,6 +142,7 @@ public partial class BoardViewModel : ObservableObject
 
         if (!isModifierPressed)
         {
+            // Click pulito: azzera tutto e seleziona solo questo
             DeselectAllNodes();
             node.IsSelected = true;
             SelectedNodes.Add(node);
@@ -149,23 +150,17 @@ public partial class BoardViewModel : ObservableObject
         }
         else
         {
+            // Click con Modificatore (Multi-Selezione Illimitata)
             if (SelectedNodes.Contains(node))
             {
-                if (SelectedNodes.IndexOf(node) != 0)
-                {
-                    SelectedNodes.Remove(node);
-                    SelectedNodes.Insert(0, node);
-                }
+                // Comportamento standard OS: Ctrl+Click su un elemento selezionato lo DESELEZIONA
+                node.IsSelected = false;
+                node.SelectionLetter = string.Empty;
+                SelectedNodes.Remove(node);
             }
             else
             {
-                if (SelectedNodes.Count >= 2)
-                {
-                    var oldest = SelectedNodes[0];
-                    oldest.IsSelected = false;
-                    SelectedNodes.RemoveAt(0);
-                }
-
+                // Aggiunge alla selezione senza alcun limite di numero
                 node.IsSelected = true;
                 SelectedNodes.Add(node);
             }
@@ -187,8 +182,10 @@ public partial class BoardViewModel : ObservableObject
 
     private void NotifySelectionCommands()
     {
+        // Pulisce tutte le lettere
         foreach (var n in Nodes) n.SelectionLetter = string.Empty;
 
+        // Assegna A e B SOLO se ci sono esattamente 2 nodi
         if (SelectedNodes.Count == 2)
         {
             SelectedNodes[0].SelectionLetter = "A";
@@ -227,24 +224,16 @@ public partial class BoardViewModel : ObservableObject
     // HELPER POSIZIONAMENTO GRAFO
     // ---------------------------------------------------------------------------
 
-    /// <summary>
-    /// Riposiziona il nuovo nodo calcolando l'esatta spaziatura (60px) tra il 
-    /// bordo destro del sorgente e il bordo sinistro del nuovo, allineandoli al centro.
-    /// Aggiunge l'offset a cascata per i nodi multipli successivi.
-    /// </summary>
     private void RepositionNewNode(BaseNodeViewModel sourceNode, BaseNodeViewModel newNode, int index = 0)
     {
         double sourceHalfWidth = sourceNode.EstimatedTotalSize.Width / 2.0;
         double newHalfWidth = newNode.EstimatedTotalSize.Width / 2.0;
         
-        // Distanza dal centro sorgente al centro del nuovo nodo = (MetàSorgente + Spazio + MetàNuovo)
         double deltaX = sourceHalfWidth + DefaultNodeMarginX + newHalfWidth;
         
-        // Centratura verticale basata sul centro geometrico
         double sourceCenterY = sourceNode.Y + (sourceNode.EstimatedTotalSize.Height / 2.0);
         double newHalfHeight = newNode.EstimatedTotalSize.Height / 2.0;
         
-        // Se generiamo nodi multipli (Split), applichiamo la cascata
         double offset = index * CascadeOffsetY;
 
         newNode.X = sourceNode.X + deltaX;
@@ -426,12 +415,10 @@ public partial class BoardViewModel : ObservableObject
             
             GC.Collect(); GC.WaitForPendingFinalizers();
 
-            // Creazione temporanea senza posizionamento (X=0, Y=0)
             BaseNodeViewModel newNode = resultPaths.Count == 1
                 ? await _nodeFactory.CreateSingleImageNodeAsync(resultPaths[0], 0, 0)
                 : await _nodeFactory.CreateMultipleImagesNodeAsync(resultPaths, 0, 0);
 
-            // Calcolo posizione definitiva basata sulle dimensioni reali generate
             RepositionNewNode(imgNode, newNode);
 
             newNode.Title = $"{imgNode.Title} {titleSuffix}";
@@ -499,7 +486,6 @@ public partial class BoardViewModel : ObservableObject
                 ? await _nodeFactory.CreateSingleImageNodeAsync(resultPaths[0], 0, 0)
                 : await _nodeFactory.CreateMultipleImagesNodeAsync(resultPaths, 0, 0);
 
-            // Calcolo posizione definitiva rispetto a Node A
             RepositionNewNode(nodeA, newNode);
 
             string opSymbol = op switch { 
@@ -538,12 +524,10 @@ public partial class BoardViewModel : ObservableObject
         {
             var paths = await _nodeStructureCoordinator.JoinNodesAsync(allFiles);
         
-            // Identifichiamo il nodo più a destra tra quelli selezionati
             var rightmostNode = SelectedNodes.OrderByDescending(n => n.X).First();
             
             var newNode = await _nodeFactory.CreateMultipleImagesNodeAsync(paths, 0, 0);
             
-            // Riposizionamento calcolando l'ingombro reale del nodo destinazione e sorgente
             RepositionNewNode(rightmostNode, newNode);
             
             newNode.Title = "Joined Sequence";
@@ -570,7 +554,6 @@ public partial class BoardViewModel : ObservableObject
             {
                 var newNode = await _nodeFactory.CreateSingleImageNodeAsync(paths[i], 0, 0);
                 
-                // Riposizionamento preciso con l'offset a cascata applicato
                 RepositionNewNode(node, newNode, i);
 
                 newNode.Title = System.IO.Path.GetFileNameWithoutExtension(paths[i]);
@@ -638,7 +621,6 @@ public partial class BoardViewModel : ObservableObject
             
             var n = await _nodeFactory.CreateSingleImageNodeAsync(r.FilePath, 0, 0); 
             
-            // UTILIZZO DELL'HELPER PER ALLINEAMENTO PERFETTO
             RepositionNewNode(s, n);
 
             n.Title=$"{s.Title} ({mode})"; 

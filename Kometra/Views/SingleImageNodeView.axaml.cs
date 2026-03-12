@@ -4,7 +4,6 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
-using Avalonia.Media;
 using Avalonia.VisualTree;
 using Kometra.ViewModels;
 using Kometra.ViewModels.Nodes;
@@ -14,7 +13,6 @@ namespace Kometra.Views;
 public partial class SingleImageNodeView : UserControl
 {
     private Point? _startDragPoint;
-    private TranslateTransform? _tempTransform;
     private bool _isPanningImage;
     private Point _lastPanPosition;
     
@@ -24,9 +22,6 @@ public partial class SingleImageNodeView : UserControl
     public SingleImageNodeView()
     {
         InitializeComponent();
-        
-        _tempTransform = new TranslateTransform();
-        this.RenderTransform = _tempTransform;
 
         var container = this.FindControl<Border>("ImageContainer");
         if (container != null)
@@ -53,7 +48,6 @@ public partial class SingleImageNodeView : UserControl
         _cachedBoardVm = null;
         _cachedBoardView = null;
         _startDragPoint = null;
-        _tempTransform = null;
         base.OnDetachedFromVisualTree(e);
     }
 
@@ -67,15 +61,12 @@ public partial class SingleImageNodeView : UserControl
         
         var sourceVisual = e.Source as Visual;
 
-        // VERIFICA: Abbiamo cliccato sulla zona del titolo (Header)?
         bool isHeaderClick = headerBorder != null && sourceVisual != null && 
                              (sourceVisual == headerBorder || headerBorder.IsVisualAncestorOf(sourceVisual));
 
-        // Verifichiamo che NON sia il pulsante di chiusura
         if (isHeaderClick && sourceVisual is Button) isHeaderClick = false; 
         if (isHeaderClick && sourceVisual.GetVisualAncestors().OfType<Button>().Any()) isHeaderClick = false;
 
-        // --- 1. GESTIONE ATTIVAZIONE EDIT (DOPPIO CLICK) ---
         if (e.ClickCount == 2 && properties.IsLeftButtonPressed)
         {
             if (isHeaderClick && textBox != null)
@@ -88,7 +79,6 @@ public partial class SingleImageNodeView : UserControl
             }
         }
 
-        // --- 2. PAN INTERNO ---
         bool isMiddleClickPan = properties.IsMiddleButtonPressed;
         bool isAltPan = properties.IsLeftButtonPressed && e.KeyModifiers.HasFlag(KeyModifiers.Alt);
 
@@ -103,7 +93,6 @@ public partial class SingleImageNodeView : UserControl
             return;
         }
 
-        // --- 3. DRAG DEL NODO & SELEZIONE ---
         if (properties.IsLeftButtonPressed)
         {
             if (textBox != null && !textBox.IsReadOnly)
@@ -113,20 +102,27 @@ public partial class SingleImageNodeView : UserControl
                     textBox.IsReadOnly = true;
                     this.Focus();
                 }
-                else
-                {
-                    return; 
-                }
+                else return; 
             }
 
-            // --- LOGICA MULTI-SELEZIONE ---
-            // Rileviamo se Shift, Ctrl o Cmd(Meta) sono premuti per la logica a 2 nodi
             bool isModifier = e.KeyModifiers.HasFlag(KeyModifiers.Shift) || 
                               e.KeyModifiers.HasFlag(KeyModifiers.Control) ||
                               e.KeyModifiers.HasFlag(KeyModifiers.Meta);
 
-            // Avvisiamo il ViewModel passando il modificatore
-            _cachedBoardVm?.SetSelectedNode(nodeVm, isModifier);
+            if (!nodeVm.IsSelected || isModifier)
+            {
+                _cachedBoardVm?.SetSelectedNode(nodeVm, isModifier);
+            }
+            else if (_cachedBoardVm != null && _cachedBoardVm.SelectedNodesCount == 2)
+            {
+                // Il nodo è già selezionato, niente modificatori e ci sono esattamente 2 nodi.
+                // Lo spostiamo in cima alla collezione per farlo diventare "A".
+                if (_cachedBoardVm.SelectedNodes.IndexOf(nodeVm) != 0)
+                {
+                    _cachedBoardVm.SelectedNodes.Remove(nodeVm);
+                    _cachedBoardVm.SelectedNodes.Insert(0, nodeVm);
+                }
+            }
             
             nodeVm.BringToFront();
 
@@ -134,16 +130,14 @@ public partial class SingleImageNodeView : UserControl
             {
                 _startDragPoint = e.GetPosition(_cachedBoardView);
                 
-                if (_tempTransform == null)
+                if (_cachedBoardVm != null)
                 {
-                    _tempTransform = new TranslateTransform();
-                    this.RenderTransform = _tempTransform;
+                    foreach (var n in _cachedBoardVm.SelectedNodes)
+                    {
+                        n.VisualOffsetX = 0;
+                        n.VisualOffsetY = 0;
+                    }
                 }
-                _tempTransform.X = 0;
-                _tempTransform.Y = 0;
-                
-                nodeVm.VisualOffsetX = 0;
-                nodeVm.VisualOffsetY = 0;
 
                 e.Pointer.Capture(this);
                 e.Handled = true;
@@ -192,23 +186,22 @@ public partial class SingleImageNodeView : UserControl
             return;
         }
 
-        if (_startDragPoint == null || _tempTransform == null || 
-            _cachedBoardView == null || _cachedBoardVm == null) return;
+        if (_startDragPoint == null || _cachedBoardView == null || _cachedBoardVm == null) return;
         
         var currentBoardPos = e.GetPosition(_cachedBoardView);
         var screenDelta = currentBoardPos - _startDragPoint.Value;
-        
+
         double scale = _cachedBoardVm.Viewport.Scale; 
         if (scale <= 0.01) scale = 0.1; 
 
         double worldDeltaX = screenDelta.X / scale;
         double worldDeltaY = screenDelta.Y / scale;
 
-        _tempTransform.X = worldDeltaX;
-        _tempTransform.Y = worldDeltaY;
-
-        nodeVm.VisualOffsetX = worldDeltaX;
-        nodeVm.VisualOffsetY = worldDeltaY;
+        foreach (var n in _cachedBoardVm.SelectedNodes)
+        {
+            n.VisualOffsetX = worldDeltaX;
+            n.VisualOffsetY = worldDeltaY;
+        }
         
         e.Handled = true;
     }
@@ -226,16 +219,16 @@ public partial class SingleImageNodeView : UserControl
 
         if (_startDragPoint != null && e.InitialPressMouseButton == MouseButton.Left)
         {
-            if (DataContext is ImageNodeViewModel nodeVm && _tempTransform != null)
+            if (_cachedBoardVm != null)
             {
-                nodeVm.X += _tempTransform.X;
-                nodeVm.Y += _tempTransform.Y;
-
-                _tempTransform.X = 0;
-                _tempTransform.Y = 0;
-                
-                nodeVm.VisualOffsetX = 0;
-                nodeVm.VisualOffsetY = 0;
+                foreach (var n in _cachedBoardVm.SelectedNodes)
+                {
+                    n.X += n.VisualOffsetX;
+                    n.Y += n.VisualOffsetY;
+                    
+                    n.VisualOffsetX = 0;
+                    n.VisualOffsetY = 0;
+                }
             }
 
             _startDragPoint = null;
@@ -249,11 +242,9 @@ public partial class SingleImageNodeView : UserControl
         if (DataContext is not ImageNodeViewModel vm) return;
         if (!vm.IsSelected) return;
 
-        // FIX CROSS-PLATFORM: Gestione Delta.X per Mac (Shift + Scroll)
         double effectiveDelta = Math.Abs(e.Delta.Y) > Math.Abs(e.Delta.X) ? e.Delta.Y : e.Delta.X;
         if (Math.Abs(effectiveDelta) < 0.0001) return;
 
-        // ZOOM (CTRL o CMD + WHEEL)
         if (e.KeyModifiers.HasFlag(KeyModifiers.Control) || e.KeyModifiers.HasFlag(KeyModifiers.Meta))
         {
             var container = this.FindControl<Border>("ImageContainer");
@@ -267,7 +258,6 @@ public partial class SingleImageNodeView : UserControl
             return;
         }
 
-        // SOGLIE RADIOMETRICHE (SHIFT o DEFAULT + WHEEL)
         if (vm.ActiveRenderer != null)
         {
             double currentRange = Math.Abs(vm.ActiveRenderer.WhitePoint - vm.ActiveRenderer.BlackPoint);
@@ -280,31 +270,23 @@ public partial class SingleImageNodeView : UserControl
 
             if (isShiftPressed)
             {
-                // Modifica BLACK POINT (con protezione anti-crossing)
                 double newBlack = vm.ActiveRenderer.BlackPoint + step;
                 if (step > 0)
                 {
                     double maxAllowed = vm.ActiveRenderer.WhitePoint - (step * 0.1);
                     vm.ActiveRenderer.BlackPoint = Math.Min(newBlack, maxAllowed);
                 }
-                else
-                {
-                    vm.ActiveRenderer.BlackPoint = newBlack;
-                }
+                else vm.ActiveRenderer.BlackPoint = newBlack;
             }
             else
             {
-                // Modifica WHITE POINT (con protezione anti-crossing)
                 double newWhite = vm.ActiveRenderer.WhitePoint + step;
                 if (step < 0)
                 {
                     double minAllowed = vm.ActiveRenderer.BlackPoint + (Math.Abs(step) * 0.1);
                     vm.ActiveRenderer.WhitePoint = Math.Max(newWhite, minAllowed);
                 }
-                else
-                {
-                    vm.ActiveRenderer.WhitePoint = newWhite;
-                }
+                else vm.ActiveRenderer.WhitePoint = newWhite;
             }
         }
         
